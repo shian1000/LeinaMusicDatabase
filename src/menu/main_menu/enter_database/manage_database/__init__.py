@@ -1,7 +1,7 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from src.menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
-from src.menu.main_menu.enter_database.manage_database.manual_management import manual_management
+from navigation.menu_utils import execute_menu_item
+from debug import slog
+from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
+from menu.main_menu.enter_database.manage_database.manual_management import manual_management
 
 def manage_database():
     action_map = {

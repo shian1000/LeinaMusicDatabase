@@ -20,6 +20,6 @@ if __name__ == "__main__":
 #TODO LIST
 #[X] Fix Where do you want the files to be copied into?
 #[X] Add src to path
-#TODO Make passwords a secret
+#[X] Make passwords a secret
 #TODO Make a copy destionation manager
 #TODO Make index creator

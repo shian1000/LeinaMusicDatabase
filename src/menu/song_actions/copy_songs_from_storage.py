@@ -1,9 +1,11 @@
-from src.settings import settings
+from settings import settings
 from upath import UPath
 from urllib.parse import urlparse
 import questionary
-from src.menu.song_actions.copy_using_index import copy_songs_from_index
+from menu.song_actions.copy_using_index import copy_songs_from_index
 import time
+from navigation.recent_dirs import save_recent_dirs, load_recent_dirs
+from navigation.menu_utils import execute_menu_item
 
 def is_local_dir(uri_str: str):
     parsed = urlparse(uri_str)
@@ -39,7 +41,30 @@ def copy_songs_from_storage(songs):
     if not (index_file.exists()):
         questionary.select("Index file not found. Would you like to create an index before proceeding further?", choices=["Yes", "No"]).ask()
 
-    paste_destination = UPath(input("Where do you want the files to be copied into: "))
+    recent_dirs = load_recent_dirs()
+
+    action_map = [
+        "Open directory manager",
+        "Type path manually",
+        "Back"
+    ]
+
+    action_map = recent_dirs + action_map
+
+    choice = questionary.select("Where do you want the files to be copied into: ", choices=action_map).ask()
+
+    if choice == "Open directory manager":
+        print("Sorry, not yet supported")
+        return
+    elif choice == "Type path manually":
+        paste_destination = UPath(input("Type path: "))        
+    elif choice == "Back":
+        return
+    else:
+        paste_destination = UPath(choice)
+
+
+    save_recent_dirs(str(paste_destination))
 
     if (index_file.exists()):
         copy_songs_from_index(songs, index_file, paste_destination)

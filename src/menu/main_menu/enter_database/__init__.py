@@ -1,8 +1,8 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from src.menu.main_menu.enter_database.fetch_songs import fetch_songs
-from src.menu.main_menu.enter_database.manage_database import manage_database
-from src.menu.main_menu.enter_database.show_whole_database import show_whole_database
+from navigation.menu_utils import execute_menu_item
+from debug import slog
+from menu.main_menu.enter_database.fetch_songs import fetch_songs
+from menu.main_menu.enter_database.manage_database import manage_database
+from menu.main_menu.enter_database.show_whole_database import show_whole_database
 
 def enter_database():
     action_map = {

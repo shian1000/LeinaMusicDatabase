@@ -1,9 +1,9 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from src.library.library import get_song_from_artist_and_name
+from navigation.menu_utils import execute_menu_item
+from debug import slog
+from library.library import get_song_from_artist_and_name
 import questionary
-from src.datatables import mp3_categories
-from src.menu.song_actions import song_actions
+from datatables import mp3_categories
+from menu.song_actions import song_actions
 
 def fetch_songs():
     exit_label = ["Back"]

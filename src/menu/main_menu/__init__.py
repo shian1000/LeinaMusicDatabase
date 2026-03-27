@@ -1,7 +1,7 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from src.menu.main_menu.enter_database import enter_database
-from src.menu.main_menu.manage_local_files import manage_local_files
+from navigation.menu_utils import execute_menu_item
+from debug import slog
+from menu.main_menu.enter_database import enter_database
+from menu.main_menu.manage_local_files import manage_local_files
 
 def main_menu():
     action_map = {
