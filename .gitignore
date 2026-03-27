@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.pyc
+src/__pychahe__/
+
+# Virtual environment
+venv/
+.env/
+
+# Secrets folder
+.secrets/
+
+# Optional OS junk
+.DS_Store
+Thumbs.db
+
+.directory
+.debuga
+.debug
+*.sqlite3
+<function create_temp_index at 0x7f88cb2354e0>
+<function create_temp_index at 0x70b0d0c354e0>
+*.env
