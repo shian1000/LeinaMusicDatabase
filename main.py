@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from menu.main_menu import main_menu
 from test_scripts import test
+from pathlib import Path
 
 def main():
 

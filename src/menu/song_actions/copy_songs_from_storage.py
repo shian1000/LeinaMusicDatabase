@@ -3,9 +3,8 @@ from upath import UPath
 from urllib.parse import urlparse
 import questionary
 from menu.song_actions.copy_using_index import copy_songs_from_index
-import time
 from navigation.recent_dirs import save_recent_dirs, load_recent_dirs
-from navigation.menu_utils import execute_menu_item, open_file_browser_terminal
+from navigation.menu_utils import open_file_browser_terminal
 
 def is_local_dir(uri_str: str):
     parsed = urlparse(uri_str)

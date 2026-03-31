@@ -132,7 +132,12 @@ def get_song_from_artist_and_name(category: str, query: str) -> list[tuple[str, 
         db_query = db_query.filter(func.lower(Artist.name).contains(query.lower()))
 
     elif category == "album":
-        db_query = db_query.filter(func.lower(Song.album).contains(query.lower()))
+        if query == "":
+            db_query = db_query.filter(
+                (Song.album == None) | (Song.album == "")
+            )
+        else:
+            db_query = db_query.filter(func.lower(Song.album).contains(query.lower()))
 
     elif category == "year":
         db_query = db_query.filter(Song.year == int(query))
@@ -270,7 +275,7 @@ def edit_song_entry(song_query: str, category: str, new_value: str):
         old_value = artist_name
         artist_name = new_value
 
-    elif category == "album":
+    if category == "album":
         old_value = song.album or "—"
         song.album = new_value
 
