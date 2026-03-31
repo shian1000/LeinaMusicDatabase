@@ -14,4 +14,4 @@ def enter_database():
 
     slog(action_map)
 
-    execute_menu_item("Database", action_map, exit_label="Exit")
+    execute_menu_item("Database", action_map, exit_label="Exit database")

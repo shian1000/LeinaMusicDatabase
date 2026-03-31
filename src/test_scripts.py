@@ -8,17 +8,12 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from src.menu.song_actions.copy_songs_from_storage import copy_songs_from_index
+from navigation.menu_utils import open_file_browser_terminal
 
 
 def test():
 
 
-    songs = [('Angelo Badalamenti', 'Twin Peaks Theme'), ('Aurora', 'The River'), ('Aurora', 'The Seed'), ('Aurora', 'Mothership'), ('Aurora', 'Dance On The Moon'), ('Gran Turismo 4 OST', 'Moon Over The Castle [Extended Orchestral Version]')]
-    index_path = UPath(get_proper_uri())
-    destination = UPath("/home/owner/Documents/Code/MusicDatabase/")
-
-
-
-    copy_songs_from_index(songs, index_path, destination)
+    open_file_browser_terminal("/home/owner/Documents/Code/")
 
     time.sleep(10000)

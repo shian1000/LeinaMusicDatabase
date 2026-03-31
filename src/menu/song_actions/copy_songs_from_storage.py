@@ -5,7 +5,7 @@ import questionary
 from menu.song_actions.copy_using_index import copy_songs_from_index
 import time
 from navigation.recent_dirs import save_recent_dirs, load_recent_dirs
-from navigation.menu_utils import execute_menu_item
+from navigation.menu_utils import execute_menu_item, open_file_browser_terminal
 
 def is_local_dir(uri_str: str):
     parsed = urlparse(uri_str)
@@ -35,16 +35,16 @@ def copy_songs_from_storage(songs):
     index_file_str = (f"{source_path_str}.mp3_index.sqlite3")
     index_file = UPath(index_file_str)
 
-    print(index_file_str)
-    print(index_file)
-
     if not (index_file.exists()):
-        questionary.select("Index file not found. Would you like to create an index before proceeding further?", choices=["Yes", "No"]).ask()
+        choice = questionary.select("Index file not found. Would you like to create an index before proceeding further?", choices=["Yes", "No"]).ask()
+
+        if choice == "No":
+            print("Sorry, not implemented")
 
     recent_dirs = load_recent_dirs()
 
     action_map = [
-        "Open directory manager",
+        "Open file manager",
         "Type path manually",
         "Back"
     ]
@@ -53,9 +53,8 @@ def copy_songs_from_storage(songs):
 
     choice = questionary.select("Where do you want the files to be copied into: ", choices=action_map).ask()
 
-    if choice == "Open directory manager":
-        print("Sorry, not yet supported")
-        return
+    if choice == "Open file manager":
+        paste_destination = open_file_browser_terminal(load_recent_dirs()[0])
     elif choice == "Type path manually":
         paste_destination = UPath(input("Type path: "))        
     elif choice == "Back":
@@ -63,12 +62,13 @@ def copy_songs_from_storage(songs):
     else:
         paste_destination = UPath(choice)
 
-
     save_recent_dirs(str(paste_destination))
 
     if (index_file.exists()):
         copy_songs_from_index(songs, index_file, paste_destination)
     else:
         print("TODO - operating without using index")
+
+    return "Back"
 
     

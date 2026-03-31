@@ -46,3 +46,8 @@ mp3_categories = [
     "Origin",
     "Tag"
 ]
+
+artist_categories = [
+    "Artist",
+    "Origin"
+]

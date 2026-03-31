@@ -228,6 +228,8 @@ def edit_song_entry(song_query: str, category: str, new_value: str):
     Editable categories: title, album, year, language, origin.
     """
 
+    old_value = None
+
     # --- Parse "Artist - Song Title" ---
     if " - " not in song_query:
         print("Invalid format. Use: 'Artist - Song Title'")
@@ -264,6 +266,10 @@ def edit_song_entry(song_query: str, category: str, new_value: str):
         old_value = song.title
         song.title = new_value
 
+    if category == "artist":
+        old_value = artist_name
+        artist_name = new_value
+
     elif category == "album":
         old_value = song.album or "—"
         song.album = new_value
@@ -286,6 +292,9 @@ def edit_song_entry(song_query: str, category: str, new_value: str):
 
     session.commit()
     session.close()
+
+    if not old_value:
+        old_value = "---"
 
     print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' → '{new_value}'.")
 

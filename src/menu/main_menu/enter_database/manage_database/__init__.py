@@ -11,4 +11,4 @@ def manage_database():
 
     slog(action_map)
 
-    execute_menu_item("Manage database", action_map, exit_label="Exit")
+    execute_menu_item("Manage database", action_map, exit_label="Back")
