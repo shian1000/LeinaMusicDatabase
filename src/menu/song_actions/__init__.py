@@ -1,6 +1,6 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from src.menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
+from utils.menu_utils import execute_menu_item
+from utils.debug import slog
+from menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
 
 def song_actions(songs):
     action_map = {

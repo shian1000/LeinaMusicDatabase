@@ -1,17 +1,17 @@
 import questionary
-from src.scan_and_import import import_music_from_folder
-from src.read_music_db import read_music_db
-from src.get_songs import get_songs_by_language
-from src.get_songs import get_songs_by_tag, get_all_artists, get_songs_by_artist
-from src.get_songs import get_songs
-from src.create_yt_playlist import create_yt_playlist
-from src.music_db_manager import create_music_db, rename_artist, delete_artist_and_songs, delete_song
-from src.tag_db_manager import create_tag_db, delete_tag
-from src.import_from_txt import load_songs_from_txt
-from src.navigation.menu_utils import execute_menu_item
+from old.scan_and_import import import_music_from_folder
+from old.read_music_db import read_music_db
+from old.get_songs import get_songs_by_language
+from old.get_songs import get_songs_by_tag, get_all_artists, get_songs_by_artist
+from old.get_songs import get_songs
+from old.create_yt_playlist import create_yt_playlist
+from utils.database.music_db_manager import create_music_db, rename_artist, delete_artist_and_songs, delete_song
+from utils.database.tag_db_manager import create_tag_db, delete_tag
+from old.import_from_txt import load_songs_from_txt
+from utils.menu_utils import execute_menu_item
 from src.library.library import display_songs, display_artists, display_songs_with_tags
 from src.settings import settings
-from src.navigation.search_for_songs import search_for_songs
+from utils.search_for_songs import search_for_songs
 from src.navigation.edit_entry import edit_entry
 
 

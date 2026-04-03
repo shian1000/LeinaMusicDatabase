@@ -1,14 +1,11 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
+from utils.menu_utils import execute_menu_item
+from utils.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
-from menu.main_menu.enter_database.manage_database.fetch_database_data.import_data_from_mp3_tags import import_data_from_mp3_tags
-from navigation.menu_utils import open_file_browser_terminal
-import time
-from pathlib import Path
+from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
+from utils.menu_utils import open_file_browser_terminal
 from settings import settings
 
 def import_data():
-
     import_folder = settings.export_dir
     songs_path = open_file_browser_terminal(import_folder)
     import_data_from_mp3_tags(songs_path)

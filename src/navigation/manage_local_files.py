@@ -1,4 +1,4 @@
-from src.navigation.menu_utils import execute_menu_item
+from utils.menu_utils import execute_menu_item
 from src.local_files_manager.tags_fetcher import tags_fetcher
 
 

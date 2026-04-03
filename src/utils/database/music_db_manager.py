@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
 
-from src.datatables import Base, Song, Artist
+from utils.database.datatables import Base, Song, Artist
 
 # --------------------
 # Engine & Session

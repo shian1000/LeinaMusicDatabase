@@ -1,8 +1,8 @@
 from src.navigation.manage_database import manage_database
 from src.navigation.manage_local_files import manage_local_files
 from src.navigation.manage_youtube_playlists import manage_youtube_playlists
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
+from utils.menu_utils import execute_menu_item
+from utils.debug import slog
 from src.settings import settings
 
 

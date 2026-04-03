@@ -1,9 +1,9 @@
-from src.datatables import mp3_categories
+from utils.database.datatables import song_categories
 import questionary
 from src.library.library import edit_song_entry, search_songs_from_name
 
 def edit_entry():
-    action_map = mp3_categories
+    action_map = song_categories
 
     query = input("What song do you wish to search for: ")
 

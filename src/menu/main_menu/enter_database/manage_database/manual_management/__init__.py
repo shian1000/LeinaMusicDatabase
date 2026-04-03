@@ -1,16 +1,18 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
+from utils.menu_utils import execute_menu_item
+from utils.debug import slog
 from menu.database_actions import edit_artist
-from src.datatables import mp3_categories, artist_categories
+from utils.database.datatables import song_categories, artist_categories
 import questionary
-from src.library.library import edit_song_entry, search_songs_from_name
+from utils.database.database_management import edit_song_entry
+from library.library import search_songs_from_name
+from utils.database.database_getter import get_songs
 
 def edit_entry(mode: str):
     if (mode == "Artist"):
         action_map = artist_categories
         query = input("What artist do you wish to search for: ")
     else:
-        action_map = mp3_categories
+        action_map = song_categories
         query = input("What song do you wish to search for: ")
 
     category = questionary.select("What category entity do you wish to edit?", choices=action_map).ask()

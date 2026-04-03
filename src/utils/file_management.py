@@ -1,9 +1,28 @@
 from src.settings import settings
 from upath import UPath
 from pathlib import Path
-from src.debug import slog
+from utils.debug import slog
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
+from urllib.parse import urlparse
+
+def is_local_dir(uri_str: str):
+    parsed = urlparse(uri_str)
+    return parsed.scheme == "" or parsed.scheme == "file"
+
+def get_proper_uri():
+    uri_upath = settings.local_library_dir
+    uri_str = settings.local_library_dir_str
+
+    if (is_local_dir(uri_str)):
+        uri = str(uri_upath)
+    else:
+        parsed = urlparse(uri_str)
+        scheme = f"{parsed.scheme}://"
+        remainder = uri_str[len(scheme):]
+        uri = f"{scheme}{settings.smb_username}:{settings.smb_password}@{remainder}"
+
+    return uri
 
 def create_temp_index():
     index_file = UPath(
@@ -27,7 +46,6 @@ def query_database(engine, query):
     else:
         return None
 
-
 def copy_file_to_destination(source, destination):
     if source.startswith("\\\\"):
         unc_path = source.replace("\\\\", "\\").replace("\\", "/").lstrip("/")
@@ -44,9 +62,7 @@ def copy_file_to_destination(source, destination):
     dest_file.write_bytes(source_file.read_bytes())
     print("Copied to:", dest_file)
 
-
-
-def copy_songs_from_index(
+def copy_songs_using_index(
     songs: list[tuple[str, str]],
     index_path,
     paste_destination: UPath | Path,

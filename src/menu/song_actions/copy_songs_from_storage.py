@@ -1,35 +1,11 @@
-from settings import settings
 from upath import UPath
-from urllib.parse import urlparse
 import questionary
-from menu.song_actions.copy_using_index import copy_songs_from_index
-from navigation.recent_dirs import save_recent_dirs, load_recent_dirs
-from navigation.menu_utils import open_file_browser_terminal
-
-def is_local_dir(uri_str: str):
-    parsed = urlparse(uri_str)
-    return parsed.scheme == "" or parsed.scheme == "file"
-
-
-def get_proper_uri():
-
-    uri_upath = settings.local_library_dir
-    uri_str = settings.local_library_dir_str
-
-    if (is_local_dir(uri_str)):
-        uri = str(uri_upath)
-    else:
-        parsed = urlparse(uri_str)
-        scheme = f"{parsed.scheme}://"
-        remainder = uri_str[len(scheme):]
-        uri = f"{scheme}{settings.smb_username}:{settings.smb_password}@{remainder}"
-
-    return uri
+from utils.file_management import copy_songs_using_index, get_proper_uri
+from utils.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
 
 
 def copy_songs_from_storage(songs):
     source_path_str = get_proper_uri()
-    source_path = UPath(source_path_str)
 
     index_file_str = (f"{source_path_str}.mp3_index.sqlite3")
     index_file = UPath(index_file_str)
@@ -64,7 +40,7 @@ def copy_songs_from_storage(songs):
     save_recent_dirs(str(paste_destination))
 
     if (index_file.exists()):
-        copy_songs_from_index(songs, index_file, paste_destination)
+        copy_songs_using_index(songs, index_file, paste_destination)
     else:
         print("TODO - operating without using index")
 

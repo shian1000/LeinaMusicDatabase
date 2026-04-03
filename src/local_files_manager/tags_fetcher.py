@@ -1,9 +1,9 @@
-from src.navigation.menu_utils import open_file_browser
+from utils.menu_utils import open_file_browser
 import questionary
 from pathlib import Path
 import sqlite3
 from typing import Optional
-from src.debug import slog
+from utils.debug import slog
 import requests
 from langdetect import detect, DetectorFactory
 import pycountry

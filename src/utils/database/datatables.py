@@ -37,17 +37,17 @@ class Song(Base):
 
     artist = relationship("Artist", back_populates="songs")
 
-mp3_categories = [
-    "Title",
-    "Artist",
-    "Album",
-    "Year",
-    "Language",
-    "Origin",
-    "Tag"
+song_categories = [
+    "title",
+    "artist",
+    "album",
+    "year",
+    "language",
+    "origin",
+    "tag"
 ]
 
 artist_categories = [
-    "Artist",
-    "Origin"
+    "artist",
+    "origin"
 ]

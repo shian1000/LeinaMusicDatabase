@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from src.datatables import Song
+from utils.database.datatables import Song
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # Goes from src → project root

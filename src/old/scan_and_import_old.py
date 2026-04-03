@@ -6,7 +6,7 @@ from mutagen.mp3 import MP3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.datatables import Song, Artist, Base
+from utils.database.datatables import Song, Artist, Base
 
 
 def import_music_from_folder(folder_path: str, mode: str = "skip"):

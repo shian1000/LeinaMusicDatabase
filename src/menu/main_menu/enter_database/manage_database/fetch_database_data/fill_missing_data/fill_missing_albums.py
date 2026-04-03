@@ -1,13 +1,12 @@
-from library.library import get_song_from_artist_and_name, edit_song_entry
-import time
-from library.music_brainz_fetcher import fetch_albums_from_musicbrainz
-from music_db_manager import get_music_session
+from utils.database.database_getter import get_songs
+from utils.database.database_management import edit_song_entry
+from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
 
 def fill_missing_albums():
     category = "album"
     querry = ""
-    songs = get_song_from_artist_and_name(category, querry)
+    songs = get_songs(category, querry)
 
     albums_search_results = fetch_albums_from_musicbrainz(songs)
 
@@ -28,7 +27,3 @@ def fill_missing_albums():
                     edit_song_entry(f"{artist} - {title}", "album", album)
                 else:
                     print(f"Skipped {artist} - {title}")
-
-
-
-    time.sleep(10000)

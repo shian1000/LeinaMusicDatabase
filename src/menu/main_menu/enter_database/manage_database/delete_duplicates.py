@@ -1,5 +1,6 @@
-from music_db_manager import get_music_session, Song, Artist
+from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
+import questionary
 
 def remove_duplicate_songs():
     """

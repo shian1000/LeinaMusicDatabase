@@ -8,10 +8,10 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
-from src.yt_cache import make_song_key, save_cache
-from src.yt_cache import load_cache, init_cache, clear_cache
-from src.yt_cache import save_cache
-from src.yt_cache import make_song_key
+from old.yt_cache import make_song_key, save_cache
+from old.yt_cache import load_cache, init_cache, clear_cache
+from old.yt_cache import save_cache
+from old.yt_cache import make_song_key
 import json
 
 

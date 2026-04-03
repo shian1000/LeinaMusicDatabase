@@ -6,8 +6,8 @@ from mutagen.mp3 import MP3
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.datatables import Song, Artist
-from src.create_tag_db import Tag, SongTag
+from utils.database.datatables import Song, Artist
+from utils.database.create_tag_db import Tag, SongTag
 
 from sqlalchemy import create_engine, func
 

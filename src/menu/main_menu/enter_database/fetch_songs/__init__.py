@@ -1,14 +1,14 @@
-from navigation.menu_utils import execute_menu_item
-from debug import slog
-from library.library import get_song_from_artist_and_name
+from utils.debug import slog
+from utils.database.database_getter import get_songs
 import questionary
-from datatables import mp3_categories
+from utils.database.datatables import song_categories
 from menu.song_actions import song_actions
-from navigation.menu_utils import clear_screen
+from utils.menu_utils import clear_screen
+from utils.display_utils import display_songs
 
 def fetch_songs():
     exit_label = ["Back"]
-    action_map = mp3_categories + exit_label
+    action_map = song_categories + exit_label
 
     category = questionary.select("What category do you wish to search for?", choices=action_map).ask()
 
@@ -20,11 +20,11 @@ def fetch_songs():
     if querry == "":
         return
 
-    songs = get_song_from_artist_and_name(category, querry)
+    songs = get_songs(category, querry)
+
+    display_songs(songs)
 
     if(songs):
-        decision_map = ["Yes", "No"]
-        decision = questionary.select("Do you want to do something with these songs?", choices=decision_map).ask()
-        if decision == "No": clear_screen()
-        if decision == "Yes":
-            song_actions(songs)
+        decision = questionary.confirm("Do you want to do something with these songs?").ask()
+        if decision: song_actions(songs)
+        else: clear_screen

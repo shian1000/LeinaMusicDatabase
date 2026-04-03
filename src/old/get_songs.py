@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from src.datatables import Song, Artist
-from src.create_tag_db import Tag, SongTag
+from utils.database.datatables import Song, Artist
+from utils.database.create_tag_db import Tag, SongTag
 from pathlib import Path
 from sqlalchemy import func
 

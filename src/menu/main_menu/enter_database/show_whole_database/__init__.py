@@ -1,6 +1,6 @@
-from src.navigation.menu_utils import execute_menu_item
-from src.debug import slog
-from library.library import display_songs, display_artists, display_songs_with_tags
+from utils.menu_utils import execute_menu_item
+from utils.debug import slog
+from utils.display_utils import display_songs, display_songs_with_tags, display_artists
 
 def show_whole_database():
     action_map = {
