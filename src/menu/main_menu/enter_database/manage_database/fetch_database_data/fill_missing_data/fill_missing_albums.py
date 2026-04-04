@@ -1,4 +1,4 @@
-from utils.database.database_getter import get_songs
+from utils.database.database_getter import get_songs_from_db
 from utils.database.database_management import edit_song_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
@@ -6,7 +6,7 @@ import questionary
 def fill_missing_albums():
     category = "album"
     querry = ""
-    songs = get_songs(category, querry)
+    songs = get_songs_from_db(category, querry)
 
     albums_search_results = fetch_albums_from_musicbrainz(songs)
 

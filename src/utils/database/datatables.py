@@ -38,6 +38,7 @@ class Song(Base):
     artist = relationship("Artist", back_populates="songs")
 
 song_categories = [
+    "name",
     "title",
     "artist",
     "album",

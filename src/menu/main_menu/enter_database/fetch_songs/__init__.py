@@ -1,5 +1,5 @@
 from utils.debug import slog
-from utils.database.database_getter import get_songs
+from utils.database.database_getter import get_songs_from_db
 import questionary
 from utils.database.datatables import song_categories
 from menu.song_actions import song_actions
@@ -20,7 +20,7 @@ def fetch_songs():
     if querry == "":
         return
 
-    songs = get_songs(category, querry)
+    songs = get_songs_from_db(category, querry)
 
     display_songs(songs)
 

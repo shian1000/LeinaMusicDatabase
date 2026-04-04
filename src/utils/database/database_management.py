@@ -2,8 +2,28 @@ from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from sqlalchemy import func
 from utils.database.datatables import song_categories
+import time
+from utils.debug import slog
+from menu.song_actions.pick_song import pick_song
+
+def validate_song(song_query):
+
+    if type(song_query) == str:
+        return song_query
+    elif type(song_query) == list:
+        if len(song_query) > 1:
+            return pick_song(song_query)
+        else:
+            slog(song_query)
+            songs_simple = [f"{artist} - {title}" for artist, title in song_query]
+            return(f"{songs_simple[0]}")
+    else:
+        print("validate_song error - song query is not a str or a list")
+    
 
 def edit_song_entry(song_query: str, category: str, new_value: str):
+
+    song_query = validate_song(song_query)
 
     old_value = None
 

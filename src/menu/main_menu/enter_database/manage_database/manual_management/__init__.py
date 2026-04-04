@@ -3,11 +3,12 @@ from utils.debug import slog
 from menu.database_actions import edit_artist
 from utils.database.datatables import song_categories, artist_categories
 import questionary
-from utils.database.database_management import edit_song_entry
-from library.library import search_songs_from_name
-from utils.database.database_getter import get_songs
+from utils.database.database_management import edit_song_entry, validate_song
+from utils.database.database_getter import get_songs_from_db
+import time
+from utils.debug import slog
 
-def edit_entry(mode: str):
+def edit_entry(mode: str = None):
     if (mode == "Artist"):
         action_map = artist_categories
         query = input("What artist do you wish to search for: ")
@@ -21,19 +22,9 @@ def edit_entry(mode: str):
 
     if query == "":
         return
-    
-    songs = search_songs_from_name(query)
 
-    songs_simple = [f"{artist} - {title}" for artist, title in songs]
+    song = get_songs_from_db("name", query)
 
-    if len(songs) > 1:
-        print("More than 1")
-        song = questionary.select("Found more than one result:", choices=songs_simple).ask()
-    else:
-        song = songs_simple[0]
-        print("Probably fine")
-
-    print(f"This be ur song: {song}")
 
     edit_song_entry(song, category, new_data)
 

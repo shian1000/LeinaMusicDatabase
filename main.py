@@ -8,7 +8,7 @@ from test_scripts import test
 
 def main():
     #Comment it to unload tests
-    # test()
+    test()
     main_menu()
 
 if __name__ == "__main__":
@@ -17,6 +17,8 @@ if __name__ == "__main__":
 
 
 #TODO Niech search_songs_from_name będzie częścią get_songs
+#TODO W manual_management w edit_entry zaraz po wstukaniu nazwy utworu, powinniśmy mieć możliwość pickowania utworu, jeżeli jest więcej niż jeden i otrzymania listy
+#TODO datatables - zabrać stamtąd name, ale żeby i tak wszystko działało. Może zrobię osobny datatables na ukryte kategorie?
 
 
 #TODO LIST

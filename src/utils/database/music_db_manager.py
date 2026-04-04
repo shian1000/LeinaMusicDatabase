@@ -5,18 +5,25 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func
-
+from settings import Settings
 from utils.database.datatables import Base, Song, Artist
+import time
+from utils.debug import slog, mlog
 
 # --------------------
 # Engine & Session
 # --------------------
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "database" / "music.db"
+BASE_DIR = Settings.database_dir
+DB_PATH = BASE_DIR / "music.db"
+
+slog(BASE_DIR)
 
 ENGINE = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=ENGINE)
+mlog("Music DB Manager")
+slog(SessionLocal)
+
 
 
 # --------------------

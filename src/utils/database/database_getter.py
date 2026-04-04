@@ -1,9 +1,12 @@
 from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
-from sqlalchemy import func
+from sqlalchemy import func, inspect, or_
+import os
 from utils.database.datatables import artist_categories, song_categories
 from contextlib import contextmanager
+import time
+from utils.debug import mlog, slog
 
 @contextmanager
 def _sessions():
@@ -29,7 +32,7 @@ def _apply_filter(items, python_filter):
     return items
 
 
-def get_artists(category: str, query: str) -> list[str]:
+def get_artists_from_db(category: str, query: str) -> list[str]:
     category = _validate_category(category, artist_categories)
     if category is None:
         return []
@@ -45,7 +48,9 @@ def get_artists(category: str, query: str) -> list[str]:
         elif category == "origin":
             python_filter = lambda a: a.origin and query.lower() in a.origin.lower()
 
-        artists = _apply_filter(db_query.order_by(Artist.name).all(), python_filter)
+        ordered_q = db_query.order_by(Artist.name)
+        mlog(f"[debug] About to execute artists query for category='{category}', query='{query}'")
+        artists = _apply_filter(ordered_q.all(), python_filter)
 
         if not artists:
             print(f"No results for {category}='{query}'.")
@@ -54,7 +59,7 @@ def get_artists(category: str, query: str) -> list[str]:
         return [a.name for a in artists]
 
 
-def get_songs(category: str, query: str) -> list[tuple[str, str]]:
+def get_songs_from_db(category: str, query: str) -> list[tuple[str, str]]:
     category = _validate_category(category, song_categories)
     if category is None:
         return []
@@ -69,6 +74,14 @@ def get_songs(category: str, query: str) -> list[tuple[str, str]]:
             python_filter = lambda s: query.lower() in s.title.lower()
         elif category == "artist":
             python_filter = lambda s: query.lower() in s.artist.name.lower()
+        elif category == "name":
+            db_query = db_query.filter(
+                or_(
+                    func.lower(Song.title).contains(query.lower()),
+                    func.lower(Artist.name).contains(query.lower()),
+                )
+            )
+            python_filter = None
         elif category == "album":
             if query == "":
                 db_query = db_query.filter((Song.album == None) | (Song.album == ""))
@@ -105,7 +118,10 @@ def get_songs(category: str, query: str) -> list[tuple[str, str]]:
 
             db_query = db_query.filter(Song.id.in_(song_ids))
 
-        songs = _apply_filter(db_query.order_by(Artist.name, Song.year).all(), python_filter)
+        ordered_q = db_query.order_by(Artist.name, Song.year)
+        mlog(f"[debug] About to execute songs query for category='{category}', query='{query}'")
+        songs = _apply_filter(ordered_q.all(), python_filter)
+
 
         if not songs:
             print(f"No results for {category}='{query}'.")

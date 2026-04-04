@@ -1,4 +1,4 @@
-from utils.database.database_getter import get_songs, get_artists
+from utils.database.database_getter import get_songs_from_db, get_artists_from_db
 import questionary
 from utils.database.datatables import song_categories, artist_categories
 
@@ -13,7 +13,7 @@ def search_for_songs(category: str = ""):
     if querry == "":
         return
 
-    songs = get_songs(category, querry)
+    songs = get_songs_from_db(category, querry)
 
     return songs
 
@@ -24,7 +24,7 @@ def search_for_artists():
     if querry == "":
         return
 
-    artists = get_artists("Artist", querry)
+    artists = get_artists_from_db("Artist", querry)
 
     print(artists)
 
