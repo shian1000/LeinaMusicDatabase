@@ -5,12 +5,20 @@ from menu.main_menu.enter_database.manage_database.manual_management import manu
 from menu.main_menu.enter_database.manage_database.delete_duplicates import delete_duplicates
 from menu.main_menu.enter_database.manage_database.merge_artists import merge_artists
 
+def merge_artists_menu():
+    querry = input("What querry do you wish to search for: ")
+
+    if querry == "":
+        return
+
+    merge_artists(querry)
+
 def manage_database():
     action_map = {
         "Fetch database data": fetch_database_data,
         "Manual management": manual_management,
         "Remove duplicates": delete_duplicates,
-        "Merge artists": merge_artists
+        "Merge artists": merge_artists_menu
     }
 
     slog(action_map)

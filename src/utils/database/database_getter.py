@@ -3,7 +3,7 @@ from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, inspect, or_
 import os
-from utils.database.datatables import artist_categories, song_categories
+from utils.database.datatables import artist_categories, song_categories, hidden_song_categories
 from contextlib import contextmanager
 import time
 from utils.debug import mlog, slog
@@ -32,7 +32,52 @@ def _apply_filter(items, python_filter):
     return items
 
 
+def _progressive_name_search(db_query, query: str):
+    """Progressively narrow search by splitting query into words.
+
+    - db_query: SQLAlchemy query already joining Song and Artist
+    - query: raw user input string
+
+    Returns a list of (artist_name, song_title) tuples (may be empty).
+    """
+    words = [w for w in query.split() if w]
+    if not words:
+        return []
+
+    first = words[0].lower()
+    mlog(f"[debug] 'name' search initial word='{first}'")
+    try:
+        candidates = (
+            db_query
+            .filter(
+                or_(
+                    func.lower(Song.title).contains(first),
+                    func.lower(Artist.name).contains(first),
+                )
+            )
+            .order_by(Artist.name, Song.year)
+            .all()
+        )
+    except Exception as e:
+        mlog(f"[debug] Error executing initial 'name' query: {e}")
+        raise
+
+    for w in words[1:]:
+        if len(candidates) <= 1:
+            break
+        lw = w.lower()
+        narrowed = [
+            s for s in candidates
+            if lw in (s.title or "").lower() or lw in (s.artist.name or "").lower()
+        ]
+        if narrowed:
+            candidates = narrowed
+
+    return [(s.artist.name, s.title) for s in candidates]
+
+
 def get_artists_from_db(category: str, query: str) -> list[str]:
+    
     category = _validate_category(category, artist_categories)
     if category is None:
         return []
@@ -60,7 +105,8 @@ def get_artists_from_db(category: str, query: str) -> list[str]:
 
 
 def get_songs_from_db(category: str, query: str) -> list[tuple[str, str]]:
-    category = _validate_category(category, song_categories)
+    valid_categories = song_categories + hidden_song_categories
+    category = _validate_category(category, valid_categories)
     if category is None:
         return []
 
@@ -75,13 +121,8 @@ def get_songs_from_db(category: str, query: str) -> list[tuple[str, str]]:
         elif category == "artist":
             python_filter = lambda s: query.lower() in s.artist.name.lower()
         elif category == "name":
-            db_query = db_query.filter(
-                or_(
-                    func.lower(Song.title).contains(query.lower()),
-                    func.lower(Artist.name).contains(query.lower()),
-                )
-            )
-            python_filter = None
+            #I might user it for other categories as well. Or better yet - replace elifs with an action map
+            return _progressive_name_search(db_query, query)
         elif category == "album":
             if query == "":
                 db_query = db_query.filter((Song.album == None) | (Song.album == ""))

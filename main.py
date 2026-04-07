@@ -8,7 +8,7 @@ from test_scripts import test
 
 def main():
     #Comment it to unload tests
-    test()
+    # test()
     main_menu()
 
 if __name__ == "__main__":
