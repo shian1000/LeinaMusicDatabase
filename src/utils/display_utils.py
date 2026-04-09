@@ -4,6 +4,9 @@ from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func
+import time
+from utils.debug import slog
+from utils.database.database_getter import get_artists_objects, get_songs_objects
 
 def _create_table(title, columns):
     table = Table(title=title)
@@ -16,45 +19,13 @@ def _create_table(title, columns):
         table.add_column(name, **kwargs)
     return table
 
-def _fetch_songs_by_names(session, songs_names):
-    songs = []
-    for artist_name, song_title in songs_names:
-        if not artist_name or not song_title:
-            continue
-        song = (
-            session.query(Song)
-            .join(Artist)
-            .filter(
-                func.lower(Song.title) == (song_title or "").lower(),
-                func.lower(Artist.name) == (artist_name or "").lower(),
-            )
-            .first()
-        )
-        if song:
-            songs.append(song)
-        else:
-            print(f"Song not found: '{artist_name}' - '{song_title}'")
-    return songs
 
-def _fetch_artists_by_names(session, artist_names):
-    artists = []
-    for name in artist_names:
-        if not name:
-            continue
-        artist = (
-            session.query(Artist)
-            .filter(func.lower(Artist.name) == name.lower())
-            .first()
-        )
-        if artist:
-            artists.append(artist)
-        else:
-            print(f"Artist not found: '{name}'")
-    return artists
 
 def display_songs(songs_names = None):
     session = get_music_session()
     console = Console()
+
+    print("display_songs function:")
 
     table = _create_table("Music Library", [
         ("Title", "cyan", None),
@@ -68,9 +39,11 @@ def display_songs(songs_names = None):
     ])
 
     if songs_names:
-        songs = _fetch_songs_by_names(session, songs_names)
+        songs = get_songs_objects(session, songs_names)
     else:
         songs = session.query(Song).join(Artist).order_by(Artist.name, Song.year).all()
+
+    slog(songs)
 
     for song in songs:
         table.add_row(
@@ -98,7 +71,7 @@ def display_artists(artist_names = None):
     ])
 
     if artist_names:
-        artists = _fetch_artists_by_names(session, artist_names)
+        artists = get_artists_objects(session, artist_names)
     else:
         artists = session.query(Artist).order_by(Artist.name).all()
 

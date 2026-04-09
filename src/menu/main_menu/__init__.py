@@ -9,7 +9,7 @@ def main_menu():
         "Manage local files": manage_local_files,
         "Settings": lambda: print("In progress")
     }
-
+    
     slog(action_map)
 
     execute_menu_item("Main Menu", action_map, exit_label="Exit")

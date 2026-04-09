@@ -31,6 +31,7 @@ def clear_screen():
 
 
 def execute_menu_item(prompt: str, action_map: Dict[str, Callable[[], None]], exit_label: str = "Back") -> None:
+    clear_screen()
     choices = list(action_map.keys()) + [exit_label]
     running = True
 

@@ -4,7 +4,7 @@ from menu.database_actions import edit_artist
 from utils.database.datatables import song_categories, artist_categories
 import questionary
 from utils.database.database_management import edit_song_entry, validate_song, edit_artist_entry
-from utils.database.database_getter import get_songs_from_db, get_artists_from_db
+from utils.database.database_getter import get_songs_names, get_artists_names
 import time
 from utils.debug import slog
 
@@ -12,12 +12,12 @@ def edit_entry(mode: str = None):
     if (mode == "Artist"):
         action_map = artist_categories
         query = input("What artist do you wish to search for: ")
-        songs = get_artists_from_db("artist", query)
+        songs = get_artists_names("artist", query)
         slog(songs)
     else:
         action_map = song_categories
         query = input("What song do you wish to search for: ")
-        songs = get_songs_from_db("name", query)
+        songs = get_songs_names("name", query)
 
 
     slog(songs)

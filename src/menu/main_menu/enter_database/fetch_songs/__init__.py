@@ -1,10 +1,11 @@
 from utils.debug import slog
-from utils.database.database_getter import get_songs_from_db
+from utils.database.database_getter import get_songs_names
 import questionary
 from utils.database.datatables import song_categories
 from menu.song_actions import song_actions
 from utils.menu_utils import clear_screen
 from utils.display_utils import display_songs
+import time
 
 def fetch_songs():
     exit_label = ["Back"]
@@ -20,7 +21,10 @@ def fetch_songs():
     if querry == "":
         return
 
-    songs = get_songs_from_db(category, querry)
+    songs = get_songs_names(category, querry)
+
+    print("Fetch songs function: Printing songs")
+    print(songs)
 
     display_songs(songs)
 

@@ -4,7 +4,7 @@ from sqlalchemy import text
 import questionary
 from utils.display_utils import display_artists
 import time
-from utils.database.database_getter import get_artists_from_db
+from utils.database.database_getter import get_artists_names
 from utils.debug import slog
 
 def merge_artists_in_db(merge_from: str, merge_to: str):
@@ -48,7 +48,7 @@ def merge_artists_in_db(merge_from: str, merge_to: str):
     print(f"Done! All songs reassigned and '{artist_from.name}' removed.")
 
 def merge_artists(querry):
-    artists_list = get_artists_from_db("artist", querry)
+    artists_list = get_artists_names("artist", querry)
     slog(artists_list)
 
     display_artists(artists_list)
