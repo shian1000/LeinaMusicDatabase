@@ -22,6 +22,7 @@ def fetch_songs():
     if querry == "":
         return
 
+
     session = get_music_session()
 
     sessions = open_database_sessions()
@@ -37,5 +38,5 @@ def fetch_songs():
 
     if(songs_objects):
         decision = questionary.confirm("Do you want to do something with these songs?").ask()
-        if decision: song_actions(extract_song_info(songs_objects))
+        if decision: song_actions(extract_song_info(songs_objects, "artist, title"))
         else: clear_screen

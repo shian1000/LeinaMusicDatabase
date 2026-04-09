@@ -7,6 +7,7 @@ from sqlalchemy import func
 import time
 from utils.debug import slog
 
+
 def _create_table(title, columns):
     table = Table(title=title)
     for name, style, justify in columns:
@@ -24,8 +25,8 @@ def display_songs(songs = None):
     console = Console()
 
     table = _create_table("Music Library", [
-        ("Title", "cyan", None),
-        ("Artist", "magenta", None),
+        ("Artist", "cyan", None),
+        ("Title", "magenta", None),
         ("Album", "green", None),
         ("Year", None, "right"),
         ("Language", None, None),
@@ -37,12 +38,12 @@ def display_songs(songs = None):
 
     for song in songs:
         table.add_row(
-            song.title,
             song.artist.name,
+            song.title,
             song.album or "—",
             str(song.year) if song.year else "—",
             song.language or "—",
-            song.artist.origin or "X",
+            song.artist.origin,
             "V" if song.nostalgic else "X",
             "V" if song.melancholic else "X",
             "V" if song.party else "X",
@@ -50,35 +51,24 @@ def display_songs(songs = None):
 
     console.print(table)
 
-# def display_artists(artist_names = None):
-#     session = get_music_session()
-#     console = Console()
+def display_artists(artists = None):
+    console = Console()
 
-#     table = _create_table("Artists", [
-#         ("Artist", "magenta", None),
-#         ("Origin", "yellow", None),
-#         ("Songs", "cyan", "right"),
-#     ])
+    table = _create_table("Music Library", [
+        ("Name", "cyan", None),
+        ("Origin", None, None)
+    ])
 
-#     if artist_names:
-#         artists = get_artists_objects(session, artist_names)
-#         artists = ge
-#     else:
-#         artists = session.query(Artist).order_by(Artist.name).all()
+    for artist in artists:
+        table.add_row(
+            artist.name,
+            artist.origin,
+        )
 
-#     for artist in artists:
-#         table.add_row(
-#             artist.name,
-#             artist.origin or "—",
-#             str(len(artist.songs))
-#         )
+    console.print(table)
 
-#     session.close()
-#     console.print(table)
-
-def display_songs_with_tags():
-    music_session = get_music_session()
-    tag_session = get_tag_session()
+def display_songs_with_tags(songs, sessions):
+    music_session, tag_session = sessions
     console = Console()
 
     song_tags = tag_session.query(SongTag).all()

@@ -10,6 +10,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
+from settings import Settings
 
 # --------------------
 # Base & Engine
@@ -17,8 +18,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "database" / "tag.db"
+BASE_DIR = Settings.database_dir
+DB_PATH = BASE_DIR / "tag.db"
 
 ENGINE = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=ENGINE)
