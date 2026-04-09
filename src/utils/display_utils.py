@@ -6,7 +6,6 @@ from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func
 import time
 from utils.debug import slog
-from utils.database.database_getter import get_artists_objects, get_songs_objects
 
 def _create_table(title, columns):
     table = Table(title=title)
@@ -21,11 +20,8 @@ def _create_table(title, columns):
 
 
 
-def display_songs(songs_names = None):
-    session = get_music_session()
+def display_songs(songs = None):
     console = Console()
-
-    print("display_songs function:")
 
     table = _create_table("Music Library", [
         ("Title", "cyan", None),
@@ -33,17 +29,11 @@ def display_songs(songs_names = None):
         ("Album", "green", None),
         ("Year", None, "right"),
         ("Language", None, None),
+        ("Origin", None, None),
         ("Nostalgic", None, "center"),
         ("Melancholic", None, "center"),
         ("Party", None, "center"),
     ])
-
-    if songs_names:
-        songs = get_songs_objects(session, songs_names)
-    else:
-        songs = session.query(Song).join(Artist).order_by(Artist.name, Song.year).all()
-
-    slog(songs)
 
     for song in songs:
         table.add_row(
@@ -52,38 +42,39 @@ def display_songs(songs_names = None):
             song.album or "—",
             str(song.year) if song.year else "—",
             song.language or "—",
+            song.artist.origin or "X",
             "V" if song.nostalgic else "X",
             "V" if song.melancholic else "X",
             "V" if song.party else "X",
         )
 
-    session.close()
     console.print(table)
 
-def display_artists(artist_names = None):
-    session = get_music_session()
-    console = Console()
+# def display_artists(artist_names = None):
+#     session = get_music_session()
+#     console = Console()
 
-    table = _create_table("Artists", [
-        ("Artist", "magenta", None),
-        ("Origin", "yellow", None),
-        ("Songs", "cyan", "right"),
-    ])
+#     table = _create_table("Artists", [
+#         ("Artist", "magenta", None),
+#         ("Origin", "yellow", None),
+#         ("Songs", "cyan", "right"),
+#     ])
 
-    if artist_names:
-        artists = get_artists_objects(session, artist_names)
-    else:
-        artists = session.query(Artist).order_by(Artist.name).all()
+#     if artist_names:
+#         artists = get_artists_objects(session, artist_names)
+#         artists = ge
+#     else:
+#         artists = session.query(Artist).order_by(Artist.name).all()
 
-    for artist in artists:
-        table.add_row(
-            artist.name,
-            artist.origin or "—",
-            str(len(artist.songs))
-        )
+#     for artist in artists:
+#         table.add_row(
+#             artist.name,
+#             artist.origin or "—",
+#             str(len(artist.songs))
+#         )
 
-    session.close()
-    console.print(table)
+#     session.close()
+#     console.print(table)
 
 def display_songs_with_tags():
     music_session = get_music_session()

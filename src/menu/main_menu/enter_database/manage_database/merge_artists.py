@@ -2,10 +2,10 @@ import questionary
 from utils.database.music_db_manager import get_music_session, Artist
 from sqlalchemy import text
 import questionary
-from utils.display_utils import display_artists
 import time
-from utils.database.database_getter import get_artists_names
+from utils.database.database_getter import get_artists_from_db_session, extract_artist_info
 from utils.debug import slog
+from utils.database.database_sessions import open_database_sessions, close_database_sessions
 
 def merge_artists_in_db(merge_from: str, merge_to: str):
     """
@@ -47,11 +47,14 @@ def merge_artists_in_db(merge_from: str, merge_to: str):
 
     print(f"Done! All songs reassigned and '{artist_from.name}' removed.")
 
-def merge_artists(querry):
-    artists_list = get_artists_names("artist", querry)
+def merge_artists(query):
+    sessions = open_database_sessions
+    artists_objects = get_artists_from_db_session("name", query, sessions)
+    artists_list = extract_artist_info(artists_objects)
+    close_database_sessions(sessions)
     slog(artists_list)
 
-    display_artists(artists_list)
+    # display_artists(artists_list)
 
     if len(artists_list)>1:
         merge_from = questionary.select("Select the artist you want to merge from", choices=artists_list).ask()

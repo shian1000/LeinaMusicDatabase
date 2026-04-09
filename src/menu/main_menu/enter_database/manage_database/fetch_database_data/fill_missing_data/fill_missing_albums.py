@@ -1,12 +1,17 @@
-from utils.database.database_getter import get_songs_names
+from utils.database.database_getter import get_songs_from_db_session, extract_song_info
 from utils.database.database_management import edit_song_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
+from test_scripts import open_database_sessions, close_database_sessions
 
 def fill_missing_albums():
     category = "album"
     querry = ""
-    songs = get_songs_names(category, querry)
+
+    sessions = open_database_sessions
+    songs_objects = get_songs_from_db_session(category, querry, sessions)
+    songs = extract_song_info(songs_objects, "artist, title")
+    close_database_sessions(sessions)
 
     albums_search_results = fetch_albums_from_musicbrainz(songs)
 

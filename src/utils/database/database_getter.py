@@ -9,14 +9,6 @@ import time
 from utils.debug import mlog, slog
 
 @contextmanager
-def _sessions():
-    music_session = get_music_session()
-    tag_session = get_tag_session()
-    try:
-        yield music_session, tag_session
-    finally:
-        music_session.close()
-        tag_session.close()
 
 def _validate_category(category: str, valid_categories: set) -> str | None:
     normalized = category.strip().lower()
@@ -26,171 +18,163 @@ def _validate_category(category: str, valid_categories: set) -> str | None:
         return None
     return normalized
 
-def _apply_filter(items, python_filter):
-    if python_filter:
-        return [item for item in items if python_filter(item)]
-    return items
+def extract_song_info(songs: list[Song], categories: str) -> list[tuple]:
+    category_list = [c.strip() for c in categories.split(",")]
+
+    field_map = {
+        "title":    lambda s: s.title,
+        "artist":   lambda s: s.artist.name,
+        "album":    lambda s: s.album,
+        "year":     lambda s: str(s.year),
+        "language": lambda s: s.language,
+        "origin":   lambda s: s.artist.origin,
+    }
+
+    result = []
+    for song in songs:
+        info = tuple(field_map[cat](song) for cat in category_list)
+        result.append(info)
+
+    return result
+
+def extract_artist_info(artists: list[Artist], categories: str) -> list[tuple]:
+    category_list = [c.strip() for c in categories.split(",")]
+
+    field_map = {
+        "name":    lambda a: a.name,
+        "origin":   lambda a: a.origin,
+    }
+
+    result = []
+    for artist in artists:
+        info = tuple(field_map[cat](artist) for cat in category_list)
+        result.append(info)
+
+    return result
 
 
-
-def _progressive_name_search(db_query, query: str, candidates_filter):
-    words = [w for w in query.split() if w]
-    if not words:
-        return []
-        
-    candidates = (
-        db_query
-        .filter(or_(*candidates_filter))  # * unpacks the tuple into separate args
-        .order_by(Artist.name, Song.year)
-        .all()
-    )
-
-    for w in words[1:]:
-        if len(candidates) <= 1:
-            break
-        lw = w.lower()
-        narrowed = [
-            s for s in candidates
-            if lw in (s.title or "").lower() or lw in (s.artist.name or "").lower()
-        ]
-        if narrowed:
-            candidates = narrowed
-
-    return [(s.artist.name, s.title) for s in candidates]
-
-
-def get_artists_names(category: str, query: str) -> list[str]:
-    
-    category = _validate_category(category, artist_categories)
-    if category is None:
-        return []
-
-    query = query.strip()
-    python_filter = None
-
-    with _sessions() as (music_session, _):
-        db_query = music_session.query(Artist)
-
-        if category == "artist":
-            python_filter = lambda a: query.lower() in a.name.lower()
-        elif category == "origin":
-            python_filter = lambda a: a.origin and query.lower() in a.origin.lower()
-
-        ordered_q = db_query.order_by(Artist.name)
-        mlog(f"[debug] About to execute artists query for category='{category}', query='{query}'")
-        artists = _apply_filter(ordered_q.all(), python_filter)
-
-        if not artists:
-            print(f"No results for {category}='{query}'.")
-            return []
-
-        return [a.name for a in artists]
-
-
-def get_songs_names(category: str, query: str) -> list[tuple[str, str]]:
+def get_songs_from_db_session(category: str, query: str, sessions: tuple) -> list[Song]:
     valid_categories = song_categories + hidden_song_categories
     category = _validate_category(category, valid_categories)
     if category is None:
         return []
 
     query = query.strip()
-    python_filter = None
 
-    with _sessions() as (music_session, tag_session):
-        db_query = music_session.query(Song).join(Artist)
+    music_session, tag_session = sessions
+    db_query = music_session.query(Song).join(Artist)
 
-        words = [w for w in query.split() if w]
-        if not words:
+    words = [w for w in query.split() if w]
+    if not words:
+        return []
+
+
+    def get_filter_for_word(word: str):
+        """Returns the appropriate SQLAlchemy filter expression for a single word."""
+        filter_map = {
+            "title":    lambda w: func.lower(Song.title).contains(w.lower()),
+            "artist":   lambda w: func.lower(Artist.name).contains(w.lower()),
+            "name":     lambda w: or_(func.lower(Song.title).contains(w.lower()),
+                                      func.lower(Artist.name).contains(w.lower())),
+            "album":    lambda w: Song.album.ilike(f"%{w}%"),
+            "year":     lambda w: Song.year == int(w),
+            "language": lambda w: func.lower(Song.language).contains(w.lower()),
+            "origin":   lambda w: func.lower(Artist.origin).contains(w.lower()),
+        }
+        return filter_map[category](word)
+
+    if category == "tag":
+        matching_tags = (
+            tag_session.query(Tag)
+            .filter(func.lower(Tag.name).contains(words[0].lower()))
+            .all()
+        )
+        if not matching_tags:
+            print(f"No tags found matching '{words[0]}'.")
             return []
 
-        first = words[0].lower()
-        mlog(f"[debug] 'name' search initial word='{first}'")
+        song_ids = set(
+            st.song_id for st in
+            tag_session.query(SongTag).filter(
+                SongTag.tag_id.in_([t.id for t in matching_tags])
+            ).all()
+        )
 
-        def filter_tag():
-            nonlocal db_query
+        for word in words[1:]:
             matching_tags = (
                 tag_session.query(Tag)
-                .filter(func.lower(Tag.name).contains(query.lower()))
+                .filter(func.lower(Tag.name).contains(word.lower()))
                 .all()
             )
-            if not matching_tags:
-                print(f"No tags found matching '{query}'.")
-                return None, None
-
-            tag_ids = [tag.id for tag in matching_tags]
-            song_ids = [
+            word_song_ids = set(
                 st.song_id for st in
-                tag_session.query(SongTag).filter(SongTag.tag_id.in_(tag_ids)).all()
-            ]
-            if not song_ids:
-                print(f"No songs found with tag matching '{query}'.")
-                return None, None
-
-            return None, db_query.filter(Song.id.in_(song_ids))
-
-        action_map = {
-            "title": lambda: ((func.lower(Song.title).contains(first),), db_query),
-            "artist": lambda: ((func.lower(Artist.name).contains(first),), db_query),
-            "name": lambda: ((func.lower(Song.title).contains(first),
-                    func.lower(Artist.name).contains(first)), db_query),
-            "album":    lambda: ((Song.album.ilike(f"%{query}%"),), db_query),
-            "year":     lambda: ((Song.year == int(query),), db_query),
-            "language": lambda: ((func.lower(Song.language).contains(query.lower()),), db_query),
-            "origin":   lambda: ((func.lower(Artist.origin).contains(query.lower()),), db_query),
-            "tag":      filter_tag,
-        }
-
-        candidates_filter, db_query = action_map[category]()
-        if db_query is None:
-            return []
-
-        return _progressive_name_search(db_query, query, candidates_filter)
-
-        ordered_q = db_query.order_by(Artist.name, Song.year)
-        mlog(f"[debug] About to execute songs query for category='{category}', query='{query}'")
-        songs = _apply_filter(ordered_q.all(), python_filter)
-
-
-        if not songs:
-            print(f"No results for {category}='{query}'.")
-            return []
-
-        return [(s.artist.name, s.title) for s in songs]
-
-def get_songs_objects(session, songs_names):
-    """This function takes music db session and song_names with artists and songs, opens songs tables and returns db objects as a list"""
-    songs = []
-    for artist_name, song_title in songs_names:
-        if not artist_name or not song_title:
-            continue
-        song = (
-            session.query(Song)
-            .join(Artist)
-            .filter(
-                func.lower(Song.title) == (song_title or "").lower(),
-                func.lower(Artist.name) == (artist_name or "").lower(),
+                tag_session.query(SongTag).filter(
+                    SongTag.tag_id.in_([t.id for t in matching_tags])
+                ).all()
             )
-            .first()
-        )
-        if song:
-            songs.append(song)
-        else:
-            print(f"Song not found: '{artist_name}' - '{song_title}'")
-    return songs
+            song_ids &= word_song_ids  # keep only IDs present in both sets
 
-def get_artists_objects(session, artist_names):
-    """This function takes music db session and song_names with artists, opens artist tables and returns db objects as a list"""
-    artists = []
-    for name in artist_names:
-        if not name:
-            continue
-        artist = (
-            session.query(Artist)
-            .filter(func.lower(Artist.name) == name.lower())
-            .first()
-        )
-        if artist:
-            artists.append(artist)
-        else:
-            print(f"Artist not found: '{name}'")
-    return artists
+        if not song_ids:
+            print(f"No songs found with tags matching '{query}'.")
+            return []
+
+        return db_query.filter(Song.id.in_(song_ids)).all()
+
+    else:
+        from sqlalchemy import or_
+        for word in words:
+            db_query = db_query.filter(get_filter_for_word(word))
+
+        return db_query.all()
+
+
+def get_artists_from_db_session(category: str, query: str, sessions: tuple) -> list[Artist]:
+    valid_categories = song_categories + hidden_song_categories
+    category = _validate_category(category, valid_categories)
+    if category is None:
+        return []
+
+    query = query.strip()
+
+    music_session, tag_session = sessions
+    db_query = music_session.query(Artist)
+
+    words = [w for w in query.split() if w]
+    if not words:
+        return []
+
+
+    def get_filter_for_word(word: str):
+        """Returns the appropriate SQLAlchemy filter expression for a single word."""
+        filter_map = {
+            "name":   lambda w: func.lower(Artist.name).contains(w.lower()),
+            "origin":   lambda w: func.lower(Artist.origin).contains(w.lower()),
+        }
+        return filter_map[category](word)
+
+    from sqlalchemy import or_
+    for word in words:
+        db_query = db_query.filter(get_filter_for_word(word))
+
+    return db_query.all()
+
+
+
+
+
+# def get_artists_objects(session, artist_names):
+#     """This function takes music db session and song_names with artists, opens artist tables and returns db objects as a list"""
+#     artists = []
+#     for name in artist_names:
+#         if not name:
+#             continue
+#         artist = (
+#             session.query(Artist)
+#             .filter(func.lower(Artist.name) == name.lower())
+#             .first()
+#         )
+#         if artist:
+#             artists.append(artist)
+#         else:
+#             print(f"Artist not found: '{name}'")
+#     return artists

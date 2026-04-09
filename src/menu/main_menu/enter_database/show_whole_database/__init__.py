@@ -1,10 +1,10 @@
 from utils.menu_utils import execute_menu_item
 from utils.debug import slog
-from utils.display_utils import display_songs, display_songs_with_tags, display_artists
+from utils.display_utils import display_songs, display_songs_with_tags
 
 def show_whole_database():
     action_map = {
-        "Show artists": display_artists,
+        "Show artists": lambda: print("WIP"),
         "Show songs": display_songs,
         "Show songs with tags": display_songs_with_tags
     }

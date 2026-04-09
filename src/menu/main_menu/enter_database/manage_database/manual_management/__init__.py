@@ -4,20 +4,26 @@ from menu.database_actions import edit_artist
 from utils.database.datatables import song_categories, artist_categories
 import questionary
 from utils.database.database_management import edit_song_entry, validate_song, edit_artist_entry
-from utils.database.database_getter import get_songs_names, get_artists_names
+from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_artists_from_db_session, extract_artist_info
 import time
 from utils.debug import slog
+from utils.database.database_sessions import open_database_sessions, close_database_sessions
 
 def edit_entry(mode: str = None):
     if (mode == "Artist"):
         action_map = artist_categories
         query = input("What artist do you wish to search for: ")
-        songs = get_artists_names("artist", query)
-        slog(songs)
+        sessions = open_database_sessions()
+        artist_objects = get_artists_from_db_session("name", query, sessions)
+        artists = extract_artist_info(artist_objects, "name")
+        slog(artists)
     else:
         action_map = song_categories
         query = input("What song do you wish to search for: ")
-        songs = get_songs_names("name", query)
+        sessions = open_database_sessions()
+        song_objects = get_songs_from_db_session("name", query, sessions)
+        songs = extract_song_info(song_objects, "artist, title")
+        close_database_sessions(sessions)
 
 
     slog(songs)
