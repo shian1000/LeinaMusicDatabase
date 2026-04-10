@@ -157,6 +157,8 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
 
 def get_artists_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Artist]:
 
+    slog(category)
+    # time.sleep(1000)
     music_session, tag_session = sessions
     db_query = music_session.query(Artist).order_by(Artist.name)
 

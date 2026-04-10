@@ -48,13 +48,17 @@ def merge_artists_in_db(merge_from: str, merge_to: str):
     print(f"Done! All songs reassigned and '{artist_from.name}' removed.")
 
 def merge_artists(query):
-    sessions = open_database_sessions
+    slog(query)
+    sessions = open_database_sessions()
+    slog(sessions)
     artists_objects = get_artists_from_db_session("name", query, sessions)
+    slog(artists_objects)
+    time.sleep(1000)
     artists_list = extract_artist_info(artists_objects)
     close_database_sessions(sessions)
     slog(artists_list)
 
-    # display_artists(artists_list)
+    time.sleep(1000)
 
     if len(artists_list)>1:
         merge_from = questionary.select("Select the artist you want to merge from", choices=artists_list).ask()
