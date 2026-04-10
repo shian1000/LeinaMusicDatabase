@@ -1,34 +1,73 @@
-from utils.database.database_getter import get_songs_from_db_session, extract_song_info
-from utils.database.database_management import edit_song_entry
+from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_songs_with_empty_category
+from utils.database.database_management import edit_song_entry_from_name, edit_song_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
-from test_scripts import open_database_sessions, close_database_sessions
+from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
+from utils.debug import slog, mlog
+import time
+from utils.display_utils import display_songs
 
 def fill_missing_albums():
     category = "album"
-    querry = ""
 
-    sessions = open_database_sessions
-    songs_objects = get_songs_from_db_session(category, querry, sessions)
+
+    sessions = open_database_sessions()
+    slog(sessions)
+    songs_objects = get_songs_with_empty_category(category, sessions)
+    slog(songs_objects)
     songs = extract_song_info(songs_objects, "artist, title")
-    close_database_sessions(sessions)
+    slog(songs)
 
     albums_search_results = fetch_albums_from_musicbrainz(songs)
 
+    print(albums_search_results)
+
+    db_objects_with_albums_found = []
+
+    for (artist_name, song_title) in albums_search_results.keys():
+        artist_name = artist_name.strip().lower()
+        song_title = song_title.strip().lower()
+
+        match = next(
+            (song for song in songs_objects
+             if song.artist.name.strip().lower() == artist_name
+             and song.title.strip().lower() == song_title),
+            None
+        )
+
+        if match:
+            db_objects_with_albums_found.append(match)
+
+    print(db_objects_with_albums_found)
+
+    display_songs(db_objects_with_albums_found)
+
     albums_found = {k: v for k, v in albums_search_results.items() if v is not None}
-    albums_missing = {k: v for k, v in albums_search_results.items() if v is None}
+    db_objects_with_no_albums = [song for song in songs_objects if not song.album]
+    slog(db_objects_with_albums_found)
+    slog(db_objects_with_no_albums)
 
-    for (artist, title), album in albums_found.items():
-        edit_song_entry(f"{artist} - {title}", "album", album)
+    if not len(albums_search_results) == len(db_objects_with_albums_found):
+        print(f"albums_search_results and matched_objects items quantity mismatch! albums_search_results = {albums_search_results}, matched_objects = {db_objects_with_albums_found}! Aborting!")
+        return
 
-    if (len(albums_missing) > 0):
-        choice = questionary.select(f"Unable to find {(len(albums_missing))} album names. Would you like to fill them up manually?", choices=["Yes", "No"]).ask()
+    filtered_pairs = [(song, album) for song, album in zip(db_objects_with_albums_found, albums_found.values()) if album is not None]
 
-        if choice == "Yes":
-            for (artist, title), album in albums_missing.items():
-                print(f"{artist} - {title}")
+    for song, album in filtered_pairs:
+        edit_song_entry(song, "album", album)
+
+    mlog(f"length of db_objects_with_no_albums = {len(db_objects_with_no_albums)}")
+
+    if (len(db_objects_with_no_albums) > 0):
+        confirmation = questionary.confirm(f"Unable to find {(len(db_objects_with_no_albums))} album names. Would you like to fill them up manually?").ask()
+
+        if confirmation:
+            for song in db_objects_with_no_albums:
+                print(f"{song.artist.name} - {song.title}")
                 album = input("Album name: ")
                 if not album == "":
-                    edit_song_entry(f"{artist} - {title}", "album", album)
+                    edit_song_entry(song, "album", album)
                 else:
-                    print(f"Skipped {artist} - {title}")
+                    print(f"Skipped {song.artist.name} - {song.title}")
+
+    submit_and_close_database_sessions(sessions)

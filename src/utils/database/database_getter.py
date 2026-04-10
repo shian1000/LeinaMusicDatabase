@@ -52,6 +52,29 @@ def extract_artist_info(artists: list[Artist], categories: str) -> list[tuple]:
 
     return result
 
+def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
+    music_session, _ = sessions
+
+    db_query = (
+        music_session.query(Song)
+        .join(Artist)
+        .order_by(Artist.name, Song.title)
+    )
+
+    column_map = {
+        "title":    Song.title,
+        "artist":   Artist.name,
+        "album":    Song.album,
+        "year":     Song.year,
+        "language": Song.language,
+        "origin":   Artist.origin,
+    }
+
+    valid_categories = list(column_map.keys())
+    category = _validate_category(category, valid_categories)
+
+    col = column_map[category]
+    return db_query.filter(or_(col == None, col == "")).all()
 
 def get_songs_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Song]:
 
@@ -135,8 +158,7 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
 def get_artists_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Artist]:
 
     music_session, tag_session = sessions
-    db_query = music_session.query(Artist)
-    db_query = music_session.query(Song).order_by(Artist.name)
+    db_query = music_session.query(Artist).order_by(Artist.name)
 
     if category is None:
         return db_query.all()

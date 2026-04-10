@@ -8,7 +8,7 @@ from test_scripts import test
 
 def main():
     #Comment it to unload tests
-    # test()
+    test()
     main_menu()
 
 if __name__ == "__main__":
@@ -16,10 +16,5 @@ if __name__ == "__main__":
 
 
 
-#TODO LIST
 #TODO Make index creator
-#TODO Wyszukaj w języku angielskim - będzie song Łąki Łan not found
-#TODO Przetestować wszystko jeszcze raz po refactoringu
-#TODO Potencjalnie zmergować get artists i songs
-#TODO Naprawić tagi
-#TODO Naprawić show artists
+#TODO Find album duplicates

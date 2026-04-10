@@ -72,9 +72,58 @@ def edit_artist_entry(artist_query: str, category: str, new_value: str):
 
     print(f"Updated {category} for '{artist_name}': '{old_value}' → '{new_value}'.")
 
+def edit_song_entry(song_db_object, category: str, new_value: str):
+
+    category = category.strip().lower()
+    new_value = new_value.strip()
+
+    valid_categories = song_categories + hidden_song_categories
+
+    slog(valid_categories)
+
+    if category not in valid_categories:
+        print(f"Invalid category '{category}'. Editable options: {', '.join(sorted(valid_categories))}")
+        return
+
+    artist_name = song_db_object.artist.name
+    song_title = song_db_object.title
+    old_value = None
+
+    if category == "title":
+        old_value = song_db_object.title
+        song_db_object.title = new_value
+
+    if category == "artist":
+        old_value = artist_name
+        artist_name = new_value
+
+    if category == "album":
+        old_value = song_db_object.album or "—"
+        song_db_object.album = new_value
+
+    if category == "year":
+        if not new_value.isdigit():
+            print(f"Year must be a number, got '{new_value}'.")
+            return
+        old_value = str(song_db_object.year) if song_db_object.year else "—"
+        song_db_object.year = int(new_value)
+
+    if category == "language":
+        old_value = song_db_object.language or "—"
+        song_db_object.language = new_value
+
+    if category == "origin":
+        old_value = song_db_object.artist.origin or "—"
+        song_db_object.artist.origin = new_value
+
+    if not old_value:
+        old_value = "---"
+
+    print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' → '{new_value}'.")
 
 
-def edit_song_entry(song_query: str, category: str, new_value: str):
+
+def edit_song_entry_from_name(song_query: str, category: str, new_value: str):
 
     slog(song_query)
 

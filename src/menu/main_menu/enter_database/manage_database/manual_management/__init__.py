@@ -3,7 +3,7 @@ from utils.debug import slog
 from menu.database_actions import edit_artist
 from utils.database.datatables import song_categories, artist_categories
 import questionary
-from utils.database.database_management import edit_song_entry, validate_song, edit_artist_entry
+from utils.database.database_management import edit_song_entry_from_name, validate_song, edit_artist_entry
 from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_artists_from_db_session, extract_artist_info
 import time
 from utils.debug import slog
@@ -42,7 +42,7 @@ def edit_entry(mode: str = None):
     if(mode == "Artist"):
         edit_artist_entry(song, category, new_data)
     else:
-        edit_song_entry(song, category, new_data)
+        edit_song_entry_from_name(song, category, new_data)
 
 def manual_management():
 
