@@ -24,7 +24,7 @@ def _is_word_substring(needle: str, haystack: str) -> bool:
     return bool(re.search(pattern, haystack))
 
 
-def _normalize_text(s: str) -> str:
+def normalize_text(s: str) -> str:
     """Normalize text for comparison.
 
     Steps:
@@ -67,8 +67,8 @@ def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
     - compare_strings('one', 'the one') -> True  (whole word match)
     - compare_strings('one', 'bones') -> False  (inside a word, rejected)
     """
-    na = _normalize_text(a or "")
-    nb = _normalize_text(b or "")
+    na = normalize_text(a or "")
+    nb = normalize_text(b or "")
 
     if not na or not nb:
         return False

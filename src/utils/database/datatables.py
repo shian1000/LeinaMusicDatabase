@@ -52,6 +52,6 @@ hidden_song_categories = [
 ]
 
 artist_categories = [
-    "artist",
+    "name",
     "origin"
 ]

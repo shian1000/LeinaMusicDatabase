@@ -1,17 +1,12 @@
 from utils.menu_utils import execute_menu_item
-from utils.debug import slog
+from utils.debug import slog, mlog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
 from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists, resolve_duplicated_albums
-from menu.main_menu.enter_database.manage_database.merge_artists import merge_artists
-
-def merge_artists_menu():
-    querry = input("What querry do you wish to search for: ")
-
-    if querry == "":
-        return
-
-    merge_artists(querry)
+from menu.main_menu.enter_database.manage_database.merge_artists import merge_artists_menu
+from utils.database.database_getter import get_artists_from_db_session, extract_artist_info
+from utils.database.database_sessions import open_database_sessions, submit_and_close_database_sessions
+import time
 
 def resolve_duplicates():
     action_map = {

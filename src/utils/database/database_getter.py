@@ -6,12 +6,14 @@ import os
 from utils.database.datatables import artist_categories, song_categories, hidden_song_categories
 import time
 from utils.debug import mlog, slog
+from utils.text_utils import normalize_text
 
 def _validate_category(category: str, valid_categories: set) -> str | None:
     slog(category)
     normalized = category.strip().lower()
     slog(normalized)
     valid_lower = {c.lower() for c in valid_categories}
+    slog(valid_categories)
     if normalized not in valid_lower:
         print(f"Invalid category '{normalized}'. Valid options: {', '.join(sorted(valid_lower))}")
         return None
@@ -46,6 +48,9 @@ def extract_artist_info(artists: list[Artist], categories: str) -> list[tuple]:
     }
 
     result = []
+
+    slog(artists)
+    
     for artist in artists:
         info = tuple(field_map[cat](artist) for cat in category_list)
         result.append(info)
@@ -155,10 +160,15 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
         return db_query.all()
 
 
-def get_artists_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Artist]:
+def get_artists_from_db_session(
+    category: str = None,
+    query: str = None,
+    sessions: tuple = None,
+    aggresive_search: bool = False,
+) -> list[Artist]:
 
     slog(category)
-    # time.sleep(1000)
+    slog(query)
     music_session, tag_session = sessions
     db_query = music_session.query(Artist).order_by(Artist.name)
 
@@ -172,20 +182,47 @@ def get_artists_from_db_session(category: str = None, query: str = None, session
 
     words = [w for w in query.split() if w]
     if not words:
+        slog(words)
         return []
+
+    if aggresive_search:
+        # Normalize the search words once up front
+        normalized_words = [normalize_text(w) for w in words]
+
+        # Pull a broader candidate set from the DB (no per-word filtering),
+        # then do precise normalized matching in Python
+        candidates = db_query.all()
+
+        field_getter = {
+            "name":   lambda artist: normalize_text(artist.name),
+            "origin": lambda artist: normalize_text(artist.origin),
+        }[category]
+
+        slog(field_getter)
+        slog([
+            artist for artist in candidates
+            if all(w in field_getter(artist) for w in normalized_words)
+        ]
+)
+        return [
+            artist for artist in candidates
+            if all(w in field_getter(artist) for w in normalized_words)
+        ]
 
     def get_filter_for_word(word: str):
         """Returns the appropriate SQLAlchemy filter expression for a single word."""
         filter_map = {
             "name":   lambda w: func.lower(Artist.name).contains(w.lower()),
-            "origin":   lambda w: func.lower(Artist.origin).contains(w.lower()),
+            "origin": lambda w: func.lower(Artist.origin).contains(w.lower()),
         }
+        slog (filter_map)
         return filter_map[category](word)
 
     from sqlalchemy import or_
     for word in words:
         db_query = db_query.filter(get_filter_for_word(word))
 
+    slog (word)
     return db_query.all()
 
 
