@@ -4,6 +4,8 @@ import os
 from upath import UPath
 from utils.debug import slog
 import json
+from utils.database.database_getter import extract_song_info
+import time
 
 """Here should fall the tools used to navigate menus - executing items, file browsing etc."""
 
@@ -105,3 +107,13 @@ def open_file_browser_window():
         print(e, "open_file_browser_error")
         
         return None
+
+def pick_from_db_objects(entries_objects, question: str = "Pick one"):
+    entries_names = extract_song_info(entries_objects, "artist, title")
+    slog(entries_names)
+    entries_names = [(' - '.join(song),) for song in entries_names]
+    slog(entries_names)
+    entries_names = [item for t in entries_names for item in t]
+    selected_name = questionary.select(question, choices=entries_names).ask()
+    selected_object = entries_objects[entries_names.index(selected_name)]
+    return selected_object

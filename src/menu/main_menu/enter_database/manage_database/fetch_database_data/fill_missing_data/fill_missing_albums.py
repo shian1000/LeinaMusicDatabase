@@ -1,5 +1,5 @@
 from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_songs_with_empty_category
-from utils.database.database_management import edit_song_entry_from_name, edit_song_entry
+from utils.database.database_management import edit_song_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
 from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
