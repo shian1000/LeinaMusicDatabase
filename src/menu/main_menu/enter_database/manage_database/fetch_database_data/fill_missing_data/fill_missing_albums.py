@@ -1,5 +1,5 @@
 from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_songs_with_empty_category
-from utils.database.database_management import edit_song_entry
+from utils.database.database_management import edit_db_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
 from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
@@ -54,7 +54,7 @@ def fill_missing_albums():
     filtered_pairs = [(song, album) for song, album in zip(db_objects_with_albums_found, albums_found.values()) if album is not None]
 
     for song, album in filtered_pairs:
-        edit_song_entry(song, "album", album)
+        edit_db_entry(song, "album", album)
 
     mlog(f"length of db_objects_with_no_albums = {len(db_objects_with_no_albums)}")
 
@@ -66,7 +66,7 @@ def fill_missing_albums():
                 print(f"{song.artist.name} - {song.title}")
                 album = input("Album name: ")
                 if not album == "":
-                    edit_song_entry(song, "album", album)
+                    edit_db_entry(song, "album", album)
                 else:
                     print(f"Skipped {song.artist.name} - {song.title}")
 

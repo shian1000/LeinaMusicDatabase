@@ -2,7 +2,7 @@ from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
 import questionary
 from utils.database.database_sessions import open_database_sessions, submit_and_close_database_sessions
-from utils.database.database_management import edit_song_entry
+from utils.database.database_management import edit_db_entry
 from utils.text_utils import compare_strings
 
 def remove_duplicate_songs():
@@ -173,7 +173,7 @@ def resolve_duplicated_albums():
 
             # Remove album value from selected artist's songs in this cluster
             for song in sel_songs:
-                edit_song_entry(song, "album", "")
+                edit_db_entry(song, "album", "")
                 # remove from local list so it's not considered in further iterations
                 if song in songs_list:
                     songs_list.remove(song)

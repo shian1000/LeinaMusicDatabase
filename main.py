@@ -19,3 +19,4 @@ if __name__ == "__main__":
 #TODO Make index creator
 #TODO Find album duplicates
 #TODO Manual edit - artist - fix
+#TODO Extract song / artist info - into one
