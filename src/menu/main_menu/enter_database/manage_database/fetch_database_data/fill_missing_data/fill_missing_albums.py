@@ -1,4 +1,4 @@
-from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_songs_with_empty_category
+from utils.database.database_getter import get_songs_from_db_session, get_songs_with_empty_category, extract_db_object_info
 from utils.database.database_management import edit_db_entry
 from utils.discoveries.music_brainz_fetcher import fetch_albums_from_musicbrainz
 import questionary
@@ -15,7 +15,7 @@ def fill_missing_albums():
     slog(sessions)
     songs_objects = get_songs_with_empty_category(category, sessions)
     slog(songs_objects)
-    songs = extract_song_info(songs_objects, "artist, title")
+    songs = extract_db_object_info(songs_objects, "artist, title")
     slog(songs)
 
     albums_search_results = fetch_albums_from_musicbrainz(songs)

@@ -1,5 +1,5 @@
 from utils.debug import slog
-from utils.database.database_getter import get_songs_from_db_session, extract_song_info
+from utils.database.database_getter import get_songs_from_db_session, extract_db_object_info
 import questionary
 from utils.database.datatables import song_categories
 from menu.song_actions import song_actions
@@ -38,5 +38,5 @@ def fetch_songs():
 
     if(songs_objects):
         decision = questionary.confirm("Do you want to do something with these songs?").ask()
-        if decision: song_actions(extract_song_info(songs_objects, "artist, title"))
+        if decision: song_actions(extract_db_object_info(songs_objects, "artist, title"))
         else: clear_screen

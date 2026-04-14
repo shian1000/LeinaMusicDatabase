@@ -22,7 +22,7 @@ ALBUM_TITLE_BLACKLIST = {
     "anthology",
     "retrospective",
     "definitive collection",
-    "complete collection",
+    "complete collection"
 }
 
 ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
@@ -37,7 +37,6 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "the essential",
     "pop party",
     "itunes",
-    "live",
     "remix",
     "germany",
     "festival",
@@ -61,11 +60,13 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "london, uk",
     "england",
     "collecion",
-    
+    "youtube",
+    "essential",
+    "live"
 }
 
 
-def _is_blacklisted_album(title: str) -> bool:
+def is_blacklisted_album(title: str) -> bool:
     lowered = title.lower().strip()
     if lowered in ALBUM_TITLE_BLACKLIST:
         return True
@@ -105,7 +106,7 @@ def fetch_albums_from_musicbrainz(
                         continue
 
                     # Skip blacklisted album titles
-                    if _is_blacklisted_album(release_title):
+                    if is_blacklisted_album(release_title):
                         continue
 
                     if primary_type == "Album":

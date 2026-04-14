@@ -33,4 +33,4 @@ def show_whole_database():
 
     slog(action_map)
 
-    execute_menu_item("Show database", action_map, exit_label="Exit")
+    execute_menu_item("Show database", action_map)

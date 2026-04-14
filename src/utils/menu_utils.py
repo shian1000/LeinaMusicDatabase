@@ -4,7 +4,7 @@ import os
 from upath import UPath
 from utils.debug import slog
 import json
-from utils.database.database_getter import extract_song_info, extract_artist_info
+from utils.database.database_getter import extract_db_object_info
 import time
 from utils.database.music_db_manager import Artist, Song
 
@@ -110,10 +110,7 @@ def open_file_browser_window():
         return None
 
 def pick_from_db_objects(entries_objects, question: str = "Pick one"):
-    if type(entries_objects[0]) == Artist:
-        entries_names = extract_artist_info(entries_objects, "name")
-    else:
-        entries_names = extract_song_info(entries_objects, "artist, title")
+    entries_names = extract_db_object_info(entries_objects)
 
     slog(entries_names)
     entries_names = [(' - '.join(song),) for song in entries_names]

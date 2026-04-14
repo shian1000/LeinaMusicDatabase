@@ -92,8 +92,6 @@ def edit_db_entry(db_object, category: str, new_value: str):
     if type(db_object) == Song:
         print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' --> '{new_value}'.")
 
-
-
 def merge_artists_in_db(merge_from, merge_to, sessions):
 
     """Merge two artists in the database.

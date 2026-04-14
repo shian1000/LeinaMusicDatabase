@@ -20,42 +20,52 @@ def _validate_category(category: str, valid_categories: set) -> str | None:
     slog(normalized)
     return normalized
 
-def extract_song_info(songs: list[Song], categories: str) -> list[tuple]:
-    category_list = [c.strip() for c in categories.split(",")]
+def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
+    if not songs:
+        print("No such songs found")
+        return
 
-    field_map = {
-        "title":    lambda s: s.title,
-        "artist":   lambda s: s.artist.name,
-        "album":    lambda s: s.album,
-        "year":     lambda s: str(s.year),
-        "language": lambda s: s.language,
-        "origin":   lambda s: s.artist.origin,
-    }
+
+    category_list = [c.strip() for c in categories.split(",")] if categories else []
+
+    slog(songs)
+
+    slog(songs[0])
+
+    if type(songs[0]) == Song:
+        field_map = {
+            "title":    lambda s: s.title,
+            "artist":   lambda s: s.artist.name,
+            "album":    lambda s: s.album,
+            "year":     lambda s: str(s.year),
+            "language": lambda s: s.language,
+            "origin":   lambda s: s.artist.origin,
+        }
+        if not category_list:
+            category_list = ["artist", "title"]
+    else:
+        field_map = {
+            "name":    lambda a: a.name,
+            "origin":   lambda a: a.origin,
+        }
+        if not category_list:
+            category_list = ["name"]
+
+    slog(category_list)
+
+    invalid_categories = [c for c in category_list if c not in field_map]
+    if invalid_categories:
+        print (f"Invalid categories: {invalid_categories}. Valid options for {type(songs[0])} are: {list(field_map.keys())}")
+        return
 
     result = []
+
     for song in songs:
         info = tuple(field_map[cat](song) for cat in category_list)
         result.append(info)
 
     return result
 
-def extract_artist_info(artists: list[Artist], categories: str) -> list[tuple]:
-    category_list = [c.strip() for c in categories.split(",")]
-
-    field_map = {
-        "name":    lambda a: a.name,
-        "origin":   lambda a: a.origin,
-    }
-
-    result = []
-
-    slog(artists)
-    
-    for artist in artists:
-        info = tuple(field_map[cat](artist) for cat in category_list)
-        result.append(info)
-
-    return result
 
 def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
     music_session, _ = sessions
@@ -158,7 +168,6 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
         for word in words:
             db_query = db_query.filter(get_filter_for_word(word))
         return db_query.all()
-
 
 def get_artists_from_db_session(
     category: str = None,

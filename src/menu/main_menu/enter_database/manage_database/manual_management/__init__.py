@@ -4,7 +4,7 @@ from menu.database_actions import edit_artist
 from utils.database.datatables import song_categories, artist_categories
 import questionary
 from utils.database.database_management import validate_song, edit_db_entry
-from utils.database.database_getter import get_songs_from_db_session, extract_song_info, get_artists_from_db_session, extract_artist_info
+from utils.database.database_getter import get_songs_from_db_session, get_artists_from_db_session, extract_db_object_info
 import time
 from utils.debug import slog
 from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
