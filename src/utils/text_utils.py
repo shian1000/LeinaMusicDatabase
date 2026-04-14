@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from typing import Optional
+import tkinter as tk
 
 _SPECIAL_REPLACEMENTS = {
     "ß": "ss",
@@ -17,6 +18,12 @@ _SPECIAL_REPLACEMENTS = {
     "Þ": "Th",
     "þ": "th",
 }
+
+def copy_to_clipboard(message: str):
+    root = tk.Tk()
+    root.withdraw()
+    root.clipboard_clear()
+    root.clipboard_append(message)
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""

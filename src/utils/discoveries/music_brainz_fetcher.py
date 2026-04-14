@@ -62,7 +62,8 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "collecion",
     "youtube",
     "essential",
-    "live"
+    "live",
+    "хит"
 }
 
 

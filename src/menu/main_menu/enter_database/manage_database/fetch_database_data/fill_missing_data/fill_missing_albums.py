@@ -6,6 +6,7 @@ from utils.database.database_sessions import open_database_sessions, close_datab
 from utils.debug import slog, mlog
 import time
 from utils.display_utils import display_songs
+from utils.text_utils import copy_to_clipboard
 
 def fill_missing_albums():
     category = "album"
@@ -18,9 +19,13 @@ def fill_missing_albums():
     songs = extract_db_object_info(songs_objects, "artist, title")
     slog(songs)
 
-    albums_search_results = fetch_albums_from_musicbrainz(songs)
+    if (songs):
+        albums_search_results = fetch_albums_from_musicbrainz(songs)
+    else:
+        print("No missing albums found")
+        return
 
-    print(albums_search_results)
+    slog(albums_search_results)
 
     db_objects_with_albums_found = []
 
@@ -38,7 +43,7 @@ def fill_missing_albums():
         if match:
             db_objects_with_albums_found.append(match)
 
-    print(db_objects_with_albums_found)
+    slog(db_objects_with_albums_found)
 
     display_songs(db_objects_with_albums_found)
 
@@ -64,6 +69,7 @@ def fill_missing_albums():
         if confirmation:
             for song in db_objects_with_no_albums:
                 print(f"{song.artist.name} - {song.title}")
+                copy_to_clipboard(f"{song.artist.name} - {song.title}")
                 album = input("Album name: ")
                 if not album == "":
                     edit_db_entry(song, "album", album)

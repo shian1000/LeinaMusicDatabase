@@ -110,7 +110,7 @@ def open_file_browser_window():
         return None
 
 def pick_from_db_objects(entries_objects, question: str = "Pick one"):
-    entries_names = extract_db_object_info(entries_objects)
+    entries_names = extract_db_object_info(entries_objects, "artist, album, title")
 
     slog(entries_names)
     entries_names = [(' - '.join(song),) for song in entries_names]

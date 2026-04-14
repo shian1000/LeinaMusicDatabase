@@ -3,7 +3,7 @@ from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, inspect, or_
 import os
-from utils.database.datatables import artist_categories, song_categories, hidden_song_categories
+from utils.database.datatables import artist_categories, song_categories, hidden_song_categories, Song, Artist
 import time
 from utils.debug import mlog, slog
 from utils.text_utils import normalize_text
@@ -93,6 +93,7 @@ def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
 
 def get_songs_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Song]:
 
+    slog(query)
     music_session, tag_session = sessions
     db_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)
 
@@ -104,10 +105,13 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
     slog(category)
 
     query = query.strip()
+    slog(query)
 
     words = [w for w in query.split() if w]
     if not words:
         return []
+    
+    slog(words)
     
     def get_filter_for_tag():
         matching_tags = (
@@ -147,13 +151,14 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
         return db_query.filter(Song.id.in_(song_ids)).all()
 
     def get_filter_for_word(word: str):
+        slog(word)
         """Returns the appropriate SQLAlchemy filter expression for a single word."""
         filter_map = {
             "title":    lambda w: func.lower(Song.title).contains(w.lower()),
             "artist":   lambda w: func.lower(Artist.name).contains(w.lower()),
             "name":     lambda w: or_(func.lower(Song.title).contains(w.lower()),
                                       func.lower(Artist.name).contains(w.lower())),
-            "album":    lambda w: Song.album.ilike(f"%{w}%"),
+            "album":    lambda w: func.lower(Song.album).contains(w.lower()),
             "year":     lambda w: Song.year == int(w),
             "language": lambda w: func.lower(Song.language).contains(w.lower()),
             "origin":   lambda w: func.lower(Artist.origin).contains(w.lower()),
@@ -165,9 +170,45 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
 
     else:
         from sqlalchemy import or_
+        filtered_query = db_query
         for word in words:
-            db_query = db_query.filter(get_filter_for_word(word))
-        return db_query.all()
+            filtered_query = filtered_query.filter(get_filter_for_word(word))
+            slog(filtered_query)
+
+        results = filtered_query.all()
+        if results:
+            return results
+
+        # Fallback: SQL returned no rows — perform Unicode-aware normalized filtering in Python
+        # Normalize search words
+        normalized_words = [normalize_text(w).casefold() for w in words]
+
+        # Fetch a candidate set (broad) and filter in Python
+        candidates = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title).all()
+
+        # field getter per category — normalized and combined where appropriate
+        def song_field_normalized(s: Song) -> str:
+            field_map = {
+                "title":    lambda s: normalize_text(s.title or ""),
+                "artist":   lambda s: normalize_text(s.artist.name or ""),
+                "name":     lambda s: f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}",
+                "album":    lambda s: normalize_text(s.album or ""),
+                "year":     lambda s: str(s.year) if s.year is not None else "",
+                "language": lambda s: normalize_text(s.language or ""),
+                "origin":   lambda s: normalize_text(s.artist.origin or ""),
+            }
+            return field_map[category](s).casefold()
+
+        slog("Falling back to Python-side normalized filtering")
+        filtered = [
+            s for s in candidates
+            if all(w in song_field_normalized(s) for w in normalized_words)
+        ]
+
+        if not filtered:
+            print("No such songs found")
+
+        return filtered
 
 def get_artists_from_db_session(
     category: str = None,
