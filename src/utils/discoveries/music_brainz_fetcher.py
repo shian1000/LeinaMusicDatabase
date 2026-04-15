@@ -1,5 +1,6 @@
 import time
 import musicbrainzngs
+from utils.debug import slog
 
 # Set up the user agent (required by MusicBrainz)
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
@@ -63,76 +64,104 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "youtube",
     "essential",
     "live",
-    "хит"
+    "хит",
+    "concert"
 }
 
 
 def is_blacklisted_album(title: str) -> bool:
+    slog(title)
     lowered = title.lower().strip()
     if lowered in ALBUM_TITLE_BLACKLIST:
+        slog("True")
         return True
     return any(sub in lowered for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
 
 
-def fetch_albums_from_musicbrainz(
-    songs: list[tuple[str, str]],
-    delay: float = 1.0,
-) -> dict[tuple[str, str], str | None]:
-    results = {}
 
-    for artist, title in songs:
-        query = f'recording:"{title}" AND artist:"{artist}"'
-        print(f"Searching: {artist} — {title}")
+def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> str | None:
+    """Simple helper: fetch album for a single (artist, song) pair.
 
-        try:
-            response = musicbrainzngs.search_recordings(
-                query=query,
-                limit=5
-            )
-            recordings = response.get("recording-list", [])
+    Calls `fetch_albums_from_musicbrainz_batch` with a single-item list and returns
+    the album title or None if not found or on error.
+    """
+    query = f'recording:"{song}" AND artist:"{artist}"'
+    try:
+        response = musicbrainzngs.search_recordings(query=query, limit=5)
+        recordings = response.get("recording-list", [])
 
-            album = None
-            fallback = None
+        album = None
+        fallback = None
 
-            for recording in recordings:
-                releases = recording.get("release-list", [])
-                for release in releases:
-                    release_title = release.get("title", "")
-                    release_group = release.get("release-group", {})
-                    primary_type = release_group.get("primary-type", "")
-                    secondary_types = release_group.get("secondary-type-list", [])
+        for recording in recordings:
+            releases = recording.get("release-list", [])
+            for release in releases:
+                release_title = release.get("title", "")
+                release_group = release.get("release-group", {})
+                primary_type = release_group.get("primary-type", "")
+                secondary_types = release_group.get("secondary-type-list", [])
 
-                    # Skip if the release group is explicitly a compilation/live/etc.
-                    if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
-                        continue
+                # Skip if the release group is explicitly a compilation/live/etc.
+                if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
+                    continue
 
-                    # Skip blacklisted album titles
-                    if is_blacklisted_album(release_title):
-                        continue
+                if is_blacklisted_album(release_title):
+                    continue
 
-                    if primary_type == "Album":
-                        album = release_title
-                        break
-                    elif fallback is None:
-                        # Hold a non-blacklisted non-Album as last resort
-                        fallback = release_title
-
-                if album:
+                if primary_type == "Album":
+                    album = release_title
                     break
+                elif fallback is None:
+                    fallback = release_title
 
-            result = album or fallback
+            if album:
+                break
 
-            if result:
-                print(f"  ✓ Found album: {result}")
-            else:
-                print(f"  ✗ No album found")
+        result = album or fallback
 
-            results[(artist, title)] = result
+        if result and not is_blacklisted_album(result):
+            print(f"  ✓ Found album: {result}")
+            time.sleep(delay)
+            return result
 
-        except musicbrainzngs.WebServiceError as e:
-            print(f"  ! MusicBrainz error for '{title}' by '{artist}': {e}")
-            results[(artist, title)] = None
+
+        response = musicbrainzngs.search_recordings(query=query, limit=25)
+        recordings = response.get("recording-list", [])
+
+        album = None
+        fallback = None
+
+        for recording in recordings:
+            releases = recording.get("release-list", [])
+            for release in releases:
+                release_title = release.get("title", "")
+                release_group = release.get("release-group", {})
+                primary_type = release_group.get("primary-type", "")
+                secondary_types = release_group.get("secondary-type-list", [])
+
+                if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
+                    continue
+                if is_blacklisted_album(release_title):
+                    continue
+
+                if primary_type == "Album":
+                    album = release_title
+                    break
+                elif fallback is None:
+                    fallback = release_title
+
+            if album:
+                break
+
+        final = album or fallback
+        if final:
+            print(f"Deep found album: {final}")
+        else:
+            print(f"Deep search found no album")
 
         time.sleep(delay)
+        return final
 
-    return results
+    except musicbrainzngs.WebServiceError as e:
+        print(f"  ! MusicBrainz error for '{song}' by '{artist}': {e}")
+        return None

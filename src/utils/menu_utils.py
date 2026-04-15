@@ -58,10 +58,10 @@ def open_file_browser_terminal(current_path = os.getcwd()):
 
     current_path = os.path.abspath(current_path)
     
-    subdirs = [
+    subdirs = sorted([
         d for d in os.listdir(current_path) 
-        if os.path.isdir(os.path.join(current_path, d))
-    ]
+        if os.path.isdir(os.path.join(current_path, d)) and not d.startswith(".")
+    ])
     
     options = ["[SELECT THIS DIRECTORY]", "<= [Go Back]"] + subdirs
     title = f"Pick a destination.\nCurrent Path: {current_path}"

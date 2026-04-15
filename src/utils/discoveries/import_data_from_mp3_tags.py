@@ -69,13 +69,13 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
 
     print(f"Checking: {artist.name} - {title} (lang: {language})")
 
-    print(f"  [DEBUG] Artist: '{artist.name}' (id={artist.id})")
+    slog(f"Artist: '{artist.name}' (id={artist.id})")
     songs = music_session.query(Song).filter(
         Song.artist_id == artist.id
     ).all()
 
-    print(f"  [DEBUG] Looking for title: '{title}' (lower: '{title.lower()}')")
-    print(f"  [DEBUG] Songs in DB for artist_id={artist.id}:")
+    slog(f"Looking for title: '{title}' (lower: '{title.lower()}')")
+    slog(f"Songs in DB for artist_id={artist.id}:")
     for s in songs:
         print(f"    - '{s.title}' (lower: '{s.title.lower()}') | match: {s.title.lower() == title.lower()}")
 
@@ -84,7 +84,7 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
         None
     )
 
-    print(f"  [DEBUG] Match found: {song}")
+    slog(f"Match found: {song}")
 
     if song:
         if mode == "skip":

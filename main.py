@@ -18,3 +18,5 @@ if __name__ == "__main__":
 
 #TODO Make index creator
 #TODO Find album duplicates
+#TODO Fetch missing results - right away option to edit the results using questionary
+#TODO Czego kopiowanie do schowka czasem działa, a czasem nie
