@@ -14,10 +14,3 @@ pip install -r requirements.txt
 
 
 
-(Note to myself - I can later check if I have unused packages by doing this:
-
-pip install pipreqs
-
-pipreqs .
-
-)
