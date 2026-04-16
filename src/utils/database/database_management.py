@@ -6,6 +6,7 @@ import time
 from utils.debug import slog
 from menu.song_actions.pick_song import pick_song
 from sqlalchemy import text
+from utils.database.database_getter import get_artists_from_db_session
 
 
 def validate_song(song_query):
@@ -25,7 +26,7 @@ def validate_song(song_query):
     else:
         print("validate_song error - song query is not a str or a list")
 
-def edit_db_entry(db_object, category: str, new_value: str):
+def edit_db_entry(db_object, category: str, new_value: str, sessions = None):
 
     category = category.strip().lower()
     new_value = new_value.strip()
@@ -36,6 +37,13 @@ def edit_db_entry(db_object, category: str, new_value: str):
         valid_categories = artist_categories
         artist_name = db_object.name
     elif(type(db_object) == Song):
+        if category == "artist":
+            if not sessions:
+                print("When changing song to artist, sessions must be provided")
+                return
+            db_artist = get_artists_from_db_session("name", db_object.artist.name, sessions=sessions)
+            edit_db_entry(db_artist[0], "name", new_value)
+            return
         valid_categories = song_categories + hidden_song_categories
         artist_name = db_object.artist.name
         song_title = db_object.title

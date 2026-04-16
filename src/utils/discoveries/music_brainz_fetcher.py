@@ -120,7 +120,6 @@ def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> 
         result = album or fallback
 
         if result and not is_blacklisted_album(result):
-            print(f"  ✓ Found album: {result}")
             time.sleep(delay)
             return result
 
@@ -154,14 +153,10 @@ def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> 
                 break
 
         final = album or fallback
-        if final:
-            print(f"Deep found album: {final}")
-        else:
-            print(f"Deep search found no album")
 
         time.sleep(delay)
         return final
 
     except musicbrainzngs.WebServiceError as e:
-        print(f"  ! MusicBrainz error for '{song}' by '{artist}': {e}")
+        print(f"MusicBrainz error for '{song}' by '{artist}': {e}")
         return None

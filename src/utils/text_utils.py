@@ -24,6 +24,8 @@ def copy_to_clipboard(message: str):
     root.withdraw()
     root.clipboard_clear()
     root.clipboard_append(message)
+    root.update
+    root.destroy
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""
