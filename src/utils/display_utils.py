@@ -6,6 +6,7 @@ from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func
 import time
 from utils.debug import slog
+from utils.database.database_sessions import get_global_database_sessions
 
 
 def _create_table(title, columns):
@@ -67,8 +68,8 @@ def display_artists(artists = None):
 
     console.print(table)
 
-def display_songs_with_tags(songs, sessions):
-    music_session, tag_session = sessions
+def display_songs_with_tags(songs):
+    music_session, tag_session = get_global_database_sessions()
     console = Console()
 
     song_tags = tag_session.query(SongTag).all()

@@ -1,9 +1,9 @@
 from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
 import questionary
-from utils.database.database_sessions import open_database_sessions, submit_and_close_database_sessions
 from utils.database.database_management import edit_db_entry
 from utils.text_utils import compare_strings
+from utils.database.database_sessions import get_global_database_sessions
 
 def remove_duplicate_songs():
     """
@@ -94,8 +94,8 @@ def resolve_duplicated_artists():
     remove_duplicate_artists()
 
 def resolve_duplicated_albums():
-    sessions = open_database_sessions()
-    music_session, tag_session = sessions
+    sessions = get_global_database_sessions()
+    music_session, _ = sessions
 
     # fetch all songs that have a non-empty album
     all_songs = (
@@ -128,7 +128,6 @@ def resolve_duplicated_albums():
     target_clusters = [c for c in clusters if len({song.artist.id for song in c['songs']}) > 1]
     if not target_clusters:
         print("No duplicated albums found.")
-        submit_and_close_database_sessions(sessions)
         return
 
     for cl in target_clusters:
@@ -177,6 +176,3 @@ def resolve_duplicated_albums():
                 # remove from local list so it's not considered in further iterations
                 if song in songs_list:
                     songs_list.remove(song)
-
-    # persist modifications
-    submit_and_close_database_sessions(sessions)

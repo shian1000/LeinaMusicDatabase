@@ -1,21 +1,18 @@
-from utils.database.database_getter import get_songs_from_db_session, get_songs_with_empty_category, extract_db_object_info
+from utils.database.database_getter import get_songs_with_empty_category, extract_db_object_info
 from utils.database.database_management import edit_db_entry
 from utils.discoveries.music_brainz_fetcher import fetch_album_from_musicbrainz
 import questionary
-from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
 from utils.debug import slog, mlog
 import time
-from utils.display_utils import display_songs
 from utils.text_utils import copy_to_clipboard
 from utils.discoveries.wikipedia_fetcher import get_album_from_wikipedia
-from menu.main_menu.enter_database.manage_database.manual_management import edit_entry_menu
+from menu.song_actions import edit_songs_menu
+from utils.database.database_sessions import submit_global_database_session
 
 def fill_missing_albums():
     category = "album"
 
-    sessions = open_database_sessions()
-    slog(sessions)
-    songs_objects = get_songs_with_empty_category(category, sessions)
+    songs_objects = get_songs_with_empty_category(category)
     slog(songs_objects)
     songs_list = extract_db_object_info(songs_objects, "artist, title, album")
     slog(songs_list)
@@ -28,10 +25,12 @@ def fill_missing_albums():
         slog(f"{art} - {son} ({alb})")
         if alb == None:
             slog("Trying to find in musicbrainz")
-            alb = fetch_album_from_musicbrainz(art, son)
+            art_clen = art.split("(")[0].strip()
+            son_cln = son.split("(")[0].strip()
+            alb = fetch_album_from_musicbrainz(art_clen, son_cln)
             if alb == None:
                 slog("musicbrainz failed. Trying to find in wikipedia")
-                alb = get_album_from_wikipedia(art, son)
+                alb = get_album_from_wikipedia(art_clen, son_cln)
             slog(alb)
             if not alb == None:
                 print(f"Found album: {alb}  for {art} - {son}")
@@ -71,25 +70,11 @@ def fill_missing_albums():
                     else:
                         print(f"Skipped {art} - {son}")
 
-    submition_list = []
     confirmation = questionary.confirm(f"Do you want to edit some of the changes manually?").ask()
     if confirmation:
-        for song in songs_list:
-            art, son, alb = song
-            submition_list.append(f"{art} - {son} ({alb})")
-        submit_option = "Submit and save"
-        submition_list.append(submit_option)
-        loop_running = True
-        while loop_running:
-            song_selection = questionary.select("Select the entity you want to edit", choices=submition_list).ask()
-            if song_selection == submit_option:
-                loop_running = False
-                submit_and_close_database_sessions(sessions)
-            else:
-                index = submition_list.index(song_selection)
-                edit_entry_menu(db_object=songs_objects[index], sessions=sessions)
-    else:
-        submit_and_close_database_sessions(sessions)
+        edit_songs_menu(songs_objects)
+
+    submit_global_database_session()
 
 
 

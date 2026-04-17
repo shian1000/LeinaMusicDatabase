@@ -1,11 +1,8 @@
 import questionary
-from utils.database.music_db_manager import get_music_session, Artist
-from sqlalchemy import text
-import questionary
 import time
 from utils.database.database_getter import get_artists_from_db_session, extract_db_object_info
 from utils.debug import slog, mlog
-from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
+from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import merge_artists_in_db
 
 
@@ -15,8 +12,7 @@ def merge_artists_menu():
     if query == "":
         return
 
-    sessions = open_database_sessions()
-    artists_objects = get_artists_from_db_session("name", query, sessions, aggresive_search=True)
+    artists_objects = get_artists_from_db_session("name", query, aggresive_search=True, work_on_global_session=True)
     slog(artists_objects)
     mlog(extract_db_object_info(artists_objects, "name, origin"))
     slog(len(artists_objects))
@@ -32,18 +28,13 @@ def merge_artists_menu():
             return
         if merge_from_name == merge_to_name:
             print("Selected the same artists")
-            close_database_sessions(sessions)
         else:
             confirm = questionary.confirm(f"You are about to merge all the songs from {merge_from_name} into {merge_to_name}. Do you wish to proceed?").ask()
             if(confirm):
                 print("Merging songs")
                 merge_from_obj = artists_objects[artists_names.index(merge_from_name)]
                 merge_to_obj   = artists_objects[artists_names.index(merge_to_name)]
-                merge_artists_in_db(merge_from_obj, merge_to_obj, sessions)
-                submit_and_close_database_sessions(sessions)
+                merge_artists_in_db(merge_from_obj, merge_to_obj)
+                submit_global_database_session()
     elif len(artists_objects) == 1:
         print("Only one artist found")
-        close_database_sessions(sessions)
-    else:
-        close_database_sessions(sessions)
-

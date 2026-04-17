@@ -4,44 +4,24 @@ from sqlalchemy import func
 from utils.database.datatables import song_categories, search_only_categories, artist_categories
 import time
 from utils.debug import slog
-from menu.song_actions.pick_song import pick_song
 from sqlalchemy import text
-from utils.database.database_getter import get_artists_from_db_session
+from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
 
 
-def validate_song(song_query):
+def edit_db_entry(db_object, category: str, new_value: str):
 
-    if type(song_query) == str:
-        return song_query
-    elif type(song_query) == list:
-        if len(song_query) > 1:
-            return pick_song(song_query)
-        else:
-            slog(song_query)
-            if isinstance(song_query[0], str):
-                songs_simple = [f"{artist}" for artist in song_query]
-            else:
-                songs_simple = [f"{artist} - {title}" for artist, title in song_query]
-            return(f"{songs_simple[0]}")
-    else:
-        print("validate_song error - song query is not a str or a list")
-
-def edit_db_entry(db_object, category: str, new_value: str, sessions = None):
-
+    #setup
     category = category.strip().lower()
     new_value = new_value.strip()
-
     slog(db_object)
 
+    #checking if we should work with Artist or Song table
     if(type(db_object) == Artist):
         valid_categories = artist_categories
         artist_name = db_object.name
     elif(type(db_object) == Song):
         if category in artist_categories:
-            if not sessions:
-                print("When looking for artist based of a song, sessions must be provided")
-                return
-            db_artist = db_artist = get_artists_from_db_session(artist_categories[0], db_object.artist.name, sessions=sessions)
+            db_artist = db_artist = get_artists_from_db_session(artist_categories[0], db_object.artist.name)
             edit_db_entry(db_artist[0], category, new_value)
             return
         valid_categories = song_categories + search_only_categories
@@ -53,10 +33,12 @@ def edit_db_entry(db_object, category: str, new_value: str, sessions = None):
     slog(valid_categories)
     old_value = None
 
+    #checking if the category is valid for the given db_object
     if category not in valid_categories:
         print(f"Invalid category '{category}'. Editable options: {', '.join(sorted(valid_categories))}")
         return
 
+    #interpretting what category to work with
     if category == artist_categories[0]:
         old_value = db_object.name or "---"
         db_object.name = new_value
@@ -97,7 +79,7 @@ def delete_db_entry(db_object, session):
     slog(type(db_object))
     music_session.delete(db_object)
 
-def merge_artists_in_db(merge_from, merge_to, sessions):
+def merge_artists_in_db(merge_from, merge_to):
 
     """Merge two artists in the database.
 
@@ -130,7 +112,7 @@ def merge_artists_in_db(merge_from, merge_to, sessions):
         print("Source and target artist are the same; nothing to merge.")
         return
 
-    session, tag_session = sessions
+    session, tag_session = get_global_database_sessions()
 
     session.execute(
         text("UPDATE songs SET artist_id = :to_id WHERE artist_id = :from_id"),

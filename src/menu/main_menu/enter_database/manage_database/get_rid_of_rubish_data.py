@@ -1,4 +1,3 @@
-from utils.database.database_sessions import open_database_sessions, submit_and_close_database_sessions, close_database_sessions
 from utils.database.database_getter import get_songs_from_db_session
 from utils.discoveries.music_brainz_fetcher import is_blacklisted_album
 import time
@@ -7,8 +6,7 @@ from utils.database.database_management import edit_db_entry
 
 def get_rid_of_rubish_data():
     print("Looking for sus album titles . . . . . ")
-    sessions = open_database_sessions()
-    songs = get_songs_from_db_session(sessions=sessions)
+    songs = get_songs_from_db_session()
 
     for song in songs:
         if(is_blacklisted_album(song.album)):
@@ -16,5 +14,3 @@ def get_rid_of_rubish_data():
             if confirmation:
                 new_name = input("Enter new album name: ")
                 edit_db_entry(song, "album", new_name)
-    
-    submit_and_close_database_sessions(sessions)

@@ -7,6 +7,7 @@ from utils.database.datatables import artist_categories, song_categories, search
 import time
 from utils.debug import mlog, slog
 from utils.text_utils import normalize_text
+from utils.database.database_sessions import get_global_database_sessions
 
 def _validate_category(category: str, valid_categories: set) -> str | None:
     slog(category)
@@ -66,8 +67,9 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
 
     return result
 
-def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
-    music_session, _ = sessions
+def get_songs_with_empty_category(category: str) -> list[Song]:
+
+    music_session, _ = get_global_database_sessions()
 
     db_query = (
         music_session.query(Song)
@@ -90,10 +92,10 @@ def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
     col = column_map[category]
     return db_query.filter(or_(col == None, col == "")).all()
 
-def get_songs_from_db_session(category: str = None, query: str = None, sessions: tuple = None) -> list[Song]:
+def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
 
     slog(query)
-    music_session, tag_session = sessions
+    music_session, tag_session = get_global_database_sessions()
     db_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)
 
     if category is None:
@@ -212,13 +214,12 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
 def get_artists_from_db_session(
     category: str = None,
     query: str = None,
-    sessions: tuple = None,
-    aggresive_search: bool = False,
+    aggresive_search: bool = False
 ) -> list[Artist]:
 
     slog(category)
     slog(query)
-    music_session, tag_session = sessions
+    music_session, tag_session = get_global_database_sessions()
     db_query = music_session.query(Artist).order_by(Artist.name)
 
     if category is None:

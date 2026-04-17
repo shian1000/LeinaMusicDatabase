@@ -7,6 +7,7 @@ import json
 from utils.database.database_getter import extract_db_object_info
 import time
 from utils.database.datatables import Artist, Song
+from utils.database.database_sessions import get_global_database_sessions
 
 """Here should fall the tools used to navigate menus - executing items, file browsing etc."""
 
@@ -33,7 +34,7 @@ def clear_screen():
         _ = os.system('clear')
 
 
-def execute_menu_item(prompt: str, action_map: Dict[str, Callable[[], None]], exit_label: str = "Back") -> None:
+def execute_menu_item(prompt: str, action_map: Dict[str, Callable[[], None]], exit_label: str = "Back", one_time = False) -> None:
     clear_screen()
     choices = list(action_map.keys()) + [exit_label]
     running = True
@@ -47,7 +48,7 @@ def execute_menu_item(prompt: str, action_map: Dict[str, Callable[[], None]], ex
         action = action_map.get(choice)
         if action:
             action_name = action()
-            if action_name == "Back":
+            if action_name == exit_label or one_time:
                 running = False
                 break
 
@@ -110,10 +111,8 @@ def open_file_browser_window():
         return None
 
 def pick_from_db_objects(entries_objects, question: str = "Pick one"):
-    entries_names = extract_db_object_info(entries_objects, "artist, album, title")
-
-    slog(entries_names)
-    entries_names = [(' - '.join(song),) for song in entries_names]
+    entries_names = extract_db_object_info(entries_objects, "artist, title, album")
+    entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
     slog(entries_names)
     entries_names = [item for t in entries_names for item in t]
     selected_name = questionary.select(question, choices=entries_names).ask()

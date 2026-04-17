@@ -4,6 +4,68 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
 
+ALBUM_TITLE_BLACKLIST = {
+    # Exact matches (lowercased)
+    "now that's what i call music",
+    "greatest hits",
+    "best of",
+    "the best of",
+    "very best of",
+    "the very best of",
+    "essential",
+    "the essential",
+    "collection",
+    "the collection",
+    "gold",
+    "platinum",
+    "anthology",
+    "retrospective",
+    "definitive collection",
+    "complete collection"
+}
+
+ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
+    # Partial matches — if any of these appear in the title, skip it
+    "greatest hits",
+    "best of",
+    "collection",
+    "anthology",
+    "retrospective",
+    "compilation",
+    "now that's what i call",
+    "the essential",
+    "pop party",
+    "itunes",
+    "remix",
+    "germany",
+    "festival",
+    "United Palace Theatre",
+    "1996-2011",
+    "radio",
+    "spotify",
+    "paris",
+    "session",
+    "ultimate",
+    "hits",
+    "edition",
+    "awards",
+    "przebojów",
+    "valentine's day",
+    "exercises",
+    "new orleans",
+    "morrison",
+    "2014",
+    "women in music",
+    "london, uk",
+    "england",
+    "collecion",
+    "youtube",
+    "essential",
+    "live",
+    "хит",
+    "concert"
+}
+
 # --------------------
 # Artist table
 # --------------------

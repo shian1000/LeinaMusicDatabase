@@ -1,73 +1,20 @@
 import time
 import musicbrainzngs
 from utils.debug import slog
+from utils.database.datatables import ALBUM_TITLE_BLACKLIST, ALBUM_TITLE_BLACKLIST_SUBSTRINGS
+import re
 
 # Set up the user agent (required by MusicBrainz)
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
 
-ALBUM_TITLE_BLACKLIST = {
-    # Exact matches (lowercased)
-    "now that's what i call music",
-    "greatest hits",
-    "best of",
-    "the best of",
-    "very best of",
-    "the very best of",
-    "essential",
-    "the essential",
-    "collection",
-    "the collection",
-    "gold",
-    "platinum",
-    "anthology",
-    "retrospective",
-    "definitive collection",
-    "complete collection"
-}
-
-ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
-    # Partial matches — if any of these appear in the title, skip it
-    "greatest hits",
-    "best of",
-    "collection",
-    "anthology",
-    "retrospective",
-    "compilation",
-    "now that's what i call",
-    "the essential",
-    "pop party",
-    "itunes",
-    "remix",
-    "germany",
-    "festival",
-    "United Palace Theatre",
-    "1996-2011",
-    "radio",
-    "spotify",
-    "paris",
-    "session",
-    "ultimate",
-    "hits",
-    "edition",
-    "awards",
-    "przebojów",
-    "valentine's day",
-    "exercises",
-    "new orleans",
-    "morrison",
-    "2014",
-    "women in music",
-    "london, uk",
-    "england",
-    "collecion",
-    "youtube",
-    "essential",
-    "live",
-    "хит",
-    "concert"
-}
-
+# def is_blacklisted_album(title: str) -> bool:
+#     slog(title)
+#     lowered = title.lower().strip()
+#     if lowered in ALBUM_TITLE_BLACKLIST:
+#         slog("True")
+#         return True
+#     return any(sub in lowered for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
 
 def is_blacklisted_album(title: str) -> bool:
     slog(title)
@@ -75,8 +22,7 @@ def is_blacklisted_album(title: str) -> bool:
     if lowered in ALBUM_TITLE_BLACKLIST:
         slog("True")
         return True
-    return any(sub in lowered for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
-
+    return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
 
 
 def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> str | None:
