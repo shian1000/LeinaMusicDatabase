@@ -3,7 +3,7 @@ from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, inspect, or_
 import os
-from utils.database.datatables import artist_categories, song_categories, hidden_song_categories, Song, Artist
+from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist
 import time
 from utils.debug import mlog, slog
 from utils.text_utils import normalize_text
@@ -66,7 +66,6 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
 
     return result
 
-
 def get_songs_with_empty_category(category: str, sessions: tuple) -> list[Song]:
     music_session, _ = sessions
 
@@ -100,7 +99,7 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
     if category is None:
         return db_query.all()
 
-    valid_categories = song_categories + hidden_song_categories
+    valid_categories = song_categories + search_only_categories
     category = _validate_category(category, valid_categories)
     slog(category)
 
@@ -154,14 +153,14 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
         slog(word)
         """Returns the appropriate SQLAlchemy filter expression for a single word."""
         filter_map = {
-            "title":    lambda w: func.lower(Song.title).contains(w.lower()),
-            "artist":   lambda w: func.lower(Artist.name).contains(w.lower()),
-            "name":     lambda w: or_(func.lower(Song.title).contains(w.lower()),
-                                      func.lower(Artist.name).contains(w.lower())),
-            "album":    lambda w: func.lower(Song.album).contains(w.lower()),
-            "year":     lambda w: Song.year == int(w),
-            "language": lambda w: func.lower(Song.language).contains(w.lower()),
-            "origin":   lambda w: func.lower(Artist.origin).contains(w.lower()),
+            song_categories[0]: lambda w: func.lower(Song.title).contains(w.lower()),
+            song_categories[1]: lambda w: func.lower(Artist.name).contains(w.lower()),
+            song_categories[2]: lambda w: func.lower(Song.album).contains(w.lower()),
+            song_categories[3]: lambda w: Song.year == int(w),
+            song_categories[4]: lambda w: func.lower(Song.language).contains(w.lower()),
+            song_categories[5]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+            search_only_categories[0]: lambda w: or_(func.lower(Song.title).contains(w.lower()),
+                                      func.lower(Artist.name).contains(w.lower()))
         }
         return filter_map[category](word)
 
@@ -189,13 +188,13 @@ def get_songs_from_db_session(category: str = None, query: str = None, sessions:
         # field getter per category — normalized and combined where appropriate
         def song_field_normalized(s: Song) -> str:
             field_map = {
-                "title":    lambda s: normalize_text(s.title or ""),
-                "artist":   lambda s: normalize_text(s.artist.name or ""),
-                "name":     lambda s: f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}",
-                "album":    lambda s: normalize_text(s.album or ""),
-                "year":     lambda s: str(s.year) if s.year is not None else "",
-                "language": lambda s: normalize_text(s.language or ""),
-                "origin":   lambda s: normalize_text(s.artist.origin or ""),
+                song_categories[0]: lambda s: normalize_text(s.title or ""),
+                song_categories[1]: lambda s: normalize_text(s.artist.name or ""),
+                song_categories[2]: lambda s: normalize_text(s.album or ""),
+                song_categories[3]: lambda s: str(s.year) if s.year is not None else "",
+                song_categories[4]: lambda s: normalize_text(s.language or ""),
+                song_categories[5]: lambda s: normalize_text(s.artist.origin or ""),
+                search_only_categories[0]: lambda s: f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}"
             }
             return field_map[category](s).casefold()
 
@@ -244,8 +243,8 @@ def get_artists_from_db_session(
         candidates = db_query.all()
 
         field_getter = {
-            "name":   lambda artist: normalize_text(artist.name),
-            "origin": lambda artist: normalize_text(artist.origin),
+            artist_categories[0]:   lambda artist: normalize_text(artist.name),
+            artist_categories[1]: lambda artist: normalize_text(artist.origin),
         }[category]
 
         slog(field_getter)
@@ -262,8 +261,8 @@ def get_artists_from_db_session(
     def get_filter_for_word(word: str):
         """Returns the appropriate SQLAlchemy filter expression for a single word."""
         filter_map = {
-            "name":   lambda w: func.lower(Artist.name).contains(w.lower()),
-            "origin": lambda w: func.lower(Artist.origin).contains(w.lower()),
+            artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
+            artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
         }
         slog (filter_map)
         return filter_map[category](word)

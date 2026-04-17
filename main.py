@@ -18,12 +18,11 @@ if __name__ == "__main__":
 
 #TODO Make index creator
 #TODO Find album duplicates
-#TODO Fetch missing results - right away option to edit the results using questionary
-#TODO Czego kopiowanie do schowka czasem działa, a czasem nie
 #TODO Wyszukiwanie - spróbuj szukać bez feat Daft Punk - Lose Yourself to Dance (feat. Pharrell Williams), Depeche Mode - Heroes (Highline Session Version)
 #TODO Czarna lista - nie bierz pod uwagę słowa, jeżeli nie zostało oddzielone spacją David Tobin,Jeff Meegan, Charley Harrison - So Much To Live For Today
-#TODO Uprościć edit_entry_menu
 #TODO Wyjebuje się kiedy misstypying przy manual management
 #TODO Fetch songs - make it look in other categories too
-#TODO Artist.name - może warto to jakoś uprościć?
-#TODO Fill_missing_albums - ta lista, co się wyświetla, jest jakaś zjebana
+#X Artist.name - może warto to jakoś uprościć?
+#[X] Fill_missing_albums - ta lista, co się wyświetla, jest jakaś zjebana
+#TODO fetch_songs if decision: song_actions(songs_objects, sessions) - make it not need sessions
+#TODO fill_missing_ablums: make it use edit_songs_menu.py

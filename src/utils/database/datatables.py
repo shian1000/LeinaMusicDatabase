@@ -39,19 +39,19 @@ class Song(Base):
 
 song_categories = [
     "title",
-    "artist",
+    "artist name",
     "album",
     "year",
     "language",
-    "origin",
+    "artist origin",
     "tag"
 ]
 
-hidden_song_categories = [
+search_only_categories = [
     "name"
 ]
 
 artist_categories = [
-    "name",
-    "origin"
+    "artist name",
+    "artist origin"
 ]

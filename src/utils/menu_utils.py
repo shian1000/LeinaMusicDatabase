@@ -6,7 +6,7 @@ from utils.debug import slog
 import json
 from utils.database.database_getter import extract_db_object_info
 import time
-from utils.database.music_db_manager import Artist, Song
+from utils.database.datatables import Artist, Song
 
 """Here should fall the tools used to navigate menus - executing items, file browsing etc."""
 
@@ -119,3 +119,22 @@ def pick_from_db_objects(entries_objects, question: str = "Pick one"):
     selected_name = questionary.select(question, choices=entries_names).ask()
     selected_object = entries_objects[entries_names.index(selected_name)]
     return selected_object
+
+def get_list_of_properties_from_db_object(db_object):
+    properties_list = []
+    if type(db_object) is Artist:
+        properties_list.append(db_object.name)
+        properties_list.append(db_object.origin)
+    elif type(db_object) is Song:
+        properties_list.append(db_object.title)
+        properties_list.append(db_object.artist.name)
+        properties_list.append(db_object.album)
+        properties_list.append(db_object.year)
+        properties_list.append(db_object.language)
+        properties_list.append(db_object.artist.origin)
+        properties_list.append("")
+        properties_list.append("")
+    else:
+        print("No proper db_object")
+        return None
+    return properties_list

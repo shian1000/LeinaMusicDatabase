@@ -1,7 +1,7 @@
 from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from sqlalchemy import func
-from utils.database.datatables import song_categories, hidden_song_categories, artist_categories
+from utils.database.datatables import song_categories, search_only_categories, artist_categories
 import time
 from utils.debug import slog
 from menu.song_actions.pick_song import pick_song
@@ -37,18 +37,18 @@ def edit_db_entry(db_object, category: str, new_value: str, sessions = None):
         valid_categories = artist_categories
         artist_name = db_object.name
     elif(type(db_object) == Song):
-        if category == "artist":
+        if category in artist_categories:
             if not sessions:
-                print("When changing song to artist, sessions must be provided")
+                print("When looking for artist based of a song, sessions must be provided")
                 return
-            db_artist = get_artists_from_db_session("name", db_object.artist.name, sessions=sessions)
-            edit_db_entry(db_artist[0], "name", new_value)
+            db_artist = db_artist = get_artists_from_db_session(artist_categories[0], db_object.artist.name, sessions=sessions)
+            edit_db_entry(db_artist[0], category, new_value)
             return
-        valid_categories = song_categories + hidden_song_categories
+        valid_categories = song_categories + search_only_categories
         artist_name = db_object.artist.name
         song_title = db_object.title
     else:
-        print("db_object is neither Artist nor Song. Aborting")
+        print(f"db_object is neither Artist nor Song. It's {type(db_object)}. Aborting")
         return
     slog(valid_categories)
     old_value = None
@@ -57,40 +57,32 @@ def edit_db_entry(db_object, category: str, new_value: str, sessions = None):
         print(f"Invalid category '{category}'. Editable options: {', '.join(sorted(valid_categories))}")
         return
 
-    if category == "name":
-        old_value = db_object.name
+    if category == artist_categories[0]:
+        old_value = db_object.name or "---"
         db_object.name = new_value
 
-    if category == "origin":
-        old_value = db_object.origin
+    if category == artist_categories[1]:
+        old_value = db_object.origin or "---"
         db_object.origin = new_value
 
-    if category == "title":
-        old_value = db_object.title
+    if category == song_categories[0]:
+        old_value = db_object.title or "---"
         db_object.title = new_value
 
-    if category == "artist":
-        old_value = artist_name
-        artist_name = new_value
-
-    if category == "album":
-        old_value = db_object.album or "—"
+    if category == song_categories[2]:
+        old_value = db_object.album or "---"
         db_object.album = new_value
 
-    if category == "year":
+    if category == song_categories[3]:
         if not new_value.isdigit():
             print(f"Year must be a number, got '{new_value}'.")
             return
-        old_value = str(db_object.year) if db_object.year else "—"
+        old_value = str(db_object.year) if db_object.year else "---"
         db_object.year = int(new_value)
 
-    if category == "language":
-        old_value = db_object.language or "—"
+    if category == song_categories[4]:
+        old_value = db_object.language or "---"
         db_object.language = new_value
-
-    if category == "origin":
-        old_value = db_object.artist.origin or "—"
-        db_object.artist.origin = new_value
 
     if not old_value:
         old_value = "---"

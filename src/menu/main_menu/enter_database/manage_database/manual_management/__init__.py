@@ -8,7 +8,7 @@ from utils.database.database_getter import get_songs_from_db_session, get_artist
 import time
 from utils.debug import slog
 from utils.database.database_sessions import open_database_sessions, close_database_sessions, submit_and_close_database_sessions
-from utils.menu_utils import pick_from_db_objects
+from utils.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object
 from utils.database.datatables import Artist, Song
 
 def edit_entry_menu(mode: str = None, db_object = None, sessions = None):
@@ -16,6 +16,7 @@ def edit_entry_menu(mode: str = None, db_object = None, sessions = None):
     if sessions == None:
         sessions = open_database_sessions()
         should_submit_session = True
+
 
     if db_object == None:
         if mode not in ("Artist", "Song"):
@@ -37,7 +38,7 @@ def edit_entry_menu(mode: str = None, db_object = None, sessions = None):
             close_database_sessions(sessions)
             return
 
-        entries_objects = query_fn("name", query, sessions)
+        entries_objects = query_fn("name", query, sessions) if mode == "Song" else query_fn("artist name", query, sessions)
 
         slog(entries_objects)
         slog(extract_db_object_info(entries_objects, "artist, title"))
@@ -48,10 +49,18 @@ def edit_entry_menu(mode: str = None, db_object = None, sessions = None):
         print(f"Found '{label}'")
     else:
         action_map = artist_categories if isinstance(db_object, Artist) else song_categories
-                
-    slog(db_object)
-    category = questionary.select("What category entity do you wish to edit for?", choices=action_map).ask()
+    
 
+    properties_list = get_list_of_properties_from_db_object(db_object)
+    displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
+    back_option = "back"
+    displayed_list.append(back_option)
+
+    choice = questionary.select("What category do you wish to edit?", choices=displayed_list).ask()
+    if choice == back_option:
+        return
+    choosen_index = (displayed_list.index(choice))
+    category = action_map[choosen_index]
     label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
     new_data = input(f"Type {category} for {label}: ")
     if not new_data:

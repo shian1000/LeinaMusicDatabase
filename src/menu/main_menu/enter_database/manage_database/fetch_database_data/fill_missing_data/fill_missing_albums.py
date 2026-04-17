@@ -57,14 +57,11 @@ def fill_missing_albums():
     no_albums_count = sum(1 for art, son, alb in songs_list if alb is None)
     slog(no_albums_count)
 
-    submition_list = []
-
     if (no_albums_count > 0):
         confirmation = questionary.confirm(f"Unable to find {no_albums_count} album names. Would you like to fill them up manually?").ask()
         if confirmation:
             for i, song in enumerate(songs_list):
                 art, son, alb = song
-                submition_list.append(f"{art} - {son} ({alb})")
                 if alb is None:
                     print(f"{art} - {son}")
                     copy_to_clipboard(f"{art} - {son}")
@@ -74,13 +71,14 @@ def fill_missing_albums():
                     else:
                         print(f"Skipped {art} - {son}")
 
+    submition_list = []
     confirmation = questionary.confirm(f"Do you want to edit some of the changes manually?").ask()
     if confirmation:
         for song in songs_list:
             art, son, alb = song
             submition_list.append(f"{art} - {son} ({alb})")
-            submit_option = "Submit and save"
-            submition_list.append(submit_option)
+        submit_option = "Submit and save"
+        submition_list.append(submit_option)
         loop_running = True
         while loop_running:
             song_selection = questionary.select("Select the entity you want to edit", choices=submition_list).ask()
