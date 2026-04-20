@@ -6,7 +6,7 @@ from utils.debug import slog
 import json
 from utils.database.database_getter import extract_db_object_info
 import time
-from utils.database.datatables import Artist, Song
+from utils.database.datatables import Artist, Song, artist_categories, song_categories
 from utils.database.database_sessions import get_global_database_sessions
 
 """Here should fall the tools used to navigate menus - executing items, file browsing etc."""
@@ -111,8 +111,13 @@ def open_file_browser_window():
         return None
 
 def pick_from_db_objects(entries_objects, question: str = "Pick one"):
-    entries_names = extract_db_object_info(entries_objects, "artist, title, album")
-    entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
+    if isinstance(entries_objects[0], Artist):
+        entries_names = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
+    else:
+        entries_names = extract_db_object_info(entries_objects, f"{song_categories[1]}, {song_categories[0]}, {song_categories[2]}")
+        entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
+
+
     slog(entries_names)
     entries_names = [item for t in entries_names for item in t]
     selected_name = questionary.select(question, choices=entries_names).ask()

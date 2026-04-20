@@ -35,24 +35,25 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
 
     if type(songs[0]) == Song:
         field_map = {
-            "title":    lambda s: s.title,
-            "artist":   lambda s: s.artist.name,
-            "album":    lambda s: s.album,
-            "year":     lambda s: str(s.year),
-            "language": lambda s: s.language,
-            "origin":   lambda s: s.artist.origin,
+            song_categories[0]: lambda s: s.title,
+            song_categories[1]: lambda s: s.artist.name,
+            song_categories[2]: lambda s: s.album,
+            song_categories[3]: lambda s: str(s.year),
+            song_categories[4]: lambda s: s.language,
+            song_categories[5]: lambda s: s.artist.origin,
         }
         if not category_list:
-            category_list = ["artist", "title"]
+            category_list = [song_categories[1], song_categories[0]]
     else:
         field_map = {
-            "name":    lambda a: a.name,
-            "origin":   lambda a: a.origin,
+            artist_categories[0]: lambda a: a.name,
+            artist_categories[1]: lambda a: a.origin,
         }
         if not category_list:
-            category_list = ["name"]
+            category_list = [artist_categories[0]]
 
     slog(category_list)
+    slog(field_map)
 
     invalid_categories = [c for c in category_list if c not in field_map]
     if invalid_categories:

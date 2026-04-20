@@ -1,27 +1,28 @@
 import time
 from utils.discoveries.wikipedia_fetcher import get_album_from_wikipedia
 import questionary
+from settings import settings
+import subprocess
+from upath import UPath
+from utils.file_management import copy_file_to_destination
+from utils.database.database_getter import get_artists_from_db_session
+from utils.database.database_management import divide_artist
+from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.debug import slog
 
 def test():
+    
+    # open_and_set_global_database_sessions()
 
-    questionary.text("What's your first name").ask()
-    questionary.password("What's your secret?").ask()
-    questionary.confirm("Are you amazed?").ask()
+    # artist = get_artists_from_db_session("artist name", "Unknown Artist")
 
-    questionary.select(
-        "What do you want to do?",
-        choices=["Order a pizza", "Make a reservation", "Ask for opening hours"],
-    ).ask()
+    # slog(artist)
 
-    questionary.rawselect(
-        "What do you want to do?",
-        choices=["Order a pizza", "Make a reservation", "Ask for opening hours"],
-    ).ask()
+    # divide_artist(artist[0])
 
-    questionary.checkbox(
-        "Select toppings", choices=["foo", "bar", "bazz"]
-    ).ask()
-
-    questionary.path("Path to the projects version file").ask()
+    # uris = []
+    # for path in files:
+    #     dest = UPath("/home/owner/Downloads/")
+    #     copy_file_to_destination(path, dest)
 
     time.sleep(10000)

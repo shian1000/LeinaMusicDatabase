@@ -8,13 +8,14 @@ from utils.text_utils import copy_to_clipboard
 from utils.discoveries.wikipedia_fetcher import get_album_from_wikipedia
 from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
+from utils.database.datatables import song_categories
 
 def fill_missing_albums():
     category = "album"
 
     songs_objects = get_songs_with_empty_category(category)
     slog(songs_objects)
-    songs_list = extract_db_object_info(songs_objects, "artist, title, album")
+    songs_list = extract_db_object_info(songs_objects, f"{song_categories[1]}, {song_categories[0]}, {song_categories[2]}")
     slog(songs_list)
 
 

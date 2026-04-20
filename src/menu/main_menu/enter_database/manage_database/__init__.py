@@ -3,7 +3,7 @@ from utils.debug import slog, mlog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
 from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists, resolve_duplicated_albums
-from menu.main_menu.enter_database.manage_database.merge_artists import merge_artists_menu
+from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu, divide_artists_menu
 import time
 from menu.main_menu.enter_database.manage_database.get_rid_of_rubish_data import get_rid_of_rubish_data
 
@@ -21,6 +21,7 @@ def manage_database():
         "Manual management": manual_management,
         "Resolve duplicates": resolve_duplicates,
         "Merge artists": merge_artists_menu,
+        "Divide artists": divide_artists_menu,
         "Get rid of rubish data": get_rid_of_rubish_data
     }
 
