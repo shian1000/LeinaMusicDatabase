@@ -8,6 +8,7 @@ from utils.database.database_getter import extract_db_object_info
 import time
 from utils.database.datatables import Artist, Song, artist_categories, song_categories
 from utils.database.database_sessions import get_global_database_sessions
+from utils.database.database_getter import get_artists_from_db_session
 
 """Here should fall the tools used to navigate menus - executing items, file browsing etc."""
 
@@ -110,19 +111,26 @@ def open_file_browser_window():
         
         return None
 
-def pick_from_db_objects(entries_objects, question: str = "Pick one"):
+def pick_from_db_objects(entries_objects, question: str = "Pick one", style = None, back_label = "Back"):
     if isinstance(entries_objects[0], Artist):
         entries_names = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
     else:
         entries_names = extract_db_object_info(entries_objects, f"{song_categories[1]}, {song_categories[0]}, {song_categories[2]}")
         entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
-
-
-    slog(entries_names)
+    #Here I created and appended an index number to the list
     entries_names = [item for t in entries_names for item in t]
-    selected_name = questionary.select(question, choices=entries_names).ask()
-    selected_object = entries_objects[entries_names.index(selected_name)]
+    slog(entries_names)
+
+    choices = [questionary.Choice(title=name, value=i) for i, name in enumerate(entries_names)]
+    choices.append(questionary.Choice(title=back_label, value=-1))
+    sel_obj_index = questionary.select(question, choices=choices, style=style).ask()
+    slog(sel_obj_index)
+
+    if sel_obj_index == -1:
+        return None
+    selected_object = entries_objects[sel_obj_index]
     return selected_object
+
 
 def get_list_of_properties_from_db_object(db_object):
     properties_list = []
@@ -142,3 +150,19 @@ def get_list_of_properties_from_db_object(db_object):
         print("No proper db_object")
         return None
     return properties_list
+
+def ask_for_entires_list(mode = "Song", question = "What querry do you wish to search for: ", allow_no_results = False, allow_one_result = True):
+    query = input(question)
+    if mode == "Artist":
+        artists_objects = get_artists_from_db_session(artist_categories[0], query, aggresive_search=True)
+    else:
+        print("ask_for_data function doesn't yet support querring for songs")
+
+    if not allow_no_results and not artists_objects:
+        print("No such artist found. Aborting")
+        return None
+    if not allow_one_result and artists_objects == 1:
+        print("Only one artist found. Abortin")
+        return None
+    
+    return artists_objects

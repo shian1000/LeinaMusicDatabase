@@ -21,7 +21,9 @@ def edit_db_entry(db_object, category: str, new_value: str):
         artist_name = db_object.name
     elif(type(db_object) == Song):
         if category in artist_categories:
-            db_artist = db_artist = get_artists_from_db_session(artist_categories[0], db_object.artist.name)
+            db_artist = get_artists_from_db_session(artist_categories[0], artist_id=db_object.artist.id)
+            slog(db_artist[0])
+            slog(db_artist[0].id)
             edit_db_entry(db_artist[0], category, new_value)
             return
         valid_categories = song_categories + search_only_categories
@@ -50,6 +52,10 @@ def edit_db_entry(db_object, category: str, new_value: str):
     if category == song_categories[0]:
         old_value = db_object.title or "---"
         db_object.title = new_value
+
+    slog(db_object)
+    slog(db_object.name)
+    slog(db_object.id)
 
     if category == song_categories[2]:
         old_value = db_object.album or "---"
@@ -144,24 +150,8 @@ def divide_artist(db_object):
     - Commits the changes to the global music session
     """
     
-    if type(db_object) != Artist:
-        print(f"divide_artist expects an Artist object, got {type(db_object)}. Aborting.")
-        return
-
-    sessions = get_global_database_sessions()
-    if not sessions:
-        print("Global database sessions are not open. Aborting.")
-        return
-
-    music_session, _ = sessions
-
-    try:
-        artist_id = int(db_object.id)
-    except Exception:
-        print("Provided Artist object does not have a valid 'id'. Aborting.")
-        return
-
-    # fetch songs belonging to this artist
+    music_session, _ = get_global_database_sessions()
+    artist_id = int(db_object.id)
     songs = (
         music_session
         .query(Song)
@@ -170,45 +160,14 @@ def divide_artist(db_object):
         .all()
     )
 
-    if len(songs) == 1:
-        print(f"Artist has only one song. Nothing to do.")
-        return
-
-    if not songs:
-        print(f"Artist '{db_object.name}' (id {artist_id}) has no songs. Nothing to do.")
-        return
-
-    print(f"Found {len(songs)} song(s) for artist '{db_object.name}':")
-    for idx, s in enumerate(songs, start=1):
-        album = (s.album or "").strip()
-        year = s.year or ""
-        extra = []
-        if album:
-            extra.append(f"album: {album}")
-        if year:
-            extra.append(f"year: {year}")
-        extra_str = f" ({'; '.join(extra)})" if extra else ""
-        print(f"  {idx}. [{s.id}] {s.title}{extra_str}")
-
-    answer = input("Proceed with dividing this artist so each song gets its own new artist record? (yes/no): ")
-    if not answer or answer.strip().lower() not in ("y", "yes"):
-        print("Aborted by user.")
-        return
-
-    # Keep the first song assigned to the original artist; for every other song create
-    # a new artist record with the same name and assign the song to it.
     original_name = db_object.name
-    # iterate songs in order; skip the first
     for s in songs[1:]:
         new_artist = Artist(name=original_name)
         music_session.add(new_artist)
-        # flush so new_artist.id is available
         music_session.flush()
-        # reassign the song to the newly created artist
         s.artist_id = new_artist.id
         print(f"Reassigned song [{s.id}] '{s.title}' to new artist id {new_artist.id}.")
 
-    # commit the changes to the global session
     music_session.commit()
     print(f"Division complete: created {len(songs)-1} new artist(s) and reassigned {len(songs)-1} song(s).")
 

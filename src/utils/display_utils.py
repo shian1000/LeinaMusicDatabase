@@ -3,7 +3,7 @@ from rich.table import Table
 from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
-from sqlalchemy import func
+from sqlalchemy import func, text
 import time
 from utils.debug import slog
 from utils.database.database_sessions import get_global_database_sessions
@@ -57,12 +57,18 @@ def display_artists(artists = None):
 
     table = _create_table("Music Library", [
         ("Name", "cyan", None),
-        ("Origin", None, None)
+        ("Songs", None, None),
+        ("Origin", None, None),
     ])
 
+    music_session, _ = get_global_database_sessions()
+
     for artist in artists:
+        songs_count = music_session.execute(text("SELECT COUNT(*) FROM songs WHERE artist_id = :artist_id"), {"artist_id": artist.id}).scalar()
+        
         table.add_row(
             artist.name,
+            str(songs_count),
             artist.origin,
         )
 

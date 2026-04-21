@@ -1,7 +1,7 @@
 from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
-from sqlalchemy import func, inspect, or_
+from sqlalchemy import func, inspect, or_, select
 import os
 from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist
 import time
@@ -215,6 +215,7 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
 def get_artists_from_db_session(
     category: str = None,
     query: str = None,
+    artist_id: int = None,
     aggresive_search: bool = False
 ) -> list[Artist]:
 
@@ -229,52 +230,61 @@ def get_artists_from_db_session(
     valid_categories = artist_categories
     category = _validate_category(category, valid_categories)
 
-    query = query.strip()
+    if query:
+        query = query.strip()
 
-    words = [w for w in query.split() if w]
-    if not words:
-        slog(words)
-        return []
+        words = [w for w in query.split() if w]
+        if not words:
+            slog(words)
+            return []
 
-    if aggresive_search:
-        # Normalize the search words once up front
-        normalized_words = [normalize_text(w) for w in words]
+        if aggresive_search:
+            # Normalize the search words once up front
+            normalized_words = [normalize_text(w) for w in words]
 
-        # Pull a broader candidate set from the DB (no per-word filtering),
-        # then do precise normalized matching in Python
-        candidates = db_query.all()
+            # Pull a broader candidate set from the DB (no per-word filtering),
+            # then do precise normalized matching in Python
+            candidates = db_query.all()
 
-        field_getter = {
-            artist_categories[0]:   lambda artist: normalize_text(artist.name),
-            artist_categories[1]: lambda artist: normalize_text(artist.origin),
-        }[category]
+            field_getter = {
+                artist_categories[0]:   lambda artist: normalize_text(artist.name),
+                artist_categories[1]: lambda artist: normalize_text(artist.origin),
+            }[category]
 
-        slog(field_getter)
-        slog([
-            artist for artist in candidates
-            if all(w in field_getter(artist) for w in normalized_words)
-        ]
-)
-        return [
-            artist for artist in candidates
-            if all(w in field_getter(artist) for w in normalized_words)
-        ]
+            slog(field_getter)
+            slog([
+                artist for artist in candidates
+                if all(w in field_getter(artist) for w in normalized_words)
+            ]
+    )
+            return [
+                artist for artist in candidates
+                if all(w in field_getter(artist) for w in normalized_words)
+            ]
+        
+        def get_filter_for_word(word: str):
+            """Returns the appropriate SQLAlchemy filter expression for a single word."""
+            filter_map = {
+                artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
+                artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+            }
+            slog (filter_map)
+            return filter_map[category](word)
 
-    def get_filter_for_word(word: str):
-        """Returns the appropriate SQLAlchemy filter expression for a single word."""
-        filter_map = {
-            artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
-            artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
-        }
-        slog (filter_map)
-        return filter_map[category](word)
+        for word in words:
+            db_query = db_query.filter(get_filter_for_word(word))
+        
+        slog (word)
+        return db_query.all()
 
-    from sqlalchemy import or_
-    for word in words:
-        db_query = db_query.filter(get_filter_for_word(word))
 
-    slog (word)
-    return db_query.all()
-
+    if artist_id:
+        slog(artist_id)
+        artists_objs_list = []
+        artists_objs_list.append(music_session.query(Artist).filter(Artist.id == artist_id).first())
+        return artists_objs_list
+    
+    print("get_artist_from_db_session needs either str or id to get artists list")
+    return
 
 

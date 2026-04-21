@@ -3,7 +3,7 @@ from utils.database.datatables import Song, Artist, artist_categories, song_cate
 from utils.debug import slog
 from utils.database.database_sessions import open_database_sessions, get_global_database_sessions, submit_global_database_session
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session, extract_db_object_info
-from utils.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object
+from utils.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object, ask_for_entires_list
 from utils.database.database_management import edit_db_entry, delete_db_entry
 import time
 
@@ -58,6 +58,11 @@ def edit_entry_menu(mode: str = None, db_object = None):
         print("Aborted")
         return
 
+    slog(db_object)
+    if isinstance(db_object, Song):
+        slog(db_object.artist.name)
+        slog(db_object.title)
+        slog(db_object.artist.id)
     edit_db_entry(db_object, category, new_data)
     submit_global_database_session()
             
@@ -101,18 +106,16 @@ def remove_song_menu(mode: str = None):
 
 
 def edit_songs_menu(songs_objects):
-    songs_list = []
     loop_running = True
     while loop_running:
-        songs_list.clear()
-        for i, song in enumerate(songs_objects):
-            songs_list.append(f"{song.artist.name} - {song.title} ({song.album})")
-        submit_option = "Submit and save"
-        songs_list.append(submit_option)
-        song_selection = questionary.select("Select the entity you want to edit", choices=songs_list).ask()
-        if song_selection == submit_option:
+        q = "Select the entity you want to edit"
+        selected_song = pick_from_db_objects(songs_objects, question=q, back_label="Submit")
+        if not selected_song:
             loop_running = False
             return
         else:
-            index = songs_list.index(song_selection)
-            edit_entry_menu(db_object=songs_objects[index])
+            slog(selected_song)
+            slog(selected_song.artist.name)
+            slog(selected_song.title)
+            slog(selected_song.artist.id)
+            edit_entry_menu(db_object=selected_song)
