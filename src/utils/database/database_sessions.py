@@ -68,3 +68,8 @@ def submit_global_database_session() -> None:
         music_session, tag_session = _GLOBAL_DATABASE_SESSION
         music_session.commit()
         tag_session.commit()
+
+
+
+
+

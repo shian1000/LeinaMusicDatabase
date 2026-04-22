@@ -3,6 +3,7 @@ import requests
 import re
 from bs4 import BeautifulSoup
 from utils.debug import slog
+from utils.database.datatables import is_blacklisted_album
 
 def clean_album_title(album_name, artist):
     # Try artist-specific pattern first
@@ -15,7 +16,7 @@ def clean_album_title(album_name, artist):
     fallback = re.compile(r"\s*\([^)]*\balbum\b[^)]*\)", re.IGNORECASE)
     return fallback.sub("", album_name).strip()
 
-def get_album_from_wikipedia(artist: str, title: str) -> str | None:
+def get_album_name(artist: str, title: str) -> str | None:
     """
     Search Wikipedia for a song and extract the album name from the infobox.
 
@@ -108,6 +109,8 @@ def get_album_from_wikipedia(artist: str, title: str) -> str | None:
 
         for heading_text, anchor in heading_containers:
             slog(f"Case 2 - checking heading: {heading_text}")
+            if is_blacklisted_album(heading_text):
+                continue
 
             for sibling in anchor.find_next_siblings():
                 if sibling.name and re.match(r"^h[1-4]$", sibling.name):

@@ -1,42 +1,25 @@
 import time
 import musicbrainzngs
 from utils.debug import slog
-from utils.database.datatables import ALBUM_TITLE_BLACKLIST, ALBUM_TITLE_BLACKLIST_SUBSTRINGS
+from utils.database.datatables import is_blacklisted_album
 import re
 
 # Set up the user agent (required by MusicBrainz)
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
-
-# def is_blacklisted_album(title: str) -> bool:
-#     slog(title)
-#     lowered = title.lower().strip()
-#     if lowered in ALBUM_TITLE_BLACKLIST:
-#         slog("True")
-#         return True
-#     return any(sub in lowered for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
-
-def is_blacklisted_album(title: str) -> bool:
-    slog(title)
-    if title:
-        lowered = title.lower().strip()
-        if lowered in ALBUM_TITLE_BLACKLIST:
-            slog("True")
-            return True
-        return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
-    return False
-
-
-def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> str | None:
+def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.
 
     Calls `fetch_albums_from_musicbrainz_batch` with a single-item list and returns
     the album title or None if not found or on error.
     """
     query = f'recording:"{song}" AND artist:"{artist}"'
+    slog(query)
     try:
         response = musicbrainzngs.search_recordings(query=query, limit=5)
+        slog(response)
         recordings = response.get("recording-list", [])
+        slog(recordings)
 
         album = None
         fallback = None

@@ -1,6 +1,8 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from utils.debug import slog
+import re
 
 Base = declarative_base()
 
@@ -66,7 +68,13 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "concert",
     "hottest",
     "liverpool",
-    "volume"
+    "volume",
+    "reedycja",
+    "edycja",
+    "лучшие",
+    "album",
+    "albums",
+    "references"
 }
 
 # --------------------
@@ -120,3 +128,13 @@ artist_categories = [
     "artist name",
     "artist origin"
 ]
+
+def is_blacklisted_album(title: str) -> bool:
+    slog(title)
+    if title:
+        lowered = title.lower().strip()
+        if lowered in ALBUM_TITLE_BLACKLIST:
+            slog("True")
+            return True
+        return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
+    return False

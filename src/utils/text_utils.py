@@ -96,7 +96,8 @@ def truncate_at_word(text: str) -> str:
     stop_words=[
         "feat",
         "&",
-        "ft."
+        "ft.",
+        " и "
     ]
 
     earliest_index = len(text)

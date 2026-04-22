@@ -1,5 +1,5 @@
 from utils.database.database_getter import get_songs_from_db_session
-from utils.discoveries.music_brainz_fetcher import is_blacklisted_album
+from utils.database.datatables import is_blacklisted_album
 import time
 import questionary
 from utils.database.database_management import edit_db_entry
@@ -46,10 +46,11 @@ def strip_leading_spaces(songs):
             song.artist.name = song.artist.name.lstrip()
             stripped_fields.append(f"artist: '{song.artist.name}'")
 
-        if song.album.startswith(" "):
-            additive_spaces_list.append(song.album)
-            song.album = song.album.lstrip()
-            stripped_fields.append(f"album: '{song.album}'")
+        if song.album:
+            if song.album.startswith(" "):
+                additive_spaces_list.append(song.album)
+                song.album = song.album.lstrip()
+                stripped_fields.append(f"album: '{song.album}'")
 
         if stripped_fields:
             print(f"Stripped leading spaces \033[93m{additive_spaces_list}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")

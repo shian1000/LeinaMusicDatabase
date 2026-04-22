@@ -10,7 +10,7 @@ import time
 def edit_entry_menu(mode: str = None, db_object = None):
     if db_object == None:
         if mode not in ("Artist", "Song"):
-            choice = questionary.select("Dou you wish to make changes in artist or song?", choices=["Artist", "Song", "Back"]).ask()
+            choice = questionary.select("Do you wish to make changes in artist or song?", choices=["Artist", "Song", "Back"]).ask()
             if choice == "Back":
                 return
             edit_entry_menu(choice, db_object, work_on_global_session=True)
@@ -45,10 +45,19 @@ def edit_entry_menu(mode: str = None, db_object = None):
     properties_list = get_list_of_properties_from_db_object(db_object)
     displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
     back_option = "back"
+    swap_option = "swap artist with title"
+    displayed_list.append(swap_option)
     displayed_list.append(back_option)
 
     choice = questionary.select("What category do you wish to edit?", choices=displayed_list).ask()
     if choice == back_option:
+        return
+    if choice == swap_option:
+        artist_name = db_object.artist.name
+        title = db_object.title
+        db_object.artist.name = title
+        db_object.title = artist_name
+        submit_global_database_session()
         return
     choosen_index = (displayed_list.index(choice))
     category = action_map[choosen_index]
