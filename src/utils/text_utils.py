@@ -90,3 +90,20 @@ def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
         return True
 
     return False
+
+
+def truncate_at_word(text: str) -> str:
+    stop_words=[
+        "feat",
+        "&",
+        "ft."
+    ]
+
+    earliest_index = len(text)
+ 
+    for word in stop_words:
+        idx = text.lower().find(word.lower())
+        if idx != -1 and idx < earliest_index:
+            earliest_index = idx
+ 
+    return text[:earliest_index].rstrip()

@@ -53,9 +53,10 @@ def edit_db_entry(db_object, category: str, new_value: str):
         old_value = db_object.title or "---"
         db_object.title = new_value
 
-    slog(db_object)
-    slog(db_object.name)
-    slog(db_object.id)
+    if isinstance(db_object, Artist):
+        slog(db_object)
+        slog(db_object.name)
+        slog(db_object.id)
 
     if category == song_categories[2]:
         old_value = db_object.album or "---"

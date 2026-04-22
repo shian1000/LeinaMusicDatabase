@@ -63,7 +63,10 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "essential",
     "live",
     "хит",
-    "concert"
+    "concert",
+    "hottest",
+    "liverpool",
+    "volume"
 }
 
 # --------------------

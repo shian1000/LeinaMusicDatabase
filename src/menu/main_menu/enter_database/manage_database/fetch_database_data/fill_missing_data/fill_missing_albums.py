@@ -9,6 +9,7 @@ from utils.discoveries.wikipedia_fetcher import get_album_from_wikipedia
 from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.datatables import song_categories
+from utils.text_utils import truncate_at_word
 
 def fill_missing_albums():
     category = "album"
@@ -21,8 +22,14 @@ def fill_missing_albums():
 
     updated_songs = []
     
+    if not songs_list:
+        print("No songs with missing albums found")
+        return
+    
     for song in songs_list:
-        art, son, alb = song
+        art, son, alb = song        
+        art = truncate_at_word(art)
+        son = truncate_at_word(son)
         slog(f"{art} - {son} ({alb})")
         if alb == None:
             slog("Trying to find in musicbrainz")
@@ -34,9 +41,9 @@ def fill_missing_albums():
                 alb = get_album_from_wikipedia(art_clen, son_cln)
             slog(alb)
             if not alb == None:
-                print(f"Found album: {alb}  for {art} - {son}")
+                print(f"Found album: \033[93m{alb}\033[0m for \033[93m{art} - {son}\033[0m")
             else:
-                print(f"Couldn't find album for {art} - {son}")
+                print(f"Couldn't find album for \033[93m{art} - {son}\033[0m")
         updated_songs.append((art, son, alb))
     songs_list = updated_songs
     slog(songs_list)
@@ -65,7 +72,7 @@ def fill_missing_albums():
                 if alb is None:
                     print(f"{art} - {son}")
                     copy_to_clipboard(f"{art} - {son}")
-                    album = input("New album name: ")
+                    album = input("New album name (Put nothing to cancel): ")
                     if not album == "":
                         edit_db_entry(songs_objects[i], "album", album)
                     else:

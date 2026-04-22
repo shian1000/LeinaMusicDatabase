@@ -9,6 +9,54 @@ from utils.debug import mlog, slog
 from utils.text_utils import normalize_text
 from utils.database.database_sessions import get_global_database_sessions
 
+CATEGORY_DB_FILTERS = {
+    song_categories[0]: lambda w: func.lower(Song.title).contains(w.lower()),
+    song_categories[1]: lambda w: func.lower(Artist.name).contains(w.lower()),
+    song_categories[2]: lambda w: func.lower(Song.album).contains(w.lower()),
+    song_categories[3]: lambda w: Song.year == int(w),
+    song_categories[4]: lambda w: func.lower(Song.language).contains(w.lower()),
+    song_categories[5]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+    search_only_categories[0]: lambda w: or_(
+        func.lower(Song.title).contains(w.lower()),
+        func.lower(Artist.name).contains(w.lower()),
+    ),
+}
+
+CATEGORY_NORMALIZED_FIELDS = {
+    song_categories[0]: lambda s: normalize_text(s.title or ""),
+    song_categories[1]: lambda s: normalize_text(s.artist.name or ""),
+    song_categories[2]: lambda s: normalize_text(s.album or ""),
+    song_categories[3]: lambda s: str(s.year) if s.year is not None else "",
+    song_categories[4]: lambda s: normalize_text(s.language or ""),
+    song_categories[5]: lambda s: normalize_text(s.artist.origin or ""),
+    search_only_categories[0]: lambda s: (
+        f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}"
+    ),
+}
+
+def _songs_by_tag(words: list[str], db_query, tag_session) -> list[Song]:
+    """Return songs whose tags match all given words (AND logic)."""
+    song_ids = None
+    for word in words:
+        matching_tags = (
+            tag_session.query(Tag)
+            .filter(func.lower(Tag.name).contains(word.lower()))
+            .all()
+        )
+        word_ids = {
+            st.song_id for st in
+            tag_session.query(SongTag)
+            .filter(SongTag.tag_id.in_([t.id for t in matching_tags]))
+            .all()
+        }
+        song_ids = word_ids if song_ids is None else song_ids & word_ids
+
+    if not song_ids:
+        print(f"No songs found with tags matching '{' '.join(words)}'.")
+        return []
+
+    return db_query.filter(Song.id.in_(song_ids)).all()
+
 def _validate_category(category: str, valid_categories: set) -> str | None:
     slog(category)
     normalized = category.strip().lower()
@@ -93,124 +141,50 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
     col = column_map[category]
     return db_query.filter(or_(col == None, col == "")).all()
 
-def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
 
+
+def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
     slog(query)
     music_session, tag_session = get_global_database_sessions()
-    db_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)
+    base_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)
 
     if category is None:
-        return db_query.all()
+        return base_query.all()
+    
+    query_has_any_standard_latin_characters = any(c.isascii() and c.isalpha() for c in query)
 
-    valid_categories = song_categories + search_only_categories
-    category = _validate_category(category, valid_categories)
-    slog(category)
+    category = _validate_category(category, song_categories + search_only_categories)
+    words = [w for w in query.strip().split() if w]
+    slog(category, words)
 
-    query = query.strip()
-    slog(query)
-
-    words = [w for w in query.split() if w]
     if not words:
         return []
-    
-    slog(words)
-    
-    def get_filter_for_tag():
-        matching_tags = (
-            tag_session.query(Tag)
-            .filter(func.lower(Tag.name).contains(words[0].lower()))
-            .all()
-        )
-        if not matching_tags:
-            print(f"No tags found matching '{words[0]}'.")
-            return []
-
-        song_ids = set(
-            st.song_id for st in
-            tag_session.query(SongTag).filter(
-                SongTag.tag_id.in_([t.id for t in matching_tags])
-            ).all()
-        )
-
-        for word in words[1:]:
-            matching_tags = (
-                tag_session.query(Tag)
-                .filter(func.lower(Tag.name).contains(word.lower()))
-                .all()
-            )
-            word_song_ids = set(
-                st.song_id for st in
-                tag_session.query(SongTag).filter(
-                    SongTag.tag_id.in_([t.id for t in matching_tags])
-                ).all()
-            )
-            song_ids &= word_song_ids  # keep only IDs present in both sets
-
-        if not song_ids:
-            print(f"No songs found with tags matching '{query}'.")
-            return []
-
-        return db_query.filter(Song.id.in_(song_ids)).all()
-
-    def get_filter_for_word(word: str):
-        slog(word)
-        """Returns the appropriate SQLAlchemy filter expression for a single word."""
-        filter_map = {
-            song_categories[0]: lambda w: func.lower(Song.title).contains(w.lower()),
-            song_categories[1]: lambda w: func.lower(Artist.name).contains(w.lower()),
-            song_categories[2]: lambda w: func.lower(Song.album).contains(w.lower()),
-            song_categories[3]: lambda w: Song.year == int(w),
-            song_categories[4]: lambda w: func.lower(Song.language).contains(w.lower()),
-            song_categories[5]: lambda w: func.lower(Artist.origin).contains(w.lower()),
-            search_only_categories[0]: lambda w: or_(func.lower(Song.title).contains(w.lower()),
-                                      func.lower(Artist.name).contains(w.lower()))
-        }
-        return filter_map[category](word)
 
     if category == "tag":
-        return get_filter_for_tag()
+        return _songs_by_tag(words, base_query, tag_session)
 
-    else:
-        from sqlalchemy import or_
-        filtered_query = db_query
+    # Primary DB-level filtering
+    if (query_has_any_standard_latin_characters):
+        filtered_query = base_query
         for word in words:
-            filtered_query = filtered_query.filter(get_filter_for_word(word))
-            slog(filtered_query)
-
+            filtered_query = filtered_query.filter(CATEGORY_DB_FILTERS[category](word))
         results = filtered_query.all()
         if results:
             return results
 
-        # Fallback: SQL returned no rows — perform Unicode-aware normalized filtering in Python
-        # Normalize search words
-        normalized_words = [normalize_text(w).casefold() for w in words]
+    # Python fallback for difficult characters - requires loading the db into the memory
+    slog("Falling back to Python-side normalized filtering")
+    normalized_words = [normalize_text(w).casefold() for w in words]
+    get_field = CATEGORY_NORMALIZED_FIELDS[category]
+    candidates = base_query.all()
+    filtered = [s for s in candidates if all(w in get_field(s).casefold() for w in normalized_words)]
 
-        # Fetch a candidate set (broad) and filter in Python
-        candidates = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title).all()
+    if not filtered:
+        print("No such songs found")
 
-        # field getter per category — normalized and combined where appropriate
-        def song_field_normalized(s: Song) -> str:
-            field_map = {
-                song_categories[0]: lambda s: normalize_text(s.title or ""),
-                song_categories[1]: lambda s: normalize_text(s.artist.name or ""),
-                song_categories[2]: lambda s: normalize_text(s.album or ""),
-                song_categories[3]: lambda s: str(s.year) if s.year is not None else "",
-                song_categories[4]: lambda s: normalize_text(s.language or ""),
-                song_categories[5]: lambda s: normalize_text(s.artist.origin or ""),
-                search_only_categories[0]: lambda s: f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}"
-            }
-            return field_map[category](s).casefold()
+    return filtered
 
-        slog("Falling back to Python-side normalized filtering")
-        filtered = [
-            s for s in candidates
-            if all(w in song_field_normalized(s) for w in normalized_words)
-        ]
 
-        if not filtered:
-            print("No such songs found")
-
-        return filtered
 
 def get_artists_from_db_session(
     category: str = None,

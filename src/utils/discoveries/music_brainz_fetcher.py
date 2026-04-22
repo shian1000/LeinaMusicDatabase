@@ -18,11 +18,13 @@ musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
 def is_blacklisted_album(title: str) -> bool:
     slog(title)
-    lowered = title.lower().strip()
-    if lowered in ALBUM_TITLE_BLACKLIST:
-        slog("True")
-        return True
-    return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
+    if title:
+        lowered = title.lower().strip()
+        if lowered in ALBUM_TITLE_BLACKLIST:
+            slog("True")
+            return True
+        return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
+    return False
 
 
 def fetch_album_from_musicbrainz(artist: str, song: str, delay: float = 1.0) -> str | None:

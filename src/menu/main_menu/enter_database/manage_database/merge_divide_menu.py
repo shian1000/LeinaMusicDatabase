@@ -10,18 +10,23 @@ from questionary import Style
 from utils.menu_utils import pick_from_db_objects, ask_for_entires_list
 
 
-def merge_artists_menu():
+def merge_artists_menu(artist_objects = None):
     red = Style([('question', 'fg:red bold')])
     green = Style([('question', 'fg:green bold')])
     q0 = ("Select the artist you want to merge from (gets deleted from db)")
     q1 = ("Select the artist you want to merge to (stays in db)")
 
-    artists_objects = ask_for_entires_list(mode = "Artist", allow_one_result=False)
-    if not artists_objects:
-        return
-        
+    if not artist_objects:
+        artists_objects = ask_for_entires_list(mode = "Artist", allow_one_result=False)
+        if not artists_objects:
+            return
+            
     obj1 = pick_from_db_objects(artists_objects, question=q0, style=red)
+    if not obj1:
+        return
     obj2 = pick_from_db_objects(artists_objects, question=q1, style=green)
+    if not obj1:
+        return
     if obj1 == obj2:
         print("Picked the same artists")
         return
