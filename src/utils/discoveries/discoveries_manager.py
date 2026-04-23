@@ -2,10 +2,7 @@ from utils.text_utils import truncate_at_word
 import importlib.util
 import sys
 from pathlib import Path
-
-def get_album_name(artist, title):
-    print("WORK IN PROGRESS")
-    return None
+from utils.debug import slog
 
 def load_discovery_modules():
     current_dir = Path(__file__).parent
@@ -22,7 +19,10 @@ def load_discovery_modules():
     
     return modules
 
-def discover_album_name(art, son, modules):
+
+def discover_album_name(song, modules):
+    art, son, alb = song.artist.name, song.title, song.album
+    slog(f"{art} - {son} ({alb})")
     art = truncate_at_word(art)
     son = truncate_at_word(son)
     art_cln = art.split("(")[0].strip()
@@ -31,6 +31,11 @@ def discover_album_name(art, son, modules):
     for script_name, module in modules:
         print(f"Looking for it in {script_name}")
         result = module.get_album_name(art_cln, son_cln)
+        #Repeat the searching if there is a synonym for an artist
+        if not result:
+            if not song.artist.synonyms is None:
+                print(f"Looking for it in {script_name} using synonyms")
+                result = module.get_album_name(song.artist.synonyms, son_cln)
         if result:
             return result
     return None

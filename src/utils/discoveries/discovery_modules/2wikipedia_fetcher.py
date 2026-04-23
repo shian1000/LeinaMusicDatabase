@@ -109,7 +109,8 @@ def get_album_name(artist: str, title: str) -> str | None:
 
         for heading_text, anchor in heading_containers:
             slog(f"Case 2 - checking heading: {heading_text}")
-            if is_blacklisted_album(heading_text):
+            if is_blacklisted_album(heading_text) and heading_text != "Singles":
+                slog()
                 continue
 
             for sibling in anchor.find_next_siblings():
@@ -134,6 +135,8 @@ def get_album_name(artist: str, title: str) -> str | None:
                         slog(heading_text)
 
                 # Case B: simple <ol> or <ul> list
+                slog(found_container)
+                slog(sibling.name)
                 if found_container is None and sibling.name in ("ol", "ul"):
                     found_container = sibling
                     slog("Case 2 - Case B: plain ol/ul list found under heading")
@@ -142,10 +145,15 @@ def get_album_name(artist: str, title: str) -> str | None:
                 # Case C: list nested inside a div
                 if found_container is None:
                     nested_list = sibling.find(["ol", "ul"])
+                    slog(nested_list)
                     if nested_list:
                         found_container = nested_list
                         slog("Case 2 - Case C: nested list found inside sibling under heading")
                         slog(heading_text)
+
+                # Case D: plain wikitable (e.g. Singles table)
+                if found_container is None and sibling.name == "table":
+                    found_container = sibling
 
                 if found_container is not None:
                     container_text = found_container.get_text(separator=" ", strip=True)

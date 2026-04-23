@@ -5,6 +5,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from utils.selenium_sessions import get_global_driver
+from utils.debug import slog
+import time
+from utils.database.database_getter import get_songs_from_db_session
 
 # -- Internal helpers ----------------------------------------------------------
 
@@ -23,12 +26,6 @@ ATTRID_MAP = {
     "duration":     "duration",
     "composer":     "composer",
 }
-
-def get_album_name(artist, title):
-    print("WORK IN PROGRESS")
-    return None
-
-
 
 
 def _extract_value(el) -> str:
@@ -53,26 +50,15 @@ def _extract_value(el) -> str:
 
 # -- Public API ----------------------------------------------------------------
 
-def get_album_from_google(artist: str, song: str) -> dict | None:
-    """
-    Search Google for '<artist> - <song>' and extract the Knowledge Panel.
-    Uses the global driver — call open_global_driver() before using this.
+def get_album_name(artist: str, song: str) -> dict | None:
 
-    Args:
-        artist: Artist name, e.g. "Hamilton Leithauser"
-        song:   Song title, e.g. "In a Black Out"
+    return None
 
-    Returns:
-        Dict with available fields, e.g.:
-            {
-                "artists":  "Hamilton Leithauser, Rostam Batmanglij",
-                "album":    "I Had a Dream That You Were Mine",
-                "released": "2016",
-                "genre":    "Alternative/Indie",
-                "_query":   {"artist": ..., "song": ...}
-            }
-        Returns None if the driver is not open or no panel was found.
-    """
+    # query = f"{artist} - {song}"
+    # song_obj = (get_songs_from_db_session("name", query))[0]
+    # query = f"{song_obj.artist.name} - {song_obj.title}"
+    # slog(query)
+
     driver = get_global_driver()
     if driver is None:
         print("[Error] No driver open. Call open_global_driver() first.")
@@ -83,15 +69,25 @@ def get_album_from_google(artist: str, song: str) -> dict | None:
 
     driver.get(url)
 
+    # time.sleep(5)
+
+    # soup = BeautifulSoup(driver.page_source, "html.parser")
+
+    # slog(soup)
+
     try:
         WebDriverWait(driver, 8).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "[data-attrid]"))
+            EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-attrid]"))
         )
     except Exception:
+        with open("debug.html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
         print("[Result] Page loaded but no Knowledge Panel detected.")
         return None
 
     soup = BeautifulSoup(driver.page_source, "html.parser")
+
+    # slog(soup)
 
     info = {}
     for div in soup.find_all("div", attrs={"data-attrid": True}):
@@ -112,19 +108,5 @@ def get_album_from_google(artist: str, song: str) -> dict | None:
         return None
 
     info["_query"] = {"artist": artist, "song": song}
-    return info
-
-
-def pretty_print(info: dict) -> None:
-    """Print scraped song info in a readable format."""
-    if not info:
-        print("No information found.")
-        return
-
-    q = info.pop("_query", {})
-    print(f"\n{'='*45}")
-    print(f"  {q.get('artist', '')} -- {q.get('song', '')}")
-    print(f"{'='*45}")
-    for key, value in info.items():
-        print(f"  {key.capitalize():<12}: {value}")
-    print()
+    slog(info)
+    return info.get("album") if info else None

@@ -74,7 +74,9 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "лучшие",
     "album",
     "albums",
-    "references"
+    "references",
+    "export",
+    "import"
 }
 
 # --------------------
@@ -85,7 +87,8 @@ class Artist(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
-    origin = Column(String)  # NEW
+    origin = Column(String)
+    synonyms = Column(String)
 
     songs = relationship("Song", back_populates="artist")
 

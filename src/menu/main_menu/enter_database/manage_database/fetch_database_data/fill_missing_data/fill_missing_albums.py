@@ -17,29 +17,31 @@ def fill_missing_albums():
 
     songs_objects = get_songs_with_empty_category(category)
     slog(songs_objects)
-    songs_list = extract_db_object_info(songs_objects, f"{song_categories[1]}, {song_categories[0]}, {song_categories[2]}")
-    slog(songs_list)
 
-
-    updated_songs = []
+    songs_list = []
     
-    if not songs_list:
+    if not songs_objects:
         print("No songs with missing albums found")
         return
     
+    #Make it adjustable in settings
+    open_global_driver()
     discovery_modules = load_discovery_modules()
-    for song in songs_list:
-        art, son, alb = song
-        slog(f"{art} - {son} ({alb})")
-        if alb is None:
-            alb = discover_album_name(art, son, discovery_modules)
-            if alb == None:
-                print(f"Couldn't find album for \033[93m{art} - {son}\033[0m")
+    for song in songs_objects:
+        if song.album is None:
+            new_album = discover_album_name(song, discovery_modules)
+            if new_album == None:
+                print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")
             else:
-                print(f"Found album: \033[93m{alb}\033[0m for \033[93m{art} - {son}\033[0m")
-        updated_songs.append((art, son, alb))
-    songs_list = updated_songs
+                if (new_album) == "Singles":
+                    print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
+                else:
+                    print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+        songs_list.append((song.artist.name, song.title, new_album))
     slog(songs_list)
+    
+    #Make it adjustable in settings
+    close_global_driver()
 
     if not len(songs_objects) == len(songs_list):
         print(f"albums_search_results and matched_objects items quantity mismatch! song_objects = {songs_objects}, songs_list = {songs_list}! Aborting!")
@@ -47,11 +49,11 @@ def fill_missing_albums():
     
     slog("Seems songs_objcets and songs_list do match. Continuing")
     for i, song in enumerate(songs_list):
-        art, son, alb = song
-        if alb is not None:
+        art, son, new_album = song
+        if new_album is not None:
             slog(songs_objects[i])
-            slog(alb)
-            edit_db_entry(songs_objects[i], "album", alb)
+            slog(new_album)
+            edit_db_entry(songs_objects[i], "album", new_album)
             slog(f"Just edited an entry. {songs_objects[i].artist.name} - {songs_objects[i].title} ({songs_objects[i].album})")
 
 
@@ -62,8 +64,8 @@ def fill_missing_albums():
         confirmation = questionary.confirm(f"Unable to find {no_albums_count} album names. Would you like to fill them up manually?").ask()
         if confirmation:
             for i, song in enumerate(songs_list):
-                art, son, alb = song
-                if alb is None:
+                art, son, new_album = song
+                if new_album is None:
                     print(f"{art} - {son}")
                     copy_to_clipboard(f"{art} - {son}")
                     album = input("New album name (Put nothing to cancel): ")

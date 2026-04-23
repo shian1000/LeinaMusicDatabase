@@ -26,3 +26,9 @@ def get_album_itunes(artist: str, title: str) -> Optional[str]:
                 return album
     
     return None
+
+if __name__ == "__main__":
+    artist = "Уматурман & Тимати"
+    title = "Дождись"
+    song = get_album_itunes(artist, title)
+    print(song)
