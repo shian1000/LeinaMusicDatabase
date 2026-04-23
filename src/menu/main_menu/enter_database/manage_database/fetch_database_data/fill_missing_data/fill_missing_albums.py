@@ -28,6 +28,7 @@ def fill_missing_albums():
     open_global_driver()
     discovery_modules = load_discovery_modules()
     for song in songs_objects:
+        print(f"Checking for for \033[93m{song.artist.name} - {song.title}\033[0m")
         if song.album is None:
             new_album = discover_album_name(song, discovery_modules)
             if new_album == None:

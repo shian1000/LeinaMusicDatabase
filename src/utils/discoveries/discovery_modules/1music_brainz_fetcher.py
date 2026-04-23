@@ -3,9 +3,14 @@ import musicbrainzngs
 from utils.debug import slog
 from utils.database.datatables import is_blacklisted_album
 import re
+import requests
+from difflib import SequenceMatcher
+from utils.text_utils import check_spelling
 
 # Set up the user agent (required by MusicBrainz)
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
+
+HEADERS = {"User-Agent": "YourScriptName/1.0 (your@email.com)"}
 
 def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.
@@ -13,6 +18,16 @@ def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
     Calls `fetch_albums_from_musicbrainz_batch` with a single-item list and returns
     the album title or None if not found or on error.
     """
+
+    slog(f"{artist} - {song}")
+    spell_check_result = check_spelling(artist, song)
+    slog(spell_check_result)
+    if(spell_check_result["found"]):
+        artist = spell_check_result["corrected_artist"]
+        song = spell_check_result["corrected_title"]
+        print(f"\033[91mSpelling might need to be corrected: {artist} - {song}\033[0m")
+    slog(f"{artist} - {song}")
+    
     query = f'recording:"{song}" AND artist:"{artist}"'
     slog(query)
     try:

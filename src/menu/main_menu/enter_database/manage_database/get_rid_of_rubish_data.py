@@ -5,6 +5,7 @@ import questionary
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import submit_global_database_session
 
+
 def convert_characters_encoding(songs):
     wrong_characters_list = []
     for song in songs:
@@ -70,3 +71,5 @@ def get_rid_of_rubish_data():
     strip_leading_spaces(songs)
     seek_nonsense_album_names(songs)
     submit_global_database_session()
+
+
