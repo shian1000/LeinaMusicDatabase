@@ -8,7 +8,6 @@ from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.datatables import song_categories
 from utils.text_utils import truncate_at_word
-from utils.discoveries.discovery_modules.genius_fetcher import get_album_from_genius
 from utils.selenium_sessions import open_global_driver, close_global_driver
 from utils.discoveries.discoveries_manager import discover_album_name, load_discovery_modules
 
@@ -25,10 +24,11 @@ def fill_missing_albums():
         return
     
     #Make it adjustable in settings
+    print("Preparing fetch modules . . . ")
     open_global_driver()
     discovery_modules = load_discovery_modules()
     for song in songs_objects:
-        print(f"Checking for for \033[93m{song.artist.name} - {song.title}\033[0m")
+        print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
         if song.album is None:
             new_album = discover_album_name(song, discovery_modules)
             if new_album == None:
@@ -38,6 +38,7 @@ def fill_missing_albums():
                     print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
                 else:
                     print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+                    print()
         songs_list.append((song.artist.name, song.title, new_album))
     slog(songs_list)
     

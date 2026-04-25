@@ -3,7 +3,7 @@ import requests
 import re
 from bs4 import BeautifulSoup
 from utils.debug import slog
-from utils.database.datatables import is_blacklisted_album
+from utils.text_utils import is_blacklisted_album
 
 def clean_album_title(album_name, artist):
     # Try artist-specific pattern first

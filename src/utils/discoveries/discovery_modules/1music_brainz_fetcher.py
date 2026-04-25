@@ -1,7 +1,7 @@
 import time
 import musicbrainzngs
 from utils.debug import slog
-from utils.database.datatables import is_blacklisted_album
+from utils.text_utils import is_blacklisted_album
 import re
 import requests
 from difflib import SequenceMatcher
@@ -12,7 +12,7 @@ musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
 HEADERS = {"User-Agent": "YourScriptName/1.0 (your@email.com)"}
 
-def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
+def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.
 
     Calls `fetch_albums_from_musicbrainz_batch` with a single-item list and returns
@@ -20,21 +20,21 @@ def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
     """
 
     slog(f"{artist} - {song}")
-    spell_check_result = check_spelling(artist, song)
-    slog(spell_check_result)
-    if(spell_check_result["found"]):
-        artist = spell_check_result["corrected_artist"]
-        song = spell_check_result["corrected_title"]
-        print(f"\033[91mSpelling might need to be corrected: {artist} - {song}\033[0m")
+    if spell_check:
+        spell_check_result = check_spelling(artist, song)
+        slog(spell_check_result)
+        if(spell_check_result["found"]):
+            if artist != spell_check_result["corrected_artist"] or song != spell_check_result["corrected_title"]:
+                artist = spell_check_result["corrected_artist"]
+                song = spell_check_result["corrected_title"]
+                print(f"\033[91mSpelling might need to be corrected: {artist} - {song}\033[0m")
     slog(f"{artist} - {song}")
     
     query = f'recording:"{song}" AND artist:"{artist}"'
     slog(query)
     try:
         response = musicbrainzngs.search_recordings(query=query, limit=5)
-        slog(response)
         recordings = response.get("recording-list", [])
-        slog(recordings)
 
         album = None
         fallback = None
@@ -51,6 +51,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
                 if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
                     continue
 
+                slog(release_title)
                 if is_blacklisted_album(release_title):
                     continue
 
@@ -64,8 +65,11 @@ def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
                 break
 
         result = album or fallback
+        slog(result)
 
         if result and not is_blacklisted_album(result):
+            if not spell_check:
+                return get_album_name(artist, song, spell_check=True)
             time.sleep(delay)
             return result
 
@@ -86,6 +90,8 @@ def get_album_name(artist: str, song: str, delay: float = 1.0) -> str | None:
 
                 if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
                     continue
+
+                # slog(release_title)
                 if is_blacklisted_album(release_title):
                     continue
 

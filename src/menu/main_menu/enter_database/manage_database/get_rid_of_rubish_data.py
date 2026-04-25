@@ -1,5 +1,5 @@
 from utils.database.database_getter import get_songs_from_db_session
-from utils.database.datatables import is_blacklisted_album
+from utils.text_utils import is_blacklisted_album
 import time
 import questionary
 from utils.database.database_management import edit_db_entry

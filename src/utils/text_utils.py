@@ -96,11 +96,14 @@ def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
 
 
 def truncate_at_word(text: str) -> str:
+ 
     stop_words=[
         "feat",
         "&",
         "ft.",
-        " и "
+        " и ",
+        " i ",
+        ", "
     ]
 
     earliest_index = len(text)
@@ -112,6 +115,37 @@ def truncate_at_word(text: str) -> str:
  
     return text[:earliest_index].rstrip()
 
+def normalize_japanese_title(text: str) -> str:
+    """
+    Normalize Japanese text for fuzzy comparison.
+    Handles middle dots, trailing punctuation, full-width chars, etc.
+    """
+    if not text:
+        return text
+
+    # Replace Japanese middle dot (・ U+30FB) and similar separators with a regular space
+    text = re.sub(r'[・･•·\-+]', ' ', text)
+    slog(text)
+
+    # Remove trailing punctuation (periods, ellipsis, 。etc.)
+    text = re.sub(r'[\.\。…]+$', '', text)
+
+    # Normalize full-width alphanumerics to half-width
+    # e.g. ＡＢＣＤ → ABCD, １２３ → 123
+    text = unicodedata.normalize('NFKC', text)
+
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+def make_fuzzy(text: str) -> str:
+    """Split on spaces AND Japanese middle dot, append ~ to each token."""
+    # Replace middle dot variants with space before splitting
+    text = re.sub(r'[・･•·]', ' ', text)
+    tokens = text.split()
+    return " ".join(t + "~" for t in tokens if t)
+
 
 def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
@@ -120,11 +154,12 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     
     def similarity(a, b):
-        return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+        a_norm = normalize_japanese_title(a)
+        b_norm = normalize_japanese_title(b)
+        return SequenceMatcher(None, a_norm.lower(), b_norm.lower()).ratio()
 
-
-    fuzzy_title = " ".join([word + "~" for word in title.split()])
-    fuzzy_artist = " ".join([word + "~" for word in artist.split()])
+    fuzzy_title = make_fuzzy(title)
+    fuzzy_artist = make_fuzzy(artist)
     slog(fuzzy_title)
     slog(fuzzy_artist)
 
@@ -139,7 +174,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     headers = {"User-Agent": "MyMusicApp/1.0.0 ( contact@example.com )"}
 
     def perform_search(q):
-        params = {"query": q, "limit": 5, "fmt": "json"}
+        params = {"query": q, "limit": 20, "fmt": "json"}
         slog(f"Attempting MB Query: {q}")
         resp = requests.get(url, params=params, headers=headers)
         resp.raise_for_status()
@@ -200,3 +235,98 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     
     slog(result)
     return result
+
+
+ALBUM_TITLE_BLACKLIST = {
+    # Exact matches (lowercased)
+    "now that's what i call music",
+    "greatest hits",
+    "best of",
+    "the best of",
+    "very best of",
+    "the very best of",
+    "essential",
+    "the essential",
+    "collection",
+    "the collection",
+    "gold",
+    "platinum",
+    "anthology",
+    "retrospective",
+    "definitive collection",
+    "complete collection"
+}
+
+ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
+    # Partial matches — if any of these appear in the title, skip it
+    "greatest hits",
+    "best of",
+    "collection",
+    "anthology",
+    "retrospective",
+    "compilation",
+    "now that's what i call",
+    "the essential",
+    "pop party",
+    "itunes",
+    "remix",
+    "germany",
+    "festival",
+    "United Palace Theatre",
+    "1996-2011",
+    "radio",
+    "spotify",
+    "paris",
+    "session",
+    "ultimate",
+    "hits",
+    "edition",
+    "awards",
+    "przebojów",
+    "valentine's day",
+    "exercises",
+    "new orleans",
+    "morrison",
+    "2014",
+    "women in music",
+    "london, uk",
+    "england",
+    "collecion",
+    "youtube",
+    "essential",
+    "live",
+    "хит",
+    "concert",
+    "hottest",
+    "liverpool",
+    "volume",
+    "reedycja",
+    "edycja",
+    "лучшие",
+    "album",
+    "albums",
+    "references",
+    "export",
+    "import",
+    "week",
+    "versie",
+    "rock",
+    "speciale",
+    "fifa",
+    "official",
+    "guest",
+    "tour"
+}
+
+def is_blacklisted_album(title: str) -> bool:
+    slog(title)
+    if title:
+        lowered = title.lower().strip()
+        if lowered in ALBUM_TITLE_BLACKLIST:
+            slog("True")
+            return True
+        return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
+    return False
+
+def remove_brackets(text):
+    return re.sub(r'\s*\([^)]*\)', '', text).strip()

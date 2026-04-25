@@ -5,18 +5,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
+from utils.debug import slog
+from utils.text_utils import remove_brackets
 
-def get_album_name(artist, title):
-    print("WORK IN PROGRESS")
-    return None
-
-def get_album_from_genius(artist: str, title: str) -> str | None:
+def get_album_name(artist: str, title: str) -> str | None:
     driver = get_global_driver()
     
     # Search via Genius search page
     query = f"{artist} {title}".replace(" ", "%20")
     driver.get(f"https://genius.com/search?q={query}")
+    slog(query)
     time.sleep(2)  # let the page breathe
+
+    #TODO So when I get to this page and click the first result, I need to look for the song name. Click it. And only then look for album
     
     try:
         # Find first song result and click it
@@ -31,7 +32,9 @@ def get_album_from_genius(artist: str, title: str) -> str | None:
         album_tag = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/albums/']"))
         )
-        return album_tag.text.strip()
+
+        album_found = remove_brackets(album_tag.text.strip())
+        return album_found
     
     except Exception as e:
         print(f"Failed: {e}")
