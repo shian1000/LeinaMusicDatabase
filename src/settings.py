@@ -9,6 +9,7 @@ load_dotenv()
 @dataclass
 class Settings:
     database_dir: UPath = UPath(__file__).parent.parent / "database"
+    config_dir: UPath = UPath(__file__).parent.parent / "config"
     music_database_dir: UPath = database_dir / UPath("music.db")
     local_library_dir_str: str = "smb://server.local/Shared/Music/"
     # local_library_dir_str: str = "/home/owner/Documents/Code/MusicDatabase/"

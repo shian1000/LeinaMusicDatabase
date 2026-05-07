@@ -1,0 +1,93 @@
+# Exact matches (lowercased)
+[exact]
+now that's what i call music
+greatest hits
+best of
+the best of
+very best of
+the very best of
+essential
+the essential
+collection
+the collection
+gold
+platinum
+anthology
+retrospective
+definitive collection
+complete collection
+
+# Partial matches — if any of these appear in the title, skip it
+[substring]
+greatest hits
+best of
+collection
+greatest hits
+best of
+collection
+anthology
+retrospective
+compilation
+now that's what i call
+the essential
+pop party
+itunes
+remix
+germany
+festival
+United Palace Theatre
+1996-2011
+radio
+spotify
+paris
+session
+ultimate
+hits
+edition
+awards
+przebojów
+valentine's day
+exercises
+new orleans
+morrison
+2014
+women in music
+london, uk
+england
+collecion
+youtube
+essential
+live
+хит
+concert
+hottest
+liverpool
+volume
+reedycja
+edycja
+лучшие
+album
+albums
+references
+export
+import
+week
+versie
+rock
+speciale
+fifa
+official
+guest
+tour
+released
+version
+demos
+club
+liva
+remasters
+filmography
+videography
+music
+the best
+kolekcja
+collaborative singles

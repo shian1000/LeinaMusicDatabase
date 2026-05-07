@@ -5,6 +5,38 @@ import tkinter as tk
 from utils.debug import slog
 import requests
 from difflib import SequenceMatcher
+from settings import settings
+
+def _is_word_substring(needle: str, haystack: str) -> bool:
+    """Return True if needle appears as whole words within haystack."""
+    pattern = r'\b' + re.escape(needle) + r'\b'
+    return bool(re.search(pattern, haystack))
+
+
+
+def load_blacklist(config_dir):
+    blacklist_path = config_dir / "blacklist.txt"
+    exact = set()
+    substrings = set()
+    current_section = None
+
+    with open(blacklist_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line == "[exact]":
+                current_section = "exact"
+            elif line == "[substring]":
+                current_section = "substring"
+            elif current_section == "exact":
+                exact.add(line.lower())
+            elif current_section == "substring":
+                substrings.add(line.lower())
+
+    return exact, substrings
+
+ALBUM_TITLE_BLACKLIST, ALBUM_TITLE_BLACKLIST_SUBSTRINGS = load_blacklist(settings.config_dir)
 
 _SPECIAL_REPLACEMENTS = {
     "ß": "ss",
@@ -30,55 +62,26 @@ def copy_to_clipboard(message: str):
     root.update
     root.destroy
 
-def _is_word_substring(needle: str, haystack: str) -> bool:
-    """Return True if needle appears as whole words within haystack."""
-    pattern = r'\b' + re.escape(needle) + r'\b'
-    return bool(re.search(pattern, haystack))
-
 
 def normalize_text(s: str) -> str:
-    """Normalize text for comparison.
-
-    Steps:
-    - NFKD unicode normalization and removal of combining marks (diacritics)
-    - Apply a small mapping for special Latin letters that don't decompose
-    - Convert to lower-case
-    - Collapse whitespace
-    """
     if s is None:
         return ""
 
-    # Normalize and decompose characters
     s = unicodedata.normalize("NFKD", s)
 
-    # Remove combining marks
     s = "".join(c for c in s if not unicodedata.combining(c))
 
-    # Apply special replacements (for characters that remain non-ASCII)
     for src, dst in _SPECIAL_REPLACEMENTS.items():
         if src in s:
             s = s.replace(src, dst)
 
-    # Remove any remaining non-letter/digit characters except spaces
     s = re.sub(r"[^\w\s]", " ", s)
 
-    # Collapse whitespace and lower-case
     s = re.sub(r"\s+", " ", s).strip().lower()
     return s
 
 
 def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
-    """Compare two strings with normalization.
-
-    Returns True when the normalized strings are equal or when one is a
-    whole-word substring of the other (case-insensitive, diacritics-insensitive).
-
-    Examples:
-    - compare_strings('Żółć', 'zolc') -> True
-    - compare_strings('The Prisonners', 'prison') -> False  (partial word, no longer matches)
-    - compare_strings('one', 'the one') -> True  (whole word match)
-    - compare_strings('one', 'bones') -> False  (inside a word, rejected)
-    """
     na = normalize_text(a or "")
     nb = normalize_text(b or "")
 
@@ -88,7 +91,6 @@ def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
     if na == nb:
         return True
 
-    # Check whole-word substring in both directions
     if _is_word_substring(na, nb) or _is_word_substring(nb, na):
         return True
 
@@ -115,26 +117,18 @@ def truncate_at_word(text: str) -> str:
  
     return text[:earliest_index].rstrip()
 
+
 def normalize_japanese_title(text: str) -> str:
-    """
-    Normalize Japanese text for fuzzy comparison.
-    Handles middle dots, trailing punctuation, full-width chars, etc.
-    """
     if not text:
         return text
 
-    # Replace Japanese middle dot (・ U+30FB) and similar separators with a regular space
     text = re.sub(r'[・･•·\-+]', ' ', text)
     slog(text)
 
-    # Remove trailing punctuation (periods, ellipsis, 。etc.)
     text = re.sub(r'[\.\。…]+$', '', text)
 
-    # Normalize full-width alphanumerics to half-width
-    # e.g. ＡＢＣＤ → ABCD, １２３ → 123
     text = unicodedata.normalize('NFKC', text)
 
-    # Collapse multiple spaces
     text = re.sub(r'\s+', ' ', text).strip()
 
     return text
@@ -165,12 +159,10 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
 
     primary_query = f'recording:{fuzzy_title} AND artist:{fuzzy_artist}'
-    # Fallback: General keyword search (more forgiving)
     fallback_query = f'{artist} {title}'
     
     url = "https://musicbrainz.org/ws/2/recording/"
     
-    # MusicBrainz requires a proper User-Agent
     headers = {"User-Agent": "MyMusicApp/1.0.0 ( contact@example.com )"}
 
     def perform_search(q):
@@ -181,11 +173,9 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
         data = resp.json()
         return data.get("recordings", [])
 
-    # Try Primary Search
     recordings = perform_search(primary_query)
     slog(f"Primary results count: {len(recordings)}")
 
-    # If no results, try Fallback Search
     if not recordings:
         slog("No results for primary query. Trying fallback keyword search...")
         recordings = perform_search(fallback_query)
@@ -195,12 +185,9 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
         slog("No recordings found in both attempts.")
         return {"artist": artist, "title": title, "corrected": False, "found": False}
 
-    # Process results
     best = recordings[0]
-    # slog(best) # Log the full raw data of the best match to see structure
 
     mb_title = best.get("title", "")
-    # Handle the complex artist-credit structure
     try:
         mb_artist = best["artist-credit"][0]["artist"]["name"]
     except (KeyError, IndexError):
@@ -214,11 +201,9 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     slog(title_sim)
     slog(artist_sim)
 
-    # Use threshold to decide on correction
     final_artist = mb_artist if artist_sim >= threshold else artist
     final_title = mb_title if title_sim >= threshold else title
     
-    # We consider it corrected if the strings actually changed
     is_corrected = (final_artist != artist) or (final_title != title)
 
     result = {
@@ -236,99 +221,6 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     slog(result)
     return result
 
-
-ALBUM_TITLE_BLACKLIST = {
-    # Exact matches (lowercased)
-    "now that's what i call music",
-    "greatest hits",
-    "best of",
-    "the best of",
-    "very best of",
-    "the very best of",
-    "essential",
-    "the essential",
-    "collection",
-    "the collection",
-    "gold",
-    "platinum",
-    "anthology",
-    "retrospective",
-    "definitive collection",
-    "complete collection"
-}
-
-ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
-    # Partial matches — if any of these appear in the title, skip it
-    "greatest hits",
-    "best of",
-    "collection",
-    "anthology",
-    "retrospective",
-    "compilation",
-    "now that's what i call",
-    "the essential",
-    "pop party",
-    "itunes",
-    "remix",
-    "germany",
-    "festival",
-    "United Palace Theatre",
-    "1996-2011",
-    "radio",
-    "spotify",
-    "paris",
-    "session",
-    "ultimate",
-    "hits",
-    "edition",
-    "awards",
-    "przebojów",
-    "valentine's day",
-    "exercises",
-    "new orleans",
-    "morrison",
-    "2014",
-    "women in music",
-    "london, uk",
-    "england",
-    "collecion",
-    "youtube",
-    "essential",
-    "live",
-    "хит",
-    "concert",
-    "hottest",
-    "liverpool",
-    "volume",
-    "reedycja",
-    "edycja",
-    "лучшие",
-    "album",
-    "albums",
-    "references",
-    "export",
-    "import",
-    "week",
-    "versie",
-    "rock",
-    "speciale",
-    "fifa",
-    "official",
-    "guest",
-    "tour",
-    "released",
-    "version",
-    "demos",
-    "club",
-    "liva",
-    "remasters",
-    "filmography",
-    "videography",
-    "music",
-    "the best",
-    "kolekcja",
-    "collaborative singles"
-}
 
 def is_blacklisted_album(title: str) -> bool:
     slog(title)

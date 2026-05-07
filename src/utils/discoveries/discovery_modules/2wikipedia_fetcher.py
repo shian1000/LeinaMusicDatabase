@@ -96,6 +96,22 @@ def _extract_from_infobox(soup: BeautifulSoup, title: str) -> str | None:
     if not infobox:
         return None
 
+    # Strategy 1: find the dedicated "from the album" <th> cell and read
+    # its text directly — avoids bleeding into the next row (e.g. "Released …")
+    for th in infobox.find_all("th"):
+        if FROM_ALBUM_MARKER in th.get_text(separator=" ", strip=True).lower():
+            # Prefer the link text if present (cleanest), else the full cell text
+            link = th.find("a")
+            if link:
+                album = link.get_text(strip=True)
+            else:
+                text = th.get_text(separator=" ", strip=True)
+                idx = text.lower().find(FROM_ALBUM_MARKER)
+                album = text[idx + len(FROM_ALBUM_MARKER):].strip(STRIP_CHARS)
+            slog(f"Infobox album (th strategy): {album}")
+            return album or None
+
+    # Strategy 2: fallback — flatten the whole infobox and regex-parse as before
     infobox_text = infobox.get_text(separator=" ", strip=True)
     slog(f"Infobox preview: {infobox_text[:300]}")
 
@@ -115,11 +131,8 @@ def _extract_from_infobox(soup: BeautifulSoup, title: str) -> str | None:
     if not match:
         return None
 
-    slog(soup)
-    save_string_to_file(str(soup))
-
     album = match.group(1).strip(STRIP_CHARS)
-    slog(f"Infobox album: {album}")
+    slog(f"Infobox album (fallback): {album}")
     return album or None
 
 
