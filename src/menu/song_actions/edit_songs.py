@@ -128,3 +128,46 @@ def edit_songs_menu(songs_objects):
             slog(selected_song.title)
             slog(selected_song.artist.id)
             edit_entry_menu(db_object=selected_song)
+
+def add_songs_menu():
+    exit_label = "/exit"
+    user_input = ""
+    song_labels = []
+    artist_labels = {"id": "",
+                     "origin": ""}
+    for category in song_categories:
+        user_input = input(f"Type the {category} of the song (type '{exit_label}' to abort): ")
+        if user_input == exit_label:
+            break
+
+        if(category == song_categories[0]):
+            while user_input == None:
+                user_input = input(f"{category} can't be blank")
+            existing_songs = get_songs_from_db_session(category, user_input)
+            if(existing_songs):
+                print("NOTE: There are songs in the database that fully or partially match this name already: ")
+                for song in existing_songs:
+                    print(f"{song.artist.name} - {song.title}")
+
+        if(category == song_categories[1]):
+            while user_input == None:
+                user_input = input(f"{category} can't be blank")
+            existing_artists = get_artists_from_db_session(category, user_input)
+            if(existing_artists):
+                print("Do you want to use an existing artist?: ")
+                picked_artist = pick_from_db_objects(existing_artists, back_label="Add new")
+                if picked_artist:
+                    user_input = None
+                    artist_labels["id"] = picked_artist.id
+
+
+
+
+
+        song_labels.append(user_input)
+
+    print(song_labels)
+    print(artist_labels)
+
+    if user_input == exit_label:
+        return None

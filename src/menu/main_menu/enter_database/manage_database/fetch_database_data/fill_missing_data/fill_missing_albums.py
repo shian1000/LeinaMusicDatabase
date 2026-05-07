@@ -30,6 +30,8 @@ def fill_missing_albums():
     for song in songs_objects:
         print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
         if song.album is None:
+            slog(song)
+            slog(discovery_modules)
             new_album = discover_album_name(song, discovery_modules)
             if new_album == None:
                 print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")

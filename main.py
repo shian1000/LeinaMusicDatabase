@@ -21,3 +21,4 @@ if __name__ == "__main__":
 #TODO Sprawdzić, czy google_search_fetcher.py działa z fill_missing albums i globalnym otwieraniem drivera
 #TODO Ogarnąć genius_fetcher.py
 #TODO Make settings for enabling fetchers. Maybe make them modular?
+#TODO Make blacklist external

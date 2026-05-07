@@ -197,7 +197,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
     # Process results
     best = recordings[0]
-    slog(best) # Log the full raw data of the best match to see structure
+    # slog(best) # Log the full raw data of the best match to see structure
 
     mb_title = best.get("title", "")
     # Handle the complex artist-credit structure
@@ -315,7 +315,19 @@ ALBUM_TITLE_BLACKLIST_SUBSTRINGS = {
     "fifa",
     "official",
     "guest",
-    "tour"
+    "tour",
+    "released",
+    "version",
+    "demos",
+    "club",
+    "liva",
+    "remasters",
+    "filmography",
+    "videography",
+    "music",
+    "the best",
+    "kolekcja",
+    "collaborative singles"
 }
 
 def is_blacklisted_album(title: str) -> bool:

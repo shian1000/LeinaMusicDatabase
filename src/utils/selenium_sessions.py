@@ -32,7 +32,7 @@ def open_global_driver(headless: bool = True) -> webdriver.Chrome:
     global _GLOBAL_DRIVER
     with _GLOBAL_DRIVER_LOCK:
         if _GLOBAL_DRIVER is None:
-            _GLOBAL_DRIVER = _build_driver(headless=headless)
+            _GLOBAL_DRIVER = _build_driver()
         return _GLOBAL_DRIVER
 
 

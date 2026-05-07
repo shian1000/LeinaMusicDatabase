@@ -52,37 +52,6 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
 
     print(f"***Debug*** [{file_info}] {name} ({type(var).__name__}): {repr(var)}")
 
-def slog_old(var: Any = None, name: Optional[str] = None) -> None:
-    if not DEBUG_ENABLED:
-        return
-
-    file_info = "unknown:0"
-    
-    try:
-        frame = inspect.currentframe()
-        if frame is not None:
-            caller = frame.f_back
-            if caller is not None:
-                # 1. Get location info
-                filename = Path(caller.f_code.co_filename).name
-                lineno = caller.f_lineno
-                file_info = f"{filename}:{lineno}"
-
-                # 2. Try to find the variable name if not provided
-                if name is None:
-                    for var_name, val in caller.f_locals.items():
-                        if val is var:
-                            name = var_name
-                            break
-    finally:
-        # Crucial to prevent reference cycles in the garbage collector
-        del frame
-
-    if name is None:
-        name = "<unknown>"
-
-    print(f"***Debug*** [{file_info}] {name} ({type(var).__name__}): {repr(var)}")
-
 def mlog(message: str):
     if not DEBUG_ENABLED:
         return

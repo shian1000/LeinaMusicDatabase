@@ -5,6 +5,40 @@ from utils.debug import slog
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
+import sys
+
+def save_string_to_file(text: str) -> str:
+    """
+    Saves a string to a .txt file in the local directory.
+    The file is named using the first three words of the string.
+
+    Args:
+        text: The string to save.
+
+    Returns:
+        The filename used to save the file.
+    """
+    if not text:
+        return
+    words = text.split()
+
+    if not words:
+        raise ValueError("Input string is empty or contains no words.")
+
+    # Take up to the first three words and join them with underscores
+    name_parts = words[:3]
+    filename = "_".join(name_parts) + ".txt"
+
+    # Sanitize filename by removing characters not allowed in filenames
+    invalid_chars = r'\/:*?"<>|'
+    for char in invalid_chars:
+        filename = filename.replace(char, "")
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    print(f"Saved to: {filename}")
+    return filename
 
 def is_local_dir(uri_str: str):
     parsed = urlparse(uri_str)
@@ -88,3 +122,11 @@ def copy_songs_using_index(
             copy_file_to_destination(path_from_db, paste_destination)
 
     engine.dispose()
+
+
+
+
+def load_paths(input_file: str) -> list[str]:
+    """This script loads paths from a file and returns a list"""
+    with open(input_file, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]

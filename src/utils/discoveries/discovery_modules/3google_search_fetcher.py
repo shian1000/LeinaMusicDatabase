@@ -52,8 +52,6 @@ def _extract_value(el) -> str:
 
 def get_album_name(artist: str, song: str) -> dict | None:
 
-    return None
-
     # query = f"{artist} - {song}"
     # song_obj = (get_songs_from_db_session("name", query))[0]
     # query = f"{song_obj.artist.name} - {song_obj.title}"
@@ -64,14 +62,14 @@ def get_album_name(artist: str, song: str) -> dict | None:
         print("[Error] No driver open. Call open_global_driver() first.")
         return None
 
-    query = f"{artist} - {song} song"
+    query = f"{artist} - {song}"
     url = f"https://www.google.com/search?q={quote_plus(query)}&hl=en"
 
     driver.get(url)
 
-    # time.sleep(5)
+    time.sleep(4)
 
-    # soup = BeautifulSoup(driver.page_source, "html.parser")
+    soup = BeautifulSoup(driver.page_source, "html.parser")
 
     # slog(soup)
 
