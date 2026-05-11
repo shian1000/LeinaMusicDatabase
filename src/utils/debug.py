@@ -4,6 +4,7 @@ from pathlib import Path
 import linecache
 import ast
 
+
 def _find_project_root() -> Path:
     # Start at the directory of the current file
     p = Path(__file__).resolve().parent
@@ -20,6 +21,28 @@ DEBUG_ENABLED = (PROJECT_ROOT / ".debug").exists()
 
 DEBUG_TO_FILE_ENABLED = True
 DEBUG_LOG_FILE = PROJECT_ROOT / "debug.log"
+
+import sys
+import traceback
+from datetime import datetime
+
+def _handle_exception(exc_type, exc_value, exc_tb) -> None:
+    # Let KeyboardInterrupt pass through normally (Ctrl+C shouldn't be logged as a crash)
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
+    tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+    tb_text = "".join(tb_lines)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    message = f"***Debug*** [CRASH @ {timestamp}]\n{tb_text}"
+
+    print(message, file=sys.stderr)
+
+    if DEBUG_TO_FILE_ENABLED:
+        _write_to_log(message)
+
+sys.excepthook = _handle_exception
 
 def _write_to_log(message: str) -> None:
     try:

@@ -73,12 +73,9 @@ def seek_nonsense_album_names(songs):
 def resolve_unknown_artist(songs):
         new_title = ""
         new_artist = ""
-        if not has_tag_on_song(song, "album_checked"):
-            print("1")
-            for song in songs:
-                print(song.artist.name)
+        for song in songs:
+            if not has_tag_on_song(song, "album_checked"):
                 lowered = song.artist.name.strip().lower()
-                print(lowered)
                 if "unknown" in lowered:
                     print("Song is off")
                     print(lowered)
