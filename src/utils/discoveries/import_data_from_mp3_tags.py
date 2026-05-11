@@ -154,7 +154,7 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
     for file in mp3_files:
         try:
             metadata = extract_mp3_metadata(file)
-            artist = resolve_artist(music_session, metadata["artist_name"], metadata["origin"])
+            artist = resolve_artist(music_session, metadata["artist_name"], metadata["origin"], metadata["title"])
             song, status = upsert_song(music_session, artist, metadata, mode)
 
             if status == "skipped":
@@ -175,7 +175,7 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
     print(f"\nDone! Added {added_count}, updated {updated_count}.")
 
 
-def resolve_artist(music_session, artist_name: str, origin: str | None = None) -> Artist:
+def resolve_artist(music_session, artist_name: str, origin: str | None = None, song_name: str = None) -> Artist:
     all_artists = music_session.query(Artist).all()
     matching_artists = [a for a in all_artists if a.name.lower() == artist_name.lower()]
 
@@ -216,7 +216,7 @@ def resolve_artist(music_session, artist_name: str, origin: str | None = None) -
         choices.append(questionary.Choice(title=label, value=artist))
 
     selected_artist = questionary.select(
-        f"Multiple artists found for '{artist_name}'. Choose the correct one:",
+        f"Multiple artists found for '{artist_name} - {song_name}'. Choose the correct one:",
         choices=choices
     ).ask()
 

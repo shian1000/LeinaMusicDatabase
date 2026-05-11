@@ -111,14 +111,21 @@ def open_file_browser_window():
         
         return None
 
-def pick_from_db_objects(entries_objects, question: str = "Pick one", style = None, back_label = "Back"):
+def pick_from_db_objects(entries_objects, question: str = "Pick one", additional_info = None, style = None, back_label = "Back"):
+
     if isinstance(entries_objects[0], Artist):
         entries_names = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
     else:
         entries_names = extract_db_object_info(entries_objects, f"{song_categories[1]}, {song_categories[0]}, {song_categories[2]}")
         entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
+
+    if additional_info:
+        entries_names = [f"{name[0]} ({', '.join(info)})" for name, info in zip(entries_names, additional_info)]
+    else:
+        entries_names = [item for t in entries_names for item in t]
+
     #Here I created and appended an index number to the list
-    entries_names = [item for t in entries_names for item in t]
+
     slog(entries_names)
 
     choices = [questionary.Choice(title=name, value=i) for i, name in enumerate(entries_names)]

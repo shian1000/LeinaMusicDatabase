@@ -5,6 +5,7 @@ import questionary
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
+from utils.text_utils import copy_to_clipboard
 
 
 def convert_characters_encoding(songs):
@@ -61,6 +62,7 @@ def seek_nonsense_album_names(songs):
     for song in songs:
         if not has_tag_on_song(song, "album_checked"):
             if(is_blacklisted_album(song.album)):
+                copy_to_clipboard(f"{song.artist.name} - {song.title}")
                 confirmation = questionary.confirm(f"'{song.album}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
                 if confirmation:
                     new_name = input("Enter new album name: ")

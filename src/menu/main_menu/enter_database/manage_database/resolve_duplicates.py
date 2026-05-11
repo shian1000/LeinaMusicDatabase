@@ -4,6 +4,7 @@ import questionary
 from utils.database.database_management import edit_db_entry
 from utils.text_utils import compare_strings
 from utils.database.database_sessions import get_global_database_sessions
+from utils.database.tags_management import has_tag_on_song
 
 def remove_duplicate_songs():
     """
@@ -51,10 +52,16 @@ def remove_duplicate_artists():
 
     for artist in all_artists:
         key = artist.name.lower()
+        key_origin = artist.origin
         if key in seen:
-            duplicates.append((seen[key], artist))
+            seen_origin = seen[key].origin.lower()
+            if key_origin == seen_origin or key_origin is None or seen_origin is None:
+                duplicates.append((seen[key], artist))
         else:
             seen[key] = artist
+
+
+
 
     if not duplicates:
         print("No duplicate artists found.")

@@ -16,6 +16,7 @@ CATEGORY_DB_FILTERS = {
     song_categories[3]: lambda w: Song.year == int(w),
     song_categories[4]: lambda w: func.lower(Song.language).contains(w.lower()),
     song_categories[5]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+    song_categories[7]: lambda w: Song.artist_id == int(w),
     search_only_categories[0]: lambda w: or_(
         func.lower(Song.title).contains(w.lower()),
         func.lower(Artist.name).contains(w.lower()),
@@ -29,6 +30,7 @@ CATEGORY_NORMALIZED_FIELDS = {
     song_categories[3]: lambda s: str(s.year) if s.year is not None else "",
     song_categories[4]: lambda s: normalize_text(s.language or ""),
     song_categories[5]: lambda s: normalize_text(s.artist.origin or ""),
+    song_categories[7]: lambda s: str(s.artist_id) if s.artist_id is not None else "",
     search_only_categories[0]: lambda s: (
         f"{normalize_text(s.title or '')} {normalize_text(s.artist.name or '')}"
     ),
@@ -89,6 +91,7 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
             song_categories[3]: lambda s: str(s.year),
             song_categories[4]: lambda s: s.language,
             song_categories[5]: lambda s: s.artist.origin,
+            song_categories[7]: lambda s: s.artist_id
         }
         if not category_list:
             category_list = [song_categories[1], song_categories[0]]
@@ -144,6 +147,10 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
 
 
 def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
+
+    if type(query) == int:
+        query = str(query)
+        
     slog(query)
     music_session, tag_session = get_global_database_sessions()
     base_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)

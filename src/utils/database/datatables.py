@@ -49,7 +49,8 @@ song_categories = [
     "year",
     "language",
     "artist origin",
-    "tag"
+    "tag",
+    "artist id"
 ]
 
 search_only_categories = [
@@ -58,6 +59,7 @@ search_only_categories = [
 
 artist_categories = [
     "artist name",
-    "artist origin"
+    "artist origin",
+    "artist id"
 ]
 

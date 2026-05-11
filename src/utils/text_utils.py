@@ -6,6 +6,7 @@ from utils.debug import slog
 import requests
 from difflib import SequenceMatcher
 from settings import settings
+import pyperclip
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""
@@ -55,12 +56,12 @@ _SPECIAL_REPLACEMENTS = {
 }
 
 def copy_to_clipboard(message: str):
-    root = tk.Tk()
-    root.withdraw()
-    root.clipboard_clear()
-    root.clipboard_append(message)
-    root.update
-    root.destroy
+    try:
+        pyperclip.copy(message)
+        return True
+    except pyperclip.PyperclipException as e:
+        print(f"Clipboard unavailable: {e}")
+        return False
 
 
 def normalize_text(s: str) -> str:

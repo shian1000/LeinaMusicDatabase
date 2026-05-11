@@ -4,10 +4,12 @@ from utils.database.database_getter import get_artists_from_db_session, extract_
 from utils.debug import slog, mlog
 from utils.database.database_sessions import submit_global_database_session, get_global_database_sessions
 from utils.database.database_management import merge_artists_in_db, divide_artist
-from utils.database.datatables import artist_categories, Song
+from utils.database.datatables import artist_categories, Song, song_categories
 from rich import print
 from questionary import Style
 from utils.menu_utils import pick_from_db_objects, ask_for_entires_list
+from utils.database.database_getter import get_songs_from_db_session
+from utils.database.tags_management import has_tag_on_song
 
 
 def merge_artists_menu(artist_objects = None):
@@ -17,14 +19,31 @@ def merge_artists_menu(artist_objects = None):
     q1 = ("Select the artist you want to merge to (stays in db)")
 
     if not artist_objects:
-        artists_objects = ask_for_entires_list(mode = "Artist", allow_one_result=False)
-        if not artists_objects:
+        artist_objects = ask_for_entires_list(mode = "Artist", allow_one_result=False)
+        if not artist_objects:
             return
-            
-    obj1 = pick_from_db_objects(artists_objects, question=q0, style=red)
+        
+
+    songs_names = []
+
+    for obj in artist_objects:
+        artists_songs = get_songs_from_db_session(song_categories[7], obj.id)
+        
+        this_artist_songs = []
+
+        for song in artists_songs:
+            this_artist_songs.append(song.title)
+
+        songs_names.append(this_artist_songs)
+
+    print(songs_names)
+
+
+
+    obj1 = pick_from_db_objects(artist_objects, question=q0, additional_info=songs_names, style=red)
     if not obj1:
         return
-    obj2 = pick_from_db_objects(artists_objects, question=q1, style=green)
+    obj2 = pick_from_db_objects(artist_objects, question=q1, additional_info=songs_names, style=green)
     if not obj1:
         return
     if obj1 == obj2:
