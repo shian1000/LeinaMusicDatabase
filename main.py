@@ -23,7 +23,7 @@ if __name__ == "__main__":
 #TODO Make settings for enabling fetchers. Maybe make them modular?
 #[X] Make blacklist external
 #[X] Czasem się kopiowanie do schowka rypie przy spell checking
-#TODO To prostackie, że dalej nie zapisuję deubug do pliku. Trzeba to zmienić
-#TODO Remove spellcheck and rubbish tags upon editting
-#TODO Poradzić coś na uknown artist
+#[X] To prostackie, że dalej nie zapisuję deubug do pliku. Trzeba to zmienić
+#[X] Remove spellcheck and rubbish tags upon editting
+#[X] Poradzić coś na uknown artist
 #[X] Rozdzielić Becka i becka

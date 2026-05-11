@@ -6,9 +6,13 @@ import time
 from utils.debug import slog
 from sqlalchemy import text
 from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
+from utils.database.tags_management import remove_tag_from_song
 
 
 def edit_db_entry(db_object, category: str, new_value: str):
+
+    remove_tag_from_song(db_object, "spellchecked")
+    remove_tag_from_song(db_object, "album_checked")
 
     #setup
     category = category.strip().lower()

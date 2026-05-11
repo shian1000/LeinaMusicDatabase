@@ -18,6 +18,17 @@ def _find_project_root() -> Path:
 PROJECT_ROOT = _find_project_root()
 DEBUG_ENABLED = (PROJECT_ROOT / ".debug").exists()
 
+DEBUG_TO_FILE_ENABLED = True
+DEBUG_LOG_FILE = PROJECT_ROOT / "debug.log"
+
+def _write_to_log(message: str) -> None:
+    try:
+        with DEBUG_LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(message + "\n")
+    except Exception:
+        pass
+
+
 
 def slog(var: Any = None, name: Optional[str] = None) -> None:
     if not DEBUG_ENABLED:
@@ -50,7 +61,11 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
     if name is None:
         name = "<unknown>"
 
-    print(f"***Debug*** [{file_info}] {name} ({type(var).__name__}): {repr(var)}")
+    message = f"***Debug*** [{file_info}] {name} ({type(var).__name__}): {repr(var)}"
+    print(message)
+
+    if DEBUG_TO_FILE_ENABLED:
+        _write_to_log(message)
 
 def mlog(message: str):
     if not DEBUG_ENABLED:
