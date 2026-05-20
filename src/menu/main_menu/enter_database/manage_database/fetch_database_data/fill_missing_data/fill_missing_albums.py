@@ -6,6 +6,7 @@ from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.selenium_sessions import open_global_driver, close_global_driver
 from utils.discoveries.discoveries_manager import discover_album_name, load_discovery_modules
+from utils.common.text_utils import copy_to_clipboard
 
 def fill_missing_albums():
     category = "album"

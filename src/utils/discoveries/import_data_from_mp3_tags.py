@@ -18,6 +18,8 @@ import time
 from settings import settings
 from utils.common.debug import slog
 
+import unicodedata
+
 
 
 def setup_sessions():
@@ -60,6 +62,10 @@ def extract_mp3_metadata(file: Path) -> dict:
         "origin": origin,
     }
 
+def normalize_title(title: str) -> str:
+    title = unicodedata.normalize("NFC", title)
+    title = title.strip().lower()
+    return title
 
 def upsert_song(music_session, artist, metadata: dict, mode: str):
     title = metadata["title"]
@@ -74,13 +80,15 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
         Song.artist_id == artist.id
     ).all()
 
-    slog(f"Looking for title: '{title}' (lower: '{title.lower()}')")
+    normalized_title = normalize_title(title)
+
+    slog(f"Looking for title: '{title}' (normalized: '{normalized_title}')")
     slog(f"Songs in DB for artist_id={artist.id}:")
     for s in songs:
-        print(f"    - '{s.title}' (lower: '{s.title.lower()}') | match: {s.title.lower() == title.lower()}")
+        print(f"    - '{s.title}' (normalized: '{normalize_title(s.title)}') | match: {normalize_title(s.title) == normalized_title}")
 
     song = next(
-        (s for s in songs if s.title.lower() == title.lower()),
+        (s for s in songs if normalize_title(s.title) == normalized_title),
         None
     )
 

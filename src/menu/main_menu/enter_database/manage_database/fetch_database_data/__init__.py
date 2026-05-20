@@ -3,6 +3,7 @@ from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
 from utils.ui.menu_utils import open_file_browser_terminal
+from menu.song_actions.edit_songs import edit_songs_menu
 from settings import settings
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
@@ -16,9 +17,10 @@ def import_data():
         slog(imported_songs)
         imported_songs_objects = []
         for song in imported_songs:
-            imported_songs.append(get_songs_from_db_session("name", f"{song["artist_name"]} {song["title"]}"))
+            imported_songs_objects.extend(get_songs_from_db_session("name", f"{song['artist_name']} {song['title']}"))
         print(imported_songs_objects)
         display_songs(imported_songs_objects)
+        edit_songs_menu(imported_songs_objects)
     
 
 
