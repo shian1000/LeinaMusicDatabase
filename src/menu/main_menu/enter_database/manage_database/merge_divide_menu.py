@@ -1,13 +1,13 @@
 import questionary
 import time
 from utils.database.database_getter import get_artists_from_db_session, extract_db_object_info
-from utils.debug import slog, mlog
+from utils.common.debug import slog, mlog
 from utils.database.database_sessions import submit_global_database_session, get_global_database_sessions
 from utils.database.database_management import merge_artists_in_db, divide_artist
 from utils.database.datatables import artist_categories, Song, song_categories
 from rich import print
 from questionary import Style
-from utils.menu_utils import pick_from_db_objects, ask_for_entires_list
+from utils.ui.menu_utils import pick_from_db_objects, ask_for_entires_list
 from utils.database.database_getter import get_songs_from_db_session
 from utils.database.tags_management import has_tag_on_song
 

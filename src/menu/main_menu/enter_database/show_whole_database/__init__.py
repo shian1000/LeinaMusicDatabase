@@ -1,6 +1,6 @@
-from utils.menu_utils import execute_menu_item
-from utils.debug import slog
-from utils.display_utils import display_songs, display_songs_with_tags, display_artists
+from utils.ui.menu_utils import execute_menu_item
+from utils.common.debug import slog
+from utils.ui.display_utils import display_songs, display_songs_with_tags, display_artists
 from utils.database.database_getter import get_songs_from_db_session, get_artists_from_db_session
 
 def show_artists():

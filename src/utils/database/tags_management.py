@@ -1,6 +1,6 @@
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tag_db_manager import Tag, SongTag
-from utils.debug import slog
+from utils.common.debug import slog
 
 
 def add_tag_to_song(song, tag: str) -> bool:

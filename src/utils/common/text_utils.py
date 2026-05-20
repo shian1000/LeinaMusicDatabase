@@ -2,11 +2,12 @@ import re
 import unicodedata
 from typing import Optional
 import tkinter as tk
-from utils.debug import slog
+from utils.common.debug import slog
 import requests
 from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
+import time
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""
@@ -147,7 +148,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     Queries MusicBrainz to verify/correct spelling.
     Includes fallback logic and extensive logging.
     """
-    
+
     def similarity(a, b):
         a_norm = normalize_japanese_title(a)
         b_norm = normalize_japanese_title(b)
@@ -166,13 +167,35 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     
     headers = {"User-Agent": "MyMusicApp/1.0.0 ( contact@example.com )"}
 
-    def perform_search(q):
+    def perform_search(q, retries=3, backoff=5):
         params = {"query": q, "limit": 20, "fmt": "json"}
         slog(f"Attempting MB Query: {q}")
-        resp = requests.get(url, params=params, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("recordings", [])
+
+        for attempt in range(1, retries + 1):
+            try:
+                resp = requests.get(url, params=params, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                return data.get("recordings", [])
+
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code if e.response is not None else None
+                if status in (429, 503) and attempt < retries:
+                    wait = backoff * attempt
+                    slog(f"HTTP {status} on attempt {attempt}/{retries}, retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    slog(f"HTTP error after {attempt} attempt(s): {e}")
+                    return []
+
+            except requests.exceptions.RequestException as e:
+                slog(f"Request failed on attempt {attempt}/{retries}: {e}")
+                if attempt < retries:
+                    time.sleep(backoff * attempt)
+                else:
+                    return []
+
+        return []
 
     recordings = perform_search(primary_query)
     slog(f"Primary results count: {len(recordings)}")

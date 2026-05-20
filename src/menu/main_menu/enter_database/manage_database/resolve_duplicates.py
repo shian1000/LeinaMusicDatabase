@@ -2,7 +2,7 @@ from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
 import questionary
 from utils.database.database_management import edit_db_entry
-from utils.text_utils import compare_strings
+from utils.common.text_utils import compare_strings
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 

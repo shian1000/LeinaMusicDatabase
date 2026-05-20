@@ -1,14 +1,14 @@
-from utils.menu_utils import execute_menu_item
-from utils.debug import slog, mlog
+from utils.ui.menu_utils import execute_menu_item
+from utils.common.debug import slog, mlog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
 from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists, resolve_duplicated_albums
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu, divide_artists_menu
 import time
 from menu.main_menu.enter_database.manage_database.get_rid_of_rubish_data import get_rid_of_rubish_data
-from utils.text_utils import check_spelling
+from utils.common.text_utils import check_spelling
 from utils.database.database_getter import get_songs_from_db_session
-from utils.display_utils import display_songs
+from utils.ui.display_utils import display_songs
 import questionary
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song

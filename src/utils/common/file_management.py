@@ -1,11 +1,14 @@
 from src.settings import settings
 from upath import UPath
 from pathlib import Path
-from utils.debug import slog
+from utils.common.debug import slog
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 import sys
+import re
+import unicodedata
+from rapidfuzz import fuzz
 
 def save_string_to_file(text: str) -> str:
     """
@@ -69,18 +72,53 @@ def create_temp_index():
     local_index.write_bytes(index_file.read_bytes())
     return local_index
 
+
+def normalize(s, strip_apostrophe=True):
+    s = unicodedata.normalize('NFKD', s)
+    s = s.lower()
+    if strip_apostrophe:
+        s = re.sub(r"[''`´ʼʻ＇\u2018\u2019\u201a\u201b\u2032\u2035]", '', s)
+    else:
+        s = re.sub(r"[''`´ʼʻ＇\u2018\u2019\u201a\u201b\u2032\u2035]", ' ', s)
+    s = re.sub(r'[-_.]', ' ', s)
+    s = re.sub(r'[()]', '', s)
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+def fuzzy_match(a, b):
+    """Check if two strings match under either apostrophe strategy, or are close enough."""
+    for strip in [True, False]:
+        na, nb = normalize(a, strip), normalize(b, strip)
+        if na == nb:
+            return True
+        if fuzz.ratio(na, nb) >= 90:  # 90% similarity threshold
+            return True
+    return False
+
+
 def query_database(engine, query):
+    slog(query)
 
     sql, params = query
-    with Session(engine) as session:
-        result = session.execute(sql, params).fetchone()
+    artist = params["artist"]
+    title = params["title"]
 
-    if result:
-        return result[0]
-    else:
-        return None
+    sql = text("SELECT path, artist, title FROM files WHERE LOWER(artist) LIKE :artist_first_char")
+
+    with Session(engine) as session:
+        candidates = session.execute(sql, {"artist_first_char": normalize(artist)[0] + '%'}).fetchall()
+
+    for row in candidates:
+        if fuzzy_match(artist, row.artist) and fuzzy_match(title, row.title):
+            slog(row.path)
+            return row.path
+
+    slog(f"No result for {artist} - {title}")
+    return None
 
 def copy_file_to_destination(source, destination):
+    slog(source)
+    slog(destination)
     if source.startswith("\\\\"):
         unc_path = source.replace("\\\\", "\\").replace("\\", "/").lstrip("/")
         smb_url = "smb://" + unc_path
@@ -115,11 +153,14 @@ def copy_songs_using_index(
 
     with engine.connect():
         for artist, title in songs:
-            query = (text("SELECT path FROM files WHERE artist = :artist AND title = :title"),
-                    {"artist": artist, "title": title})
-            
+            query = (text("SELECT path FROM files WHERE LOWER(artist) = :artist AND LOWER(title) = :title"),
+                    {"artist": normalize(artist), "title": normalize(title)})
+
             path_from_db = query_database(engine, query)
-            copy_file_to_destination(path_from_db, paste_destination)
+            if not path_from_db:
+                print(f"Couldn't find {query[1]}. Skipping")
+            else:
+                copy_file_to_destination(path_from_db, paste_destination)
 
     engine.dispose()
 

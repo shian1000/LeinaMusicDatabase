@@ -6,9 +6,9 @@ import time
 from utils.discoveries.discoveries_manager import discover_album_name, load_discovery_modules
 from utils.database.database_getter import get_songs_from_db_session
 from utils.database.database_sessions import open_and_set_global_database_sessions
-from utils.debug import slog
+from utils.common.debug import slog
 from menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
-from utils.file_management import copy_file_to_destination
+from utils.common.file_management import copy_file_to_destination
 from upath import UPath
 
 def test():

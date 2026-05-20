@@ -1,12 +1,13 @@
 from utils.database.database_getter import get_songs_from_db_session
-from utils.text_utils import is_blacklisted_album
+from utils.common.text_utils import is_blacklisted_album
 import time
 import questionary
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
-from utils.text_utils import copy_to_clipboard
+from utils.common.text_utils import copy_to_clipboard
 from utils.database.datatables import song_categories, artist_categories
+from utils.common.debug import slog
 
 
 def convert_characters_encoding(songs):
@@ -75,14 +76,27 @@ def resolve_unknown_artist(songs):
         new_artist = ""
         for song in songs:
             if not has_tag_on_song(song, "album_checked"):
-                lowered = song.artist.name.strip().lower()
-                if "unknown" in lowered:
-                    print("Song is off")
-                    print(lowered)
-                    if " - " in lowered:
-                        new_artist, new_title = lowered.split(" - ", 1)
-                    edit_db_entry(song, song_categories[1], new_artist)
-                    edit_db_entry(song, song_categories[0], new_title)
+                lowered_artist = song.artist.name.strip().lower()
+                lowered_title = song.title.strip().lower()
+                print(lowered_artist)
+                print(lowered_title)
+                if "abba" in (lowered_title):
+                    print(f"artist is {lowered_artist}")
+                    input("Abba")
+                if "unknown" in lowered_artist or not lowered_artist:
+                    print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
+                    if " - " in lowered_artist:
+                        new_artist, new_title = lowered_artist.split(" - ", 1)
+                    elif " - " in lowered_title:
+                        new_artist, new_title = lowered_title.split(" - ", 1)
+                    if new_artist:
+                        if new_artist is not "":
+                            input(f"editting entry of a song (song is {song.artist.name} - {song.title} [song_id is {song.id}]). New artist name = {new_artist}. Press anything to continue")
+                            edit_db_entry(song, song_categories[1], new_artist)
+                    if new_title:
+                        if new_title is not "":
+                            edit_db_entry(song, song_categories[0], new_title)
+                            input(f"editting entry of a song (song is {song.artist.name} - {song.title} [song_id is {song.id}]). New title = {new_title}. Press anything to continue")
 
                  
 

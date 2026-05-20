@@ -1,5 +1,5 @@
-from utils.menu_utils import execute_menu_item
-from utils.debug import slog
+from utils.ui.menu_utils import execute_menu_item
+from utils.common.debug import slog
 from menu.main_menu.enter_database.fetch_songs import fetch_songs
 from menu.main_menu.enter_database.manage_database import manage_database
 from menu.main_menu.enter_database.show_whole_database import show_whole_database

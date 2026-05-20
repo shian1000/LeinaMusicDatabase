@@ -1,10 +1,10 @@
-from utils.debug import slog
+from utils.common.debug import slog
 from utils.database.database_getter import get_songs_from_db_session
 import questionary
 from utils.database.datatables import song_categories, search_only_categories
 from menu.song_actions import song_actions
-from utils.menu_utils import clear_screen
-from utils.display_utils import display_songs
+from utils.ui.menu_utils import clear_screen
+from utils.ui.display_utils import display_songs
 import time
 from utils.database.database_sessions import submit_global_database_session
 

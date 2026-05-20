@@ -1,8 +1,8 @@
-from utils.text_utils import truncate_at_word
+from utils.common.text_utils import truncate_at_word
 import importlib.util
 import sys
 from pathlib import Path
-from utils.debug import slog
+from utils.common.debug import slog
 
 def load_discovery_modules():
     current_dir = Path(__file__).parent

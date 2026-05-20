@@ -1,5 +1,5 @@
-from utils.menu_utils import execute_menu_item
-from utils.debug import slog
+from utils.ui.menu_utils import execute_menu_item
+from utils.common.debug import slog
 
 def manage_local_files():
     action_map = {

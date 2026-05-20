@@ -1,5 +1,5 @@
-from utils.debug import slog
-from utils.menu_utils import execute_menu_item
+from utils.common.debug import slog
+from utils.ui.menu_utils import execute_menu_item
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_albums import fill_missing_albums
 
 def fill_missing_data():

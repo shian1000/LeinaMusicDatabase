@@ -29,3 +29,7 @@ documentation/QUICK_REFERENCE.md
 documentation/QUICK_SUMMARY.md
 documentation/README_DOCUMENTATION.md
 import
+src/old/create_yt_playlist.py
+src/old/import_from_txt.py
+src/old/yt_cache.py
+data/songs.txt

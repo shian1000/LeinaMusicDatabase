@@ -1,7 +1,8 @@
 from upath import UPath
 import questionary
-from utils.file_management import copy_songs_using_index, get_proper_uri
-from utils.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
+from utils.common.file_management import copy_songs_using_index, get_proper_uri
+from utils.ui.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
+from utils.common.debug import slog
 
 
 def copy_songs_from_storage(songs):
@@ -10,7 +11,16 @@ def copy_songs_from_storage(songs):
     index_file_str = (f"{source_path_str}.mp3_index.sqlite3")
     index_file = UPath(index_file_str)
 
-    if not (index_file.exists()):
+    # Check index existence but guard against remote filesystem/network errors (SMB, fsspec, etc.)
+    try:
+        index_exists = index_file.exists()
+    except Exception as e:
+        # Log detailed debug info and show a friendly warning to the user. Don't crash the app.
+        slog(e, "copy_songs_from_storage - index existence check failed")
+        print("Warning: Could not reach the storage to check for an index file. The operation will be aborted.")
+        return "Back"
+
+    if not index_exists:
         choice = questionary.select("Index file not found. Would you like to create an index before proceeding further?", choices=["Yes", "No"]).ask()
 
         if choice == "No":
@@ -39,10 +49,17 @@ def copy_songs_from_storage(songs):
 
     save_recent_dirs(str(paste_destination))
 
-    if (index_file.exists()):
-        copy_songs_using_index(songs, index_file, paste_destination)
-    else:
-        print("TODO - operating without using index")
+    slog(songs)
+
+    try:
+        if index_exists and index_file.exists():
+            copy_songs_using_index(songs, index_file, paste_destination)
+        else:
+            print("TODO - operating without using index")
+    except Exception as e:
+        slog(e, "copy_songs_from_storage - copy operation failed")
+        print("Warning: Copy operation failed due to storage/network error. Returning to menu.")
+        return "Back"
 
     return "Back"
 

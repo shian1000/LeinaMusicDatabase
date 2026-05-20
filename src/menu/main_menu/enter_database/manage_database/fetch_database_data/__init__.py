@@ -1,8 +1,8 @@
-from utils.menu_utils import execute_menu_item
-from utils.debug import slog
+from utils.ui.menu_utils import execute_menu_item
+from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
-from utils.menu_utils import open_file_browser_terminal
+from utils.ui.menu_utils import open_file_browser_terminal
 from settings import settings
 
 def import_data():

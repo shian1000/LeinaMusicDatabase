@@ -8,7 +8,7 @@ from sqlalchemy import func
 from settings import Settings
 from utils.database.datatables import Base, Song, Artist
 import time
-from utils.debug import slog, mlog
+from utils.common.debug import slog, mlog
 
 # --------------------
 # Engine & Session
@@ -24,6 +24,24 @@ SessionLocal = sessionmaker(bind=ENGINE)
 mlog("Music DB Manager")
 slog(SessionLocal)
 
+
+# --------------------
+# Custom Exceptions
+# --------------------
+
+class DatabaseError(Exception):
+    """Base exception for database operations."""
+    pass
+
+
+class ArtistNotFoundError(DatabaseError):
+    """Raised when an artist is not found in the database."""
+    pass
+
+
+class SongNotFoundError(DatabaseError):
+    """Raised when a song is not found in the database."""
+    pass
 
 
 # --------------------
@@ -44,93 +62,124 @@ def get_music_session():
     """
     return SessionLocal()
 
-def rename_artist(old_name: str, new_name: str):
+def rename_artist(old_name: str, new_name: str) -> None:
     """
     Rename an artist in music.db (case-insensitive lookup).
+    
+    Args:
+        old_name: Current artist name to find
+        new_name: New artist name to set
+    
+    Raises:
+        ArtistNotFoundError: If artist with old_name is not found
+        ValueError: If new_name is identical to old_name
     """
     session = get_music_session()
 
-    artist = (
-        session.query(Artist)
-        .filter(func.lower(Artist.name) == old_name.lower())
-        .first()
-    )
+    try:
+        artist = (
+            session.query(Artist)
+            .filter(func.lower(Artist.name) == old_name.lower())
+            .first()
+        )
 
-    if not artist:
+        if not artist:
+            raise ArtistNotFoundError(f"Artist '{old_name}' not found in database.")
+
+        if artist.name == new_name:
+            raise ValueError(f"Artist is already named '{new_name}'. No changes needed.")
+
+        artist.name = new_name
+        session.commit()
+        slog(f"✓ Renamed artist '{old_name}' → '{new_name}'")
+
+    finally:
         session.close()
-        print(f"❌ Artist '{old_name}' not found.")
-        return
-
-    if artist.name == new_name:
-        session.close()
-        print(f"ℹ️ Artist name is already '{new_name}'. No changes made.")
-        return
-
-    artist.name = new_name
-    session.commit()
-    session.close()
-
-    print(f"✏️ Renamed artist '{old_name}' → '{new_name}'.")
 
 
-def delete_artist_and_songs(artist_name: str):
+def delete_artist_and_songs(artist_name: str) -> int:
     """
     Delete an artist and ALL their songs from music.db.
+    
+    WARNING: This operation is permanent and cannot be undone.
+    
+    Args:
+        artist_name: Name of artist to delete (case-insensitive)
+    
+    Returns:
+        int: Number of songs that were deleted
+    
+    Raises:
+        ArtistNotFoundError: If artist is not found
     """
     session = get_music_session()
 
-    artist = session.query(Artist).filter(func.lower(Artist.name) == artist_name).first()
-    if not artist:
+    try:
+        artist = (
+            session.query(Artist)
+            .filter(func.lower(Artist.name) == artist_name.lower())
+            .first()
+        )
+        
+        if not artist:
+            raise ArtistNotFoundError(f"Artist '{artist_name}' not found in database.")
+
+        # Delete songs first
+        deleted_songs = (
+            session.query(Song)
+            .filter(Song.artist_id == artist.id)
+            .delete(synchronize_session=False)
+        )
+
+        # Delete artist
+        session.delete(artist)
+        session.commit()
+        
+        slog(f"✓ Deleted artist '{artist_name}' and {deleted_songs} songs")
+        return deleted_songs
+
+    finally:
         session.close()
-        print(f"❌ Artist '{artist_name}' not found.")
-        return
 
-    # Delete songs first
-    deleted_songs = (
-        session.query(Song)
-        .filter(Song.artist_id == artist.id)
-        .delete(synchronize_session=False)
-    )
 
-    # Delete artist
-    session.delete(artist)
-    session.commit()
-    session.close()
-
-    print(f"🗑️ Deleted artist '{artist_name}' and {deleted_songs} songs.")
-
-def delete_song(song_title: str, artist_name: str):
+def delete_song(song_title: str, artist_name: str) -> None:
     """
     Delete a song by title and artist name (case-insensitive).
+    
+    WARNING: This operation is permanent and cannot be undone.
+    
+    Args:
+        song_title: Title of song to delete
+        artist_name: Name of artist (case-insensitive)
+    
+    Raises:
+        SongNotFoundError: If song is not found
     """
     session = get_music_session()
 
-    song = (
-        session.query(Song)
-        .join(Artist)
-        .filter(
-            func.lower(Song.title) == song_title.lower(),
-            func.lower(Artist.name) == artist_name.lower(),
+    try:
+        song = (
+            session.query(Song)
+            .join(Artist)
+            .filter(
+                func.lower(Song.title) == song_title.lower(),
+                func.lower(Artist.name) == artist_name.lower(),
+            )
+            .first()
         )
-        .first()
-    )
 
-    print("DEBUG", song)
+        if not song:
+            raise SongNotFoundError(
+                f"Song '{song_title}' by '{artist_name}' not found in database."
+            )
 
-    if not song:
+        session.delete(song)
+        session.commit()
+        slog(f"✓ Deleted song '{song_title}' by '{artist_name}'")
+
+    finally:
         session.close()
-        print(
-            f"❌ Song '{song_title}' by '{artist_name}' not found."
-        )
-        return
 
-    session.delete(song)
-    session.commit()
-    session.close()
-
-    print(
-        f"🗑️ Deleted song '{song_title}' by '{artist_name}'."
-    )
 
 
 

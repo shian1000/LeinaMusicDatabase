@@ -16,7 +16,7 @@ from sqlalchemy import func
 
 import time
 from settings import settings
-from utils.debug import slog
+from utils.common.debug import slog
 
 
 
