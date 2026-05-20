@@ -1,9 +1,9 @@
 import questionary
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.common.debug import slog
-from utils.database.database_sessions import open_database_sessions, get_global_database_sessions, submit_global_database_session
+from utils.database.database_sessions import open_database_sessions, submit_global_database_session
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session, extract_db_object_info
-from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object, ask_for_entires_list
+from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object
 from utils.database.database_management import edit_db_entry, delete_db_entry
 import time
 
@@ -75,9 +75,6 @@ def edit_entry_menu(mode: str = None, db_object = None):
     edit_db_entry(db_object, category, new_data)
     submit_global_database_session()
             
-
-
-
 
 def remove_song_menu(mode: str = None):
     sessions = open_database_sessions()

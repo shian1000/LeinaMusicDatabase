@@ -4,18 +4,19 @@ This module provides functions to display database objects (Songs, Artists)
 in formatted tables using the rich library.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Tuple, Any, Dict
 from rich.console import Console
 from rich.table import Table
 from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, text
+from sqlalchemy.orm import Session
 from utils.common.debug import slog
 from utils.database.database_sessions import get_global_database_sessions
 
 
-def _create_table(title: str, columns: List[tuple]) -> Table:
+def _create_table(title: str, columns: List[Tuple[str, Optional[str], Optional[str]]]) -> Table:
     """
     Create a formatted Rich table with specified columns.
     
@@ -27,9 +28,9 @@ def _create_table(title: str, columns: List[tuple]) -> Table:
     Returns:
         Table: Configured Rich Table object ready for data rows
     """
-    table = Table(title=title)
+    table: Table = Table(title=title)
     for name, style, justify in columns:
-        kwargs = {}
+        kwargs: Dict[str, str] = {}
         if style:
             kwargs["style"] = style
         if justify:
@@ -49,9 +50,9 @@ def display_songs(songs: Optional[List[Song]]) -> None:
     if not songs:
         return
     
-    console = Console()
+    console: Console = Console()
 
-    table = _create_table("Music Library", [
+    table: Table = _create_table("Music Library", [
         ("Artist", "cyan", None),
         ("Title", "magenta", None),
         ("Album", "green", None),
@@ -91,18 +92,19 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     if not artists:
         return
     
-    console = Console()
+    console: Console = Console()
 
-    table = _create_table("Music Library", [
+    table: Table = _create_table("Music Library", [
         ("Name", "cyan", None),
         ("Songs", None, None),
         ("Origin", None, None),
     ])
 
+    music_session: Session
     music_session, _ = get_global_database_sessions()
 
     for artist in artists:
-        songs_count = music_session.execute(
+        songs_count: int = music_session.execute(
             text("SELECT COUNT(*) FROM songs WHERE artist_id = :artist_id"),
             {"artist_id": artist.id}
         ).scalar()
@@ -126,6 +128,8 @@ def display_songs_with_tags(songs: List[Song]) -> None:
         songs: List of Song objects to display (currently unused,
                all songs are queried from database)
     """
+    music_session: Session
+    tag_session: Session
     music_session, tag_session = get_global_database_sessions()
     console = Console()
 

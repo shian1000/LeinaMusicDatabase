@@ -1,12 +1,12 @@
-from utils.selenium_sessions import get_global_driver
+from utils.common.selenium_sessions import get_global_driver
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
-from utils.debug import slog
-from utils.text_utils import remove_brackets, is_blacklisted_album
+from utils.common.debug import slog
+from utils.common.text_utils import remove_brackets, is_blacklisted_album
 from difflib import SequenceMatcher
 
 def slugify(text: str) -> str:

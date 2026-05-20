@@ -4,9 +4,9 @@ import re
 import time
 from bs4 import BeautifulSoup
 
-from utils.debug import slog
-from utils.text_utils import is_blacklisted_album
-from utils.file_management import save_string_to_file
+from utils.common.debug import slog
+from utils.common.text_utils import is_blacklisted_album
+from utils.common.file_management import save_string_to_file
 
 
 # ---------------------------------------------------------------------------

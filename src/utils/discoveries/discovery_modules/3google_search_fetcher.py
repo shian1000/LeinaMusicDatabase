@@ -4,8 +4,8 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from utils.selenium_sessions import get_global_driver
-from utils.debug import slog
+from utils.common.selenium_sessions import get_global_driver
+from utils.common.debug import slog
 import time
 from utils.database.database_getter import get_songs_from_db_session
 

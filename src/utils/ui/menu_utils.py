@@ -4,7 +4,7 @@ This module provides tools for creating interactive menus, file browsing,
 and selecting from database objects.
 """
 
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union, Any
 import questionary
 import os
 from upath import UPath
@@ -31,7 +31,7 @@ def load_recent_dirs() -> list[str]:
     Returns:
         list[str]: List of recent directory paths, empty if file doesn't exist
     """
-    recent_file = UPath(RECENT_DIRS_FILE)
+    recent_file: UPath = UPath(RECENT_DIRS_FILE)
     if not recent_file.exists():
         return []
     return json.loads(recent_file.read_text())
@@ -47,12 +47,12 @@ def save_recent_dirs(new_dir: str) -> None:
     Args:
         new_dir: Directory path to add to recent list
     """
-    dirs = load_recent_dirs()
+    dirs: list[str] = load_recent_dirs()
     if new_dir in dirs:
         dirs.remove(new_dir)
     dirs.insert(0, new_dir)
     dirs = dirs[:MAX_RECENT_DIRS]
-    recent_file = UPath(RECENT_DIRS_FILE)
+    recent_file: UPath = UPath(RECENT_DIRS_FILE)
     recent_file.write_text(json.dumps(dirs, indent=2))
 
 
@@ -67,7 +67,7 @@ def clear_screen() -> None:
 
 def execute_menu_item(
     prompt: str, 
-    action_map: Dict[str, Callable[[], None]], 
+    action_map: Dict[str, Callable[[], Optional[str]]], 
     exit_label: str = "Back", 
     one_time: bool = False
 ) -> None:
@@ -81,8 +81,8 @@ def execute_menu_item(
         one_time: If True, exit after first action (default: False)
     """
     clear_screen()
-    choices = list(action_map.keys()) + [exit_label]
-    running = True
+    choices: list[str] = list(action_map.keys()) + [exit_label]
+    running: bool = True
 
     while running:
         choice: Optional[str] = questionary.select(prompt, choices=choices).ask()
@@ -90,12 +90,13 @@ def execute_menu_item(
             clear_screen()
             break
 
-        action = action_map.get(choice)
+        action: Optional[Callable[[], Optional[str]]] = action_map.get(choice)
         if action:
-            action_name = action()
+            action_name: Optional[str] = action()
             if action_name == exit_label or one_time:
                 running = False
                 break
+
 
 
 def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
@@ -116,26 +117,27 @@ def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
 
     current_path = os.path.abspath(current_path)
     
-    subdirs = sorted([
+    subdirs: list[str] = sorted([
         d for d in os.listdir(current_path) 
         if os.path.isdir(os.path.join(current_path, d)) and not d.startswith(".")
     ])
     
-    options = [FILE_BROWSER_SELECT_OPTION, FILE_BROWSER_BACK_OPTION] + subdirs
-    title = f"{DEFAULT_FILE_BROWSER_QUESTION}\nCurrent Path: {current_path}"
+    options: list[str] = [FILE_BROWSER_SELECT_OPTION, FILE_BROWSER_BACK_OPTION] + subdirs
+    title: str = f"{DEFAULT_FILE_BROWSER_QUESTION}\nCurrent Path: {current_path}"
 
-    option = questionary.select(title, options).ask()
+    option: Optional[str] = questionary.select(title, options).ask()
     
     if option == FILE_BROWSER_SELECT_OPTION:
         return UPath(current_path)
     
     elif option == FILE_BROWSER_BACK_OPTION:
-        parent_dir = os.path.dirname(current_path)
+        parent_dir: str = os.path.dirname(current_path)
         return UPath(open_file_browser_terminal(parent_dir))
     
     else:
-        new_path = os.path.join(current_path, option)
+        new_path: str = os.path.join(current_path, option)
         return UPath(open_file_browser_terminal(new_path))
+
 
 
 
@@ -157,14 +159,14 @@ def open_file_browser_window() -> Optional[str]:
         return None
 
     try:
-        root = tk.Tk()
+        root: tk.Tk = tk.Tk()
         root.withdraw()
         try:
             root.attributes("-topmost", True)
         except Exception:
             pass
 
-        path = filedialog.askopenfilename()
+        path: str = filedialog.askopenfilename()
         root.destroy()
         
         if path:
@@ -178,12 +180,12 @@ def open_file_browser_window() -> Optional[str]:
 
 
 def pick_from_db_objects(
-    entries_objects: list,
+    entries_objects: list[Union[Song, Artist]],
     question: str = DEFAULT_MENU_PICK_QUESTION,
-    additional_info: Optional[list] = None,
-    style = None,
+    additional_info: Optional[list[tuple[str, ...]]] = None,
+    style: Any = None,
     back_label: str = DEFAULT_MENU_BACK_LABEL
-) -> Optional[object]:
+) -> Optional[Union[Song, Artist]]:
     """
     Display interactive menu to select a database object.
     
@@ -202,7 +204,7 @@ def pick_from_db_objects(
         Optional: Selected database object, or None if user selects back
     """
     if isinstance(entries_objects[0], Artist):
-        entries_names = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
+        entries_names: list[tuple] = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
     else:
         entries_names = extract_db_object_info(
             entries_objects,
@@ -210,23 +212,24 @@ def pick_from_db_objects(
         )
         entries_names = [(f"{song[0]} - {song[1]} ({song[2]})",) for song in entries_names]
 
+    display_names: list[str]
     if additional_info:
-        entries_names = [
+        display_names = [
             f"{name[0]} ({', '.join(info)})"
             for name, info in zip(entries_names, additional_info)
         ]
     else:
-        entries_names = [item for t in entries_names for item in t]
+        display_names = [item for t in entries_names for item in t]
 
-    slog(entries_names)
+    slog(display_names)
 
-    choices = [
+    choices: list[questionary.Choice] = [
         questionary.Choice(title=name, value=i)
-        for i, name in enumerate(entries_names)
+        for i, name in enumerate(display_names)
     ]
     choices.append(questionary.Choice(title=back_label, value=DIALOG_NO_RESULT))
     
-    sel_obj_index = questionary.select(question, choices=choices, style=style).ask()
+    sel_obj_index: Optional[int] = questionary.select(question, choices=choices, style=style).ask()
     slog(sel_obj_index)
 
     if sel_obj_index == DIALOG_NO_RESULT:
@@ -235,7 +238,7 @@ def pick_from_db_objects(
     return entries_objects[sel_obj_index]
 
 
-def get_list_of_properties_from_db_object(db_object) -> Optional[list]:
+def get_list_of_properties_from_db_object(db_object: Union[Song, Artist]) -> Optional[list[Any]]:
     """
     Extract properties from a database object as a list.
     
@@ -248,7 +251,7 @@ def get_list_of_properties_from_db_object(db_object) -> Optional[list]:
     Returns:
         Optional[list]: List of properties, or None if invalid object type
     """
-    properties_list = []
+    properties_list: list[Any] = []
     if isinstance(db_object, Artist):
         properties_list.append(db_object.name)
         properties_list.append(db_object.origin)
@@ -273,7 +276,7 @@ def ask_for_entires_list(
     question: str = "What query do you wish to search for: ",
     allow_no_results: bool = False,
     allow_one_result: bool = True
-) -> Optional[list]:
+) -> Optional[list[Artist]]:
     """
     Prompt user for input and search for database objects.
     

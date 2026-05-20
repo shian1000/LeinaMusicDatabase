@@ -12,6 +12,7 @@ import ast
 import sys
 import traceback
 from datetime import datetime
+from types import TracebackType
 
 
 def _find_project_root() -> Path:
@@ -36,14 +37,14 @@ def _find_project_root() -> Path:
     return p
 
 
-PROJECT_ROOT = _find_project_root()
-DEBUG_ENABLED = (PROJECT_ROOT / ".debug").exists()
+PROJECT_ROOT: Path = _find_project_root()
+DEBUG_ENABLED: bool = (PROJECT_ROOT / ".debug").exists()
 
-DEBUG_TO_FILE_ENABLED = True
-DEBUG_LOG_FILE = PROJECT_ROOT / "debug.log"
+DEBUG_TO_FILE_ENABLED: bool = True
+DEBUG_LOG_FILE: Path = PROJECT_ROOT / "debug.log"
 
 
-def _handle_exception(exc_type, exc_value, exc_tb) -> None:
+def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Optional[TracebackType]) -> None:
     """
     Global exception handler for uncaught exceptions.
     
@@ -110,22 +111,22 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
     if not DEBUG_ENABLED and not DEBUG_TO_FILE_ENABLED:
         return
 
-    file_info = "unknown:0"
+    file_info: str = "unknown:0"
 
     try:
         frame = inspect.currentframe()
         if frame is not None:
             caller = frame.f_back
             if caller is not None:
-                filename = Path(caller.f_code.co_filename).name
-                lineno = caller.f_lineno
+                filename: str = Path(caller.f_code.co_filename).name
+                lineno: int = caller.f_lineno
                 file_info = f"{filename}:{lineno}"
 
                 # Try to extract variable name from source code
                 if name is None:
                     try:
-                        full_path = caller.f_code.co_filename
-                        call_line = linecache.getline(full_path, lineno).strip()
+                        full_path: str = caller.f_code.co_filename
+                        call_line: str = linecache.getline(full_path, lineno).strip()
                         tree = ast.parse(call_line, mode='eval')
                         call_node = tree.body
                         if isinstance(call_node, ast.Call) and call_node.args:
@@ -133,7 +134,11 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
                     except Exception:
                         pass
     finally:
-        del frame
+        # explicit deletion to remove cyclic references
+        try:
+            del frame
+        except Exception:
+            pass
 
     if name is None:
         name = "<unknown>"

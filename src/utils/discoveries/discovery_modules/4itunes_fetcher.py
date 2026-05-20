@@ -1,10 +1,10 @@
 from bs4 import BeautifulSoup
-from utils.selenium_sessions import get_global_driver
+from utils.common.selenium_sessions import get_global_driver
 import time
-from utils.debug import slog
+from utils.common.debug import slog
 from urllib.parse import quote
 import json
-from utils.text_utils import is_blacklisted_album
+from utils.common.text_utils import is_blacklisted_album
 
 def extract_from_itunes_soup(song_soup, artist, song):
     # Parse the JSON-LD schema tag in <head>

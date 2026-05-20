@@ -140,6 +140,8 @@ def apply_tag(tag_session, song, file: Path, folder: Path):
 def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
     music_session, tag_session = setup_sessions()
 
+    added_songs = []
+
     folder = Path(folder_path).resolve()
     if not folder.exists():
         print(f"Folder {folder_path} does not exist.")
@@ -162,6 +164,7 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
 
             if status == "added":
                 added_count += 1
+                added_songs.append({"artist_name": metadata["artist_name"], "title": metadata["title"]})
             elif status == "updated":
                 updated_count += 1
 
@@ -173,6 +176,7 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
     music_session.close()
     tag_session.close()
     print(f"\nDone! Added {added_count}, updated {updated_count}.")
+    return added_songs
 
 
 def resolve_artist(music_session, artist_name: str, origin: str | None = None, song_name: str = None) -> Artist:

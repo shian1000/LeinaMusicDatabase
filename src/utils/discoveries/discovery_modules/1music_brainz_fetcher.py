@@ -1,11 +1,11 @@
 import time
 import musicbrainzngs
-from utils.debug import slog
-from utils.text_utils import is_blacklisted_album
+from utils.common.debug import slog
+from utils.common.text_utils import is_blacklisted_album
 import re
 import requests
 from difflib import SequenceMatcher
-from utils.text_utils import check_spelling
+from utils.common.text_utils import check_spelling
 
 # Set up the user agent (required by MusicBrainz)
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
