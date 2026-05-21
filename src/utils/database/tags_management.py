@@ -18,6 +18,7 @@ def add_tag_to_song(song, tag: str) -> bool:
         ValueError: If song_id is invalid or tag is empty
     """
     # Validate inputs
+    slog("add_tag_to_song functiion activated")
     if not hasattr(song, 'id') or song.id is None:
         slog("Invalid song object: missing or None id")
         return False
@@ -74,6 +75,7 @@ def add_tag_to_song(song, tag: str) -> bool:
 
 
 def has_tag_on_song(song, tag: str) -> bool:
+    slog("has_tag_on_song activatd")
     """
     Check if a song has a specific tag.
     
@@ -111,6 +113,7 @@ def has_tag_on_song(song, tag: str) -> bool:
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
         if not tag_obj:
             # Tag doesn't exist, so song can't have it
+            slog("tag doesn't exist")
             return False
         
         # Check if song-tag relationship exists
@@ -120,6 +123,8 @@ def has_tag_on_song(song, tag: str) -> bool:
             .first()
         )
         
+        slog(song_tag)
+        slog(song_tag is not None)
         return song_tag is not None
         
     except Exception as e:

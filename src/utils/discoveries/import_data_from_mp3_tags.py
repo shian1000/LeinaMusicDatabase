@@ -13,13 +13,15 @@ from sqlalchemy import create_engine, func
 import random
 import questionary
 from sqlalchemy import func
+from difflib import SequenceMatcher
 
 import time
 from settings import settings
 from utils.common.debug import slog
 
 import unicodedata
-
+from utils.common.normalizer import normalize
+from utils.common.text_utils import notify_similar_entry, check_spelling
 
 
 def setup_sessions():
@@ -63,9 +65,11 @@ def extract_mp3_metadata(file: Path) -> dict:
     }
 
 def normalize_title(title: str) -> str:
+    # Keep NFC for mp3 tag normalization but reuse central rules for case/cleanup
+    if title is None:
+        return ""
     title = unicodedata.normalize("NFC", title)
-    title = title.strip().lower()
-    return title
+    return normalize(title)
 
 def upsert_song(music_session, artist, metadata: dict, mode: str):
     title = metadata["title"]
@@ -76,27 +80,39 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
     print(f"Checking: {artist.name} - {title} (lang: {language})")
 
     slog(f"Artist: '{artist.name}' (id={artist.id})")
+    
+    # Get songs by this artist for exact match checking
     songs = music_session.query(Song).filter(
         Song.artist_id == artist.id
     ).all()
+    
+    # Get all songs in database for similarity checking
+    all_songs = music_session.query(Song).all()
 
+    print(songs)
+
+    # Normalize title with detailed logging
     normalized_title = normalize_title(title)
+    slog(f"[TITLE LOOKUP] Input: '{title}' | Normalized: '{normalized_title}'")
 
-    slog(f"Looking for title: '{title}' (normalized: '{normalized_title}')")
-    slog(f"Songs in DB for artist_id={artist.id}:")
+    slog(f"Looking for title in {len(songs)} songs for artist_id={artist.id}:")
     for s in songs:
-        print(f"    - '{s.title}' (normalized: '{normalize_title(s.title)}') | match: {normalize_title(s.title) == normalized_title}")
+        norm_db_title = normalize_title(s.title)
+        is_match = norm_db_title == normalized_title
+        slog(f"  - DB title '{s.title}' | Normalized: '{norm_db_title}' | Match: {is_match}")
+        print(f"    - '{s.title}' (normalized: '{norm_db_title}') | match: {is_match}")
 
     song = next(
         (s for s in songs if normalize_title(s.title) == normalized_title),
         None
     )
 
-    slog(f"Match found: {song}")
+    slog(f"Exact match found: {song is not None} (song_id={song.id if song else 'N/A'})")
 
     if song:
+        # Exact normalized match found - don't ask about similar entries
         if mode == "skip":
-            print(" -> Song exists, skipping.")
+            print(" -> Song exists (exact match), skipping.")
             return song, "skipped"
 
         elif mode == "update":
@@ -104,10 +120,39 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
             song.language = language
             song.album = album or song.album
             music_session.commit()
+            slog(f"[SONG UPDATED] Updated: '{artist.name} - {title}'")
             print(" -> Song updated.")
             return song, "updated"
-
+        
     else:
+        # No exact match found - check for similar entries
+        slog(f"[NO EXACT MATCH] Checking for similar entries for: '{title}' (normalized: '{normalized_title}')")
+        
+        # Check spelling using MusicBrainz and look for similar titles
+        spelling_result = check_spelling(artist.name, title)
+        slog(f"[SPELLING CHECK RESULT] {spelling_result}")
+        
+        # Use similarity from spelling check to detect similar entries in database
+        title_similarity_threshold = spelling_result.get("title_similarity", 0)
+        artist_similarity_threshold = spelling_result.get("artist_similarity", 0)
+        
+        # Look for similar titles in ALL database entries (not just this artist's songs)
+        similar_song = None
+        print(f"Checking {len(all_songs)} total songs in database for similarities")
+        for s in all_songs:
+            print("checking song:", s.title)
+            # Calculate combined similarity: check both title similarity and artist similarity
+            if title_similarity_threshold >= 0.7 and artist_similarity_threshold >= 0.7:  # If check_spelling found high similarity
+                similar_song = s
+                slog(f"[SIMILAR SONG FOUND] '{s.title}' with title similarity {title_similarity_threshold:.2f}")
+                # Notify user about the similar entry with similarity score
+                user_wants_to_add = notify_similar_entry(artist.name, title, s.artist.name if s.artist else "Unknown", s.title)
+                if not user_wants_to_add:
+                    print(" -> Similar song found, not adding.")
+                    return None, "skipped"
+                break
+        
+        # Add new song
         song = Song(
             title=title,
             artist_id=artist.id,
@@ -120,6 +165,7 @@ def upsert_song(music_session, artist, metadata: dict, mode: str):
         )
         music_session.add(song)
         music_session.commit()
+        slog(f"[NEW SONG ADMITTED] Artist: '{artist.name}' ({normalize(artist.name)}) | Title: '{title}' ({normalize_title(title)})")
         print(" -> Added new song.")
         return song, "added"
 
@@ -188,8 +234,20 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip"):
 
 
 def resolve_artist(music_session, artist_name: str, origin: str | None = None, song_name: str = None) -> Artist:
+    # Normalize incoming artist name for comparison
+    normalized_incoming = normalize(artist_name)
+    slog(f"[ARTIST LOOKUP] Input: '{artist_name}' | Normalized: '{normalized_incoming}'")
+    
     all_artists = music_session.query(Artist).all()
-    matching_artists = [a for a in all_artists if a.name.lower() == artist_name.lower()]
+    
+    # Find matching artists using normalized comparison
+    matching_artists = []
+    for a in all_artists:
+        normalized_db = normalize(a.name)
+        is_match = normalized_db == normalized_incoming
+        slog(f"  - DB artist '{a.name}' | Normalized: '{normalized_db}' | Match: {is_match}")
+        if is_match:
+            matching_artists.append(a)
 
     # --- no artist found ---
     if not matching_artists:

@@ -69,7 +69,7 @@ def seek_nonsense_album_names(songs):
                 if confirmation:
                     new_name = input("Enter new album name: ")
                     edit_db_entry(song, "album", new_name)
-                add_tag_to_song(song, "album_checked")
+            add_tag_to_song(song, "album_checked")
 
 def resolve_unknown_artist(songs):
         new_title = ""
@@ -78,11 +78,8 @@ def resolve_unknown_artist(songs):
             if not has_tag_on_song(song, "album_checked"):
                 lowered_artist = song.artist.name.strip().lower()
                 lowered_title = song.title.strip().lower()
-                print(lowered_artist)
-                print(lowered_title)
-                if "abba" in (lowered_title):
-                    print(f"artist is {lowered_artist}")
-                    input("Abba")
+                slog(lowered_artist)
+                slog(lowered_title)
                 if "unknown" in lowered_artist or not lowered_artist:
                     print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
                     if " - " in lowered_artist:

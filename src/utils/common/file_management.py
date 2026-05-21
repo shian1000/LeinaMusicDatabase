@@ -5,10 +5,11 @@ from utils.common.debug import slog
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
-import sys
 import re
-import unicodedata
 from rapidfuzz import fuzz
+
+from utils.common.normalizer import normalize
+
 
 def save_string_to_file(text: str) -> str:
     """
@@ -43,9 +44,11 @@ def save_string_to_file(text: str) -> str:
     print(f"Saved to: {filename}")
     return filename
 
+
 def is_local_dir(uri_str: str):
     parsed = urlparse(uri_str)
     return parsed.scheme == "" or parsed.scheme == "file"
+
 
 def get_proper_uri():
     uri_upath = settings.local_library_dir
@@ -61,6 +64,7 @@ def get_proper_uri():
 
     return uri
 
+
 def create_temp_index():
     index_file = UPath(
         "smb://server.local/Shared/Music/.mp3_index.sqlite3",
@@ -73,22 +77,10 @@ def create_temp_index():
     return local_index
 
 
-def normalize(s, strip_apostrophe=True):
-    s = unicodedata.normalize('NFKD', s)
-    s = s.lower()
-    if strip_apostrophe:
-        s = re.sub(r"[''`´ʼʻ＇\u2018\u2019\u201a\u201b\u2032\u2035]", '', s)
-    else:
-        s = re.sub(r"[''`´ʼʻ＇\u2018\u2019\u201a\u201b\u2032\u2035]", ' ', s)
-    s = re.sub(r'[-_.]', ' ', s)
-    s = re.sub(r'[()]', '', s)
-    s = re.sub(r'\s+', ' ', s)
-    return s.strip()
-
 def fuzzy_match(a, b):
     """Check if two strings match under either apostrophe strategy, or are close enough."""
     for strip in [True, False]:
-        na, nb = normalize(a, strip), normalize(b, strip)
+        na, nb = normalize(a, strip_apostrophe=strip), normalize(b, strip_apostrophe=strip)
         if na == nb:
             return True
         if fuzz.ratio(na, nb) >= 90:  # 90% similarity threshold
@@ -116,6 +108,7 @@ def query_database(engine, query):
     slog(f"No result for {artist} - {title}")
     return None
 
+
 def copy_file_to_destination(source, destination):
     slog(source)
     slog(destination)
@@ -133,6 +126,7 @@ def copy_file_to_destination(source, destination):
     dest_file = destination / source_file.name
     dest_file.write_bytes(source_file.read_bytes())
     print("Copied to:", dest_file)
+
 
 def copy_songs_using_index(
     songs: list[tuple[str, str]],

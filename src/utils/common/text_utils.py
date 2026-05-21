@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
 import time
+import questionary
+from utils.common.normalizer import normalize
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""
@@ -40,21 +42,6 @@ def load_blacklist(config_dir):
 
 ALBUM_TITLE_BLACKLIST, ALBUM_TITLE_BLACKLIST_SUBSTRINGS = load_blacklist(settings.config_dir)
 
-_SPECIAL_REPLACEMENTS = {
-    "ß": "ss",
-    "Æ": "AE",
-    "æ": "ae",
-    "Œ": "OE",
-    "œ": "oe",
-    "Ø": "O",
-    "ø": "o",
-    "Ł": "L",
-    "ł": "l",
-    "Đ": "D",
-    "đ": "d",
-    "Þ": "Th",
-    "þ": "th",
-}
 
 def copy_to_clipboard(message: str):
     try:
@@ -66,21 +53,8 @@ def copy_to_clipboard(message: str):
 
 
 def normalize_text(s: str) -> str:
-    if s is None:
-        return ""
-
-    s = unicodedata.normalize("NFKD", s)
-
-    s = "".join(c for c in s if not unicodedata.combining(c))
-
-    for src, dst in _SPECIAL_REPLACEMENTS.items():
-        if src in s:
-            s = s.replace(src, dst)
-
-    s = re.sub(r"[^\w\s]", " ", s)
-
-    s = re.sub(r"\s+", " ", s).strip().lower()
-    return s
+    """Compatibility wrapper that uses the centralized normalizer."""
+    return normalize(s)
 
 
 def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
@@ -146,18 +120,24 @@ def make_fuzzy(text: str) -> str:
 def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     Queries MusicBrainz to verify/correct spelling.
-    Includes fallback logic and extensive logging.
+    Includes fallback logic, normalization, and extensive logging.
     """
+    from utils.common.normalizer import normalize as central_normalize
 
     def similarity(a, b):
-        a_norm = normalize_japanese_title(a)
-        b_norm = normalize_japanese_title(b)
-        return SequenceMatcher(None, a_norm.lower(), b_norm.lower()).ratio()
+        # Use centralized normalization for consistent comparison
+        a_norm = central_normalize(a)
+        b_norm = central_normalize(b)
+        sim_score = SequenceMatcher(None, a_norm, b_norm).ratio()
+        slog(f"[SIMILARITY] '{a}' ({a_norm}) vs '{b}' ({b_norm}) = {sim_score:.2f}")
+        return sim_score
 
+    slog(f"[SPELLCHECK START] Artist: '{artist}' | Title: '{title}'")
+    slog(f"  Input (normalized): Artist: '{central_normalize(artist)}' | Title: '{central_normalize(title)}'")
+    
     fuzzy_title = make_fuzzy(title)
     fuzzy_artist = make_fuzzy(artist)
-    slog(fuzzy_title)
-    slog(fuzzy_artist)
+    slog(f"[FUZZY] Artist: '{fuzzy_artist}' | Title: '{fuzzy_title}'")
 
 
     primary_query = f'recording:{fuzzy_title} AND artist:{fuzzy_artist}'
@@ -222,8 +202,9 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     title_sim = similarity(title, mb_title)
     artist_sim = similarity(artist, mb_artist)
     
-    slog(title_sim)
-    slog(artist_sim)
+    slog(f"[MB RESULT] Score: {mb_score}")
+    slog(f"  Title: input='{title}' ({central_normalize(title)}) vs MB='{mb_title}' ({central_normalize(mb_title)})")
+    slog(f"  Artist: input='{artist}' ({central_normalize(artist)}) vs MB='{mb_artist}' ({central_normalize(mb_artist)})")
 
     final_artist = mb_artist if artist_sim >= threshold else artist
     final_title = mb_title if title_sim >= threshold else title
@@ -233,8 +214,12 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     result = {
         "input_artist": artist,
         "input_title": title,
+        "input_artist_norm": central_normalize(artist),
+        "input_title_norm": central_normalize(title),
         "corrected_artist": final_artist,
         "corrected_title": final_title,
+        "corrected_artist_norm": central_normalize(final_artist),
+        "corrected_title_norm": central_normalize(final_title),
         "corrected": is_corrected,
         "mb_score": mb_score,
         "title_similarity": round(title_sim, 2),
@@ -242,7 +227,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
         "found": True,
     }
     
-    slog(result)
+    slog(f"[SPELLCHECK END] Corrected: {is_corrected} | Artist sim: {artist_sim:.2f} | Title sim: {title_sim:.2f}")
     return result
 
 
@@ -258,3 +243,32 @@ def is_blacklisted_album(title: str) -> bool:
 
 def remove_brackets(text):
     return re.sub(r'\s*\([^)]*\)', '', text).strip()
+
+
+def notify_similar_entry(artist: str, title: str, existing_artist: str, existing_title: str) -> bool:
+    """
+    Notifies user that a similar entry exists in the database.
+    Returns True if user wants to add this entry anyway, False to skip.
+    """
+    from utils.common.normalizer import normalize as central_normalize
+    
+    slog(f"[SIMILAR ENTRY] Checking if user wants to add: '{artist} - {title}'")
+    slog(f"  Existing entry: '{existing_artist} - {existing_title}'")
+    slog(f"  Normalized comparison:")
+    slog(f"    Input: '{central_normalize(artist)}' - '{central_normalize(title)}'")
+    slog(f"    Existing: '{central_normalize(existing_artist)}' - '{central_normalize(existing_title)}'")
+    
+    prompt = (
+        f"\n⚠️  A similar entry already exists in the database:\n"
+        f"  Existing: {existing_artist} - {existing_title}\n"
+        f"  Your entry: {artist} - {title}\n\n"
+        f"Do you want to add this entry anyway?"
+    )
+    
+    try:
+        response = questionary.confirm(prompt, default=False).ask()
+        slog(f"[USER RESPONSE] Add similar entry: {response}")
+        return response if response is not None else False
+    except Exception as e:
+        slog(f"[ERROR in notify_similar_entry] {e}")
+        return False
