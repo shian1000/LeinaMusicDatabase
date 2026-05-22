@@ -54,8 +54,9 @@ def remove_duplicate_artists():
         key = artist.name.lower()
         key_origin = artist.origin
         if key in seen:
-            seen_origin = seen[key].origin.lower()
-            if key_origin == seen_origin or key_origin is None or seen_origin is None:
+            seen_origin = seen[key].origin
+            if (key_origin is None or seen_origin is None or 
+                    key_origin.lower() == seen_origin.lower()):
                 duplicates.append((seen[key], artist))
         else:
             seen[key] = artist

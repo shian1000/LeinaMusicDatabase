@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from typing import Optional
+from pathlib import Path
 
 # Small mapping for special latin letters that don't decompose nicely
 _SPECIAL_REPLACEMENTS = {
@@ -86,3 +87,26 @@ def compare(a: Optional[str], b: Optional[str], *, threshold: int = 100) -> bool
     if not na or not nb:
         return False
     return na == nb
+
+def extract_unknown_data(filepath: Path):
+
+    name = filepath.stem
+    print(name)
+    artist, title = re.split(r" [–-] ", name, maxsplit=1)
+    print(artist)
+    print(title) 
+
+    return artist, title
+
+def strip_title(title: str):
+    print("Stripping title")
+    new_title, _ = title.split(" (", maxsplit=1)
+    # new_title = re.split(r' \(| {2}\|', title, maxsplit=1)[0]
+    print(title)
+    print(new_title)
+    if new_title:
+        print("returning new title")
+        return new_title
+    else:
+        print("returning none")
+        return None

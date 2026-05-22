@@ -17,7 +17,9 @@ def import_data():
         slog(imported_songs)
         imported_songs_objects = []
         for song in imported_songs:
+            print("Checking song")
             imported_songs_objects.extend(get_songs_from_db_session("name", f"{song['artist_name']} {song['title']}"))
+            print("Done checking song")
         print(imported_songs_objects)
         display_songs(imported_songs_objects)
         edit_songs_menu(imported_songs_objects)

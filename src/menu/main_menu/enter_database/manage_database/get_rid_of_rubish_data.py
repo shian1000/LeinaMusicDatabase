@@ -8,6 +8,8 @@ from utils.database.tags_management import add_tag_to_song, has_tag_on_song
 from utils.common.text_utils import copy_to_clipboard
 from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
+import re
+from utils.common.normalizer import strip_title
 
 
 def convert_characters_encoding(songs):
@@ -60,7 +62,26 @@ def strip_leading_spaces(songs):
         if stripped_fields:
             print(f"Stripped leading spaces \033[93m{additive_spaces_list}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
 
-def seek_nonsense_album_names(songs):
+def replace_double_spaces(songs):
+    for song in songs:
+        modified_fields = []
+
+        if "  " in song.title:
+            song.title = re.sub(r" {2,}", " ", song.title)
+            modified_fields.append(f"title: '{song.title}'")
+
+        if "  " in song.artist.name:
+            song.artist.name = re.sub(r" {2,}", " ", song.artist.name)
+            modified_fields.append(f"artist: '{song.artist.name}'")
+
+        if song.album and "  " in song.album:
+            song.album = re.sub(r" {2,}", " ", song.album)
+            modified_fields.append(f"album: '{song.album}'")
+
+        if modified_fields:
+            print(f"Replaced double spaces in \033[93m{', '.join(modified_fields)}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+
+def seek_nonsense_names(songs):
     for song in songs:
         if not has_tag_on_song(song, "album_checked"):
             if(is_blacklisted_album(song.album)):
@@ -69,6 +90,19 @@ def seek_nonsense_album_names(songs):
                 if confirmation:
                     new_name = input("Enter new album name: ")
                     edit_db_entry(song, "album", new_name)
+            if(is_blacklisted_album(song.title)):
+                copy_to_clipboard(f"{song.artist.name} - {song.title}")
+                confirmation = questionary.confirm(f"'{song.title}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
+                if confirmation:
+                    new_name = input("Enter new title: ")
+                    if new_name == "":
+                        new_name = strip_title(song.title)
+                        print(new_name)
+                    print(new_name)
+                    if new_name and new_name is not "":
+                        edit_db_entry(song, "title", new_name)
+                    else:
+                        print("Can't delete title name entirely")
             add_tag_to_song(song, "album_checked")
 
 def resolve_unknown_artist(songs):
@@ -104,9 +138,10 @@ def get_rid_of_rubish_data():
     songs = get_songs_from_db_session()
     convert_characters_encoding(songs)
     strip_leading_spaces(songs)
+    replace_double_spaces(songs)
     resolve_unknown_artist(songs)
     submit_global_database_session()
-    seek_nonsense_album_names(songs)
+    seek_nonsense_names(songs)
     submit_global_database_session()
 
 

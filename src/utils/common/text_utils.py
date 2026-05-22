@@ -245,30 +245,16 @@ def remove_brackets(text):
     return re.sub(r'\s*\([^)]*\)', '', text).strip()
 
 
-def notify_similar_entry(artist: str, title: str, existing_artist: str, existing_title: str) -> bool:
-    """
-    Notifies user that a similar entry exists in the database.
-    Returns True if user wants to add this entry anyway, False to skip.
-    """
-    from utils.common.normalizer import normalize as central_normalize
-    
-    slog(f"[SIMILAR ENTRY] Checking if user wants to add: '{artist} - {title}'")
-    slog(f"  Existing entry: '{existing_artist} - {existing_title}'")
-    slog(f"  Normalized comparison:")
-    slog(f"    Input: '{central_normalize(artist)}' - '{central_normalize(title)}'")
-    slog(f"    Existing: '{central_normalize(existing_artist)}' - '{central_normalize(existing_title)}'")
-    
-    prompt = (
-        f"\n⚠️  A similar entry already exists in the database:\n"
-        f"  Existing: {existing_artist} - {existing_title}\n"
-        f"  Your entry: {artist} - {title}\n\n"
-        f"Do you want to add this entry anyway?"
-    )
-    
-    try:
-        response = questionary.confirm(prompt, default=False).ask()
-        slog(f"[USER RESPONSE] Add similar entry: {response}")
-        return response if response is not None else False
-    except Exception as e:
-        slog(f"[ERROR in notify_similar_entry] {e}")
-        return False
+def similarity(a: str, b: str) -> float:
+    """Returns similarity ratio between 0 and 1."""
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+def are_song_entries_similar(
+    db_object,
+    title_query: str,
+    artist_query: str,
+    threshold: float = 0.7
+) -> bool:
+    title_score = similarity(title_query, db_object.title)
+    artist_score = similarity(artist_query, db_object.artist.name)
+    return title_score >= threshold and artist_score >= threshold

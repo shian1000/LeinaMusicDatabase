@@ -9,8 +9,8 @@ from utils.database.tags_management import remove_tag_from_song
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
-        remove_tag_from_song(songs_objects, "spellchecked")
-        remove_tag_from_song(songs_objects, "album_checked")
+        remove_tag_from_song(song, "spellchecked")
+        remove_tag_from_song(song, "album_checked")
 
 
 def song_actions(songs_objects):

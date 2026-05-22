@@ -44,12 +44,11 @@ def merge_artists_menu(artist_objects = None):
     if not obj1:
         return
     obj2 = pick_from_db_objects(artist_objects, question=q1, additional_info=songs_names, style=green)
-    if not obj1:
+    if not obj2:
         return
     if obj1 == obj2:
         print("Picked the same artists")
         return
-    
     confirm = questionary.confirm(
         f"You are about to merge all the songs from {obj1.name} into {obj2.name}. Do you wish to proceed?"
     ).ask()

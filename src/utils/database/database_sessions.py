@@ -9,24 +9,6 @@ def open_database_sessions() -> Tuple[Session, Session]:
     tag_session = get_tag_session()
     return music_session, tag_session
 
-
-# def close_database_sessions(sessions: Tuple[Session, Session]):
-#     music_session, tag_session = sessions
-#     music_session.close()
-#     tag_session.close()
-
-# def submit_and_close_database_sessions(sessions: Tuple[Session, Session]):
-#     music_session, tag_session = sessions
-#     music_session.commit()
-#     tag_session.commit()
-#     music_session.close()
-#     tag_session.close()
-
-# def submit_database_sessions(sessions: Tuple[Session, Session]):
-#     music_session, tag_session = sessions
-#     music_session.commit()
-#     tag_session.commit()
-
     
 
 _GLOBAL_DATABASE_SESSION: Optional[Tuple[Session, Session]] = None
