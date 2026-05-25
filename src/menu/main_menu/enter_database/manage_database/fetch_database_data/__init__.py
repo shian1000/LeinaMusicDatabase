@@ -13,16 +13,11 @@ def import_data():
     songs_path = open_file_browser_terminal(import_folder)
     imported_songs = import_data_from_mp3_tags(songs_path)
     print(imported_songs)
-    if imported_songs:
-        slog(imported_songs)
-        imported_songs_objects = []
-        for song in imported_songs:
-            print("Checking song")
-            imported_songs_objects.extend(get_songs_from_db_session("name", f"{song['artist_name']} {song['title']}"))
-            print("Done checking song")
-        print(imported_songs_objects)
-        display_songs(imported_songs_objects)
-        edit_songs_menu(imported_songs_objects)
+    if(imported_songs[0]):
+        print(imported_songs)
+        print("displaying")
+        display_songs(imported_songs)
+        edit_songs_menu(imported_songs)
     
 
 

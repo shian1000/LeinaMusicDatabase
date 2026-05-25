@@ -11,7 +11,7 @@ from unittest.mock import Mock, MagicMock, patch
 from utils.discoveries.import_data_from_mp3_tags import (
     _find_exact_match,
     _check_for_similar_song,
-    _extract_metadata_with_fallback,
+    extract_metadata_with_fallback,
     upsert_song,
     apply_tag,
 )
@@ -258,7 +258,7 @@ class TestExtractMetadataWithFallback:
         }
         
         with patch('utils.discoveries.import_data_from_mp3_tags.extract_mp3_metadata', return_value=mock_metadata):
-            result = _extract_metadata_with_fallback(file)
+            result = extract_metadata_with_fallback(file)
         
         assert result == mock_metadata
         assert result["title"] == "Test Song"
@@ -270,7 +270,7 @@ class TestExtractMetadataWithFallback:
         
         with patch('utils.discoveries.import_data_from_mp3_tags.extract_mp3_metadata', side_effect=Exception("Bad ID3 tags")):
             with patch('utils.discoveries.import_data_from_mp3_tags.extract_unknown_data', return_value=("Artist Name", "Song Title")):
-                result = _extract_metadata_with_fallback(file)
+                result = extract_metadata_with_fallback(file)
         
         # Should have successfully extracted from filename
         assert result["title"] == "Song Title"
@@ -285,7 +285,7 @@ class TestExtractMetadataWithFallback:
         with patch('utils.discoveries.import_data_from_mp3_tags.extract_mp3_metadata', side_effect=Exception("Bad ID3")):
             with patch('utils.discoveries.import_data_from_mp3_tags.extract_unknown_data', side_effect=Exception("Bad filename")):
                 with pytest.raises(ValueError, match="Could not extract metadata"):
-                    _extract_metadata_with_fallback(file)
+                    extract_metadata_with_fallback(file)
     
     def test_extract_metadata_fallback_returns_complete_dict(self):
         """Should return complete metadata dict from fallback with all required keys."""
@@ -293,7 +293,7 @@ class TestExtractMetadataWithFallback:
         
         with patch('utils.discoveries.import_data_from_mp3_tags.extract_mp3_metadata', side_effect=Exception("No tags")):
             with patch('utils.discoveries.import_data_from_mp3_tags.extract_unknown_data', return_value=("My Band", "My Song")):
-                result = _extract_metadata_with_fallback(file)
+                result = extract_metadata_with_fallback(file)
         
         # Verify all required keys are present
         required_keys = {"title", "artist_name", "album", "year", "language", "origin"}

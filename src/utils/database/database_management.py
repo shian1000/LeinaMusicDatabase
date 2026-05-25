@@ -177,3 +177,99 @@ def divide_artist(db_object):
     print(f"Division complete: created {len(songs)-1} new artist(s) and reassigned {len(songs)-1} song(s).")
 
     
+
+def add_db_entry(db_object):
+    """Add a new Artist or Song entry to the music database.
+
+    Accepts either an ORM-like object (instance of `Artist` or `Song`) or a
+    dict-like object with the required fields.
+
+    Behavior:
+    - If `db_object` is an `Artist` instance: add it to the music session and
+      commit. Returns the persisted Artist (with id).
+    - If `db_object` is a `Song` instance: ensure the referenced artist exists
+      (by Artist instance or artist_id), add the Song, commit and return it.
+
+    Returns the created ORM object on success.
+    """
+
+    music_session, _ = get_global_database_sessions() or (get_music_session(), None)
+
+    # If it's already an ORM instance of Artist
+    if isinstance(db_object, Artist):
+        music_session.add(db_object)
+        music_session.commit()
+        music_session.refresh(db_object)
+        print(f"Added Artist '{db_object.name}' with id {db_object.id}")
+        return db_object
+
+    # If it's already an ORM instance of Song
+    if isinstance(db_object, Song):
+        # Ensure artist exists (either attached or by id)
+        if getattr(db_object, "artist", None) is None and getattr(db_object, "artist_id", None) is None:
+            raise ValueError("Song must have either 'artist' relationship set or 'artist_id' before adding.")
+
+        # If artist relationship provided but not persisted, persist or find matching artist by name
+        if getattr(db_object, "artist", None) is not None and getattr(db_object.artist, "id", None) is None:
+            # try to find existing artist by name
+            existing = music_session.query(Artist).filter(func.lower(Artist.name) == db_object.artist.name.lower()).first()
+            if existing:
+                db_object.artist_id = existing.id
+            else:
+                music_session.add(db_object.artist)
+                music_session.flush()
+                db_object.artist_id = db_object.artist.id
+
+        music_session.add(db_object)
+        music_session.commit()
+        music_session.refresh(db_object)
+        print(f"Added Song '{db_object.title}' with id {db_object.id}")
+        return db_object
+
+    # Allow dict-like creation for convenience
+    if isinstance(db_object, dict):
+        obj_type = db_object.get("_type")
+        if obj_type == "artist":
+            name = db_object.get("name")
+            if not name:
+                raise ValueError("Artist dict must contain 'name'")
+            new_artist = Artist(name=name, origin=db_object.get("origin"), synonyms=db_object.get("synonyms"))
+            music_session.add(new_artist)
+            music_session.commit()
+            music_session.refresh(new_artist)
+            print(f"Added Artist '{new_artist.name}' with id {new_artist.id}")
+            return new_artist
+
+        if obj_type == "song":
+            title = db_object.get("title")
+            artist_id = db_object.get("artist_id")
+            artist_name = db_object.get("artist_name")
+            if not title:
+                raise ValueError("Song dict must contain 'title'")
+            if not artist_id and not artist_name:
+                raise ValueError("Song dict must contain either 'artist_id' or 'artist_name'")
+
+            if not artist_id and artist_name:
+                existing = music_session.query(Artist).filter(func.lower(Artist.name) == artist_name.lower()).first()
+                if existing:
+                    artist_id = existing.id
+                else:
+                    new_artist = Artist(name=artist_name)
+                    music_session.add(new_artist)
+                    music_session.flush()
+                    artist_id = new_artist.id
+
+            new_song = Song(
+                title=title,
+                album=db_object.get("album"),
+                year=db_object.get("year"),
+                language=db_object.get("language"),
+                artist_id=artist_id,
+            )
+            music_session.add(new_song)
+            music_session.refresh(new_song)
+            print(f"Added Song '{new_song.title}' with id {new_song.id}")
+            return new_song
+
+    raise ValueError(f"Unsupported db_object type: {type(db_object)}")
+

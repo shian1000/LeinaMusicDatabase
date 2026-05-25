@@ -92,7 +92,7 @@ def extract_unknown_data(filepath: Path):
 
     name = filepath.stem
     print(name)
-    artist, title = re.split(r" [–-] ", name, maxsplit=1)
+    artist, title = re.split(r" [–\-_] ", name, maxsplit=1)
     print(artist)
     print(title) 
 

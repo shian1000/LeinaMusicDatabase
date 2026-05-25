@@ -271,6 +271,8 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
 
 def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
 
+    print("get_songs_from_db_session")
+    print(category)
     print(query)
 
     if type(query) == int:

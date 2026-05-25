@@ -258,3 +258,11 @@ def are_song_entries_similar(
     title_score = similarity(title_query, db_object.title)
     artist_score = similarity(artist_query, db_object.artist.name)
     return title_score >= threshold and artist_score >= threshold
+
+def are_artists_entries_similar(
+    db_object,
+    artist_query: str,
+    threshold: float = 0.7
+) -> bool:
+    artist_score = similarity(artist_query, db_object.artist.name)
+    return artist_score >= threshold
