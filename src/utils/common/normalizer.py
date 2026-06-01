@@ -92,14 +92,21 @@ def extract_unknown_data(filepath: Path):
 
     name = filepath.stem
     print(name)
-    artist, title = re.split(r" [–\-_] ", name, maxsplit=1)
-    print(artist)
-    print(title) 
+    parts = re.split(r" [–\-_] ", name, maxsplit=1)
+    if len(parts) < 2:
+        return None, None
+    
+    artist, title = parts
+    print(f"normalizer - artist: {artist}")
+    print(f"normalizer - title: {title}")
 
     return artist, title
 
-def strip_title(title: str):
+def strip_brackets(title: str):
     print("Stripping title")
+    if " (" not in title:
+        print("Can't strip brackets")
+        return None
     new_title, _ = title.split(" (", maxsplit=1)
     # new_title = re.split(r' \(| {2}\|', title, maxsplit=1)[0]
     print(title)

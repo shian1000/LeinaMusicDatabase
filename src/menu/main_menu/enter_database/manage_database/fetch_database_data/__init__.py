@@ -7,17 +7,24 @@ from menu.song_actions.edit_songs import edit_songs_menu
 from settings import settings
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
+import questionary
+from utils.database.database_sessions import submit_global_database_session
 
 def import_data():
     import_folder = settings.export_dir
     songs_path = open_file_browser_terminal(import_folder)
     imported_songs = import_data_from_mp3_tags(songs_path)
     print(imported_songs)
-    if(imported_songs[0]):
+    if(imported_songs):
         print(imported_songs)
         print("displaying")
         display_songs(imported_songs)
         edit_songs_menu(imported_songs)
+        decision = questionary.confirm("Do you want to do something with these songs?").ask()
+        if decision:
+            from menu.song_actions import song_actions
+            song_actions(imported_songs)
+            submit_global_database_session()
     
 
 

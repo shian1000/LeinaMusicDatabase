@@ -18,6 +18,4 @@ if __name__ == "__main__":
 
 #TODO Make index creator
 #TODO Make settings for enabling fetchers. Maybe make them modular?
-#[X] Need to rethink/refactor import_data_from_mp3_tags. I need to make it much simpler
-##### because right now navigating through that is kind of a nigthmarew
-#TODO Kaunas Acoustics : Liūdni slibinai - - Pieno Fabrikėlis
+#TODO On importing songs, note which artists are new

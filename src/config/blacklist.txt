@@ -84,7 +84,7 @@ version
 demos
 club
 liva
-remasters
+remaster
 filmography
 videography
 music
@@ -94,3 +94,13 @@ collaborative singles
 www
 2016
 episode
+deutschland
+years
+presents
+scotland
+motion
+anniversary
+Kuschelrock
+forza
+featured
+Kampioen

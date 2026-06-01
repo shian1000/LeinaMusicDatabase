@@ -193,7 +193,7 @@ def _validate_category(category: str, valid_categories: set) -> str | None:
 
 def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
     if not songs:
-        print("No such songs found")
+        slog("No such songs found")
         return
 
 
@@ -271,9 +271,7 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
 
 def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
 
-    print("get_songs_from_db_session")
-    print(category)
-    print(query)
+    slog("get_songs_from_db_session")
 
     if type(query) == int:
         query = str(query)
@@ -285,7 +283,12 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     if category is None:
         return base_query.all()
     
-    query_has_any_standard_latin_characters = any(c.isascii() and c.isalpha() for c in query)
+    # Determine if the query contains any ASCII alphanumeric characters.
+    # Use isalnum() instead of isalpha() so numeric-only queries (like artist IDs)
+    # are treated as suitable for DB-level filtering (and won't match substrings
+    # inside other numbers, because the category-specific filter will use
+    # equality for artist_id).
+    query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in (query or ""))
 
     category = _validate_category(category, song_categories + search_only_categories)
     words = [w for w in query.strip().split() if w]
@@ -314,7 +317,7 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     filtered = [s for s in candidates if all(w in get_field(s).casefold() for w in normalized_words)]
 
     if not filtered:
-        print("No such songs found")
+        slog("No such songs found")
 
     return filtered
 

@@ -6,6 +6,8 @@ from urllib.parse import quote
 import json
 from utils.common.text_utils import is_blacklisted_album
 
+MODULE_NAME = "Itunes Fetches"
+
 def extract_from_itunes_soup(song_soup, artist, song):
     # Parse the JSON-LD schema tag in <head>
     # slog(song_soup)

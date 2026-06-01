@@ -9,7 +9,7 @@ from utils.common.text_utils import copy_to_clipboard
 from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
 import re
-from utils.common.normalizer import strip_title
+from utils.common.normalizer import strip_brackets
 
 
 def convert_characters_encoding(songs):
@@ -96,7 +96,7 @@ def seek_nonsense_names(songs):
                 if confirmation:
                     new_name = input("Enter new title: ")
                     if new_name == "":
-                        new_name = strip_title(song.title)
+                        new_name = strip_brackets(song.title)
                         print(new_name)
                     print(new_name)
                     if new_name and new_name is not "":

@@ -9,6 +9,8 @@ from utils.common.debug import slog
 from utils.common.text_utils import remove_brackets, is_blacklisted_album
 from difflib import SequenceMatcher
 
+MODULE_NAME = "Genius lyrics fetcher"
+
 def slugify(text: str) -> str:
     """Convert text to a lowercase slug for comparison."""
     return re.sub(r'[^a-z0-9]', '', text.lower())
@@ -61,5 +63,5 @@ def get_album_name(artist: str, title: str) -> str | None:
             return album_found
     
     except Exception as e:
-        print(f"Failed: {e}")
+        slog(f"Failed: {e}")
         return None

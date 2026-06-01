@@ -11,6 +11,7 @@ from utils.common.text_utils import check_spelling
 musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
 HEADERS = {"User-Agent": "YourScriptName/1.0 (your@email.com)"}
+MODULE_NAME = "Musicbrainz fetcher"
 
 def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.

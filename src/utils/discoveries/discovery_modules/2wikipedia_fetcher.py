@@ -13,6 +13,7 @@ from utils.common.file_management import save_string_to_file
 # Constants
 # ---------------------------------------------------------------------------
 
+MODULE_NAME = "Wikipedia fetcher"
 FROM_ALBUM_MARKER = "from the album"
 STRIP_CHARS = " \"''\u201c\u2018\u201d\u2019"
 GENERIC_HEADINGS = {

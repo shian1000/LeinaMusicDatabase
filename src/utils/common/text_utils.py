@@ -8,7 +8,6 @@ from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
 import time
-import questionary
 from utils.common.normalizer import normalize
 
 def _is_word_substring(needle: str, haystack: str) -> bool:

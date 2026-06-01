@@ -204,34 +204,6 @@ def add_video_to_playlist(youtube, playlist_id: str, video_id: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------
-# MAIN FUNCTION
-# ---------------------------------------------------------
-
-# def create_yt_playlist(song_list: List[Dict[str, str]], playlist_name: str):
-#     """
-#     Create a YouTube playlist from a list of:
-#     { "title": "...", "artist": "..." }
-#     """
-
-#     youtube = get_youtube_service()
-
-#     playlist_id = create_playlist(
-#         youtube,
-#         title=playlist_name,
-#         description="Generated automatically from database"
-#     )
-
-#     for song in song_list:
-#         title = song.title
-#         artist = song.artist.name
-
-#         video_id = search_video_cached(youtube, artist, title)
-#         if video_id:
-#             add_video_to_playlist(youtube, playlist_id, video_id)
-
-#     print("\n🎉 Playlist creation complete!")
-
 def create_yt_playlist(song_list, playlist_name: str):
     youtube = get_youtube_service()
 
@@ -321,21 +293,6 @@ def create_yt_playlist(song_list, playlist_name: str):
     # -------------------
     # Completed successfully
     # -------------------
-    print("\n🎉 Playlist creation complete!")
+    print("\nPlaylist creation complete!")
     clear_cache()
 
-
-
-
-
-# ---------------------------------------------------------
-# For testing
-# ---------------------------------------------------------
-
-if __name__ == "__main__":
-    test_songs = [
-        {"title": "Hey Jude", "artist": "The Beatles"},
-        {"title": "Rolling in the Deep", "artist": "Adele"}
-    ]
-
-    create_yt_playlist(test_songs)

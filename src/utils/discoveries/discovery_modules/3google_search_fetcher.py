@@ -17,6 +17,8 @@ from utils.database.database_getter import get_songs_from_db_session
 #   data-attrid="kc:/music/recording_cluster:first album"
 #   data-attrid="kc:/music/recording_cluster:release date"
 #   data-attrid="kc:/music/recording_cluster:skos_genre"
+MODULE_NAME = "Google search fetcher"
+
 ATTRID_MAP = {
     "artist":       "artists",
     "first album":  "album",
@@ -80,7 +82,7 @@ def get_album_name(artist: str, song: str) -> dict | None:
     except Exception:
         with open("debug.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print("[Result] Page loaded but no Knowledge Panel detected.")
+        slog("[Result] Page loaded but no Knowledge Panel detected.")
         return None
 
     soup = BeautifulSoup(driver.page_source, "html.parser")

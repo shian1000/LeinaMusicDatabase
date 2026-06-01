@@ -120,7 +120,7 @@ def resolve_duplicated_albums():
     clusters = []  # each cluster: {'key': representative_album, 'songs': [Song,...], 'albums': set()}
     for s in all_songs:
         album = (s.album or "").strip()
-        if not album:
+        if not album or album == "Singles":
             continue
         placed = False
         for cl in clusters:

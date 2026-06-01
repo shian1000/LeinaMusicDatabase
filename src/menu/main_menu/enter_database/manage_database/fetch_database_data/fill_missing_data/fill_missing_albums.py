@@ -24,9 +24,17 @@ def fill_missing_albums():
     print("Preparing fetch modules . . . ")
     open_global_driver()
     discovery_modules = load_discovery_modules()
+
+    for song in songs_objects:
+        slog(f"song.tlte = {song.title}")
+        slog(f"song.album = {song.album}")
+
     for song in songs_objects:
         print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
-        if song.album is None:
+        slog("About to check if song.album is none")
+        slog(f"song.album = {song.album}")
+        if song.album is None or song.album == "":
+            slog("Yeah, song album is none")
             slog(song)
             slog(discovery_modules)
             new_album = discover_album_name(song, discovery_modules)

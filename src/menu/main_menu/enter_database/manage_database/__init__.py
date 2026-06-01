@@ -38,7 +38,6 @@ def check_spelling_menu():
         new_artist = spell_check_results["corrected_artist"]
         new_title = spell_check_results["corrected_title"]
 
-        # Handle Artist Correction
         if new_artist != song.artist.name:
             print(f"{RED}{song.artist.name}{RESET} -> {GREEN}{new_artist}{RESET}")
             if questionary.confirm("Do you wish to correct this artist name?").ask():
@@ -47,6 +46,7 @@ def check_spelling_menu():
         # Handle Title Correction
         if new_title != song.title:
             print(f"{RED}{song.title}{RESET} -> {GREEN}{new_title}{RESET}")
+            print(f"song_id = {song.id}")
             if questionary.confirm("Do you wish to correct this song title?").ask():
                 song.title = new_title
 
