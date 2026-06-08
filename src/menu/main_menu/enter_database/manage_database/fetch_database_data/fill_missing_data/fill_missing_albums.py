@@ -30,6 +30,7 @@ def fill_missing_albums():
         slog(f"song.album = {song.album}")
 
     for song in songs_objects:
+        print()
         print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
         slog("About to check if song.album is none")
         slog(f"song.album = {song.album}")
@@ -45,7 +46,6 @@ def fill_missing_albums():
                     print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
                 else:
                     print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
-                    print()
         songs_list.append((song.artist.name, song.title, new_album))
     slog(songs_list)
     

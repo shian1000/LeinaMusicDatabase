@@ -4,13 +4,14 @@ import time
 from utils.common.debug import slog
 from urllib.parse import quote
 import json
-from utils.common.text_utils import is_blacklisted_album
+from utils.common.text_utils import is_blacklisted_album, similarity
+from config.constants import SPELLING_CHECK_THRESHOLD
 
 MODULE_NAME = "Itunes Fetches"
 
 def extract_from_itunes_soup(song_soup, artist, song):
     # Parse the JSON-LD schema tag in <head>
-    # slog(song_soup)
+    # slog(song_soup, priority=1)
     schema_tag = song_soup.find("script", {"id": "schema:song", "type": "application/ld+json"})
     if not schema_tag:
         return None
@@ -31,8 +32,10 @@ def extract_from_itunes_soup(song_soup, artist, song):
 
     # 2. Verify song title
     found_song = audio.get("name", "")
-    if song.lower() not in found_song.lower():
-        slog(f"Song mismatch: expected '{song}', found '{found_song}'")
+    song_query = song.lower()
+    song_on_the_page = found_song.lower()
+    if similarity(song_query, song_on_the_page) < SPELLING_CHECK_THRESHOLD:
+        slog(f"Song mismatch: expected '{song}', found '{found_song}'", priority=1)
         return None
 
     # 3. Extract album name
@@ -47,6 +50,8 @@ def get_album_name(artist: str, song: str) -> str | None:
     query = quote(f"{artist} {song}")
     url = f"https://music.apple.com/us/search?term={query}"
 
+    slog(url, priority=1)
+
     #Open itunes and look for the song:
     driver = get_global_driver()
     driver.get(url)
@@ -57,14 +62,20 @@ def get_album_name(artist: str, song: str) -> str | None:
     #Open the link of the song:
     song_link = None
     for a in soup.select(".track-lockup__title a[data-testid='click-action']"):
-        if song.lower() in a.get_text(strip=True).lower():
+        slog(a, priority=1)
+        song_query = song.lower()
+        song_on_the_page = a.get_text(strip=True).lower()
+        slog(song_query, priority=1)
+        slog(song_on_the_page, priority=1)
+        if similarity(song_query, song_on_the_page) > SPELLING_CHECK_THRESHOLD:
+            slog("Found", priority=1)
             song_link = a["href"]
             break
 
     if not song_link:
         print("Song not found")
     else:
-        slog(f"Found song link: {song_link}")
+        slog(f"Found song link: {song_link}", priority=1)
         driver.get(song_link)
         time.sleep(2)
 

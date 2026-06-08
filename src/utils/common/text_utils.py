@@ -245,8 +245,12 @@ def remove_brackets(text):
 
 
 def similarity(a: str, b: str) -> float:
+    slog(a, priority=1)
+    slog(b, priority=1)
     """Returns similarity ratio between 0 and 1."""
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    result = SequenceMatcher(None, a.lower(), b.lower()).ratio()
+    slog(result, priority=1)
+    return result
 
 def are_song_entries_similar(
     db_object,
@@ -263,5 +267,5 @@ def are_artists_entries_similar(
     artist_query: str,
     threshold: float = 0.7
 ) -> bool:
-    artist_score = similarity(artist_query, db_object.artist.name)
+    artist_score = similarity(artist_query, db_object.name)
     return artist_score >= threshold

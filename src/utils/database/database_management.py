@@ -7,6 +7,7 @@ from utils.common.debug import slog
 from sqlalchemy import text
 from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
+from rich import print
 
 
 def edit_db_entry(db_object, category: str, new_value: str):
@@ -237,7 +238,7 @@ def add_db_entry(db_object):
             music_session.add(new_artist)
             music_session.commit()
             music_session.refresh(new_artist)
-            print(f"Added Artist '{new_artist.name}' with id {new_artist.id}")
+            print(f"Added artist [green]'{new_artist.name}'[/green] with id [green]{new_artist.id}[/green]")
             return new_artist
 
         if obj_type == "song":
@@ -268,7 +269,7 @@ def add_db_entry(db_object):
             )
             music_session.add(new_song)
             music_session.refresh(new_song)
-            print(f"Added Song '{new_song.title}' with id {new_song.id}")
+            print(f"Added song [green]'{new_song.title}'[/green] with id [green]{new_song.id}[/green]")
             return new_song
 
     raise ValueError(f"Unsupported db_object type: {type(db_object)}")

@@ -40,6 +40,14 @@ def _find_project_root() -> Path:
 PROJECT_ROOT: Path = _find_project_root()
 DEBUG_ENABLED: bool = (PROJECT_ROOT / ".debug").exists()
 
+VERBOSITY_LEVEL: int = 0
+if DEBUG_ENABLED:
+    import re
+    _debug_text = (PROJECT_ROOT / ".debug").read_text()
+    _match = re.search(r"^\s*verbosity\s*=\s*(\d+)", _debug_text, re.MULTILINE)
+    if _match:
+        VERBOSITY_LEVEL = int(_match.group(1))
+
 DEBUG_TO_FILE_ENABLED: bool = True
 DEBUG_LOG_FILE: Path = PROJECT_ROOT / "debug.log"
 
@@ -92,7 +100,7 @@ def _write_to_log(message: str) -> None:
         pass
 
 
-def slog(var: Any = None, name: Optional[str] = None) -> None:
+def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None:
     """
     Log a variable's value with type and source location information.
     
@@ -110,6 +118,12 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
     """
     if not DEBUG_ENABLED and not DEBUG_TO_FILE_ENABLED:
         return
+
+    threshold = 3 - VERBOSITY_LEVEL
+    if not priority >= threshold:
+        return
+
+    
 
     file_info: str = "unknown:0"
 
@@ -152,7 +166,7 @@ def slog(var: Any = None, name: Optional[str] = None) -> None:
         _write_to_log(message)
 
 
-def mlog(message: str) -> None:
+def mlog(message: str, priority: int = 0) -> None:
     """
     Log a simple message string.
     
@@ -166,4 +180,9 @@ def mlog(message: str) -> None:
     """
     if not DEBUG_ENABLED:
         return
+    
+    threshold = 3 - VERBOSITY_LEVEL
+    if not priority >= threshold:
+        return
+    
     print(f"***Debug*** {message}")

@@ -24,7 +24,7 @@ DEFAULT_FILE_BROWSER_QUESTION = "Pick a destination."
 
 # Similarity thresholds
 FILE_SIMILARITY_THRESHOLD = 90  # Percentage (0-100)
-SPELLING_CHECK_THRESHOLD = 0.78  # Decimal (0-1)
+SPELLING_CHECK_THRESHOLD = 0.7  # Decimal (0-1)
 
 # Search constants
 DEFAULT_SEARCH_MODE = "Song"

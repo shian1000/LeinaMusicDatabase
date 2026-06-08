@@ -127,7 +127,7 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
     return video_id
 
 def search_video(youtube, artist: str, title: str) -> str | None:
-    query = f"{artist} - {title}"
+    query = f"{artist} - {title} audio"
     print(f"\nSearching for: {query}")
 
     try:

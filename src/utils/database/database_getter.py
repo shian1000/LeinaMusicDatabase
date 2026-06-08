@@ -343,59 +343,58 @@ def get_artists_from_db_session(
 
     if query:
         query = query.strip()
-
         words = [w for w in query.split() if w]
         if not words:
             slog(words)
             return []
 
-        if aggresive_search:
-            # Normalize the search words once up front
-            normalized_words = [normalize_text(w) for w in words]
+        # Determine if the query contains any ASCII alphanumeric characters,
+        # same logic as get_songs_from_db_session.
+        query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in query)
 
-            # Pull a broader candidate set from the DB (no per-word filtering),
-            # then do precise normalized matching in Python
+        CATEGORY_DB_FILTERS = {
+            artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
+            artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+        }
+
+        CATEGORY_NORMALIZED_FIELDS = {
+            artist_categories[0]: lambda artist: normalize_text(artist.name),
+            artist_categories[1]: lambda artist: normalize_text(artist.origin),
+        }
+
+        if aggresive_search or not query_has_any_standard_latin_characters:
+            # Python-side normalized filtering — handles Polish and other non-ASCII characters
+            slog("Falling back to Python-side normalized filtering")
+            normalized_words = [normalize_text(w).casefold() for w in words]
+            get_field = CATEGORY_NORMALIZED_FIELDS[category]
             candidates = db_query.all()
+            filtered = [a for a in candidates if all(w in get_field(a).casefold() for w in normalized_words)]
+            if not filtered:
+                slog("No such artists found")
+            return filtered
 
-            field_getter = {
-                artist_categories[0]:   lambda artist: normalize_text(artist.name),
-                artist_categories[1]: lambda artist: normalize_text(artist.origin),
-            }[category]
-
-            slog(field_getter)
-            slog([
-                artist for artist in candidates
-                if all(w in field_getter(artist) for w in normalized_words)
-            ]
-    )
-            return [
-                artist for artist in candidates
-                if all(w in field_getter(artist) for w in normalized_words)
-            ]
-        
-        def get_filter_for_word(word: str):
-            """Returns the appropriate SQLAlchemy filter expression for a single word."""
-            filter_map = {
-                artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
-                artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
-            }
-            slog (filter_map)
-            return filter_map[category](word)
-
+        # Primary DB-level filtering (ASCII queries)
+        filtered_query = db_query
         for word in words:
-            db_query = db_query.filter(get_filter_for_word(word))
-        
-        slog (word)
-        return db_query.all()
+            filtered_query = filtered_query.filter(CATEGORY_DB_FILTERS[category](word))
+        results = filtered_query.all()
+        if results:
+            return results
 
+        # Python fallback even for ASCII queries, in case DB-level filtering missed anything
+        slog("Falling back to Python-side normalized filtering")
+        normalized_words = [normalize_text(w).casefold() for w in words]
+        get_field = CATEGORY_NORMALIZED_FIELDS[category]
+        candidates = db_query.all()
+        filtered = [a for a in candidates if all(w in get_field(a).casefold() for w in normalized_words)]
+        if not filtered:
+            slog("No such artists found")
+        return filtered
 
     if artist_id:
         slog(artist_id)
-        artists_objs_list = []
-        artists_objs_list.append(music_session.query(Artist).filter(Artist.id == artist_id).first())
-        return artists_objs_list
-    
+        return [music_session.query(Artist).filter(Artist.id == artist_id).first()]
+
     print("get_artist_from_db_session needs either str or id to get artists list")
     return
-
 

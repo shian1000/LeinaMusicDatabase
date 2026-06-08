@@ -20,7 +20,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
     the album title or None if not found or on error.
     """
 
-    slog(f"{artist} - {song}")
+    slog(f"{artist} - {song}", priority=1)
     if spell_check:
         spell_check_result = check_spelling(artist, song)
         slog(spell_check_result)
@@ -28,11 +28,10 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             if artist != spell_check_result["corrected_artist"] or song != spell_check_result["corrected_title"]:
                 artist = spell_check_result["corrected_artist"]
                 song = spell_check_result["corrected_title"]
-                print(f"\033[91mSpelling might need to be corrected: {artist} - {song}\033[0m")
-    slog(f"{artist} - {song}")
+    slog(f"{artist} - {song}", priority=1)
     
     query = f'recording:"{song}" AND artist:"{artist}"'
-    slog(query)
+    slog(query, priority=1)
     try:
         response = musicbrainzngs.search_recordings(query=query, limit=5)
         recordings = response.get("recording-list", [])

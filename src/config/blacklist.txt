@@ -85,6 +85,7 @@ demos
 club
 liva
 remaster
+remasters
 filmography
 videography
 music
@@ -104,3 +105,15 @@ Kuschelrock
 forza
 featured
 Kampioen
+dance
+spectaculars
+gold
+tokyo
+re-loaded
+muzyka
+bounce
+compact
+fifa
+edits
+uefa
+audio

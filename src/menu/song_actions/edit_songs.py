@@ -4,7 +4,7 @@ from utils.common.debug import slog
 from utils.database.database_sessions import open_database_sessions, submit_global_database_session
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session, extract_db_object_info
 from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object
-from utils.database.database_management import edit_db_entry, delete_db_entry
+from utils.database.database_management import edit_db_entry, delete_db_entry, add_db_entry
 import time
 
 def edit_entry_menu(mode: str = None, db_object = None):
@@ -130,9 +130,12 @@ def add_songs_menu():
     exit_label = "/exit"
     user_input = ""
     song_labels = []
-    artist_labels = {"id": "",
-                     "origin": ""}
+    artist_labels = []
+
+    picked_artist = None
+
     for category in song_categories:
+        user_input = None
         user_input = input(f"Type the {category} of the song (type '{exit_label}' to abort): ")
         if user_input == exit_label:
             break
@@ -155,16 +158,55 @@ def add_songs_menu():
                 picked_artist = pick_from_db_objects(existing_artists, back_label="Add new")
                 if picked_artist:
                     user_input = None
-                    artist_labels["id"] = picked_artist.id
 
-
-
-
-
+        if category == song_categories[3]:
+            while not user_input.isdigit():
+                user_input = input("Type numericals only: ")
+            user_input = int(user_input)
+        
         song_labels.append(user_input)
+
+    if (song_labels[1]):
+        artist_labels.append(song_labels[1])
+    else:
+        artist_labels.append("")
+
+    if (song_labels[5]):
+        artist_labels.append(song_labels[5])
+    else:
+        artist_labels.append("")
+
 
     print(song_labels)
     print(artist_labels)
+
+    artist_object = Artist()
+    song_object = Song()
+
+    if picked_artist is None:
+        if(artist_labels[0]):
+            artist_object.name = artist_labels[0]
+        if(artist_labels[1]):
+            artist_object.origin = artist_labels[1]
+        artist_object = add_db_entry(artist_object)
+        print(artist_object)
+        print(artist_object.id)
+    else:
+        artist_object = picked_artist
+        print(artist_object)
+        print(artist_object.id)
+
+    if song_labels[0]:
+        song_object.title = song_labels[0]
+    song_object.artist_id = artist_object.id
+    if song_labels[2]:
+        song_object.album = song_labels[2]
+    if song_labels[3]:
+        song_object.year = int(song_labels[3])
+    if song_labels[4]:
+        song_object.language = song_labels[4]
+
+    add_db_entry(song_object)
 
     if user_input == exit_label:
         return None

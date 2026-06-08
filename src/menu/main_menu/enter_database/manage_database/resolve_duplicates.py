@@ -2,7 +2,7 @@ from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
 import questionary
 from utils.database.database_management import edit_db_entry
-from utils.common.text_utils import compare_strings
+from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 
@@ -133,7 +133,27 @@ def resolve_duplicated_albums():
             clusters.append({'key': album, 'songs': [s], 'albums': {album}})
 
     # select clusters with songs from more than one artist
-    target_clusters = [c for c in clusters if len({song.artist.id for song in c['songs']}) > 1]
+    SIMILARITY_THRESHOLD = 0.72
+
+    # only consider clusters that span more than one artist
+    raw_target_clusters = [c for c in clusters if len({song.artist.id for song in c['songs']}) > 1]
+
+    # further filter clusters: ensure there's at least one pair of different album strings
+    # in the cluster whose similarity >= SIMILARITY_THRESHOLD. If not, skip prompting.
+    target_clusters = []
+    for c in raw_target_clusters:
+        albums = list(c['albums'])
+        max_sim = 0.0
+        # compare representative key against all distinct album strings in cluster
+        for a in albums:
+            if a == c['key']:
+                continue
+            sim = similarity(c['key'], a)
+            print(f"Similarity between {c['key']} and {a} is {sim}")
+            if sim > max_sim:
+                max_sim = sim
+        if max_sim >= SIMILARITY_THRESHOLD:
+            target_clusters.append(c)
     if not target_clusters:
         print("No duplicated albums found.")
         return
@@ -141,6 +161,11 @@ def resolve_duplicated_albums():
     for cl in target_clusters:
         songs_list = list(cl['songs'])
         rep_album = cl['key']
+        # double-check: ensure cluster has at least one album string similar enough to rep_album
+        albums_in_cl = [a for a in cl['albums'] if a != rep_album]
+        if not any(similarity(rep_album, a) >= SIMILARITY_THRESHOLD for a in albums_in_cl):
+            # nothing similar enough, skip this cluster
+            continue
         # loop until duplicates resolved or user done
         while True:
             # group remaining songs by artist
