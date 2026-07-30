@@ -35,6 +35,8 @@ def get_album_name(artist: str, title: str) -> str | None:
         return None
 
     soup = _fetch_soup(page.url)
+    if not soup:
+        return None
 
     if title.lower() in page.title.lower():
         album = _extract_from_infobox(soup, title)
@@ -64,27 +66,35 @@ def _fetch_wikipedia_page(artist: str, title: str):
         page = wikipedia.page(results[0], auto_suggest=False)
     except (wikipedia.DisambiguationError, wikipedia.PageError):
         return None
+    except requests.exceptions.RequestException as exc:
+        slog(f"Wikipedia page request failed: {exc}")
+        return None
 
     slog(f"Page title: {page.title}")
     return page
 
 
 def _search_with_retry(query: str, retries: int = 3, delay: int = 2) -> list:
-    """Run wikipedia.search with retries on JSONDecodeError."""
+    """Run wikipedia.search with retries on transient request failures."""
     for attempt in range(retries):
         try:
             return wikipedia.search(query)
-        except requests.exceptions.JSONDecodeError:
+        except requests.exceptions.RequestException:
             if attempt < retries - 1:
                 time.sleep(delay)
     return []
 
 
-def _fetch_soup(url: str) -> BeautifulSoup:
+def _fetch_soup(url: str) -> BeautifulSoup | None:
     headers = {"User-Agent": "SongAlbumFinder/1.0 (your-email@example.com)"}
-    response = requests.get(url, headers=headers)
-    slog(response)
-    return BeautifulSoup(response.text, "html.parser")
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        slog(response)
+        return BeautifulSoup(response.text, "html.parser")
+    except requests.exceptions.RequestException as exc:
+        slog(f"Wikipedia page fetch failed: {exc}")
+        return None
 
 
 # ---------------------------------------------------------------------------

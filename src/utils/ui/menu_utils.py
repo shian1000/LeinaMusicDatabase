@@ -22,6 +22,7 @@ from config.constants import (
     DEFAULT_MENU_PICK_QUESTION,
     DEFAULT_MENU_BACK_LABEL,
     DIALOG_NO_RESULT,
+    FILE_BROWSER_EXIT_OPTION
 )
 
 def load_recent_dirs() -> list[str]:
@@ -99,7 +100,7 @@ def execute_menu_item(
 
 
 
-def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
+def open_file_browser_terminal(current_path: str = os.getcwd()) -> Optional[UPath]:
     """
     Interactive file browser using terminal/console UI.
     
@@ -110,7 +111,7 @@ def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
         current_path: Starting directory path (defaults to current working directory)
     
     Returns:
-        UPath: The selected directory path
+        UPath: The selected directory path, or None if the user exits.
     """
     if not os.path.isdir(current_path):
         current_path = os.getcwd()
@@ -122,7 +123,7 @@ def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
         if os.path.isdir(os.path.join(current_path, d)) and not d.startswith(".")
     ])
     
-    options: list[str] = [FILE_BROWSER_SELECT_OPTION, FILE_BROWSER_BACK_OPTION] + subdirs
+    options: list[str] = [FILE_BROWSER_SELECT_OPTION, FILE_BROWSER_BACK_OPTION, FILE_BROWSER_EXIT_OPTION] + subdirs
     title: str = f"{DEFAULT_FILE_BROWSER_QUESTION}\nCurrent Path: {current_path}"
 
     option: Optional[str] = questionary.select(title, options).ask()
@@ -132,11 +133,14 @@ def open_file_browser_terminal(current_path: str = os.getcwd()) -> UPath:
     
     elif option == FILE_BROWSER_BACK_OPTION:
         parent_dir: str = os.path.dirname(current_path)
-        return UPath(open_file_browser_terminal(parent_dir))
+        return open_file_browser_terminal(parent_dir)
+    
+    elif option == FILE_BROWSER_EXIT_OPTION:
+        return None
     
     else:
         new_path: str = os.path.join(current_path, option)
-        return UPath(open_file_browser_terminal(new_path))
+        return open_file_browser_terminal(new_path)
 
 
 

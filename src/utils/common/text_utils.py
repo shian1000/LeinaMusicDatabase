@@ -241,7 +241,7 @@ def is_blacklisted_album(title: str) -> bool:
     return False
 
 def remove_brackets(text):
-    return re.sub(r'\s*\([^)]*\)', '', text).strip()
+    return re.sub(r'\s*[\(\[]([^)\]]*)[)\]]', '', text).strip()
 
 
 def similarity(a: str, b: str) -> float:

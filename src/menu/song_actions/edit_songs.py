@@ -46,7 +46,10 @@ def edit_entry_menu(mode: str = None, db_object = None):
     displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
     back_option = "back"
     swap_option = "swap artist with title"
+    merge_option = "merge artist with an existing one"
+    delete_option = "remove from the database"
     displayed_list.append(swap_option)
+    displayed_list.append(delete_option)
     displayed_list.append(back_option)
 
     choice = questionary.select("What category do you wish to edit?", choices=displayed_list).ask()
@@ -58,6 +61,14 @@ def edit_entry_menu(mode: str = None, db_object = None):
         db_object.artist.name = title
         db_object.title = artist_name
         submit_global_database_session()
+        return
+    if choice == delete_option:
+        confirmation = questionary.confirm(f"Are you sure you want to delete {db_object.artist.name} - {db_object.title}???").ask()
+        if confirmation:
+            delete_db_entry(db_object)
+        return
+    if choice == merge_option:
+        print("WIP")
         return
     choosen_index = (displayed_list.index(choice))
     category = action_map[choosen_index]
@@ -165,6 +176,9 @@ def add_songs_menu():
             user_input = int(user_input)
         
         song_labels.append(user_input)
+
+    if user_input == exit_label:
+        return
 
     if (song_labels[1]):
         artist_labels.append(song_labels[1])

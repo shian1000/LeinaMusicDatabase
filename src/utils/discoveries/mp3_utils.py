@@ -63,39 +63,45 @@ def normalize_title(title: Optional[str]) -> str:
 
 def extract_metadata_with_fallback(file: Path) -> dict:
     """Extract MP3 metadata with fallback to filename parsing.
-    
-    Attempts to extract metadata from ID3 tags first. If that fails,
-    falls back to parsing the filename using extract_unknown_data.
-    
+
+    Attempts to extract metadata from ID3 tags first. If the tags are present
+    but do not contain usable title/artist values, it falls back to parsing the
+    filename using extract_unknown_data.
+
     Args:
         file: Path to the MP3 file
-        
+
     Returns:
         dict: Metadata with keys 'title', 'artist_name', 'album', 'year', 'language', 'origin'
     """
     try:
         metadata = extract_mp3_metadata(file)
-        slog(f"[METADATA] Successfully extracted from ID3 tags: {file.name}")
-        return metadata
     except Exception as e:
         slog(f"[METADATA FALLBACK] ID3 extraction failed for {file.name}: {e}")
         print(f"Could not read ID3 tags from {file.name}, attempting to extract from filename...")
-        
-        try:
-            artist_name, title = extract_unknown_data(file)
-            print(artist_name)
-            print(title)
-            slog(f"[METADATA FALLBACK] Extracted from filename: artist='{artist_name}', title='{title}'")
-            
-            # Return a complete metadata dict with extracted data
-            return {
-                "title": title,
-                "artist_name": artist_name,
-                "album": None,
-                "year": None,
-                "language": "Unknown",
-                "origin": None,
-            }
-        except Exception as fallback_error:
-            slog(f"[METADATA ERROR] Both ID3 and fallback extraction failed for {file.name}: {fallback_error}")
-            raise ValueError(f"Could not extract metadata from {file.name} via ID3 or filename") from fallback_error
+        metadata = None
+
+    if metadata and metadata.get("title") not in {None, "", "Unknown Title"} and metadata.get("artist_name") not in {None, "", "Unknown Artist"}:
+        slog(f"[METADATA] Successfully extracted from ID3 tags: {file.name}")
+        return metadata
+
+    if metadata is not None:
+        slog(f"[METADATA FALLBACK] Missing title/artist tags for {file.name}; trying filename")
+    else:
+        slog(f"[METADATA FALLBACK] ID3 extraction failed for {file.name}; trying filename")
+
+    try:
+        artist_name, title = extract_unknown_data(file)
+        slog(f"[METADATA FALLBACK] Extracted from filename: artist='{artist_name}', title='{title}'")
+
+        return {
+            "title": title,
+            "artist_name": artist_name,
+            "album": None,
+            "year": None,
+            "language": "Unknown",
+            "origin": None,
+        }
+    except Exception as fallback_error:
+        slog(f"[METADATA ERROR] Both ID3 and fallback extraction failed for {file.name}: {fallback_error}")
+        raise ValueError(f"Could not extract metadata from {file.name} via ID3 or filename") from fallback_error

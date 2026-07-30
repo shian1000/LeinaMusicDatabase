@@ -21,10 +21,12 @@ DEFAULT_MENU_EXIT_LABEL = "Back"
 DEFAULT_MENU_PICK_QUESTION = "Pick one"
 DEFAULT_MENU_BACK_LABEL = "Back"
 DEFAULT_FILE_BROWSER_QUESTION = "Pick a destination."
+FILE_BROWSER_EXIT_OPTION = "Exit file manager"
 
 # Similarity thresholds
 FILE_SIMILARITY_THRESHOLD = 90  # Percentage (0-100)
 SPELLING_CHECK_THRESHOLD = 0.7  # Decimal (0-1)
+SIMILARITY_THRESHOLD = 0.77 # Used when resolving duplicates
 
 # Search constants
 DEFAULT_SEARCH_MODE = "Song"

@@ -5,6 +5,7 @@ from utils.database.database_management import edit_db_entry
 from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
+from config.constants import SIMILARITY_THRESHOLD
 
 def remove_duplicate_songs():
     """
@@ -60,9 +61,6 @@ def remove_duplicate_artists():
                 duplicates.append((seen[key], artist))
         else:
             seen[key] = artist
-
-
-
 
     if not duplicates:
         print("No duplicate artists found.")
@@ -131,9 +129,6 @@ def resolve_duplicated_albums():
                 break
         if not placed:
             clusters.append({'key': album, 'songs': [s], 'albums': {album}})
-
-    # select clusters with songs from more than one artist
-    SIMILARITY_THRESHOLD = 0.72
 
     # only consider clusters that span more than one artist
     raw_target_clusters = [c for c in clusters if len({song.artist.id for song in c['songs']}) > 1]

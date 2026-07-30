@@ -8,6 +8,8 @@ from utils.database.datatables import artist_categories, song_categories
 from utils.database.tags_management import remove_tag_from_song
 from utils.youtube.manage_youtube_playlists import create_yt_playlist
 from utils.ui.display_utils import display_songs
+from utils.database.tags_management import add_tag_to_song
+from utils.database.database_sessions import submit_global_database_session
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -20,6 +22,13 @@ def make_yt_playlist_menu(songs_objects):
     playlist_name = input("Enter playlsit name:")
     create_yt_playlist(songs_objects, playlist_name)
 
+def add_tags_menu(song_objects):
+    tag = input("What tags do you wish to add to these songs?")
+    for song in song_objects:
+        add_tag_to_song(song_objects, tag)
+    submit_global_database_session()
+    print(f"Added {tag} to songs")
+
 
 def song_actions(songs_objects):
     slog(songs_objects)
@@ -28,6 +37,7 @@ def song_actions(songs_objects):
 
     action_map = {
         "Edit": lambda: edit_songs_menu(songs_objects),
+        "Add tags": lambda: add_tags_menu(songs_objects),
         "Copy songs from local storage": lambda: copy_songs_from_storage(songs_list),
         "Make YT playlist": lambda: make_yt_playlist_menu(songs_objects),
         "Make TXT file": lambda: print("In progress"),

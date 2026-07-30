@@ -13,10 +13,10 @@ from utils.database.database_sessions import submit_global_database_session
 def import_data():
     import_folder = settings.export_dir
     songs_path = open_file_browser_terminal(import_folder)
+    if not songs_path:
+        return
     imported_songs = import_data_from_mp3_tags(songs_path)
-    print(imported_songs)
     if(imported_songs):
-        print(imported_songs)
         print("displaying")
         display_songs(imported_songs)
         edit_songs_menu(imported_songs)

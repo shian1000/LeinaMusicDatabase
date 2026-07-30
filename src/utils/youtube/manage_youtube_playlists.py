@@ -1,5 +1,9 @@
 import os
+import shutil
+import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import List, Dict
 
 import questionary
@@ -8,18 +12,27 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
-from old.yt_cache import make_song_key, save_cache
-from old.yt_cache import load_cache, init_cache, clear_cache
-from old.yt_cache import save_cache
-from old.yt_cache import make_song_key
+from utils.youtube.yt_cache import make_song_key, save_cache
+from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
+from utils.youtube.yt_cache import save_cache
+from utils.youtube.yt_cache import make_song_key
 import json
 
+
+import json
+from googleapiclient.errors import HttpError
 
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 TOKEN_PATH = ".secrets/token.json"
 CLIENT_SECRET_PATH = ".secrets/client_secret.json"
+
+HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320"]
+# Keywords that suggest we should deprioritize (lower = worse)
+LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix"]
+VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
+
 
 
 # ---------------------------------------------------------
@@ -57,6 +70,91 @@ def get_youtube_service():
             token.write(creds.to_json())
 
     return build("youtube", "v3", credentials=creds)
+
+
+# ---------------------------------------------------------
+# DOWNLOADING VIDEOS
+# ---------------------------------------------------------
+
+def download_youtube_video(url: str, output_dir: str | None = None) -> str | None:
+    """Download a video from a YouTube link using yt-dlp."""
+    link = (url or "").strip()
+    if not link:
+        print("  ✖ No link provided")
+        return None
+
+    target_dir = output_dir or str(Path(__file__).resolve().parents[3] / "import")
+    Path(target_dir).mkdir(parents=True, exist_ok=True)
+
+    yt_dlp_executable = shutil.which("yt-dlp") or shutil.which("yt-dlp.exe")
+    if not yt_dlp_executable:
+        venv_bin = Path(sys.prefix) / "bin"
+        candidate = venv_bin / "yt-dlp"
+        if candidate.exists():
+            yt_dlp_executable = str(candidate)
+
+    if not yt_dlp_executable:
+        try:
+            import yt_dlp  # type: ignore
+        except ModuleNotFoundError:
+            print("  ✖ yt-dlp is not installed or not available on PATH")
+            return None
+        yt_dlp_executable = sys.executable
+
+    output_template = str(Path(target_dir) / "%(title)s.%(ext)s")
+    command = [
+        yt_dlp_executable,
+        "--no-playlist",
+        "-x",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        "0",
+        "-o",
+        output_template,
+        "--print",
+        "after_move:filepath",
+        link,
+    ]
+
+    if yt_dlp_executable == sys.executable:
+        command = [yt_dlp_executable, "-m", "yt_dlp", *command[1:]]
+
+    print(f"\nDownloading from: {link}")
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+    except FileNotFoundError:
+        print("  ✖ yt-dlp is not installed or not available on PATH")
+        return None
+    except subprocess.TimeoutExpired:
+        print("  ✖ Download timed out")
+        return None
+
+    if result.returncode != 0:
+        error_output = (result.stderr or result.stdout).strip()
+        if error_output:
+            print(f"  ✖ Download failed: {error_output}")
+        else:
+            print("  ✖ Download failed")
+        return None
+
+    downloaded_path = None
+    for line in result.stdout.splitlines():
+        candidate = line.strip()
+        if candidate:
+            downloaded_path = candidate
+
+    if downloaded_path:
+        print(f"  ✔ Downloaded: {downloaded_path}")
+    else:
+        print("  ✔ Download completed")
+
+    return downloaded_path
 
 
 # ---------------------------------------------------------
@@ -126,23 +224,90 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
 
     return video_id
 
-def search_video(youtube, artist: str, title: str) -> str | None:
+def score_result(title: str) -> int:
+    title_lower = title.lower()
+    score = 0
+    for kw in HQ_KEYWORDS:
+        if kw in title_lower:
+            score += 2
+    for kw in VIDEO_KEYWORDS:
+        if kw in title_lower:
+            score -= 2
+    for kw in LQ_KEYWORDS:
+        if kw in title_lower:
+            score -= 1
+    return score
+
+def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | None:
+    """Search YouTube using yt-dlp (no API quota used)."""
     query = f"{artist} - {title} audio"
-    print(f"\nSearching for: {query}")
+    print(f"\nSearching via yt-dlp for: {query}")
+
+    try:
+        result = subprocess.run(
+            [
+                "yt-dlp",
+                "--dump-json",
+                "--no-playlist",
+                f"ytsearch{max_results}:{query}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"  ✖ yt-dlp unavailable: {e}")
+        return None
+
+    if result.returncode != 0 or not result.stdout.strip():
+        print("  ✖ yt-dlp returned no results")
+        return None
+
+    candidates = []
+    for line in result.stdout.strip().splitlines():
+        try:
+            info = json.loads(line)
+            video_id = info.get("id")
+            video_title = info.get("title", "")
+            if video_id:
+                candidates.append((score_result(video_title), video_id, video_title))
+        except json.JSONDecodeError:
+            continue
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_id, best_title = candidates[0]
+    print(f"  ✔ Best match (score={best_score}): {best_title} [{best_id}]")
+    return best_id
+
+def search_video(youtube, artist: str, title: str) -> str | None:
+    """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback."""
+
+    # Try yt-dlp first — free, no quota
+    video_id = search_video_ytdlp(artist, title)
+    if video_id:
+        return video_id
+
+    # Fallback: YouTube Data API
+    print("  ↩ Falling back to YouTube API...")
+    query = f"{artist} - {title} audio"
+    print(f"  Searching API for: {query}")
 
     try:
         response = youtube.search().list(
             part="snippet",
             q=query,
             type="video",
-            maxResults=1
+            maxResults=5,
+            videoCategoryId="10",  # Music category
         ).execute()
 
     except HttpError as e:
         if e.resp.status == 403 and b"quotaExceeded" in e.content:
             print("🛑 YouTube API quota exceeded. Stopping.")
             raise SystemExit(1)
-
         raise
 
     items = response.get("items", [])
@@ -150,9 +315,14 @@ def search_video(youtube, artist: str, title: str) -> str | None:
         print("  ✖ No results found")
         return None
 
-    video_id = items[0]["id"]["videoId"]
-    print(f"  ✔ Found video: {video_id}")
-    return video_id
+    candidates = [
+        (score_result(item["snippet"]["title"]), item["id"]["videoId"], item["snippet"]["title"])
+        for item in items
+    ]
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_id, best_title = candidates[0]
+    print(f"  ✔ Best match (score={best_score}): {best_title} [{best_id}]")
+    return best_id
 
 
 # ---------------------------------------------------------

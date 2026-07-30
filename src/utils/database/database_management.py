@@ -86,8 +86,8 @@ def edit_db_entry(db_object, category: str, new_value: str):
     if type(db_object) == Song:
         print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' --> '{new_value}'.")
 
-def delete_db_entry(db_object, session):
-    music_session, tag_session = session
+def delete_db_entry(db_object):
+    music_session, tag_session = get_global_database_sessions()
     slog(type(db_object))
     music_session.delete(db_object)
 

@@ -5,7 +5,6 @@ from utils.database.datatables import artist_categories, search_only_categories,
 from menu.song_actions import song_actions
 from utils.ui.menu_utils import clear_screen
 from utils.ui.display_utils import display_songs, display_artists
-import time
 from utils.database.database_sessions import submit_global_database_session
 
 def fetch_artists():
@@ -25,15 +24,6 @@ def fetch_artists():
     slog(artist_objects)
 
     display_artists(artist_objects)
-
-
-    # if(artist_objects):
-    #     decision = questionary.confirm("Do you want to do something with these songs?").ask()
-    #     if decision:
-    #         song_actions(artist_objects)
-    #         submit_global_database_session()
-    #     else:
-    #         clear_screen
 
 def fetch_songs():
     exit_label = ["Back"]

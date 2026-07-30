@@ -18,6 +18,10 @@ _SPECIAL_REPLACEMENTS = {
     "\u0111": "d",
 }
 
+APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵"
+
+ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on"}
+
 
 def normalize(
     s: Optional[str],
@@ -97,23 +101,61 @@ def extract_unknown_data(filepath: Path):
         return None, None
     
     artist, title = parts
-    print(f"normalizer - artist: {artist}")
-    print(f"normalizer - title: {title}")
 
     return artist, title
 
 def strip_brackets(title: str):
     print("Stripping title")
-    if " (" not in title:
+    
+    # Find the earliest occurrence of either bracket type
+    round_pos = title.find(" (")
+    square_pos = title.find(" [")
+    
+    if round_pos == -1 and square_pos == -1:
         print("Can't strip brackets")
         return None
-    new_title, _ = title.split(" (", maxsplit=1)
-    # new_title = re.split(r' \(| {2}\|', title, maxsplit=1)[0]
+    
+    # Pick the earliest bracket that exists
+    if round_pos == -1:
+        split_str = " ["
+    elif square_pos == -1:
+        split_str = " ("
+    else:
+        split_str = " (" if round_pos <= square_pos else " ["
+    
+    new_title, _ = title.split(split_str, maxsplit=1)
     print(title)
     print(new_title)
+    
     if new_title:
         print("returning new title")
         return new_title
     else:
         print("returning none")
         return None
+
+    
+def _normalize_apostrophes(text: str) -> str:
+    """Replace all apostrophe-like characters with a single canonical one."""
+    return re.sub(f"[{re.escape(APOSTROPHES)}]", "'", text)
+
+def _words_match(old_word: str, new_word: str) -> bool:
+    """A word pair is acceptable if identical, or if the new word is an
+    accepted (lowercase) word and the old word is just a different-case
+    variant of it. Correcting TOWARDS the accepted form is fine; the
+    reverse (moving away from it) is not.
+    """
+    if old_word == new_word:
+        return True
+    return new_word in ACCEPTED_WORDS and old_word.lower() == new_word
+
+def rule_apostrophe_and_common_word_diff(old_title: str, new_title: str) -> bool:
+    """Auto-confirm if, after canonicalizing apostrophes, the only
+    remaining differences are casing corrections on ACCEPTED_WORDS."""
+    old_words = _normalize_apostrophes(old_title).split()
+    new_words = _normalize_apostrophes(new_title).split()
+
+    if len(old_words) != len(new_words):
+        return False
+
+    return all(_words_match(ow, nw) for ow, nw in zip(old_words, new_words))
