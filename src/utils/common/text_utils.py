@@ -123,11 +123,11 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     from utils.common.normalizer import normalize as central_normalize
 
-    def similarity(a, b):
+    def normalized_similarity(a, b):
         # Use centralized normalization for consistent comparison
         a_norm = central_normalize(a)
         b_norm = central_normalize(b)
-        sim_score = SequenceMatcher(None, a_norm, b_norm).ratio()
+        sim_score = similarity(a_norm, b_norm)
         slog(f"[SIMILARITY] '{a}' ({a_norm}) vs '{b}' ({b_norm}) = {sim_score:.2f}")
         return sim_score
 
@@ -198,8 +198,8 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
     mb_score = int(best.get("score", 0))
 
-    title_sim = similarity(title, mb_title)
-    artist_sim = similarity(artist, mb_artist)
+    title_sim = normalized_similarity(title, mb_title)
+    artist_sim = normalized_similarity(artist, mb_artist)
     
     slog(f"[MB RESULT] Score: {mb_score}")
     slog(f"  Title: input='{title}' ({central_normalize(title)}) vs MB='{mb_title}' ({central_normalize(mb_title)})")

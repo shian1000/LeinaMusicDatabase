@@ -6,7 +6,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
 from utils.common.debug import slog
-from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, are_song_entries_similar
+from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, similarity
 from difflib import SequenceMatcher
 
 MODULE_NAME = "Genius lyrics fetcher"
@@ -20,7 +20,7 @@ def title_matches_url(title: str, url: str, threshold: float = 0.6) -> bool:
     title_slug = normalize(title)
     url_slug = normalize(slug)
 
-    ratio = are_song_entries_similar(title_slug, url_slug)
+    ratio = similarity(title_slug, url_slug)
     slog(ratio, priority=1)
     return ratio >= threshold
 
