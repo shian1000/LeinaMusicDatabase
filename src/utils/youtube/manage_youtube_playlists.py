@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from utils.youtube.yt_cache import make_song_key, save_cache
 from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
 from utils.youtube.yt_cache import save_cache
 from utils.youtube.yt_cache import make_song_key
+from utils.common.text_utils import remove_brackets, similarity
 import json
 
 
@@ -32,6 +34,16 @@ HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster"
 # Keywords that suggest we should deprioritize (lower = worse)
 LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix"]
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
+
+# Minimum title similarity a candidate must have to the requested song to be
+# accepted at all. Without this, two candidates that both score 0 on the
+# keyword lists above are indistinguishable, so a completely unrelated video
+# could "win" just by being returned first. Gating on title (rather than
+# artist+title combined) matters: a wrong song by a same-named artist, or a
+# wrong video that merely shares a caption like "[Save Ukraine - #StopWar]"
+# with the requested title, can still look deceptively similar once the
+# artist name or shared junk text is folded into one comparison string.
+MIN_RELEVANCE = 0.35
 
 
 
@@ -224,19 +236,44 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
 
     return video_id
 
-def score_result(title: str) -> int:
-    title_lower = title.lower()
-    score = 0
+def _relevance_text(text: str) -> str:
+    """Strip bracketed annotations and hashtags before comparing titles.
+
+    DB titles/video titles often carry junk like "[Official Video]" or
+    "[Save Ukraine - #StopWar]" that isn't part of the song's identity. If
+    two unrelated videos both happen to carry the same bracketed tag, a
+    plain similarity check on the raw strings would rate them as similar
+    for the wrong reason, so that text is dropped before comparing.
+    """
+    text = remove_brackets(text)
+    text = re.sub(r"#\w+", "", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def score_result(candidate_title: str, artist: str, title: str) -> tuple[float, int]:
+    """Score a candidate video: (relevance to the requested song, quality).
+
+    Relevance is judged on the song title alone, not artist+title combined.
+    The title is what distinguishes the specific song; folding the artist
+    name into the comparison lets a wrong song by the same (or similarly
+    spelled) artist score deceptively high.
+    """
+    expected_title = _relevance_text(title)
+    candidate_clean = _relevance_text(candidate_title)
+    relevance = similarity(expected_title, candidate_clean) if expected_title and candidate_clean else 0.0
+
+    title_lower = candidate_title.lower()
+    quality = 0
     for kw in HQ_KEYWORDS:
         if kw in title_lower:
-            score += 2
+            quality += 2
     for kw in VIDEO_KEYWORDS:
         if kw in title_lower:
-            score -= 2
+            quality -= 2
     for kw in LQ_KEYWORDS:
         if kw in title_lower:
-            score -= 1
-    return score
+            quality -= 1
+    return relevance, quality
 
 def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | None:
     """Search YouTube using yt-dlp (no API quota used)."""
@@ -270,7 +307,7 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | N
             video_id = info.get("id")
             video_title = info.get("title", "")
             if video_id:
-                candidates.append((score_result(video_title), video_id, video_title))
+                candidates.append((score_result(video_title, artist, title), video_id, video_title))
         except json.JSONDecodeError:
             continue
 
@@ -278,8 +315,11 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | N
         return None
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    best_score, best_id, best_title = candidates[0]
-    print(f"  ✔ Best match (score={best_score}): {best_title} [{best_id}]")
+    (best_relevance, best_quality), best_id, best_title = candidates[0]
+    if best_relevance < MIN_RELEVANCE:
+        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f})")
+        return None
+    print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
     return best_id
 
 def search_video(youtube, artist: str, title: str) -> str | None:
@@ -316,12 +356,15 @@ def search_video(youtube, artist: str, title: str) -> str | None:
         return None
 
     candidates = [
-        (score_result(item["snippet"]["title"]), item["id"]["videoId"], item["snippet"]["title"])
+        (score_result(item["snippet"]["title"], artist, title), item["id"]["videoId"], item["snippet"]["title"])
         for item in items
     ]
     candidates.sort(key=lambda x: x[0], reverse=True)
-    best_score, best_id, best_title = candidates[0]
-    print(f"  ✔ Best match (score={best_score}): {best_title} [{best_id}]")
+    (best_relevance, best_quality), best_id, best_title = candidates[0]
+    if best_relevance < MIN_RELEVANCE:
+        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f})")
+        return None
+    print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
     return best_id
 
 

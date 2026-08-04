@@ -9,7 +9,7 @@ from utils.discoveries.mp3_utils import extract_metadata_with_fallback, extract_
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold
 from config.constants import SPELLING_CHECK_THRESHOLD
 from rich import print
 import questionary
@@ -49,22 +49,21 @@ def check_artist_spelling(metadata) -> Artist:
     slog(corrected_spelling)
     slog(similarity_percent)
 
-    if(similarity_percent > SPELLING_CHECK_THRESHOLD):
+    if(similarity_percent > scaled_similarity_threshold(new_artist_name, corrected_spelling, SPELLING_CHECK_THRESHOLD)):
         existing_artists = get_artists_from_db_session(artist_categories[0], corrected_spelling)
         if existing_artists:
             for art in existing_artists:
                 if not (are_artists_entries_similar(art, corrected_spelling)):
                     slog(f"{art} is not similar to {corrected_spelling}, skipping", priority=1)
                 else:
-                    print(f"Found similar artist [blue]{existing_artists[0].name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
+                    print(f"Found similar artist [blue]{art.name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
                     confirmation = questionary.confirm(f"Do you wish to use the artist already in the database?").ask()
                     if confirmation:
-                        new_artist_obj = (get_artists_from_db_session(artist_categories[0], corrected_spelling))[0]
                         print("Found existing artist")
-                        slog(new_artist_obj)
-                        slog(new_artist_obj.name)
-                        slog(new_artist_obj.id)
-                        return new_artist_obj
+                        slog(art)
+                        slog(art.name)
+                        slog(art.id)
+                        return art
             else:
                 return None
             
@@ -223,7 +222,7 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
                 similarity_percent = similarity(new_artist_name, similar_artist.name)
                 slog(f"The first is {new_artist_name}", priority=1)
                 slog(f"The second is {similar_artist.name}", priority=1)
-                if(similarity_percent > SPELLING_CHECK_THRESHOLD):
+                if(similarity_percent > scaled_similarity_threshold(new_artist_name, similar_artist.name, SPELLING_CHECK_THRESHOLD)):
                     existing_artist = similar_artist
                     print(f"Artists seem the same (Similarity is {similarity_percent})")
                     break  # Early exit - we found a good match
@@ -250,10 +249,7 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
         slog(f"    [NEW ARTIST] Created and added in {create_time:.4f}s", priority=1)
         added_new_entry = True
     else:
-        retrieve_start = time.time()
-        new_artist_obj = (get_artists_from_db_session(artist_categories[0], existing_artist.name))[0]
-        retrieve_time = time.time() - retrieve_start
-        slog(f"    [RETRIEVE] Got artist from DB in {retrieve_time:.4f}s", priority=1)
+        new_artist_obj = existing_artist
         print(f"Found existing artist ({new_artist_obj.name})")
 
     # Cache the result for future lookups in this import batch

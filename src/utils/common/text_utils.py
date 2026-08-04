@@ -252,6 +252,24 @@ def similarity(a: str, b: str) -> float:
     slog(result, priority=1)
     return result
 
+
+def scaled_similarity_threshold(a: str, b: str, base_threshold: float) -> float:
+    """Raise the required similarity ratio for short strings.
+
+    SequenceMatcher's ratio is noisy on short strings: two names that only
+    share a first letter and a common suffix (e.g. "A.Mia" vs "Armia") can
+    score as high as 0.8 despite being different names. Scale the threshold
+    up as the shorter of the two strings shrinks so short names need to be
+    almost identical to count as a match, while longer names keep using the
+    base threshold.
+    """
+    shortest = min(len(a), len(b))
+    if shortest <= 5:
+        return max(base_threshold, 0.92)
+    if shortest <= 8:
+        return max(base_threshold, 0.85)
+    return base_threshold
+
 def are_song_entries_similar(
     db_object,
     title_query: str,
@@ -268,4 +286,4 @@ def are_artists_entries_similar(
     threshold: float = 0.7
 ) -> bool:
     artist_score = similarity(artist_query, db_object.name)
-    return artist_score >= threshold
+    return artist_score >= scaled_similarity_threshold(artist_query, db_object.name, threshold)
