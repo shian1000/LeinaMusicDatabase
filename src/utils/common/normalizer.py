@@ -96,7 +96,7 @@ def extract_unknown_data(filepath: Path):
 
     name = filepath.stem
     print(name)
-    parts = re.split(r" [–\-_] ", name, maxsplit=1)
+    parts = re.split(r" [–—\-_] ", name, maxsplit=1)
     if len(parts) < 2:
         return None, None
     
