@@ -12,74 +12,53 @@ import re
 from utils.common.normalizer import strip_brackets
 
 
-def convert_characters_encoding(songs):
-    wrong_characters_list = []
+_CLEANUP_FIELDS = [
+    ("title",  lambda song: song.title,        lambda song, v: setattr(song, "title", v)),
+    ("artist", lambda song: song.artist.name,  lambda song, v: setattr(song.artist, "name", v)),
+    ("album",  lambda song: song.album,        lambda song, v: setattr(song, "album", v)),
+]
+
+def _apply_field_cleanup(songs, needs_transform, transform, action_description):
+    """
+    Apply `transform` to each song's title/artist name/album whenever
+    `needs_transform` matches the current value, logging which fields changed.
+    Album is skipped when empty/None; title and artist name are always present.
+    """
     for song in songs:
-        converted_fields = []
-        wrong_characters_list.clear()
+        changed_fields = []
+        for field_name, get_value, set_value in _CLEANUP_FIELDS:
+            value = get_value(song)
+            if value and needs_transform(value):
+                new_value = transform(value)
+                set_value(song, new_value)
+                changed_fields.append(f"{field_name}: '{new_value}'")
 
-        if "&amp;" in song.title:
-            wrong_characters_list.append(song.title)
-            song.title = song.title.replace("&amp;", "&")
-            converted_fields.append(f"title: '{song.title}'")
+        if changed_fields:
+            print(f"{action_description} \033[93m{', '.join(changed_fields)}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
 
-        if "&amp;" in song.artist.name:
-            wrong_characters_list.append(song.artist.name)
-            song.artist.name = song.artist.name.replace("&amp;", "&")
-            converted_fields.append(f"artist: '{song.artist.name}'")
-
-        if song.album:
-            if "&amp;" in song.album:
-                wrong_characters_list.append(song.album)
-                song.album = song.album.replace("&amp;", "&")
-                converted_fields.append(f"album: '{song.album}'")
-
-        if converted_fields:
-            print(f"Converted \033[93m{wrong_characters_list}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+def convert_characters_encoding(songs):
+    _apply_field_cleanup(
+        songs,
+        needs_transform=lambda v: "&amp;" in v,
+        transform=lambda v: v.replace("&amp;", "&"),
+        action_description="Converted",
+    )
 
 def strip_leading_spaces(songs):
-    additive_spaces_list = []
-    for song in songs:
-        stripped_fields = []
-        additive_spaces_list.clear()
-
-        if song.title.startswith(" "):
-            additive_spaces_list.append(song.title)
-            song.title = song.title.lstrip()
-            stripped_fields.append(f"title: '{song.title}'")
-
-        if song.artist.name.startswith(" "):
-            additive_spaces_list.append(song.artist.name)
-            song.artist.name = song.artist.name.lstrip()
-            stripped_fields.append(f"artist: '{song.artist.name}'")
-
-        if song.album:
-            if song.album.startswith(" "):
-                additive_spaces_list.append(song.album)
-                song.album = song.album.lstrip()
-                stripped_fields.append(f"album: '{song.album}'")
-
-        if stripped_fields:
-            print(f"Stripped leading spaces \033[93m{additive_spaces_list}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+    _apply_field_cleanup(
+        songs,
+        needs_transform=lambda v: v.startswith(" "),
+        transform=lambda v: v.lstrip(),
+        action_description="Stripped leading spaces in",
+    )
 
 def replace_double_spaces(songs):
-    for song in songs:
-        modified_fields = []
-
-        if "  " in song.title:
-            song.title = re.sub(r" {2,}", " ", song.title)
-            modified_fields.append(f"title: '{song.title}'")
-
-        if "  " in song.artist.name:
-            song.artist.name = re.sub(r" {2,}", " ", song.artist.name)
-            modified_fields.append(f"artist: '{song.artist.name}'")
-
-        if song.album and "  " in song.album:
-            song.album = re.sub(r" {2,}", " ", song.album)
-            modified_fields.append(f"album: '{song.album}'")
-
-        if modified_fields:
-            print(f"Replaced double spaces in \033[93m{', '.join(modified_fields)}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+    _apply_field_cleanup(
+        songs,
+        needs_transform=lambda v: "  " in v,
+        transform=lambda v: re.sub(r" {2,}", " ", v),
+        action_description="Replaced double spaces in",
+    )
 
 def seek_nonsense_names(songs):
     for song in songs:
