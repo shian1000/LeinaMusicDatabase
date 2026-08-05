@@ -3,6 +3,35 @@ from utils.database.tag_db_manager import Tag, SongTag
 from utils.common.debug import slog
 
 
+def _validate_song_and_tag(song, tag: str):
+    """
+    Validate a (song, tag) pair shared by all tag CRUD helpers below.
+
+    Returns (tag_session, cleaned_tag) on success, or None if song/tag are
+    invalid or the global database sessions aren't initialized yet.
+    """
+    if not hasattr(song, 'id') or song.id is None:
+        slog("Invalid song object: missing or None id")
+        return None
+
+    if not tag or not isinstance(tag, str):
+        slog("Invalid tag: must be a non-empty string")
+        return None
+
+    tag = tag.strip()
+    if not tag:
+        slog("Tag cannot be empty after stripping whitespace")
+        return None
+
+    sessions = get_global_database_sessions()
+    if sessions is None:
+        slog("Global database sessions not initialized")
+        return None
+
+    _, tag_session = sessions
+    return tag_session, tag
+
+
 def add_tag_to_song(song, tag: str) -> bool:
     """
     Add a tag to a song, respecting all existing tags.
@@ -17,29 +46,12 @@ def add_tag_to_song(song, tag: str) -> bool:
     Raises:
         ValueError: If song_id is invalid or tag is empty
     """
-    # Validate inputs
     slog("add_tag_to_song functiion activated")
-    if not hasattr(song, 'id') or song.id is None:
-        slog("Invalid song object: missing or None id")
+    validated = _validate_song_and_tag(song, tag)
+    if validated is None:
         return False
-    
-    if not tag or not isinstance(tag, str):
-        slog("Invalid tag: must be a non-empty string")
-        return False
-    
-    tag = tag.strip()
-    if not tag:
-        slog("Tag cannot be empty after stripping whitespace")
-        return False
-    
-    # Get global sessions
-    sessions = get_global_database_sessions()
-    if sessions is None:
-        slog("Global database sessions not initialized")
-        return False
-    
-    music_session, tag_session = sessions
-    
+    tag_session, tag = validated
+
     try:
         # Get or create the tag
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
@@ -86,28 +98,11 @@ def has_tag_on_song(song, tag: str) -> bool:
     Returns:
         bool: True if song has the tag, False otherwise
     """
-    # Validate inputs
-    if not hasattr(song, 'id') or song.id is None:
-        slog("Invalid song object: missing or None id")
+    validated = _validate_song_and_tag(song, tag)
+    if validated is None:
         return False
-    
-    if not tag or not isinstance(tag, str):
-        slog("Invalid tag: must be a non-empty string")
-        return False
-    
-    tag = tag.strip()
-    if not tag:
-        slog("Tag cannot be empty after stripping whitespace")
-        return False
-    
-    # Get global sessions
-    sessions = get_global_database_sessions()
-    if sessions is None:
-        slog("Global database sessions not initialized")
-        return False
-    
-    music_session, tag_session = sessions
-    
+    tag_session, tag = validated
+
     try:
         # Query for the tag
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
@@ -146,28 +141,11 @@ def remove_tag_from_song(song, tag: str) -> bool:
     Raises:
         ValueError: If song_id is invalid or tag is empty
     """
-    # Validate inputs
-    if not hasattr(song, 'id') or song.id is None:
-        slog("Invalid song object: missing or None id")
+    validated = _validate_song_and_tag(song, tag)
+    if validated is None:
         return False
-    
-    if not tag or not isinstance(tag, str):
-        slog("Invalid tag: must be a non-empty string")
-        return False
-    
-    tag = tag.strip()
-    if not tag:
-        slog("Tag cannot be empty after stripping whitespace")
-        return False
-    
-    # Get global sessions
-    sessions = get_global_database_sessions()
-    if sessions is None:
-        slog("Global database sessions not initialized")
-        return False
-    
-    music_session, tag_session = sessions
-    
+    tag_session, tag = validated
+
     try:
         # Query for the tag
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
