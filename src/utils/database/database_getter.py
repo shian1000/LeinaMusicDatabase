@@ -191,6 +191,15 @@ def _validate_category(category: str, valid_categories: set) -> str | None:
     slog(normalized)
     return normalized
 
+def _normalized_python_filter(candidates: list, words: list[str], get_field) -> list:
+    """
+    Python-side fallback filter: keep candidates whose normalized field contains
+    every word, case-insensitively. Used when DB-level LIKE filtering can't be
+    trusted (non-ASCII queries) or came back empty.
+    """
+    normalized_words = [normalize_text(w).casefold() for w in words]
+    return [c for c in candidates if all(w in get_field(c).casefold() for w in normalized_words)]
+
 def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
     if not songs:
         slog("No such songs found")
@@ -311,10 +320,9 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
 
     # Python fallback for difficult characters - requires loading the db into the memory
     slog("Falling back to Python-side normalized filtering")
-    normalized_words = [normalize_text(w).casefold() for w in words]
     get_field = CATEGORY_NORMALIZED_FIELDS[category]
     candidates = base_query.all()
-    filtered = [s for s in candidates if all(w in get_field(s).casefold() for w in normalized_words)]
+    filtered = _normalized_python_filter(candidates, words, get_field)
 
     if not filtered:
         slog("No such songs found")
@@ -365,10 +373,9 @@ def get_artists_from_db_session(
         if aggresive_search or not query_has_any_standard_latin_characters:
             # Python-side normalized filtering — handles Polish and other non-ASCII characters
             slog("Falling back to Python-side normalized filtering")
-            normalized_words = [normalize_text(w).casefold() for w in words]
             get_field = CATEGORY_NORMALIZED_FIELDS[category]
             candidates = db_query.all()
-            filtered = [a for a in candidates if all(w in get_field(a).casefold() for w in normalized_words)]
+            filtered = _normalized_python_filter(candidates, words, get_field)
             if not filtered:
                 slog("No such artists found")
             return filtered
@@ -383,10 +390,9 @@ def get_artists_from_db_session(
 
         # Python fallback even for ASCII queries, in case DB-level filtering missed anything
         slog("Falling back to Python-side normalized filtering")
-        normalized_words = [normalize_text(w).casefold() for w in words]
         get_field = CATEGORY_NORMALIZED_FIELDS[category]
         candidates = db_query.all()
-        filtered = [a for a in candidates if all(w in get_field(a).casefold() for w in normalized_words)]
+        filtered = _normalized_python_filter(candidates, words, get_field)
         if not filtered:
             slog("No such artists found")
         return filtered
