@@ -7,15 +7,28 @@ import time
 import re
 from utils.common.debug import slog
 from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, similarity
+from utils.discoveries.discovery_result import DiscoveryResult
 from difflib import SequenceMatcher
 
 MODULE_NAME = "Genius lyrics fetcher"
 
+def _url_slug(url: str) -> str:
+    """"metronomy-love-letters-lyrics" -> "metronomy love letters lyrics" """
+    return url.rstrip('/').split('/')[-1].replace('-', ' ').replace(' lyrics', '')
+
+def _title_portion_of_slug(slug: str, artist: str) -> str:
+    """Best-effort strip of the leading artist name from a "artist title" slug,
+    so a title-only similarity check upstream isn't diluted by the artist words."""
+    norm_slug = normalize(slug)
+    norm_artist = normalize(artist)
+    if norm_artist and norm_slug.startswith(norm_artist):
+        return norm_slug[len(norm_artist):].strip()
+    return norm_slug
+
 def title_matches_url(title: str, url: str, threshold: float = 0.6) -> bool:
     slog("title_matches_url function", priority=1)
     """Check if a song title roughly matches a Genius lyrics URL."""
-    # Extract the slug part: "metronomy-love-letters-lyrics" → "metronomy love letters lyrics"
-    slug = url.rstrip('/').split('/')[-1].replace('-', ' ').replace(' lyrics', '')
+    slug = _url_slug(url)
     slog(slug, priority=1)
     title_slug = normalize(title)
     url_slug = normalize(slug)
@@ -52,8 +65,11 @@ def get_album_name(artist: str, title: str) -> str | None:
                 song_url = href
                 slog("match", priority=1)
                 break
-        
-        song_url = link.get_attribute("href")
+
+        if not song_url:
+            slog("No matching Genius result found")
+            return None
+
         slog(song_url)
         driver.get(song_url)
         time.sleep(2)
@@ -67,7 +83,8 @@ def get_album_name(artist: str, title: str) -> str | None:
         if is_blacklisted_album(album_found):
             return None
         else:
-            return album_found
+            matched_title = _title_portion_of_slug(_url_slug(song_url), artist)
+            return DiscoveryResult(album=album_found, matched_title=matched_title)
     
     except Exception as e:
         slog(f"Failed: {e}")

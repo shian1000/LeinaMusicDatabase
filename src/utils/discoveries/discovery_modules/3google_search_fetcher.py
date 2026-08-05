@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.debug import slog
+from utils.discoveries.discovery_result import DiscoveryResult
 import time
 from utils.database.database_getter import get_songs_from_db_session
 
@@ -109,4 +110,8 @@ def get_album_name(artist: str, song: str) -> dict | None:
 
     info["_query"] = {"artist": artist, "song": song}
     slog(info)
-    return info.get("album") if info else None
+
+    album = info.get("album")
+    if not album:
+        return None
+    return DiscoveryResult(album=album, matched_artist=info.get("artists"))

@@ -5,11 +5,13 @@ from utils.common.debug import slog
 from urllib.parse import quote
 import json
 from utils.common.text_utils import is_blacklisted_album, similarity
+from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import SPELLING_CHECK_THRESHOLD
 
 MODULE_NAME = "Itunes Fetches"
 
 def extract_from_itunes_soup(song_soup, artist, song):
+    """Returns (album, matched_title, matched_artist) or None."""
     # Parse the JSON-LD schema tag in <head>
     # slog(song_soup, priority=1)
     schema_tag = song_soup.find("script", {"id": "schema:song", "type": "application/ld+json"})
@@ -29,6 +31,7 @@ def extract_from_itunes_soup(song_soup, artist, song):
     if not any(artist.lower() in name for name in artist_names):
         slog(f"Artist mismatch: expected '{artist}', found {artist_names}")
         return None
+    matched_artist = artists[0].get("name", "") if artists else ""
 
     # 2. Verify song title
     found_song = audio.get("name", "")
@@ -44,7 +47,7 @@ def extract_from_itunes_soup(song_soup, artist, song):
         return None
 
     slog(f"Matched: {artist} - {found_song} ({album})")
-    return album
+    return album, found_song, matched_artist
 
 def get_album_name(artist: str, song: str) -> str | None:
     query = quote(f"{artist} {song}")
@@ -74,14 +77,18 @@ def get_album_name(artist: str, song: str) -> str | None:
 
     if not song_link:
         print("Song not found")
-    else:
-        slog(f"Found song link: {song_link}", priority=1)
-        driver.get(song_link)
-        time.sleep(2)
+        return None
+
+    slog(f"Found song link: {song_link}", priority=1)
+    driver.get(song_link)
+    time.sleep(2)
 
     song_soup = BeautifulSoup(driver.page_source, "html.parser")
-    album_name = extract_from_itunes_soup(song_soup, artist, song)
+    extracted = extract_from_itunes_soup(song_soup, artist, song)
+    if not extracted:
+        return None
+
+    album_name, matched_title, matched_artist = extracted
     if is_blacklisted_album(album_name):
         return None
-    else:
-        return album_name or None
+    return DiscoveryResult(album=album_name, matched_title=matched_title, matched_artist=matched_artist)

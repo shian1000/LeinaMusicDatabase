@@ -2,6 +2,7 @@ import time
 import musicbrainzngs
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
+from utils.discoveries.discovery_result import DiscoveryResult
 import re
 import requests
 from difflib import SequenceMatcher
@@ -12,6 +13,17 @@ musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
 
 HEADERS = {"User-Agent": "YourScriptName/1.0 (your@email.com)"}
 MODULE_NAME = "Musicbrainz fetcher"
+
+def _recording_title_artist(recording) -> tuple[str, str]:
+    """Best-effort extraction of what MusicBrainz recording a release came from."""
+    if not recording:
+        return "", ""
+    title = recording.get("title", "")
+    try:
+        artist = recording["artist-credit"][0]["artist"]["name"]
+    except (KeyError, IndexError, TypeError):
+        artist = ""
+    return title, artist
 
 def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.
@@ -37,7 +49,9 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
         recordings = response.get("recording-list", [])
 
         album = None
+        album_recording = None
         fallback = None
+        fallback_recording = None
 
         for recording in recordings:
             releases = recording.get("release-list", [])
@@ -57,28 +71,34 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
 
                 if primary_type == "Album":
                     album = release_title
+                    album_recording = recording
                     break
                 elif fallback is None:
                     fallback = release_title
+                    fallback_recording = recording
 
             if album:
                 break
 
         result = album or fallback
+        result_recording = album_recording or fallback_recording
         slog(result)
 
         if result and not is_blacklisted_album(result):
             if not spell_check:
                 return get_album_name(artist, song, spell_check=True)
             time.sleep(delay)
-            return result
+            matched_title, matched_artist = _recording_title_artist(result_recording)
+            return DiscoveryResult(album=result, matched_title=matched_title, matched_artist=matched_artist)
 
 
         response = musicbrainzngs.search_recordings(query=query, limit=25)
         recordings = response.get("recording-list", [])
 
         album = None
+        album_recording = None
         fallback = None
+        fallback_recording = None
 
         for recording in recordings:
             releases = recording.get("release-list", [])
@@ -97,17 +117,23 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
 
                 if primary_type == "Album":
                     album = release_title
+                    album_recording = recording
                     break
                 elif fallback is None:
                     fallback = release_title
+                    fallback_recording = recording
 
             if album:
                 break
 
         final = album or fallback
+        final_recording = album_recording or fallback_recording
 
         time.sleep(delay)
-        return final
+        if not final:
+            return None
+        matched_title, matched_artist = _recording_title_artist(final_recording)
+        return DiscoveryResult(album=final, matched_title=matched_title, matched_artist=matched_artist)
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for '{song}' by '{artist}': {e}")
