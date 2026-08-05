@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import List, Dict
 
@@ -17,7 +18,7 @@ from utils.youtube.yt_cache import make_song_key, save_cache
 from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
 from utils.youtube.yt_cache import save_cache
 from utils.youtube.yt_cache import make_song_key
-from utils.common.text_utils import remove_brackets, similarity
+from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
 import json
 
 
@@ -32,18 +33,25 @@ CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 
 HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320"]
 # Keywords that suggest we should deprioritize (lower = worse)
-LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix"]
+LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted"]
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
 
-# Minimum title similarity a candidate must have to the requested song to be
-# accepted at all. Without this, two candidates that both score 0 on the
-# keyword lists above are indistinguishable, so a completely unrelated video
-# could "win" just by being returned first. Gating on title (rather than
-# artist+title combined) matters: a wrong song by a same-named artist, or a
-# wrong video that merely shares a caption like "[Save Ukraine - #StopWar]"
-# with the requested title, can still look deceptively similar once the
-# artist name or shared junk text is folded into one comparison string.
-MIN_RELEVANCE = 0.35
+# Baseline minimum title relevance a candidate must have to be accepted at
+# all (see _min_relevance_for — short titles require a much higher bar than
+# this). Without this, two candidates that both score 0 on the keyword lists
+# above are indistinguishable, so a completely unrelated video could "win"
+# just by being returned first. Gating on title (rather than artist+title
+# combined) matters: a wrong song by a same-named artist, or a wrong video
+# that merely shares a caption like "[Save Ukraine - #StopWar]" with the
+# requested title, can still look deceptively similar once the artist name
+# or shared junk text is folded into one comparison string.
+MIN_RELEVANCE = 0.5
+
+# Unicode ranges for scripts written without spaces between words/characters
+# (hiragana/katakana, CJK ideographs, hangul syllables). Titles in these
+# scripts need substring-containment matching instead of whole-word regex
+# matching, since there's no word boundary to anchor on.
+_NO_SPACES_SCRIPT = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
 
 
 
@@ -250,17 +258,89 @@ def _relevance_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def score_result(candidate_title: str, artist: str, title: str) -> tuple[float, int]:
-    """Score a candidate video: (relevance to the requested song, quality).
+def _title_containment(expected: str, candidate: str) -> float:
+    """How much of `expected` shows up intact inside `candidate`.
 
-    Relevance is judged on the song title alone, not artist+title combined.
-    The title is what distinguishes the specific song; folding the artist
-    name into the comparison lets a wrong song by the same (or similarly
-    spelled) artist score deceptively high.
+    A plain whole-string similarity() ratio unfairly penalizes a short,
+    exact title buried in a longer, decorated candidate title (e.g. title
+    "As" vs candidate "Gosia Kunc - As" scores only ~0.24 on similarity()
+    alone, despite being an exact match) — the surrounding text dilutes the
+    ratio. This checks containment directly instead.
+
+    For space-delimited scripts, containment only counts if `expected`
+    appears as a whole word/phrase, not merely as a substring of a longer
+    word — otherwise a short title like "As" would spuriously "contain-match"
+    inside an unrelated candidate like "Asian Kungfu Generation - ...".
+    Scripts written without spaces (CJK/hangul) have no such word boundary to
+    anchor on, so a contiguous-run match is used instead; that's safe there
+    because each character carries far more information than a Latin one, so
+    short runs aren't the coincidental-substring risk they are in English.
+    """
+    if not expected:
+        return 0.0
+    if _NO_SPACES_SCRIPT.search(expected):
+        match = SequenceMatcher(None, expected.lower(), candidate.lower()).find_longest_match(
+            0, len(expected), 0, len(candidate)
+        )
+        return match.size / len(expected)
+    pattern = r"\b" + re.escape(expected.lower()) + r"\b"
+    return 1.0 if re.search(pattern, candidate.lower()) else 0.0
+
+
+def _min_relevance_for(title: str) -> float:
+    """Short titles need a near-exact match.
+
+    A whole-string similarity() ratio is unreliable for short strings: e.g.
+    similarity("nix", "netflix top 10 trailer compilation") is already 0.67
+    just from incidental character overlap, well past a loose bar. Scale the
+    required relevance up for short titles the same way
+    scaled_similarity_threshold() already does for short artist names
+    elsewhere in this codebase.
+    """
+    expected_title = _relevance_text(title)
+    return scaled_similarity_threshold(expected_title, expected_title, MIN_RELEVANCE)
+
+
+def _is_topic_channel(channel: str) -> bool:
+    """YouTube auto-generates a "<Artist> - Topic" channel per artist for
+    official, single-track audio uploads (title = bare song title, no
+    artist prefix). These are exactly the plain, unedited version a music
+    library wants, so they're worth a quality bonus like HQ_KEYWORDS."""
+    return channel.strip().lower().replace(" ", "").endswith("-topic")
+
+
+def score_result(candidate_title: str, artist: str, title: str, channel: str = "") -> tuple[float, float, int]:
+    """Score a candidate video: (title relevance, artist relevance, quality).
+
+    Acceptance is gated on title relevance alone (see _min_relevance_for) —
+    the title is what distinguishes the specific song, and folding the
+    artist name into that comparison lets a wrong song by the same (or
+    similarly spelled) artist score deceptively high. Artist relevance is
+    kept only as a tiebreaker: when multiple candidates clear the title bar
+    (e.g. the same generic title from different artists), prefer the one
+    whose artist also matches. `channel` (the uploader/channel name) is
+    checked too, not just the video title — a "<Artist> - Topic" upload's
+    title is deliberately just the song title with no artist mentioned at
+    all, so the title alone would otherwise make a correct match look like
+    it has no artist relevance.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
-    relevance = similarity(expected_title, candidate_clean) if expected_title and candidate_clean else 0.0
+    if expected_title and candidate_clean:
+        relevance = max(
+            similarity(expected_title, candidate_clean),
+            _title_containment(expected_title, candidate_clean),
+        )
+    else:
+        relevance = 0.0
+
+    expected_artist = _relevance_text(artist)
+    channel_clean = _relevance_text(channel)
+    artist_relevance = 0.0
+    if expected_artist and candidate_clean:
+        artist_relevance = similarity(expected_artist, candidate_clean)
+    if expected_artist and channel_clean:
+        artist_relevance = max(artist_relevance, similarity(expected_artist, channel_clean))
 
     title_lower = candidate_title.lower()
     quality = 0
@@ -273,9 +353,11 @@ def score_result(candidate_title: str, artist: str, title: str) -> tuple[float, 
     for kw in LQ_KEYWORDS:
         if kw in title_lower:
             quality -= 1
-    return relevance, quality
+    if channel and _is_topic_channel(channel):
+        quality += 2
+    return relevance, artist_relevance, quality
 
-def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | None:
+def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | None:
     """Search YouTube using yt-dlp (no API quota used)."""
     query = f"{artist} - {title} audio"
     print(f"\nSearching via yt-dlp for: {query}")
@@ -306,8 +388,9 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | N
             info = json.loads(line)
             video_id = info.get("id")
             video_title = info.get("title", "")
+            channel = info.get("channel") or info.get("uploader") or ""
             if video_id:
-                candidates.append((score_result(video_title, artist, title), video_id, video_title))
+                candidates.append((score_result(video_title, artist, title, channel), video_id, video_title))
         except json.JSONDecodeError:
             continue
 
@@ -315,9 +398,10 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 5) -> str | N
         return None
 
     candidates.sort(key=lambda x: x[0], reverse=True)
-    (best_relevance, best_quality), best_id, best_title = candidates[0]
-    if best_relevance < MIN_RELEVANCE:
-        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f})")
+    (best_relevance, best_artist_relevance, best_quality), best_id, best_title = candidates[0]
+    required = _min_relevance_for(title)
+    if best_relevance < required:
+        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
         return None
     print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
     return best_id
@@ -340,7 +424,7 @@ def search_video(youtube, artist: str, title: str) -> str | None:
             part="snippet",
             q=query,
             type="video",
-            maxResults=5,
+            maxResults=8,
             videoCategoryId="10",  # Music category
         ).execute()
 
@@ -356,13 +440,18 @@ def search_video(youtube, artist: str, title: str) -> str | None:
         return None
 
     candidates = [
-        (score_result(item["snippet"]["title"], artist, title), item["id"]["videoId"], item["snippet"]["title"])
+        (
+            score_result(item["snippet"]["title"], artist, title, item["snippet"].get("channelTitle", "")),
+            item["id"]["videoId"],
+            item["snippet"]["title"],
+        )
         for item in items
     ]
     candidates.sort(key=lambda x: x[0], reverse=True)
-    (best_relevance, best_quality), best_id, best_title = candidates[0]
-    if best_relevance < MIN_RELEVANCE:
-        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f})")
+    (best_relevance, best_artist_relevance, best_quality), best_id, best_title = candidates[0]
+    required = _min_relevance_for(title)
+    if best_relevance < required:
+        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
         return None
     print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
     return best_id
