@@ -32,8 +32,9 @@ import
 src/old/create_yt_playlist.py
 src/old/import_from_txt.py
 src/old/yt_cache.py
-data/songs.txt
 debug.log
 /src/database/
 /backimport/
 debug.html
+src/database/music.db
+src/database/tag.db

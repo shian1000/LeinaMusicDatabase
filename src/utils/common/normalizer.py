@@ -20,7 +20,7 @@ _SPECIAL_REPLACEMENTS = {
 
 APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵"
 
-ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on"}
+ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on", "as", "a"}
 
 
 def normalize(
@@ -168,3 +168,15 @@ def rule_apostrophe_and_common_word_diff(old_title: str, new_title: str) -> bool
         return False
 
     return all(_words_match(ow, nw) for ow, nw in zip(old_words, new_words))
+
+def rule_all_caps_correction(old_title: str, new_title: str) -> bool:
+    """Auto-confirm if the old title is written in ALL CAPS and the
+    correction is purely a casing fix (e.g. "LA TORTURA" -> "La tortura"),
+    not a change to the underlying letters or words."""
+    old_norm = _normalize_apostrophes(old_title)
+    new_norm = _normalize_apostrophes(new_title)
+
+    if not old_norm.isupper():
+        return False
+
+    return old_norm.upper() == new_norm.upper()

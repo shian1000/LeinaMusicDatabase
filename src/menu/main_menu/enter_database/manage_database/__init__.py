@@ -11,7 +11,7 @@ from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
 import questionary
 from utils.database.database_sessions import submit_global_database_session
-from utils.common.normalizer import rule_apostrophe_and_common_word_diff, normalize
+from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
 from config.constants import SPELLING_CHECK_THRESHOLD
 
@@ -21,6 +21,7 @@ RESET = "\033[0m"
 
 AUTO_CONFIRM_RULES = [
     rule_apostrophe_and_common_word_diff,
+    rule_all_caps_correction,
 ]
 
 def should_auto_confirm(old_title: str, new_title: str) -> bool:
@@ -99,8 +100,13 @@ def check_spelling_menu():
 
         if new_artist != song.artist.name:
             print(f"{RED}{song.artist.name}{RESET} -> {GREEN}{new_artist}{RESET}")
-            if questionary.confirm("Do you wish to correct this artist name?").ask():
+            if should_auto_confirm(song.artist.name, new_artist):
+                print("Auto-confirmed")
                 song.artist.name = new_artist
+            else:
+                if questionary.confirm("Do you wish to correct this artist name?").ask():
+                    print("Confirmed")
+                    song.artist.name = new_artist
 
         # Handle Title Correction
         if new_title != song.title:
