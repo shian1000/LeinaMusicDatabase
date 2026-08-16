@@ -9,7 +9,7 @@ from utils.database.database_sessions import submit_global_database_session
 
 def fetch_artists():
     exit_label = ["Back"]
-    action_map = search_only_categories + artist_categories + exit_label
+    action_map = artist_categories + exit_label
 
     category = questionary.select("What category do you wish to search for?", choices=action_map).ask()
     if category == exit_label[0]:

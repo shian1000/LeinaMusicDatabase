@@ -1,46 +1,29 @@
 import questionary
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.common.debug import slog
-from utils.database.database_sessions import open_database_sessions, submit_global_database_session
-from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session, extract_db_object_info
-from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object
+from utils.database.database_sessions import submit_global_database_session
+from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
+from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object, search_and_pick_db_object
 from utils.database.database_management import edit_db_entry, delete_db_entry, add_db_entry
 import time
 
 def edit_entry_menu(mode: str = None, db_object = None):
-    if db_object == None:
+    if db_object is None:
         if mode not in ("Artist", "Song"):
             choice = questionary.select("Do you wish to make changes in artist or song?", choices=["Artist", "Song", "Back"]).ask()
             if choice == "Back":
                 return
-            edit_entry_menu(choice, db_object, work_on_global_session=True)
-            return
-    
-        action_map, query_fn = (
-            (artist_categories, get_artists_from_db_session)
-            if mode == "Artist"
-            else (song_categories, get_songs_from_db_session)
-        )
-        
-        query = input (f"What {mode.lower()} do you wish to search for: ")
-        if not query:
-            print("Aborted")
+            edit_entry_menu(choice)
             return
 
-        entries_objects = query_fn("name", query) if mode == "Song" else query_fn("artist name", query)
-
-        slog(entries_objects)
-        slog(extract_db_object_info(entries_objects, "artist, title"))
-        slog(len(entries_objects))
-
-        if not entries_objects:
+        db_object = search_and_pick_db_object(mode)
+        if db_object is None:
             return
-        db_object = pick_from_db_objects(entries_objects) if len(entries_objects) > 1 else entries_objects[0]
-        label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
-        print(f"Found '{label}'")
     else:
-        action_map = artist_categories if isinstance(db_object, Artist) else song_categories
-    
+        mode = "Artist" if isinstance(db_object, Artist) else "Song"
+
+    action_map = artist_categories if mode == "Artist" else song_categories
+
 
     properties_list = get_list_of_properties_from_db_object(db_object)
     displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
@@ -88,36 +71,15 @@ def edit_entry_menu(mode: str = None, db_object = None):
             
 
 def remove_song_menu(mode: str = None):
-    sessions = open_database_sessions()
+    db_object = search_and_pick_db_object(mode)
+    if db_object is None:
+        return
 
-    if (mode == "Artist"):
-        query = input("What artist do you wish to search for: ")    
-        entries_objects = get_artists_from_db_session("name", query, sessions)
-    else:
-        query = input("What song do you wish to search for: ")
-        slog(query)
-        entries_objects = get_songs_from_db_session("name", query, sessions)
-
-    slog(entries_objects)
-    slog(extract_db_object_info(entries_objects, "artist, title"))
-    slog(len(entries_objects))
-
-    if(len(entries_objects) > 1):
-        db_object = pick_from_db_objects(entries_objects)
-    else:
-        db_object = entries_objects[0]
-        if mode == "Artist":
-            print(f"Found '{db_object.name}'")
-        else:
-            print(f"Found '{db_object.artist.name} - {db_object.title}")
-                
-
-    slog(db_object)
-
-    confirmation = questionary.confirm(f"Do you really want to delete {db_object.artist.name} - {db_object.title}?").ask()
-    if(confirmation):
-        delete_db_entry(db_object, sessions)
-        print(f"Song deleted")
+    label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
+    confirmation = questionary.confirm(f"Do you really want to delete {label}?").ask()
+    if confirmation:
+        delete_db_entry(db_object)
+        print(f"Deleted {label}")
     else:
         print("Aborted")
 

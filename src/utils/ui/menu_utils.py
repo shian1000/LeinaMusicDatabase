@@ -11,8 +11,8 @@ from upath import UPath
 from utils.common.debug import slog
 import json
 from utils.database.database_getter import extract_db_object_info
-from utils.database.datatables import Artist, Song, artist_categories, song_categories
-from utils.database.database_getter import get_artists_from_db_session
+from utils.database.datatables import Artist, Song, artist_categories, song_categories, search_only_categories
+from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from config.constants import (
     RECENT_DIRS_FILE,
     MAX_RECENT_DIRS,
@@ -273,6 +273,49 @@ def get_list_of_properties_from_db_object(db_object: Union[Song, Artist]) -> Opt
         return None
     
     return properties_list
+
+
+def search_and_pick_db_object(
+    mode: str,
+    pick_question: str = DEFAULT_MENU_PICK_QUESTION,
+    back_label: str = DEFAULT_MENU_BACK_LABEL
+) -> Optional[Union[Song, Artist]]:
+    """
+    Prompt for a search query, look up matching Song/Artist rows, and resolve
+    to a single object: auto-picked when there's exactly one match, or via an
+    interactive menu (`pick_from_db_objects`) when there are several.
+
+    Args:
+        mode: "Song" or "Artist" — which table to search.
+        pick_question: Prompt shown by the pick menu when there are multiple matches.
+        back_label: Label for the pick menu's back/cancel option.
+
+    Returns:
+        The selected Song/Artist, or None if the query was empty, nothing
+        matched, or the user backed out of the pick menu.
+    """
+    query = input(f"What {mode.lower()} do you wish to search for: ")
+    if not query:
+        print("Aborted")
+        return None
+
+    if mode == "Song":
+        entries_objects = get_songs_from_db_session(search_only_categories[0], query)
+    else:
+        entries_objects = get_artists_from_db_session(artist_categories[0], query)
+
+    slog(entries_objects)
+
+    if not entries_objects:
+        return None
+
+    if len(entries_objects) == 1:
+        db_object = entries_objects[0]
+        label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
+        print(f"Found '{label}'")
+        return db_object
+
+    return pick_from_db_objects(entries_objects, question=pick_question, back_label=back_label)
 
 
 def ask_for_entires_list(
