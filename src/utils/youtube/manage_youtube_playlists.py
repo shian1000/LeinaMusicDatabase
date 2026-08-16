@@ -33,7 +33,7 @@ CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 
 HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320"]
 # Keywords that suggest we should deprioritize (lower = worse)
-LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted"]
+LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral"]
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
 
 # Baseline minimum title relevance a candidate must have to be accepted at
@@ -221,7 +221,8 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
             part="snippet",
             q=f"{artist} - {title}",
             type="video",
-            maxResults=1
+            maxResults=1,
+            safeSearch="none"
         ).execute()
 
     except HttpError as e:
@@ -343,16 +344,30 @@ def score_result(candidate_title: str, artist: str, title: str, channel: str = "
         artist_relevance = max(artist_relevance, similarity(expected_artist, channel_clean))
 
     title_lower = candidate_title.lower()
+
+    def _non_overlapping_hits(keywords: list[str]) -> list[str]:
+        # Some keyword-list entries are substrings of others in the same list
+        # (e.g. "audio" inside "official audio", "mv" inside "official mv") —
+        # matching both against the same title text double-counts what is
+        # really a single signal. Drop any hit that's wholly contained in
+        # another hit from the same list before scoring.
+        hits = [kw for kw in keywords if kw in title_lower]
+        return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
+
+    lq_hits = [kw for kw in LQ_KEYWORDS if kw in title_lower]
     quality = 0
-    for kw in HQ_KEYWORDS:
-        if kw in title_lower:
-            quality += 2
-    for kw in VIDEO_KEYWORDS:
-        if kw in title_lower:
-            quality -= 2
-    for kw in LQ_KEYWORDS:
-        if kw in title_lower:
-            quality -= 1
+    # An "Official Audio" / "HQ" label only means the video is well-produced,
+    # not that it's the plain studio version — a professionally released
+    # remix or demo can carry that label too. If the title already signals
+    # an alternate arrangement (LQ_KEYWORDS), don't let the HQ bonus offset
+    # that penalty, or a polished remix/dub upload out-scores the real thing
+    # (e.g. Foals - 2001: a "(Dan Carey Dub) - Official Audio" reupload was
+    # outranking the actual official video because "official audio" gave +4
+    # from the double-count bug above, dwarfing a single -1 dub/remix hit).
+    if not lq_hits:
+        quality += 2 * len(_non_overlapping_hits(HQ_KEYWORDS))
+    quality -= 2 * len(_non_overlapping_hits(VIDEO_KEYWORDS))
+    quality -= len(lq_hits)
     if channel and _is_topic_channel(channel):
         quality += 2
     return relevance, artist_relevance, quality
@@ -426,6 +441,7 @@ def search_video(youtube, artist: str, title: str) -> str | None:
             type="video",
             maxResults=8,
             videoCategoryId="10",  # Music category
+            safeSearch="none",
         ).execute()
 
     except HttpError as e:
