@@ -133,9 +133,8 @@ def add_songs_menu():
                     user_input = None
 
         if category == song_categories[3]:
-            while not user_input.isdigit():
+            while user_input and not user_input.isdigit():
                 user_input = input("Type numericals only: ")
-            user_input = int(user_input)
         
         song_labels.append(user_input)
 
