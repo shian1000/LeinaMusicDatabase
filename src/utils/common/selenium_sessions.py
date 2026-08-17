@@ -1,3 +1,4 @@
+import atexit
 import threading
 from typing import Optional
 from selenium import webdriver
@@ -46,14 +47,21 @@ def get_global_driver() -> Optional[webdriver.Chrome]:
 def close_global_driver() -> None:
     """
     Quit the global WebDriver and clear the global reference.
-    Safe to call even if the driver was never opened.
+    Safe to call even if the driver was never opened or already crashed.
     """
     global _GLOBAL_DRIVER
     with _GLOBAL_DRIVER_LOCK:
         if _GLOBAL_DRIVER is None:
             return
-        _GLOBAL_DRIVER.quit()
-        _GLOBAL_DRIVER = None
+        try:
+            _GLOBAL_DRIVER.quit()
+        finally:
+            _GLOBAL_DRIVER = None
+
+
+# Fallback so a driver still gets torn down even if a caller forgets its own
+# try/finally, or the process exits after an unhandled exception.
+atexit.register(close_global_driver)
 
 def _build_driver(headless: bool = True) -> webdriver.Chrome:
     """Build and return a new Chrome WebDriver instance."""

@@ -23,34 +23,35 @@ def fill_missing_albums():
     #Make it adjustable in settings
     print("Preparing fetch modules . . . ")
     open_global_driver()
-    discovery_modules = load_discovery_modules()
+    try:
+        discovery_modules = load_discovery_modules()
 
-    for song in songs_objects:
-        slog(f"song.tlte = {song.title}")
-        slog(f"song.album = {song.album}")
+        for song in songs_objects:
+            slog(f"song.tlte = {song.title}")
+            slog(f"song.album = {song.album}")
 
-    for song in songs_objects:
-        print()
-        print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
-        slog("About to check if song.album is none")
-        slog(f"song.album = {song.album}")
-        if song.album is None or song.album == "":
-            slog("Yeah, song album is none")
-            slog(song)
-            slog(discovery_modules)
-            new_album = discover_album_name(song, discovery_modules)
-            if new_album == None:
-                print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")
-            else:
-                if (new_album) == "Singles":
-                    print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
+        for song in songs_objects:
+            print()
+            print(f"Checking for \033[93m{song.artist.name} - {song.title}\033[0m")
+            slog("About to check if song.album is none")
+            slog(f"song.album = {song.album}")
+            if song.album is None or song.album == "":
+                slog("Yeah, song album is none")
+                slog(song)
+                slog(discovery_modules)
+                new_album = discover_album_name(song, discovery_modules)
+                if new_album == None:
+                    print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")
                 else:
-                    print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
-        songs_list.append((song.artist.name, song.title, new_album))
-    slog(songs_list)
-    
-    #Make it adjustable in settings
-    close_global_driver()
+                    if (new_album) == "Singles":
+                        print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
+                    else:
+                        print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+            songs_list.append((song.artist.name, song.title, new_album))
+        slog(songs_list)
+    finally:
+        #Make it adjustable in settings
+        close_global_driver()
 
     if not len(songs_objects) == len(songs_list):
         print(f"albums_search_results and matched_objects items quantity mismatch! song_objects = {songs_objects}, songs_list = {songs_list}! Aborting!")

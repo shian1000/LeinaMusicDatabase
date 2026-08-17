@@ -20,7 +20,7 @@ _SPECIAL_REPLACEMENTS = {
 
 APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵"
 
-ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on", "as", "a"}
+ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on", "as", "a", "and"}
 
 
 def normalize(
