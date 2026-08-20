@@ -17,5 +17,4 @@ if __name__ == "__main__":
 
 
 #TODO Make index creator
-#TODO Make settings for enabling fetchers. Maybe make them modular?
 #TODO On importing songs, note which artists are new

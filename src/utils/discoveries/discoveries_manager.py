@@ -1,27 +1,58 @@
 from utils.common.text_utils import truncate_at_word, is_blacklisted_album, similarity, scaled_similarity_threshold
 from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_settings import reconcile_discovery_config
 from config.constants import SPELLING_CHECK_THRESHOLD
 import importlib.util
 import sys
 from pathlib import Path
 from utils.common.debug import slog
 
-def load_discovery_modules():
-    current_dir = Path(__file__).parent
-    modules_dir = current_dir / "discovery_modules"
-    
-    modules = []
-    for script_path in sorted(modules_dir.glob("*.py")):
-        script_name = script_path.stem
-        spec = importlib.util.spec_from_file_location(script_name, script_path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[script_name] = module
-        spec.loader.exec_module(module)
+def _discovery_modules_dir() -> Path:
+    return Path(__file__).parent / "discovery_modules"
 
-        module_name = getattr(module, "MODULE_NAME", script_name)  # fallback to filename if missing
+
+def _import_module(script_path: Path):
+    """Import a single discovery module file by path."""
+    module_id = script_path.stem
+    spec = importlib.util.spec_from_file_location(module_id, script_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_id] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_discovery_modules():
+    """Import and return the *enabled* discovery modules, in the user's
+    configured order (see discovery_settings.py), ready to be passed to
+    discover_album_name()."""
+    module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
+    config = reconcile_discovery_config(module_files.keys())
+
+    modules = []
+    for module_id in config["order"]:
+        if not config["enabled"].get(module_id, True):
+            continue
+        module = _import_module(module_files[module_id])
+        module_name = getattr(module, "MODULE_NAME", module_id)  # fallback to filename if missing
         modules.append((module_name, module))
-    
+
     return modules
+
+
+def load_all_discovery_modules_metadata():
+    """Import every discovery module file (enabled or not) and return
+    [(module_id, display_name), ...] in the user's configured order, for use
+    by the Settings menu (enable/disable + reorder screens)."""
+    module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
+    config = reconcile_discovery_config(module_files.keys())
+
+    metadata = []
+    for module_id in config["order"]:
+        module = _import_module(module_files[module_id])
+        display_name = getattr(module, "MODULE_NAME", module_id)
+        metadata.append((module_id, display_name))
+
+    return metadata
 
 
 def _validate_result(result, queried_artist: str, queried_title: str, module_name: str) -> str | None:

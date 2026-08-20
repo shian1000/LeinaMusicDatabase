@@ -12,6 +12,18 @@ modify in one place.
 RECENT_DIRS_FILE = "recent_dirs.json"
 MAX_RECENT_DIRS = 5
 
+# Discovery module settings (enabled state + fetch order), persisted as JSON.
+# Order here is only the seed used the first time the file is created — after
+# that, the JSON file is the source of truth and this is ignored.
+DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
+DEFAULT_DISCOVERY_MODULE_ORDER = [
+    "music_brainz_fetcher",
+    "wikipedia_fetcher",
+    "google_search_fetcher",
+    "itunes_fetcher",
+    "genius_fetcher",
+]
+
 # File browser menu options
 FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"
 FILE_BROWSER_BACK_OPTION = "<= [Go Back]"

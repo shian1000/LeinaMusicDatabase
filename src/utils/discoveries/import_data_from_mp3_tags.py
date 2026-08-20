@@ -41,6 +41,10 @@ def check_artist_spelling(metadata) -> Artist:
     slog(metadata["title"])
     slog(spell_check_result)
 
+    if not spell_check_result.get("found"):
+        slog(f"No MusicBrainz match for {new_artist_name}, skipping spellcheck correction", priority=1)
+        return None
+
     corrected_spelling = spell_check_result["corrected_artist"]
     slog(corrected_spelling)
 

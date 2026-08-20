@@ -129,18 +129,92 @@ becomes an official-channel live session, not necessarily the plainest fan uploa
 deliberate design tradeoff (prefer the official channel), not something this fix attempted to
 change — don't over-tune `LQ_KEYWORDS` weights trying to force one specific video to win.
 
-**Future redesign trigger:** if more cases like this keep surfacing — an official-channel alternate
-version (live/session/orchestral/demo) beating the plain studio upload because `artist_relevance`
-outranks `quality` in the sort tuple — that's a signal the tuple priority itself needs
-reconsidering (e.g. folding a strong `LQ_KEYWORDS` hit into the relevance/gating stage instead of
-only `quality`), not another `LQ_KEYWORDS` tweak. One-off keyword additions are the right fix for a
-single missing signal (as `demo`/`dub`/`orchestra` were here); a *pattern* of the same tiebreak
-losing is a design problem, not a vocabulary gap.
+**Future redesign trigger:** if more cases like this keep surfacing — a signal that should
+obviously lose (a live/remix/alternate version) still winning because some *other* term in the sort
+tuple happens to be stronger for that particular candidate — that's a sign the additive,
+lexicographic-tuple scoring model itself needs reconsidering (e.g. one blended score instead of
+`(relevance, artist_relevance, quality)` compared strictly left-to-right), not another one-off
+keyword/weight tweak. This has now recurred in a second, different form — see the popularity
+section below — which makes it more likely a real pattern than a one-off. One-off keyword additions
+are still the right fix for a single missing *vocabulary* signal (as `demo`/`dub`/`orchestra` were
+here); it's specifically the *tiebreak losing despite the right signal being present* that's the
+design problem.
 
 Regression tests: [tests/test_youtube_search.py](../../tests/test_youtube_search.py) —
 `test_score_result_does_not_double_count_official_audio_keyword` asserts the exact `quality` value
 for the Dan Carey Dub title, and `test_search_video_ytdlp_does_not_pick_the_remix_for_foals_2001`
 replays the real yt-dlp candidate list (mocked `subprocess.run`) and asserts neither remix wins.
+
+## Query text itself can defeat search — extra words aren't free context, they can actively hurt
+
+The query sent to both yt-dlp and the Data API used to be `f"{artist} - {title} audio"`. Dropping
+the trailing `" audio"` (now just `f"{artist} - {title}"` in both `search_video_ytdlp()` and
+`search_video()`) fixed two unrelated failures by itself, with no scoring change involved:
+- `Passive Voice - Тебе пам'ятаю`: "Passive Voice" reads as a generic English grammar term, and
+  adding "audio" made YouTube's search drift entirely to unrelated grammar/audiobook content — the
+  real candidates weren't in the result set *at all* with "audio" in the query, but appeared
+  immediately without it.
+- `Ten Preston feat. Sitek - 71 (prod. lil aloes)`: the real video (3.26M views, public, no
+  restrictions) didn't appear in results at any of 5+ query phrasings tried, including a widened
+  `ytsearch20`, as long as "audio" was in the query. Removing it alone put the real video first.
+
+Lesson: a query is not "safer" for carrying extra descriptive words — YouTube's search relevance
+can drift or hide legitimate high-view results because of one added generic word, and this isn't
+predictable from the query text alone (there's no obvious reason "audio" should hide a 3M-view
+video). Keep constructed queries as close to the literal `"{artist} - {title}"` as possible; don't
+add qualifying words "for context" without verifying against a real search first.
+
+## Popularity (view count) as a quality signal — free from yt-dlp only, and not a strict "not-live" proxy
+
+`score_result()` takes an optional `view_count` (only `search_video_ytdlp()` passes it — yt-dlp's
+JSON includes it for free, but the Data API's `search().list()` doesn't return it, and getting it
+there needs a separate `videos().list()` call per candidate, burning quota, so API-sourced
+candidates just don't get this term). `_popularity_bonus()` log-scales it, centered on ~1000 views
+(`log10(view_count) - 3`), to land in roughly the same range as the existing keyword-based
+adjustments rather than swamping them.
+
+This fixed `SLAUGHTER TO PREVAIL - Bratva`: relevance tied at 1.0 between the real track and an
+"(Instrumental)" reupload, and `artist_relevance` — pure whitespace-formatting noise ("Prevail-
+Bratva" vs "Prevail - Bratva") — happened to favor the instrumental *before quality was even
+consulted* in the sort tuple, the same structural issue flagged above for `Foals - 2001`. Popularity
+(8.3M views vs. 60K) was strong enough to flip this one, unlike a plain `-1` "instrumental" penalty.
+
+It is **not** a reliable proxy for "not a live/alternate version", though — confirmed with
+`OBERSCHLESIEN - Król Olch`: a Woodstock festival recording has *more* views (5.1M) than the actual
+studio video (1.4M), so it still wins even after being correctly tag-flagged as live (see next
+section) and penalized `-1`. A single categorical LQ penalty isn't always enough to outweigh a real
+popularity gap, and cranking that one constant up to force this specific case to flip was
+deliberately **not done** — see the "Future redesign trigger" note above; this is the same
+structural issue recurring in a second form (popularity vs. keyword-penalty magnitude this time, not
+`artist_relevance` vs. `quality`). Left as a known, open limitation rather than force-fit — do not
+"fix" this by arbitrarily inflating `"live"`'s weight without addressing the general pattern.
+
+Also left open, unrelated to popularity: `NIZKIZ - Правілы` picked a 67-view excerpt over the
+74K-view real upload because the real upload spells "Правілы" the Russian way (missing the
+Belarusian "і"), scoring relevance 0.55 vs. the excerpt's exact-match 1.0 — relevance is compared
+*before* quality/popularity in the sort tuple, so popularity is never even consulted for this one.
+A spelling-variant/orthography problem, not a popularity or quality-weighting problem.
+
+## Keyword scanning now covers `tags` too, not just the title (yt-dlp only, free)
+
+A live recording's *title* often carries no signal at all —
+`"Oberschlesien - Król Olch #Woodstock2016"` has no English "live"/"concert" word — but yt-dlp's
+free `tags` field did: `"Oberschlesien Król Olch na żywo"` ("na żywo" is Polish for "live"), plus
+repeated festival names, while the actual studio upload's tags were clean (verified both, no
+false-positive risk observed). `score_result()` now takes an optional `tags: list[str] | None` and
+builds `keyword_text = title + " " + " ".join(tags)` for the `HQ_KEYWORDS`/`LQ_KEYWORDS`/
+`VIDEO_KEYWORDS`/`HIGH_TRUST_KEYWORDS` scan — relevance/artist_relevance still use the title alone,
+unaffected. Deliberately `tags` only, not `description`: tags are curated keywords an uploader
+picked, description is freeform prose where "live" could appear in unrelated boilerplate (tour
+dates, etc.) and false-positive. `LQ_KEYWORDS` gained `"na żywo"` for this.
+
+`HIGH_TRUST_KEYWORDS`/`HIGH_TRUST_BONUS` (currently just `"oficjalny odsłuch albumu"` — Polish for
+"official album listen", a label's official full-album premiere upload) is a separate list from
+`HQ_KEYWORDS`, scored at `+4` instead of the generic `+2`, for phrases specific enough to be an
+unambiguous "this is the real official upload" signal rather than a generic quality indicator like
+"HD"/"remaster". Keep it that way if extending it — don't fold new entries into `HQ_KEYWORDS` just
+because they're both "good" signals; the point of a separate list is the stronger, deliberately
+uneven weight.
 
 ## Known regressions this logic exists to prevent
 
@@ -167,3 +241,9 @@ simplified:
   titles carried the same un-bracketed channel branding (`KaszubskiHipHop.pl`), inflating
   similarity against any candidate from that channel (see above — a data problem, not a scoring
   one).
+- `SLAUGHTER TO PREVAIL - Bratva` → an "(Instrumental)" reupload (60K views) beat the real track
+  (8.3M views) on an `artist_relevance` tie caused by pure whitespace-formatting noise (see the
+  popularity section above).
+- `Passive Voice - Тебе пам'ятаю` / `Ten Preston feat. Sitek - 71` → both had zero relevant
+  candidates purely because the query included the literal word "audio" (see the query-text
+  section above) — no scoring change was needed, only removing it from the query.

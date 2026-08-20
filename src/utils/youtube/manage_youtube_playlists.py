@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import shutil
@@ -33,8 +34,14 @@ CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 
 HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320"]
 # Keywords that suggest we should deprioritize (lower = worse)
-LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral"]
+LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "na żywo"]
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
+# Phrases that are an especially strong, unambiguous "this is the real,
+# official, unedited upload" signal — trusted with a bigger bonus than the
+# generic HQ_KEYWORDS list. "oficjalny odsłuch albumu" is Polish for
+# "official album listen" (a label's official full-album premiere upload).
+HIGH_TRUST_KEYWORDS = ["oficjalny odsłuch albumu"]
+HIGH_TRUST_BONUS = 4
 
 # Baseline minimum title relevance a candidate must have to be accepted at
 # all (see _min_relevance_for — short titles require a much higher bar than
@@ -310,7 +317,30 @@ def _is_topic_channel(channel: str) -> bool:
     return channel.strip().lower().replace(" ", "").endswith("-topic")
 
 
-def score_result(candidate_title: str, artist: str, title: str, channel: str = "") -> tuple[float, float, int]:
+def _popularity_bonus(view_count: int | None) -> float:
+    """Log-scaled quality bonus from view count — a low-effort reupload
+    (an excerpt, an instrumental rip, a random remix) is almost always
+    watched far less than the real/official upload of the same song, even
+    when keyword-based quality scoring can't tell them apart (e.g. neither
+    title mentions "audio"/"remix" at all). View count spans several orders
+    of magnitude (tens to millions), so it's log-scaled and centered on
+    ~1000 views (log10 == 3) to land in roughly the same range as the
+    existing +/-1..4 keyword-based quality adjustments, rather than
+    swamping them.
+    """
+    if not view_count or view_count <= 0:
+        return 0.0
+    return math.log10(view_count) - 3
+
+
+def score_result(
+    candidate_title: str,
+    artist: str,
+    title: str,
+    channel: str = "",
+    view_count: int | None = None,
+    tags: list[str] | None = None,
+) -> tuple[float, float, float]:
     """Score a candidate video: (title relevance, artist relevance, quality).
 
     Acceptance is gated on title relevance alone (see _min_relevance_for) —
@@ -324,6 +354,21 @@ def score_result(candidate_title: str, artist: str, title: str, channel: str = "
     title is deliberately just the song title with no artist mentioned at
     all, so the title alone would otherwise make a correct match look like
     it has no artist relevance.
+
+    `view_count` is optional because it's only free from yt-dlp's search
+    JSON — the YouTube Data API's search().list() doesn't return it (getting
+    it there needs a separate videos().list() call per candidate, burning
+    quota), so API-sourced candidates just don't get a popularity term.
+
+    `tags` (also yt-dlp-only/free) are folded into the keyword scan alongside
+    the title, not used for relevance — a live recording's *title* often
+    carries no signal at all (e.g. "Oberschlesien - Król Olch #Woodstock2016"
+    has no English "live"/"concert" keyword), but its uploader-assigned tags
+    did: "...na żywo" (Polish for "live") plus repeated festival names, while
+    the actual studio upload's tags were clean. Deliberately tags only, not
+    `description` — tags are curated keywords, description is freeform prose
+    where "live" could appear in unrelated boilerplate (tour dates, etc.) and
+    false-positive.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
@@ -343,7 +388,9 @@ def score_result(candidate_title: str, artist: str, title: str, channel: str = "
     if expected_artist and channel_clean:
         artist_relevance = max(artist_relevance, similarity(expected_artist, channel_clean))
 
-    title_lower = candidate_title.lower()
+    keyword_text = candidate_title.lower()
+    if tags:
+        keyword_text += " " + " ".join(tags).lower()
 
     def _non_overlapping_hits(keywords: list[str]) -> list[str]:
         # Some keyword-list entries are substrings of others in the same list
@@ -351,10 +398,10 @@ def score_result(candidate_title: str, artist: str, title: str, channel: str = "
         # matching both against the same title text double-counts what is
         # really a single signal. Drop any hit that's wholly contained in
         # another hit from the same list before scoring.
-        hits = [kw for kw in keywords if kw in title_lower]
+        hits = [kw for kw in keywords if kw in keyword_text]
         return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
 
-    lq_hits = [kw for kw in LQ_KEYWORDS if kw in title_lower]
+    lq_hits = [kw for kw in LQ_KEYWORDS if kw in keyword_text]
     quality = 0
     # An "Official Audio" / "HQ" label only means the video is well-produced,
     # not that it's the plain studio version — a professionally released
@@ -370,11 +417,13 @@ def score_result(candidate_title: str, artist: str, title: str, channel: str = "
     quality -= len(lq_hits)
     if channel and _is_topic_channel(channel):
         quality += 2
+    quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in keyword_text])
+    quality += _popularity_bonus(view_count)
     return relevance, artist_relevance, quality
 
 def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | None:
     """Search YouTube using yt-dlp (no API quota used)."""
-    query = f"{artist} - {title} audio"
+    query = f"{artist} - {title}"
     print(f"\nSearching via yt-dlp for: {query}")
 
     try:
@@ -404,8 +453,16 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | N
             video_id = info.get("id")
             video_title = info.get("title", "")
             channel = info.get("channel") or info.get("uploader") or ""
+            view_count = info.get("view_count")
+            tags = info.get("tags")
             if video_id:
-                candidates.append((score_result(video_title, artist, title, channel), video_id, video_title))
+                candidates.append(
+                    (
+                        score_result(video_title, artist, title, channel, view_count, tags),
+                        video_id,
+                        video_title,
+                    )
+                )
         except json.JSONDecodeError:
             continue
 
@@ -431,7 +488,7 @@ def search_video(youtube, artist: str, title: str) -> str | None:
 
     # Fallback: YouTube Data API
     print("  ↩ Falling back to YouTube API...")
-    query = f"{artist} - {title} audio"
+    query = f"{artist} - {title}"
     print(f"  Searching API for: {query}")
 
     try:

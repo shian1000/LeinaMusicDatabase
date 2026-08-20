@@ -1,8 +1,14 @@
 # Discovery module fetchers (`src/utils/discoveries/`)
 
-`discoveries_manager.py` dynamically loads every file in `discovery_modules/` (sorted by
-filename — numeric prefixes 1-5 pin fetch priority, see `AGENTS.md`) and tries each one in turn
-via `get_album_name(artist, title)` until one returns an album for the song being looked up.
+`discoveries_manager.py` dynamically loads the *enabled* files in `discovery_modules/` and tries
+each one in turn via `get_album_name(artist, title)`, in the user-configured order, until one
+returns an album for the song being looked up.
+
+Fetch priority used to be pinned by numeric filename prefixes (`1music_brainz_fetcher.py`, etc.);
+that's gone. Order and enabled/disabled state now live in `discovery_settings.py`, persisted to
+`discovery_modules_config.json` (gitignored, repo root) keyed by filename stem, and are editable
+at runtime via Settings -> Discovery modules in the main menu
+(`src/menu/main_menu/settings/__init__.py`). See `AGENTS.md` for the mechanics.
 
 ## Why the manager validates results itself instead of trusting modules
 
@@ -10,7 +16,7 @@ Each fetcher scrapes/searches its own source and, historically, did its own matc
 (comparing a candidate result's title/artist to the query before accepting it) — the manager just
 took whatever a module returned at face value.
 
-That trust broke in practice: `5genius_fetcher.py` had a loop that correctly searched Genius
+That trust broke in practice: `genius_fetcher.py` had a loop that correctly searched Genius
 results for one whose URL slug matched the query title, but a leftover line right after the loop
 (`song_url = link.get_attribute("href")`) unconditionally overwrote the verified match with
 whichever search result the loop happened to end on — silently discarding its own verification and
@@ -59,22 +65,22 @@ module degrades gracefully rather than breaking.
 
 ## Which fetchers report matches
 
-- `1music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the
+- `music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the
   chosen release came from.
-- `4itunes_fetcher.py` — reports the JSON-LD `audio.name` / `byArtist[0].name` it already scrapes
+- `itunes_fetcher.py` — reports the JSON-LD `audio.name` / `byArtist[0].name` it already scrapes
   to verify the match internally.
-- `5genius_fetcher.py` — reports the song-title portion of the matched URL slug (artist prefix
+- `genius_fetcher.py` — reports the song-title portion of the matched URL slug (artist prefix
   stripped best-effort by `_title_portion_of_slug()`, since Genius slugs are `artist-title-lyrics`
   with no clean delimiter).
-- `3google_search_fetcher.py` — reports the artist field from the Google Knowledge Panel when
+- `google_search_fetcher.py` — reports the artist field from the Google Knowledge Panel when
   present; no reliably-extractable matched title from that source.
-- `2wikipedia_fetcher.py` was **not** upgraded — it already requires the query title to appear in
+- `wikipedia_fetcher.py` was **not** upgraded — it already requires the query title to appear in
   the page/container text before accepting a result, so the marginal benefit was low, and its
   extraction logic wasn't touched.
 
 ## Don't remove the per-candidate blacklist checks
 
-`1music_brainz_fetcher.py` and `2wikipedia_fetcher.py` both call `is_blacklisted_album()` *inside*
+`music_brainz_fetcher.py` and `wikipedia_fetcher.py` both call `is_blacklisted_album()` *inside*
 a loop over many candidate releases/headings, to filter out bad options while picking the best one
 (batch filtering). That is a different job from the manager's blacklist check on the *final*
 returned album (a last-resort net). Don't treat the per-candidate calls as redundant with the

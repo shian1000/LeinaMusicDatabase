@@ -20,7 +20,6 @@ def fill_missing_albums():
         print("No songs with missing albums found")
         return
     
-    #Make it adjustable in settings
     print("Preparing fetch modules . . . ")
     open_global_driver()
     try:

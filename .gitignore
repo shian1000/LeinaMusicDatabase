@@ -20,6 +20,7 @@ Thumbs.db
 *.sqlite3
 *.env
 recent_dirs.json
+discovery_modules_config.json
 documentation/ARCHITECTURE.md
 documentation/DATA_FLOW.md
 documentation/DEVELOPER_GUIDE.md

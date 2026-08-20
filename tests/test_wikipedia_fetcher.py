@@ -17,7 +17,7 @@ def load_wikipedia_fetcher_module():
         / "utils"
         / "discoveries"
         / "discovery_modules"
-        / "2wikipedia_fetcher.py"
+        / "wikipedia_fetcher.py"
     )
     spec = importlib.util.spec_from_file_location("wikipedia_fetcher", module_path)
     module = importlib.util.module_from_spec(spec)
