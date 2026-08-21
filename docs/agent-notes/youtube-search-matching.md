@@ -179,15 +179,13 @@ Bratva" vs "Prevail - Bratva") — happened to favor the instrumental *before qu
 consulted* in the sort tuple, the same structural issue flagged above for `Foals - 2001`. Popularity
 (8.3M views vs. 60K) was strong enough to flip this one, unlike a plain `-1` "instrumental" penalty.
 
-It is **not** a reliable proxy for "not a live/alternate version", though — confirmed with
-`OBERSCHLESIEN - Król Olch`: a Woodstock festival recording has *more* views (5.1M) than the actual
-studio video (1.4M), so it still wins even after being correctly tag-flagged as live (see next
-section) and penalized `-1`. A single categorical LQ penalty isn't always enough to outweigh a real
-popularity gap, and cranking that one constant up to force this specific case to flip was
-deliberately **not done** — see the "Future redesign trigger" note above; this is the same
-structural issue recurring in a second form (popularity vs. keyword-penalty magnitude this time, not
-`artist_relevance` vs. `quality`). Left as a known, open limitation rather than force-fit — do not
-"fix" this by arbitrarily inflating `"live"`'s weight without addressing the general pattern.
+It is **not** always a reliable proxy for "not a live/alternate version" on its own, though —
+`OBERSCHLESIEN - Król Olch`'s Woodstock festival recording had *more* views (5.1M) than the actual
+studio video (1.4M), so it kept winning even after being correctly tag-flagged as live and
+penalized. Initially left as a known, open limitation rather than force-fitting a bigger constant
+for this one case — see "`VIDEO_KEYWORDS`/`LQ_KEYWORDS` rebalanced" below for how it was eventually
+resolved (as a side effect of a more general rebalancing, not a value tuned specifically for this
+song).
 
 Also left open, unrelated to popularity: `NIZKIZ - Правілы` picked a 67-view excerpt over the
 74K-view real upload because the real upload spells "Правілы" the Russian way (missing the
@@ -215,6 +213,85 @@ unambiguous "this is the real official upload" signal rather than a generic qual
 "HD"/"remaster". Keep it that way if extending it — don't fold new entries into `HQ_KEYWORDS` just
 because they're both "good" signals; the point of a separate list is the stronger, deliberately
 uneven weight.
+
+## `VIDEO_KEYWORDS`/`LQ_KEYWORDS` rebalanced — a uniform penalty per list was too coarse
+
+Two problems from a single root cause: every `VIDEO_KEYWORDS` hit cost the same `-2` regardless of
+how bad the alternate-format upload actually was, and every `LQ_KEYWORDS` hit cost the same `-1`
+regardless of how bad the alternate arrangement actually was. In practice these aren't uniform:
+- The video-format penalty was heavy enough that the *correct, most popular, officially-uploaded*
+  video could lose to an obscure alternate cut purely for being a video instead of audio-only
+  (`Måneskin`'s 230M-view official video losing to an 8.9M-view "Eurovision Version"; `Daði Freyr -
+  Bitte`'s official video only barely surviving a 10x-less-popular live recording, 0.372 vs 0.368).
+  Lowered to `-1` (`VIDEO_PENALTY`).
+- `"live"`/festival-recording signals deserved a heavier penalty than the rest of `LQ_KEYWORDS` — a
+  live recording is essentially never the plain studio version, unlike, say, an "acoustic" cut,
+  which occasionally *is* the canonical release. Split `"live"`/`"na żywo"` out into their own
+  `STRONG_LQ_KEYWORDS` list at `-3` (`STRONG_LQ_PENALTY`), separate from the generic `-1`.
+  `"woodstock"` joined this list too (Poland's Pol'and'Rock/Woodstock festival implies a live
+  performance) — a plain lowercased substring check already catches every form ("Woodstock",
+  "#Woodstock2016", "woodstock") without listing each variant.
+
+Together these fixed `Daði Freyr - Bitte` decisively (not just barely) and — as a side effect, not
+a value tuned specifically for it — resolved the `OBERSCHLESIEN - Król Olch` "viral live clip
+out-views the studio original" case flagged as an open limitation above: the studio video no longer
+loses ~2 points to the video penalty, and the live clip now loses 3 points per matched strong-LQ
+term (both `"na żywo"` and `"woodstock"` matched its tags, so `-6` total) rather than `-1`.
+
+## A DB title's bracket content can be a meaningful selector, not just junk to discard
+
+`_relevance_text()` still strips all bracketed text for the main relevance comparison (unchanged —
+most of it really is disposable annotation). But sometimes it's the opposite: DB title `"Get Back
+(Lorin Rymbu & Denis Rynda Remix Extended)"` wants *that* remix specifically, not just any version
+— stripping it for relevance meant every remix (right or wrong) scored identical `1.0`, so a
+completely unrelated remix (`"Deepshader's Reconstruction"`) won on quality/popularity alone.
+There's no reliable way to tell a meaningful selector from junk annotation by looking at the
+bracket in isolation (`"[Official Video]"` and `"(Lorin Rymbu & Denis Rynda Remix Extended)"` are
+syntactically identical), so instead of guessing up front, `_bracket_selector_hints()` keeps what
+`_relevance_text()` discards, and `score_result()` checks it *separately*, after relevance, against
+the candidate's own (unstripped) title/tags — a real match earns `SELECTOR_MATCH_BONUS` (`+3`) as a
+tiebreak, not a relevance change, so a search with no matching-remix candidate still falls back to
+whatever's available instead of rejecting everything.
+
+The false-positive risk (rewarding *any* candidate that happens to share generic branding like
+"Official Video") is handled by `_selector_tokens()`: it reduces a hint to only its specific,
+identifying words via `_SELECTOR_STOPWORDS` (built from every existing keyword list's words, plus
+common remix vocabulary like "remix"/"extended"/"feat"). A plain `"Official Video"` hint reduces to
+zero tokens and is never treated as a selector at all; `"Lorin Rymbu & Denis Rynda Remix Extended"`
+reduces to the actual names (`{"lorin", "rymbu", "denis", "rynda"}`). Also note the match is on
+those *words*, not the whole bracket phrase verbatim — the real matching candidate's title says
+just "Remix", not "Remix Extended", so a naive whole-phrase containment check would have missed it.
+
+## `"official"` is a trust signal independent of the audio/video format preference
+
+`VIDEO_KEYWORDS`' format penalty and "is this genuinely the official upload" used to be conflated —
+only the format penalty was tracked, so a video correctly labeled `"[Official Music Video]"` scored
+*worse* than a random, unlabeled fan upload that said nothing distinguishing at all. This surfaced
+starkly on `Foals - 2001`: a bare-number title where every candidate ties at `1.0`
+relevance/artist_relevance via `_text_containment` (the number/artist name trivially appears
+everywhere), so `quality` alone decided, and the real official video (`-1`, video penalty with no
+offsetting signal) lost to several candidates that said nothing at all and coasted to `0`. Adding
+bare `"official"` to `HQ_KEYWORDS` (distinct from the already-existing `"official audio"` entry,
+which still dedupes against it via the existing substring-containment rule in
+`_non_overlapping_hits()`) fixed this: the real video now scores `+1` (a genuine `+2` trust bonus,
+still `-1` for being a video), clear of everything else. Stays correctly suppressed on
+remixes/dubs/demos exactly like `"official audio"` already did — verified none of the wrong
+`Foals - 2001` candidates (Myd Remix, Dan Carey Dub, the orchestral collab, all of which also say
+"official" somewhere) picked up the bonus, because each also matches an `LQ_KEYWORDS` term that
+suppresses the whole HQ bonus block.
+
+## Doubled-letter typo/spelling-variant tolerance for short titles
+
+`Bastille - Pompei` (DB) against the real `"Pompeii"` scored relevance `0.50` — rejected outright,
+since a title this short requires `0.85` (see `_min_relevance_for()`). The scaled threshold that
+protects short titles from false positives (the "netflix ≈ nix" problem above) also makes them
+brittle to a single-character legitimate spelling variant, because one differing character is a
+much larger fraction of a short string's `similarity()` ratio than of a long one's. Rather than
+lowering the threshold (which would reopen the false-positive risk it exists to prevent),
+`_collapse_repeated_letters()` folds runs of 2+ identical letters to one (`"Pompeii"` → `"Pompei"`)
+as one more candidate in the `max()` already used for relevance — applied symmetrically to both
+sides, so it only *adds* a way for a legitimate variant to match, never loosens what already
+matched. Title relevance only (not artist_relevance) — scoped to the one problem actually observed.
 
 ## Known regressions this logic exists to prevent
 
@@ -247,3 +324,25 @@ simplified:
 - `Passive Voice - Тебе пам'ятаю` / `Ten Preston feat. Sitek - 71` → both had zero relevant
   candidates purely because the query included the literal word "audio" (see the query-text
   section above) — no scoring change was needed, only removing it from the query.
+- `Gary Clark Jr. - Ain't Messin' 'Round` → the two real uploads each had only *one* of the DB
+  title's two apostrophes, scoring relevance ~0.69 against an unrelated but exactly-punctuated
+  candidate's 1.0 (see the doubled-letter/apostrophe handling in `_relevance_text()` above).
+- `WE BUTTER THE BREAD WITH BUTTER - N!CE` → the real upload's title had extra uploader branding
+  ("// Official Music Video // AFM Records") that diluted plain `similarity()`-based
+  `artist_relevance` below a reaction video's shorter, undecorated title (see the
+  `_text_containment()`-for-artist section above).
+- `Zob - Cantec de dragoste` → a cover by a completely different duo (563K views, far more popular
+  than any of Zob's own uploads) outscored the real artist's uploads for the same
+  `artist_relevance` dilution reason as above.
+- `Måneskin - Zitti e buoni` / `Foals - 2001` / `Bloodywood - Ari Ari` / `Błażej Król - Zaklęcie` →
+  "eurovision version", "official" (see above), a clean channel-name match, and a large
+  pre-existing popularity gap respectively resolved these — see the `VIDEO_KEYWORDS`/`LQ_KEYWORDS`
+  rebalancing and `"official"` sections above for the two that needed a real code change.
+- `Bastille - Pompei` → rejected outright by the relevance gate over a single missing "i" (see the
+  doubled-letter tolerance section above).
+- `Daði Freyr - Bitte` / `OBERSCHLESIEN - Król Olch` → the real official video only barely (or
+  didn't) beat a live/festival recording due to the old uniform `VIDEO_KEYWORDS`/`LQ_KEYWORDS`
+  weights (see the rebalancing section above).
+- `Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix Extended)` → any remix scored
+  identical relevance once the DB title's remix-selector bracket was stripped, so a completely
+  unrelated remix won (see the bracket-selector-hint section above).

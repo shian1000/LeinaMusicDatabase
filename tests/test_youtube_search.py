@@ -127,6 +127,17 @@ def test_search_video_ytdlp_does_not_pick_the_remix_for_foals_2001(monkeypatch):
     # "channel" field), with the reported Dan Carey Dub reupload added in —
     # it wasn't in this particular sample run but is exactly the case that
     # triggered the wrong pick in production.
+    #
+    # "2001" is short enough that every candidate ties at 1.0
+    # relevance/artist_relevance, so quality alone decides — and the real
+    # official video used to lose to several completely uninformative
+    # titles (a random lyric video, an unlabeled "'2001'" upload) that
+    # scored a "clean" 0 purely by not saying anything, while the real
+    # video's correct "[Official Music Video]" label triggered only the
+    # VIDEO_KEYWORDS format penalty with no offsetting signal. HQ_KEYWORDS
+    # gaining bare "official" (a genuine trust signal distinct from the
+    # audio/video format preference) fixed this — asserted as an exact
+    # pick now, not just "isn't the remix".
     candidates = [
         {"id": "ydBQz3SecaE", "title": "FOALS - 2001 [Official Music Video]", "channel": "Foals"},
         {"id": "E2WD04MPkG4", "title": "FOALS x LONDON CONTEMPORARY ORCHESTRA - 2001 [Official Video]", "channel": "Foals"},
@@ -149,7 +160,7 @@ def test_search_video_ytdlp_does_not_pick_the_remix_for_foals_2001(monkeypatch):
 
     video_id = m.search_video_ytdlp("Foals", "2001")
 
-    assert video_id not in ("6Q_58jY9A0Q", "CYU9Yz2RayU")  # Dan Carey Dub / Myd Remix
+    assert video_id == "ydBQz3SecaE"  # the real official music video
 
 
 def _mock_ytdlp_search(monkeypatch, candidates):
@@ -251,3 +262,242 @@ def test_search_video_ytdlp_finds_ten_preston_without_audio_suffix(monkeypatch):
 
     assert video_id == "R5eMExxWu1M"
     assert not any("audio" in arg.lower() for arg in captured_command)
+
+
+# Real cases: apostrophe stripping in `_relevance_text()`, a containment-based
+# fallback for `artist_relevance` (mirroring the one title relevance already
+# had), and `LQ_KEYWORDS` gaining "react"/"review"/"teaser"/"eurovision
+# version"/"high tone". Not every song reported alongside these was fixed:
+# a double-letter spelling variant ("Pompei" vs "Pompeii") and a script
+# mismatch (Cyrillic artist name vs. a Latin-alphabet channel name with no
+# textual overlap at all) both block matching before these fixes can help —
+# see docs/agent-notes/youtube-search-matching.md.
+
+
+def test_search_video_ytdlp_ignores_missing_apostrophe(monkeypatch):
+    # Real candidates for "Gary Clark Jr. - Ain't Messin' 'Round". Before the
+    # apostrophe fix, the two official uploads scored relevance ~0.69 (one
+    # missing each of the DB title's two apostrophes) while an unrelated,
+    # much-less-popular live recording matched exactly and won outright.
+    candidates = [
+        {"id": "fyBem5-Bfpg", "title": "Gary Clark Jr. - Ain't Messin' Round [Official Music Video]", "channel": "garyclarkjr", "view_count": 1029669},
+        {"id": "EyFFuEY_S6Q", "title": "Gary Clark Jr - Ain't Messin 'Round [Official Audio]", "channel": "garyclarkjr", "view_count": 400470},
+        {"id": "AdK8QEMIKN4", "title": "Gary Clark Jr - Ain't Messin' 'Round (Live at Farm Aid 2014)", "channel": "Farm Aid", "view_count": 64223},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Gary Clark Jr.", "Ain't Messin' 'Round")
+
+    assert video_id == "EyFFuEY_S6Q"
+
+
+def test_search_video_ytdlp_artist_containment_ignores_upload_branding(monkeypatch):
+    # Real candidates for "WE BUTTER THE BREAD WITH BUTTER - N!CE". The real
+    # official upload's title carries extra branding ("// Official Music
+    # Video // AFM Records") that diluted plain similarity() enough to score
+    # lower artist_relevance than a short, undecorated reaction video's
+    # title — on top of "react" not being an LQ_KEYWORDS term at all yet.
+    candidates = [
+        {"id": "E49Qrhdk2cI", "title": "WE BUTTER THE BREAD WITH BUTTER - N!CE (2021) // Official Music Video // AFM Records", "channel": "AFM Records", "view_count": 890446},
+        {"id": "qSNnl-w0_c8", "title": "We Butter The Bread With Butter - N!CE (React/Review)", "channel": "Mat and Chels React", "view_count": 13231},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("WE BUTTER THE BREAD WITH BUTTER", "N!CE")
+
+    assert video_id == "E49Qrhdk2cI"
+
+
+def test_search_video_ytdlp_deprioritizes_eurovision_version(monkeypatch):
+    # Real candidates for "Måneskin - Zitti e buoni". The actual official
+    # video (230M views) lost to an "(Eurovision Version)" reupload (8.9M
+    # views) purely because "official video" tripped VIDEO_KEYWORDS while
+    # "eurovision version" tripped nothing at all.
+    candidates = [
+        {"id": "QN1odfjtMoo", "title": "Måneskin - ZITTI E BUONI (Official Video – Sanremo & EUROVISION 2021 Winners)", "channel": "Måneskin Official", "view_count": 230071757},
+        {"id": "0Upt-ddaw04", "title": "ZITTI E BUONI (Eurovision Version)", "channel": "Måneskin Official", "view_count": 8897851},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Måneskin", "Zitti e buoni")
+
+    assert video_id == "QN1odfjtMoo"
+
+
+def test_search_video_ytdlp_prefers_real_upload_over_reaction_video(monkeypatch):
+    # Real candidates for "Bloodywood - INDIAN STREET METAL (Ari Ari ft.
+    # Raoul Kerr)". A reaction video (4.6K views, channel "Alex N Channel")
+    # beat the real upload (7.9M views, channel "Bloodywood") in production
+    # because "reaction" wasn't in LQ_KEYWORDS at all. In practice this
+    # resolves via multiple redundant signals now (the real view-count gap
+    # via popularity, and a clean channel-name match via artist_relevance
+    # containment), which is why the dedicated LQ_KEYWORDS("react") coverage
+    # lives in test_score_result_penalizes_new_lq_keywords instead, with
+    # view counts equalized to isolate that one signal — this test checks
+    # the real, full candidate pool end-to-end instead.
+    candidates = [
+        {"id": "i4FqGPRQWFM", "title": 'INDIAN STREET METAL ("Ari Ari" ft. Raoul Kerr) - Bloodywood', "channel": "Bloodywood", "view_count": 7946578},
+        {"id": "6uJoN_I9ebQ", "title": 'INDIAN FOLK METAL (Bloodywood - "Jee Veerey" ft. Raoul Kerr)', "channel": "Bloodywood", "view_count": 2536950},
+        {"id": "1nvgTbEdH8E", "title": "Ari Ari", "channel": "Bloodywood", "view_count": 313093},
+        {"id": "TcpgRq-bCTs", "title": 'INDIAN STREET METAL ("Ari Ari" ft. Raoul Kerr) - Bloodywood (REACTION)', "channel": "Alex N Channel", "view_count": 4556},
+        {"id": "Fvu3uPNiWNk", "title": "Bloodywood - Ari Ari - Live at Wacken Open Air 2019", "channel": "WackenTV", "view_count": 290477},
+        {"id": "LZcjfLMzDuw", "title": "Bloodywood & Raoul Kerr - Ari Ari", "channel": "All Kind Of Music", "view_count": 201},
+        {"id": "a65A626Ed20", "title": "Bloodywood - Dana Dan (Indian Folk Metal)", "channel": "Bloodywood", "view_count": 9423555},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Bloodywood", "INDIAN STREET METAL (_Ari Ari_ ft. Raoul Kerr)")
+
+    assert video_id == "i4FqGPRQWFM"
+
+
+# Real cases that motivated adding "react", "review", "teaser", "eurovision
+# version", and "high tone" to LQ_KEYWORDS: Bloodywood's "(REACTION)" video
+# and Król's "(Teaser)" upload both beat the real thing in production. Both
+# turned out, on closer inspection, to already be resolved by *other*
+# existing signals once matched against real data (Bloodywood: a clean
+# channel-name match already gives the real upload a decisive artist_relevance
+# edge; Król: the huge pre-existing view-count gap alone is enough) — so an
+# end-to-end test built from those exact songs wouldn't actually exercise the
+# new keywords; it would pass with or without them. Testing the keywords
+# directly against `score_result()` instead, holding everything else fixed,
+# is what actually catches a regression if one of them is ever removed.
+def test_score_result_penalizes_new_lq_keywords():
+    baseline = m.score_result("Artist - Song", "Artist", "Song", "Artist", 50000)
+    for decorated_title in [
+        "Artist - Song (REACTION)",
+        "Artist - Song (Review)",
+        "Artist - Song (Teaser)",
+        "Artist - Song (Eurovision Version)",
+        "Artist - Song (High Tone)",
+    ]:
+        decorated = m.score_result(decorated_title, "Artist", "Song", "Artist", 50000)
+        assert decorated[2] < baseline[2], f"{decorated_title!r} should score lower quality than the baseline"
+
+
+def test_search_video_ytdlp_artist_containment_disambiguates_cover_artists(monkeypatch):
+    # Real candidates for "Zob - Cantec de dragoste". A cover by a different
+    # duo (Alexandra Usurelu & Dan Bordeianu, 563K views — far more popular
+    # than any of Zob's own uploads) used to outscore the real artist's
+    # uploads because plain similarity() didn't clearly separate "this
+    # candidate is by the searched artist" from "this candidate happens to
+    # share some characters with the artist name". Containment-based
+    # artist_relevance fixes this: the cover artists' names share almost no
+    # textual overlap with "Zob" once measured by containment, not raw ratio.
+    candidates = [
+        {"id": "KGPft935c00", "title": "Zob - Cantec De Dragoste (Official Video)", "channel": "Roton Hits", "view_count": 188747},
+        {"id": "D398DGsBP1I", "title": "Zob & Mara - Cantec de dragoste", "channel": "Vali Moga", "view_count": 54880},
+        {"id": "5n_cKrQYeoU", "title": "ZOB- 'Cântec de dragoste' la BTLive @Guerrilive Radio Session", "channel": "Radio Guerrilla", "view_count": 5904},
+        {"id": "X86Vjl3SCpc", "title": "Alexandra Usurelu și Dan Bordeianu - Cantec de dragoste", "channel": "Alexandra Usurelu", "view_count": 563148},
+        {"id": "-oDSUwRm64Y", "title": "Zob - Cantec de dragoste", "channel": "Alexandru Popa", "view_count": 1095},
+        {"id": "-lssuVMpvFo", "title": "Zob-Cantec de dragoste ( Cristina Țițescu cover)", "channel": "Cristina Țițescu", "view_count": 1046},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Zob", "Cantec de dragoste")
+
+    assert video_id in ("D398DGsBP1I", "KGPft935c00")  # either the band's own upload or the official video
+
+
+def test_search_video_ytdlp_tolerates_doubled_letter_typo(monkeypatch):
+    # Real case: DB title "Pompei" (missing one "i") vs the real "Pompeii" —
+    # scored relevance 0.50 against a required 0.85 for a title this short,
+    # rejecting every candidate outright. Both collapse to "Pompei" once
+    # repeated letters are folded, restoring an exact match.
+    candidates = [
+        {"id": "F90Cw4l-8NY", "title": "Bastille - Pompeii (Official Music Video)", "channel": "BASTILLEvideos", "view_count": 839916374},
+        {"id": "ilLEuwH4hws", "title": "Bastille - Pompeii (Lyric Video)", "channel": "BASTILLEvideos", "view_count": 32408712},
+        {"id": "cvQ2LF3hyuY", "title": "Bastille - Pompeii (Lyrics)", "channel": "Cosmos Music", "view_count": 23270768},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Bastille", "Pompei")
+
+    assert video_id == "F90Cw4l-8NY"
+
+
+def test_search_video_ytdlp_prefers_official_video_over_live_recording(monkeypatch):
+    # Real case: "Daði Freyr - Bitte". The official video (235K views) only
+    # barely beat a live recording (23K views) at the old weights (VIDEO
+    # penalty -2 for being a video, "live" penalty only -1) — 0.372 vs
+    # 0.368, a coincidence away from picking the live version instead.
+    # Lowering the video penalty and giving "live" its own bigger penalty
+    # makes this decisive rather than a near-tie — asserting on the margin
+    # itself, not just the final pick, since the old weights already won
+    # this one (barely) by luck; a plain video_id assertion wouldn't catch
+    # a regression back to that fragile near-tie.
+    official_score = m.score_result("Daði Freyr - Bitte (Official Video)", "Daði Freyr", "Bitte", "Daði Freyr", 235334)
+    live_score = m.score_result("Daði Freyr - Bitte (Live from Vikan með Gísla Marteini)", "Daði Freyr", "Bitte", "Daði Freyr", 23322)
+    assert official_score[2] - live_score[2] > 2  # was ~0.004 before
+
+    candidates = [
+        {"id": "Wotwtc9tA-Q", "title": "Daði Freyr - Bitte (Official Video)", "channel": "Daði Freyr", "view_count": 235334},
+        {"id": "2oDi4xLk1L0", "title": "Daði Freyr - Bitte (Live from Vikan með Gísla Marteini)", "channel": "Daði Freyr", "view_count": 23322},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Daði Freyr", "Bitte")
+
+    assert video_id == "Wotwtc9tA-Q"
+
+
+def test_search_video_ytdlp_prefers_studio_video_over_viral_live_clip(monkeypatch):
+    # Real case: "OBERSCHLESIEN - Król Olch" — a Woodstock festival
+    # recording (5.1M views) has *more* views than the actual studio video
+    # (1.4M views), so it kept winning even after being correctly
+    # tag-flagged as live ("na żywo" in its tags, not its title) at the old
+    # -1 STRONG_LQ-equivalent weight. Left as a known, accepted limitation
+    # when first found; the same fix that resolved Daði Freyr above (bigger
+    # "live" penalty, smaller video penalty) turned out to resolve this too
+    # — "na żywo" alone was already enough to flip the final pick (margin
+    # ~1.4), so "woodstock" joining STRONG_LQ_KEYWORDS is asserted on the
+    # margin directly below, not just the final video_id, since the pick
+    # alone wouldn't catch a regression if "woodstock" were removed again.
+    woodstock_title = "Oberschlesien - Król Olch #Woodstock2016"
+    woodstock_tags = ["Oberschlesien Król Olch na żywo", "oberschlesien woodstock", "polandrock festival"]
+    studio_title = "OBERSCHLESIEN - Król Olch [OFFICIAL VIDEO]"
+    studio_tags = ["s.p. records", "OBERSCHLESIEN", "Król Olch"]
+
+    woodstock_score = m.score_result(woodstock_title, "OBERSCHLESIEN", "Król Olch", "KręciołaTV", 5123817, woodstock_tags)
+    studio_score = m.score_result(studio_title, "OBERSCHLESIEN", "Król Olch", "S.P. RECORDS", 1417183, studio_tags)
+    assert studio_score[2] - woodstock_score[2] > 3  # was ~1.4 with "na żywo" alone, before "woodstock" joined STRONG_LQ_KEYWORDS
+
+    candidates = [
+        {"id": "NhPpu_WGAng", "title": woodstock_title, "channel": "KręciołaTV", "view_count": 5123817, "tags": woodstock_tags},
+        {"id": "KPJPJzpk_QQ", "title": studio_title, "channel": "S.P. RECORDS", "view_count": 1417183, "tags": studio_tags},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("OBERSCHLESIEN", "Król Olch")
+
+    assert video_id == "KPJPJzpk_QQ"
+
+
+def test_search_video_ytdlp_matches_specific_requested_remix(monkeypatch):
+    # Real case: "Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix
+    # Extended)". Bracket-stripping for relevance meant *any* remix scored
+    # identical 1.0 relevance, so a completely unrelated remix
+    # ("Deepshader's Reconstruction") won purely on quality/popularity.
+    # SELECTOR_MATCH_BONUS rewards a candidate whose own title/tags mention
+    # the specific named remixers asked for. Note the real matching
+    # candidate's title says "Remix", not "Remix Extended" — the bonus
+    # matches on the identifying names (Lorin Rymbu, Denis Rynda), not the
+    # whole bracket phrase verbatim.
+    candidates = [
+        {"id": "YeQHuxFw31I", "title": "Valeria Stoica — Get Back (Deepshader's Reconstruction)", "channel": "Valeria Stoica", "view_count": 1202},
+        {"id": "zliatPv0RGU", "title": "Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix)", "channel": "Valeria Stoica", "view_count": 1938},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)")
+
+    assert video_id == "zliatPv0RGU"
+
+
+def test_score_result_selector_bonus_ignores_generic_bracket_content():
+    # A plain "(Official Video)" bracket must never be treated as a
+    # meaningful selector — every word in it is generic branding, not a
+    # specific identifier, so it should reduce to no tokens at all and grant
+    # no bonus to any random candidate that happens to also say "Official
+    # Video" (which is nearly all of them).
+    assert m._selector_tokens("Official Video") == set()

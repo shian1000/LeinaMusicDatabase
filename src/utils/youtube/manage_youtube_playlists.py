@@ -20,6 +20,7 @@ from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
 from utils.youtube.yt_cache import save_cache
 from utils.youtube.yt_cache import make_song_key
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
+from utils.common.normalizer import APOSTROPHES
 import json
 
 
@@ -32,16 +33,65 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_PATH = ".secrets/token.json"
 CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 
-HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320"]
+HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320", "official"]
+# "official" is a genuine trust signal on its own, not just as part of
+# "official audio" — being confirmed official content and being in the
+# less-preferred video format are two separate axes, but previously only
+# the format axis (VIDEO_KEYWORDS' penalty) was tracked, so a video
+# correctly labeled "[Official Music Video]" scored *worse* than a random,
+# unlabeled fan upload that said nothing distinguishing at all. Real case:
+# Foals - 2001, a bare-number title where every candidate ties at 1.0
+# relevance/artist_relevance (so quality alone decides) — the real official
+# video used to score -1 (video penalty, no offsetting signal) while a
+# random lyric video and an unlabeled "'2001'" upload both coasted to 0
+# purely by not saying anything. "official" already dedupes against
+# "official audio"/"official mv" via _non_overlapping_hits (a hit wholly
+# contained in another hit from the same list doesn't double-count), so
+# this doesn't change scoring for anything already covered by those.
 # Keywords that suggest we should deprioritize (lower = worse)
-LQ_KEYWORDS = ["live", "concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "na żywo"]
+LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "review", "teaser", "eurovision version", "high tone"]
+# "live"/"na żywo" get a bigger penalty than the rest of LQ_KEYWORDS: a live
+# recording is essentially never the plain studio version (unlike, say, an
+# "acoustic" cut, which occasionally *is* the canonical release), so it
+# deserves to reliably outweigh a moderate popularity edge, not just barely
+# tip the balance. Real case: Daði Freyr - Bitte's official video (235K
+# views) only barely beat a live recording (23K views) at the old uniform
+# -1 weight — a coincidence away from picking the live version instead.
+# "woodstock" is grouped in here too — Poland's Pol'and'Rock/Woodstock
+# festival is a live-performance event, and its name shows up in tags/titles
+# in many forms ("Woodstock", "#Woodstock2016", "woodstock") that a plain
+# lowercased substring check already catches without listing each variant.
+STRONG_LQ_KEYWORDS = ["live", "na żywo", "woodstock"]
+STRONG_LQ_PENALTY = 3
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
+# Lowered from -2: being a video instead of an audio-only upload isn't
+# itself evidence of being the *wrong* content, just a format preference —
+# but at -2 it was heavily enough weighted to make the correct, far more
+# popular official video lose to an obscure alternate cut just for being a
+# video (e.g. Måneskin's 230M-view official video losing to an 8.9M-view
+# "Eurovision Version" reupload that triggered no penalty at all).
+VIDEO_PENALTY = 1
 # Phrases that are an especially strong, unambiguous "this is the real,
 # official, unedited upload" signal — trusted with a bigger bonus than the
 # generic HQ_KEYWORDS list. "oficjalny odsłuch albumu" is Polish for
 # "official album listen" (a label's official full-album premiere upload).
 HIGH_TRUST_KEYWORDS = ["oficjalny odsłuch albumu"]
 HIGH_TRUST_BONUS = 4
+
+# Generic descriptor words that don't identify a *specific* version on their
+# own — used to filter noise out of a DB title's bracket content before
+# treating it as a "which exact version" selector (see _selector_tokens()).
+# Built from the keyword lists above plus common remix/version vocabulary,
+# so a bracket that's just ordinary branding ("Official Video", "HD") never
+# gets treated as a meaningful selector — only bracket content with real,
+# specific identifying words left over (a named remixer, a collaborator)
+# does.
+_SELECTOR_STOPWORDS = {
+    word
+    for phrase in HQ_KEYWORDS + LQ_KEYWORDS + STRONG_LQ_KEYWORDS + VIDEO_KEYWORDS + HIGH_TRUST_KEYWORDS
+    for word in phrase.split()
+} | {"remix", "mix", "edit", "extended", "radio", "club", "vip", "feat", "ft", "featuring", "prod", "the", "and", "of", "with", "by"}
+SELECTOR_MATCH_BONUS = 3
 
 # Baseline minimum title relevance a candidate must have to be accepted at
 # all (see _min_relevance_for — short titles require a much higher bar than
@@ -252,28 +302,97 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
 
     return video_id
 
+def _bracket_selector_hints(title: str) -> list[str]:
+    """Extract bracket-wrapped text from a DB title before _relevance_text()
+    discards it for good.
+
+    Bracketed text is stripped for the main relevance comparison because
+    it's *usually* disposable annotation ("[Official Video]", "[WIDEO]") —
+    but sometimes it's the opposite: the specific version being asked for.
+    Real case: DB title "Get Back (Lorin Rymbu & Denis Rynda Remix
+    Extended)" — stripping the bracket for relevance meant *any* remix of
+    "Get Back" scored identical 1.0 relevance, so a completely different
+    remix won. Rather than guessing up front whether a given bracket is
+    junk or a meaningful selector (the two look identical syntactically),
+    keep what's stripped and check it separately in score_result() against
+    the *candidate's* own (unstripped) title/tags — see _selector_tokens().
+    """
+    return [m.strip() for m in re.findall(r"[\(\[]([^)\]]*)[)\]]", title) if m.strip()]
+
+
+def _selector_tokens(hint: str) -> set[str]:
+    """Reduce a bracket hint to its specific, identifying words.
+
+    Generic branding words ("Official", "Video", "Remix", "Extended", ...)
+    are filtered via _SELECTOR_STOPWORDS, so a plain "[Official Video]"
+    bracket reduces to an empty set (never treated as a meaningful selector
+    to match against), while "Lorin Rymbu & Denis Rynda Remix Extended"
+    reduces to the actual identifying names: {"lorin", "rymbu", "denis",
+    "rynda"}.
+    """
+    words = re.findall(r"\w+", hint.lower())
+    return {w for w in words if w not in _SELECTOR_STOPWORDS and len(w) > 2}
+
+
 def _relevance_text(text: str) -> str:
-    """Strip bracketed annotations and hashtags before comparing titles.
+    """Strip bracketed annotations, hashtags, and apostrophe variance before
+    comparing titles/artists.
 
     DB titles/video titles often carry junk like "[Official Video]" or
     "[Save Ukraine - #StopWar]" that isn't part of the song's identity. If
     two unrelated videos both happen to carry the same bracketed tag, a
     plain similarity check on the raw strings would rate them as similar
     for the wrong reason, so that text is dropped before comparing.
+
+    Apostrophes are stripped entirely (not just normalized to one style) —
+    real case: DB title "Ain't Messin' 'Round" against a candidate titled
+    "Ain't Messin 'Round" (missing the first apostrophe) scored relevance
+    0.69, not 1.0, because that single missing character breaks both the
+    whole-word containment match and depresses the similarity ratio — enough
+    for a much worse, but exactly-punctuated, candidate to outrank it before
+    quality is ever consulted. Reuses `normalizer.APOSTROPHES`, the same
+    apostrophe-variant set already trusted elsewhere in the app for exactly
+    this kind of fuzzy match (`rule_apostrophe_and_common_word_diff`).
     """
     text = remove_brackets(text)
     text = re.sub(r"#\w+", "", text)
+    text = re.sub(f"[{re.escape(APOSTROPHES)}]", "", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _title_containment(expected: str, candidate: str) -> float:
+def _collapse_repeated_letters(text: str) -> str:
+    """Collapse runs of 2+ identical letters to a single one.
+
+    Tolerates the common doubled-letter typo/spelling-variant pattern (DB
+    title "Pompei" vs the real "Pompeii") as one more relevance signal,
+    without loosening the relevance bar itself for short titles in general —
+    this is applied equally to both sides of the comparison, so it only
+    helps when a title is otherwise an exact match modulo a repeated letter,
+    not a blanket relaxation of what counts as similar. Real case: "Bastille
+    - Pompei" scored 0.50 relevance against the real "Pompeii" (needed 0.85
+    for a title this short — see _min_relevance_for) purely from that single
+    missing letter; collapsed, both become "Pompei" and match exactly. This
+    matters more for short titles specifically because a single-character
+    difference is a much larger fraction of a short string's similarity()
+    ratio than of a long one's — the same scaled threshold that protects
+    short titles from false positives also makes them brittle to this exact
+    kind of minor, legitimate spelling variance.
+    """
+    return re.sub(r"(.)\1+", r"\1", text)
+
+
+def _text_containment(expected: str, candidate: str) -> float:
     """How much of `expected` shows up intact inside `candidate`.
 
     A plain whole-string similarity() ratio unfairly penalizes a short,
     exact title buried in a longer, decorated candidate title (e.g. title
     "As" vs candidate "Gosia Kunc - As" scores only ~0.24 on similarity()
     alone, despite being an exact match) — the surrounding text dilutes the
-    ratio. This checks containment directly instead.
+    ratio. This checks containment directly instead. Used for both title and
+    artist relevance — the same dilution problem hits artist matching too
+    (e.g. a real official upload titled "... // Official Music Video // AFM
+    Records" scored lower artist_relevance than a short, undecorated reaction
+    video's title, purely from the extra branding text diluting the ratio).
 
     For space-delimited scripts, containment only counts if `expected`
     appears as a whole word/phrase, not merely as a substring of a longer
@@ -369,13 +488,25 @@ def score_result(
     `description` — tags are curated keywords, description is freeform prose
     where "live" could appear in unrelated boilerplate (tour dates, etc.) and
     false-positive.
+
+    `title`'s bracket content also gets a second look after relevance is
+    computed: if it contains a specific selector (a named remix/collaborator,
+    not just generic branding — see _selector_tokens()), a candidate whose
+    own title or tags actually mention it earns SELECTOR_MATCH_BONUS. This
+    doesn't affect the relevance gate itself, only the tiebreak — if no
+    candidate mentions the specific remix asked for, we still want to fall
+    back to whatever's available rather than reject everything outright.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
     if expected_title and candidate_clean:
+        expected_title_collapsed = _collapse_repeated_letters(expected_title)
+        candidate_clean_collapsed = _collapse_repeated_letters(candidate_clean)
         relevance = max(
             similarity(expected_title, candidate_clean),
-            _title_containment(expected_title, candidate_clean),
+            _text_containment(expected_title, candidate_clean),
+            similarity(expected_title_collapsed, candidate_clean_collapsed),
+            _text_containment(expected_title_collapsed, candidate_clean_collapsed),
         )
     else:
         relevance = 0.0
@@ -384,9 +515,16 @@ def score_result(
     channel_clean = _relevance_text(channel)
     artist_relevance = 0.0
     if expected_artist and candidate_clean:
-        artist_relevance = similarity(expected_artist, candidate_clean)
+        artist_relevance = max(
+            similarity(expected_artist, candidate_clean),
+            _text_containment(expected_artist, candidate_clean),
+        )
     if expected_artist and channel_clean:
-        artist_relevance = max(artist_relevance, similarity(expected_artist, channel_clean))
+        artist_relevance = max(
+            artist_relevance,
+            similarity(expected_artist, channel_clean),
+            _text_containment(expected_artist, channel_clean),
+        )
 
     keyword_text = candidate_title.lower()
     if tags:
@@ -394,30 +532,39 @@ def score_result(
 
     def _non_overlapping_hits(keywords: list[str]) -> list[str]:
         # Some keyword-list entries are substrings of others in the same list
-        # (e.g. "audio" inside "official audio", "mv" inside "official mv") —
-        # matching both against the same title text double-counts what is
-        # really a single signal. Drop any hit that's wholly contained in
-        # another hit from the same list before scoring.
+        # (e.g. "audio" inside "official audio", "mv" inside "official mv",
+        # "orchestra" inside "orchestral") — matching both against the same
+        # title text double-counts what is really a single signal. Drop any
+        # hit that's wholly contained in another hit from the same list
+        # before scoring.
         hits = [kw for kw in keywords if kw in keyword_text]
         return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
 
-    lq_hits = [kw for kw in LQ_KEYWORDS if kw in keyword_text]
+    lq_hits = _non_overlapping_hits(LQ_KEYWORDS)
+    strong_lq_hits = [kw for kw in STRONG_LQ_KEYWORDS if kw in keyword_text]
     quality = 0
     # An "Official Audio" / "HQ" label only means the video is well-produced,
     # not that it's the plain studio version — a professionally released
     # remix or demo can carry that label too. If the title already signals
-    # an alternate arrangement (LQ_KEYWORDS), don't let the HQ bonus offset
-    # that penalty, or a polished remix/dub upload out-scores the real thing
-    # (e.g. Foals - 2001: a "(Dan Carey Dub) - Official Audio" reupload was
-    # outranking the actual official video because "official audio" gave +4
-    # from the double-count bug above, dwarfing a single -1 dub/remix hit).
-    if not lq_hits:
+    # an alternate arrangement (LQ_KEYWORDS/STRONG_LQ_KEYWORDS), don't let
+    # the HQ bonus offset that penalty, or a polished remix/dub upload
+    # out-scores the real thing (e.g. Foals - 2001: a "(Dan Carey Dub) -
+    # Official Audio" reupload was outranking the actual official video
+    # because "official audio" gave +4 from the double-count bug above,
+    # dwarfing a single -1 dub/remix hit).
+    if not lq_hits and not strong_lq_hits:
         quality += 2 * len(_non_overlapping_hits(HQ_KEYWORDS))
-    quality -= 2 * len(_non_overlapping_hits(VIDEO_KEYWORDS))
+    quality -= VIDEO_PENALTY * len(_non_overlapping_hits(VIDEO_KEYWORDS))
     quality -= len(lq_hits)
+    quality -= STRONG_LQ_PENALTY * len(strong_lq_hits)
     if channel and _is_topic_channel(channel):
         quality += 2
     quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in keyword_text])
+    for hint in _bracket_selector_hints(title):
+        tokens = _selector_tokens(hint)
+        if tokens and all(re.search(r"\b" + re.escape(tok) + r"\b", keyword_text) for tok in tokens):
+            quality += SELECTOR_MATCH_BONUS
+            break
     quality += _popularity_bonus(view_count)
     return relevance, artist_relevance, quality
 
