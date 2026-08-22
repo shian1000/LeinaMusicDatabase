@@ -89,4 +89,20 @@ def _build_driver(headless: bool = True) -> webdriver.Chrome:
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
+    _accept_google_consent(driver)
     return driver
+
+
+def _accept_google_consent(driver: webdriver.Chrome) -> None:
+    """
+    Preemptively set Google's CONSENT cookie so later google.com/search calls
+    skip the "Before you continue to Google Search" interstitial, which a
+    fresh cookie-less profile would otherwise hit instead of real results.
+    """
+    driver.get("https://www.google.com")
+    driver.add_cookie({
+        "name": "CONSENT",
+        "value": "YES+shp.gws-20231108-0-RC1.en+FX+410",
+        "domain": ".google.com",
+        "path": "/",
+    })

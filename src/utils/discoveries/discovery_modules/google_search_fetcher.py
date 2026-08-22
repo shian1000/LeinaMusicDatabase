@@ -72,6 +72,10 @@ def get_album_name(artist: str, song: str) -> dict | None:
 
     time.sleep(4)
 
+    if "/sorry/" in driver.current_url:
+        slog("[Result] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
+        return None
+
     soup = BeautifulSoup(driver.page_source, "html.parser")
 
     # slog(soup)
