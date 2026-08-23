@@ -191,7 +191,36 @@ Also left open, unrelated to popularity: `NIZKIZ - Правілы` picked a 67-v
 74K-view real upload because the real upload spells "Правілы" the Russian way (missing the
 Belarusian "і"), scoring relevance 0.55 vs. the excerpt's exact-match 1.0 — relevance is compared
 *before* quality/popularity in the sort tuple, so popularity is never even consulted for this one.
-A spelling-variant/orthography problem, not a popularity or quality-weighting problem.
+A spelling-variant/orthography problem, not a popularity or quality-weighting problem. Distinct
+from the diacritic-folding fix below: Belarusian "і" (U+0456) doesn't NFKD-decompose into Russian
+"и" + a mark — it's a genuinely separate base letter, not an accent variant, so folding can't help.
+
+## Open: artist identity that no string algorithm can bridge — needs a synonym/alias mechanism
+
+Three related, still-unfixed cases, grouped here because they're the same underlying problem, not
+three different ones — the real channel/title uses a *different name* for the artist than the DB
+does, not a spelling variant of the same name, so no amount of fuzzy string matching (containment,
+similarity, diacritic-folding) can close the gap:
+- `Бумбокс - Нездара`: the real upload's channel is `familyboombox` (an English fan-channel name),
+  sharing zero characters with the Cyrillic artist name `Бумбокс` — `artist_relevance` scores `0.0`
+  and, since it's compared before `quality` in the sort tuple, a much worse but textually-matching
+  candidate wins regardless of popularity. Should resolve to
+  [youtu.be/zDVzqqTzTDE](https://youtu.be/zDVzqqTzTDE).
+- `Stray Kids - 특(S-Class)`: the DB title mixes Hangul and a Latin-alphabet parenthetical
+  (`특(S-Class)_ MV`) in a way that doesn't line up character-for-character with how the real
+  video titles it (relevance 0.60 against a required 0.92 for a title this short) — likely a
+  Hangul/Latin transliteration or spacing/punctuation convention mismatch specific to Korean titles,
+  not yet diagnosed in detail. Should resolve to
+  [youtu.be/JsOOis4bBFg](https://youtu.be/JsOOis4bBFg).
+- `Плач Єремії - Вона`: the band is fronted by (and sometimes uploads under) Taras Chubai's own
+  name rather than the band name — an artist-alias problem, not a spelling or script one. Should
+  resolve to [youtu.be/EaQEnpYoA2U](https://youtu.be/EaQEnpYoA2U).
+
+A fix here likely means a small manual synonym/alias table (`"Бумбокс"` ↔ `"familyboombox"`,
+`"Плач Єремії"` ↔ `"Taras Chubai"`/`"Тарас Чубай"`, etc.) consulted as an *additional* signal
+alongside `artist_relevance`, since there's no way to derive these algorithmically — deliberately
+not attempted yet, flagged here to revisit as more of these turn up rather than one-off patching
+each song's DB row.
 
 ## Keyword scanning now covers `tags` too, not just the title (yt-dlp only, free)
 
@@ -280,18 +309,42 @@ remixes/dubs/demos exactly like `"official audio"` already did — verified none
 "official" somewhere) picked up the bonus, because each also matches an `LQ_KEYWORDS` term that
 suppresses the whole HQ bonus block.
 
-## Doubled-letter typo/spelling-variant tolerance for short titles
+## Typo/spelling-variant tolerance for short titles: doubled letters and diacritics
 
-`Bastille - Pompei` (DB) against the real `"Pompeii"` scored relevance `0.50` — rejected outright,
-since a title this short requires `0.85` (see `_min_relevance_for()`). The scaled threshold that
-protects short titles from false positives (the "netflix ≈ nix" problem above) also makes them
-brittle to a single-character legitimate spelling variant, because one differing character is a
-much larger fraction of a short string's `similarity()` ratio than of a long one's. Rather than
-lowering the threshold (which would reopen the false-positive risk it exists to prevent),
-`_collapse_repeated_letters()` folds runs of 2+ identical letters to one (`"Pompeii"` → `"Pompei"`)
-as one more candidate in the `max()` already used for relevance — applied symmetrically to both
-sides, so it only *adds* a way for a legitimate variant to match, never loosens what already
-matched. Title relevance only (not artist_relevance) — scoped to the one problem actually observed.
+Two related relevance-matching gaps, both stemming from the same root cause: the scaled threshold
+that protects short titles from false positives (the "netflix ≈ nix" problem above) also makes
+them brittle to a single-character legitimate spelling variant, because one differing character is
+a much larger fraction of a short string's `similarity()` ratio than of a long one's. Rather than
+lowering the threshold (which would reopen the false-positive risk it exists to prevent), both are
+handled as extra candidates in the same `max()` already used for relevance — applied symmetrically
+to both sides, so each only *adds* a way for a legitimate variant to match, never loosens what
+already matched. Title relevance only (not `artist_relevance`) — scoped to the problems actually
+observed.
+
+- `_collapse_repeated_letters()` folds runs of 2+ identical letters to one (`"Pompeii"` →
+  `"Pompei"`). Real case: `Bastille - Pompei` (DB) scored relevance `0.50` against the real
+  `"Pompeii"` — needed `0.85` for a title this short — purely from the missing second "i".
+- `_fold_diacritics()` strips accents via Unicode NFKD decomposition + dropping combining marks —
+  the same technique `normalizer.normalize()` already uses elsewhere in the app, reused here rather
+  than pulling in that function's other transformations (full punctuation removal, lowercasing
+  done elsewhere already). Real case: `ABRADAB - Niesmiertelnosc` (DB, ASCII) against the real
+  `"Nieśmiertelność"` — exact containment couldn't bridge the missing "ś"/"ć", and the fallback
+  `similarity()` ratio, further diluted by an "ABRADAB - " prefix on the candidate side, dropped
+  low enough (0.6) to lose to an unrelated live recording (0.8).
+  - This isn't limited to Latin accents — NFKD decomposition also covers some same-script letter
+    variants that read as "the same base letter plus a mark" under Unicode even when they don't
+    look like an accent to an English speaker. Real case: `bayski - набіраи` (DB, a typo — Cyrillic
+    "и") against the real `"набірай"` (Cyrillic "й", short I) — "й" decomposes to "и" + a combining
+    breve, so folding fixes the typo too, with no Cyrillic-specific rule needed.
+  - Not universal, though: Belarusian "і" (U+0456, as in `NIZKIZ - Правілы`, see above) does *not*
+    NFKD-decompose into Russian "и" + a mark — it's a genuinely separate base letter, not an accent
+    variant, so this fix can't help every Cyrillic spelling-variant case, only the ones that are
+    truly "a letter plus a diacritic" under Unicode.
+
+Both transforms are combined into one "maximally normalized" pass (fold diacritics, then collapse
+repeated letters) rather than kept as separate `max()` branches — a title can need both at once,
+and running them together costs nothing extra since neither transform does anything when its own
+pattern isn't present.
 
 ## Known regressions this logic exists to prevent
 
@@ -346,3 +399,10 @@ simplified:
 - `Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix Extended)` → any remix scored
   identical relevance once the DB title's remix-selector bracket was stripped, so a completely
   unrelated remix won (see the bracket-selector-hint section above).
+- `ABRADAB - Niesmiertelnosc (Muzyka Daje)` / `bayski - набіраи (acoustic)` → missing Polish
+  diacritics and a Cyrillic "и"/"й" typo respectively defeated relevance matching before diacritic
+  folding was added (see the typo/spelling-variant section above).
+- `Rival Sons - Darkfighter` → a "Track by Track" promo video (content *about* the album, not the
+  song) only barely lost to the real official audio — margin 0.29, the same fragile-near-tie shape
+  as `Daði Freyr - Bitte` above. `"track by track"` joined `LQ_KEYWORDS` alongside
+  "react"/"review"/"teaser" as the same category of signal: content that isn't the song at all.

@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import unicodedata
 import sys
 import time
 from difflib import SequenceMatcher
@@ -48,8 +49,15 @@ HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster"
 # "official audio"/"official mv" via _non_overlapping_hits (a hit wholly
 # contained in another hit from the same list doesn't double-count), so
 # this doesn't change scoring for anything already covered by those.
-# Keywords that suggest we should deprioritize (lower = worse)
-LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "review", "teaser", "eurovision version", "high tone"]
+# Keywords that suggest we should deprioritize (lower = worse). "track by
+# track" (a band explaining/promoting an album track, not the track itself)
+# joins the same category as "react"/"review"/"teaser" — content *about* the
+# song, not the song. Real case: Rival Sons - Darkfighter, where a "Track by
+# Track" promo video only barely lost to the real official audio (margin
+# 0.29) on view count alone before this — the same fragile-near-tie shape
+# fixed for Daði Freyr, but for "isn't music at all" rather than "isn't the
+# canonical arrangement".
+LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "review", "teaser", "eurovision version", "high tone", "track by track"]
 # "live"/"na żywo" get a bigger penalty than the rest of LQ_KEYWORDS: a live
 # recording is essentially never the plain studio version (unlike, say, an
 # "acoustic" cut, which occasionally *is* the canonical release), so it
@@ -381,6 +389,33 @@ def _collapse_repeated_letters(text: str) -> str:
     return re.sub(r"(.)\1+", r"\1", text)
 
 
+def _fold_diacritics(text: str) -> str:
+    """Strip accents/diacritics via Unicode NFKD decomposition + dropping
+    combining marks — the same technique `normalizer.normalize()` already
+    uses elsewhere in the app, reused here as its own relevance signal
+    rather than pulling in that function's other transformations (full
+    punctuation removal, lowercasing done elsewhere already) that aren't
+    wanted at this stage.
+
+    Real case: DB title "Niesmiertelnosc" (ASCII, missing the accents) vs
+    the real "Nieśmiertelność" — exact containment can't match across a
+    missing "ś"/"ć", and the fallback similarity() ratio, further diluted
+    by an "ABRADAB - " prefix on the candidate side, dropped low enough
+    (0.6) to lose to an unrelated "(Live)" recording (0.8). Folded, both
+    become "niesmiertelnosc" and match exactly.
+
+    This isn't limited to Latin accents — NFKD decomposition also covers
+    some same-script letter variants that read as "the same base letter
+    plus a mark" under Unicode, even when they don't look like an accent to
+    an English speaker. Real case: DB title "...набіраи" (a typo, Cyrillic
+    "и") vs the real "...набірай" (Cyrillic "й", short I) — "й" decomposes
+    to "и" + a combining breve, so folding makes the typo and the correct
+    spelling identical too, without a Cyrillic-specific rule.
+    """
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 def _text_containment(expected: str, candidate: str) -> float:
     """How much of `expected` shows up intact inside `candidate`.
 
@@ -500,13 +535,20 @@ def score_result(
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
     if expected_title and candidate_clean:
-        expected_title_collapsed = _collapse_repeated_letters(expected_title)
-        candidate_clean_collapsed = _collapse_repeated_letters(candidate_clean)
+        # Both variance-tolerance transforms are folded into one "maximally
+        # normalized" pass rather than kept as separate max() branches — a
+        # title can need both at once (a doubled letter *and* a missing
+        # accent), and running them together costs nothing extra since
+        # neither transform is destructive when the other's pattern isn't
+        # present (collapsing is a no-op with no repeated letters; folding
+        # is a no-op with no diacritics).
+        expected_title_normalized = _collapse_repeated_letters(_fold_diacritics(expected_title))
+        candidate_clean_normalized = _collapse_repeated_letters(_fold_diacritics(candidate_clean))
         relevance = max(
             similarity(expected_title, candidate_clean),
             _text_containment(expected_title, candidate_clean),
-            similarity(expected_title_collapsed, candidate_clean_collapsed),
-            _text_containment(expected_title_collapsed, candidate_clean_collapsed),
+            similarity(expected_title_normalized, candidate_clean_normalized),
+            _text_containment(expected_title_normalized, candidate_clean_normalized),
         )
     else:
         relevance = 0.0

@@ -416,6 +416,65 @@ def test_search_video_ytdlp_tolerates_doubled_letter_typo(monkeypatch):
     assert video_id == "F90Cw4l-8NY"
 
 
+def test_search_video_ytdlp_tolerates_missing_diacritics(monkeypatch):
+    # Real case: DB title "Niesmiertelnosc" (ASCII, missing Polish accents)
+    # vs the real "Nieśmiertelność" — exact containment couldn't match
+    # across the missing "ś"/"ć", and the fallback similarity() ratio,
+    # further diluted by the "ABRADAB - " prefix on the candidate side,
+    # dropped to 0.6 — below an unrelated "(Live)" recording's 0.8, so the
+    # live version won outright. Folding diacritics via NFKD decomposition
+    # makes both sides "niesmiertelnosc" and restores an exact match.
+    candidates = [
+        {"id": "vIGV7z31vj8", "title": "Nieśmiertelność (Live)", "channel": "Abradab - Topic", "view_count": 294},
+        {"id": "T3bqVFKEoDA", "title": "ABRADAB - Nieśmiertelność (Muzyka daje) [OFFICIAL AUDIO]", "channel": "S.P. RECORDS", "view_count": 22699},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("ABRADAB", "Niesmiertelnosc (Muzyka Daje)")
+
+    assert video_id == "T3bqVFKEoDA"
+
+
+def test_search_video_ytdlp_tolerates_short_i_breve_typo(monkeypatch):
+    # Real case: DB title "...набіраи" (a typo — Cyrillic "и") vs the real
+    # "...набірай" (Cyrillic "й", short I) — yt-dlp returned zero results
+    # for the typo'd query, and the correct video wasn't found at all under
+    # the old code. "й" NFKD-decomposes to "и" + a combining breve, so the
+    # same diacritic-folding fix above resolves this non-Latin-script case
+    # too, without a script-specific rule.
+    candidates = [
+        {"id": "l8cJML7BJUg", "title": "bayski - набірай (acoustic)", "channel": "bayski", "view_count": 686},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("bayski", "набіраи (acoustic)")
+
+    assert video_id == "l8cJML7BJUg"
+
+
+def test_search_video_ytdlp_deprioritizes_track_by_track_promo(monkeypatch):
+    # Real case: "Rival Sons - Darkfighter". A "Track by Track" promo video
+    # (a band explaining/promoting the album, not the song itself) only
+    # barely lost to the real official audio — margin 0.29 with real view
+    # counts, the same fragile-near-tie shape as Daði Freyr before that fix,
+    # here for "isn't music at all" rather than "isn't the canonical
+    # arrangement". Asserted on the margin, not just the pick, since the old
+    # weights already (barely) won this one by luck.
+    real_score = m.score_result('Rival Sons - "DARKFIGHTER" (Official Audio)', "Rival Sons", "Darkfighter", "Rival Sons", 97112)
+    promo_score = m.score_result("DARKFIGHTER Track by Track (Official)", "Rival Sons", "Darkfighter", "Rival Sons", 50000)
+    assert real_score[2] - promo_score[2] > 2  # was ~0.29 before
+
+    candidates = [
+        {"id": "uX7ZXF2EyeE", "title": "DARKFIGHTER Track by Track (Official)", "channel": "Rival Sons", "view_count": 50000},
+        {"id": "GEW7zR1aIUI", "title": 'Rival Sons - "DARKFIGHTER" (Official Audio)', "channel": "Rival Sons", "view_count": 97112},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Rival Sons", "Darkfighter")
+
+    assert video_id == "GEW7zR1aIUI"
+
+
 def test_search_video_ytdlp_prefers_official_video_over_live_recording(monkeypatch):
     # Real case: "Daði Freyr - Bitte". The official video (235K views) only
     # barely beat a live recording (23K views) at the old weights (VIDEO
