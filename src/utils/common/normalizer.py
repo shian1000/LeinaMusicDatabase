@@ -95,7 +95,6 @@ def compare(a: Optional[str], b: Optional[str], *, threshold: int = 100) -> bool
 def extract_unknown_data(filepath: Path):
 
     name = filepath.stem
-    print(name)
     parts = re.split(r" [–—\-_] ", name, maxsplit=1)
     if len(parts) < 2:
         # Secondary fallback: hyphen/underscore without surrounding spaces

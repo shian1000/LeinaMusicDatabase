@@ -348,6 +348,8 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
                 metadata["artist_name"] = artist
                 metadata["title"] = title
 
+        print(f"{metadata['artist_name']} - {metadata['title']}")
+
         if metadata["artist_name"] == "Unknown Artist" or not metadata["artist_name"]:
             print("Couldn't establish the artist and title")
             print("##########")
