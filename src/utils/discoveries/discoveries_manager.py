@@ -120,15 +120,26 @@ def _call_module(module, module_name: str, artist: str, title: str) -> str | Non
 def discover_album_name(song, modules):
     art, son, alb = song.artist.name, song.title, song.album
     slog(f"{art} - {son} ({alb})")
+    art_cln_full = art.split("(")[0].strip()
+    son_cln_full = son.split("(")[0].strip()
     art = truncate_at_word(art)
     son = truncate_at_word(son)
     art_cln = art.split("(")[0].strip()
     son_cln = son.split("(")[0].strip()
+    truncated = art_cln != art_cln_full or son_cln != son_cln_full
 
     slog("About to lunch modules' loop")
     for module_name, module in modules:
         print(f"Looking in {module_name} module")
         album = _call_module(module, module_name, art_cln, son_cln)
+
+        # truncate_at_word() strips trailing "feat. X" / "& X" credits, but it
+        # can also cut into a legitimate title/artist (e.g. "Bang, Bang").
+        # If the truncated search came up empty, retry with the untruncated
+        # strings before giving up on this module.
+        if not album and truncated:
+            print(f"Looking in {module_name} using untruncated title/artist")
+            album = _call_module(module, module_name, art_cln_full, son_cln_full)
 
         #Repeat the searching if there is a synonym for an artist
         if not album and song.artist.synonyms is not None:

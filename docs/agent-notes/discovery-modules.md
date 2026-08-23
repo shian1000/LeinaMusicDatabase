@@ -10,6 +10,24 @@ that's gone. Order and enabled/disabled state now live in `discovery_settings.py
 at runtime via Settings -> Discovery modules in the main menu
 (`src/menu/main_menu/settings/__init__.py`). See `AGENTS.md` for the mechanics.
 
+## Title/artist truncation before querying, and the untruncated fallback
+
+Before calling any module, `discover_album_name()` runs the artist and title through
+`truncate_at_word()` (`text_utils.py`), which cuts the string off at the first occurrence of a
+stop word (`feat`, `&`, `ft.`, `, `, etc.) — meant to strip trailing collaborator credits like
+"Song Title feat. Other Artist" down to just "Song Title" before searching, since most fetchers
+match better without them.
+
+The catch: the bare `", "` stop word matches *any* mid-string comma-space, not just a trailing
+credits list, so it also truncates legitimate titles/artists that happen to contain one — e.g.
+"Bang, Bang" becomes just "Bang" before it ever reaches a fetcher's query. Rather than special-case
+the stop-word list (which is inherently ambiguous — a comma could be a real credits separator or
+part of the title), `discover_album_name()` compensates with a fallback: if a module's truncated
+query comes up empty *and* truncation actually changed something, it retries that same module once
+more with the original, untruncated (but still parenthetical-stripped) artist/title before moving
+on. This runs before the synonym-retry step. Because it's implemented in the manager rather than
+per-module, every fetcher gets the fallback for free.
+
 ## Why the manager validates results itself instead of trusting modules
 
 Each fetcher scrapes/searches its own source and, historically, did its own match verification
