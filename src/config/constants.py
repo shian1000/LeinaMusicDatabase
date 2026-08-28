@@ -66,8 +66,26 @@ SEARCH_CATEGORY_NAME = "name"
 
 # MusicBrainz API
 MUSICBRAINZ_API_BASE_URL = "https://musicbrainz.org/ws/2/recording/"
-MUSICBRAINZ_API_USER_AGENT = "MyMusicApp/1.0.0 ( contact@example.com )"
+# MusicBrainz asks every client to identify itself with an application name,
+# version, and a real contact (an email address or a URL). A generic User-Agent
+# is throttled harder and can be blocked outright. This points at the project
+# repo; swap in your own contact if you fork it.
+MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/MusicDatabase )"
 MUSICBRAINZ_API_LIMIT = 20
+# (connect, read) timeout in seconds for a single MusicBrainz HTTP request, so a
+# stalled connection can never hang an import forever.
+MUSICBRAINZ_API_TIMEOUT = (5, 12)
+# Minimum seconds between two outgoing MusicBrainz requests (process-wide). Their
+# anonymous rate limit is ~1 req/s; staying just above 1s avoids the 503 storms
+# and multi-second backoffs that otherwise dominate a slow import.
+MUSICBRAINZ_API_MIN_INTERVAL = 1.1
+# Run the broad unfielded fallback query when the precise query finds nothing.
+# It roughly doubles the request count for every miss; set to False to trade a
+# little recall for speed.
+MUSICBRAINZ_SPELLCHECK_USE_FALLBACK = True
+# Disk-backed cache of check_spelling() results, path relative to the project
+# root. Delete this file to force fresh lookups of everything.
+SPELLCHECK_CACHE_FILE = "data/spellcheck_cache.json"
 
 # ==================== System Constants ====================
 

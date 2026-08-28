@@ -7,11 +7,13 @@ import re
 import requests
 from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
+from config.constants import MUSICBRAINZ_API_USER_AGENT
 
-# Set up the user agent (required by MusicBrainz)
-musicbrainzngs.set_useragent("MusicLibraryFetcher", "1.0", "your@email.com")
+# Set up the user agent (required by MusicBrainz). Contact points at the project
+# repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
+musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian1000/MusicDatabase")
 
-HEADERS = {"User-Agent": "YourScriptName/1.0 (your@email.com)"}
+HEADERS = {"User-Agent": MUSICBRAINZ_API_USER_AGENT}
 MODULE_NAME = "Musicbrainz fetcher"
 
 def _recording_title_artist(recording) -> tuple[str, str]:

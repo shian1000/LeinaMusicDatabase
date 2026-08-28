@@ -9,6 +9,13 @@ from settings import settings
 import pyperclip
 import time
 from utils.common.normalizer import normalize
+from utils.common import spellcheck_cache
+from utils.common.musicbrainz_client import mb_get, MBStats
+from config.constants import (
+    MUSICBRAINZ_API_BASE_URL,
+    MUSICBRAINZ_API_LIMIT,
+    MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
+)
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
     """Return True if needle appears as whole words within haystack."""
@@ -123,6 +130,13 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     from utils.common.normalizer import normalize as central_normalize
 
+    cached = spellcheck_cache.get(artist, title)
+    if cached is not None:
+        MBStats.cache_hits += 1
+        slog(f"[SPELLCHECK CACHE HIT] Artist: '{artist}' | Title: '{title}'")
+        return cached
+    MBStats.cache_misses += 1
+
     def normalized_similarity(a, b):
         # Use centralized normalization for consistent comparison
         a_norm = central_normalize(a)
@@ -141,52 +155,45 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
     primary_query = f'recording:{fuzzy_title} AND artist:{fuzzy_artist}'
     fallback_query = f'{artist} {title}'
-    
-    url = "https://musicbrainz.org/ws/2/recording/"
-    
-    headers = {"User-Agent": "MyMusicApp/1.0.0 ( contact@example.com )"}
 
-    def perform_search(q, retries=3, backoff=5):
-        params = {"query": q, "limit": 20, "fmt": "json"}
+    def perform_search(q, retries=2):
+        """Run a single MusicBrainz recording search. Rate limiting, timeout and
+        429/503 retry/backoff are handled centrally by mb_get()."""
+        params = {"query": q, "limit": MUSICBRAINZ_API_LIMIT, "fmt": "json"}
         slog(f"Attempting MB Query: {q}")
+        resp = mb_get(MUSICBRAINZ_API_BASE_URL, params, retries=retries)
+        if resp is None:
+            return []
+        try:
+            return resp.json().get("recordings", [])
+        except ValueError:
+            slog("MB response was not valid JSON")
+            return []
 
-        for attempt in range(1, retries + 1):
-            try:
-                resp = requests.get(url, params=params, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                return data.get("recordings", [])
-
-            except requests.exceptions.HTTPError as e:
-                status = e.response.status_code if e.response is not None else None
-                if status in (429, 503) and attempt < retries:
-                    wait = backoff * attempt
-                    slog(f"HTTP {status} on attempt {attempt}/{retries}, retrying in {wait}s...")
-                    time.sleep(wait)
-                else:
-                    slog(f"HTTP error after {attempt} attempt(s): {e}")
-                    return []
-
-            except requests.exceptions.RequestException as e:
-                slog(f"Request failed on attempt {attempt}/{retries}: {e}")
-                if attempt < retries:
-                    time.sleep(backoff * attempt)
-                else:
-                    return []
-
-        return []
-
-    recordings = perform_search(primary_query)
+    # The precise fielded query is the expensive one and, when MusicBrainz is
+    # under load, the first to be dropped. Give it a single attempt and fall
+    # straight through to the cheaper keyword query rather than burning two
+    # timeouts on it.
+    recordings = perform_search(primary_query, retries=1)
     slog(f"Primary results count: {len(recordings)}")
 
-    if not recordings:
+    if not recordings and MUSICBRAINZ_SPELLCHECK_USE_FALLBACK:
         slog("No results for primary query. Trying fallback keyword search...")
         recordings = perform_search(fallback_query)
         slog(f"Fallback results count: {len(recordings)}")
 
     if not recordings:
-        slog("No recordings found in both attempts.")
-        return {"artist": artist, "title": title, "corrected": False, "found": False}
+        slog("No recordings found.")
+        not_found = {
+            "input_artist": artist,
+            "input_title": title,
+            "corrected_artist": artist,
+            "corrected_title": title,
+            "corrected": False,
+            "found": False,
+        }
+        spellcheck_cache.put(artist, title, not_found)
+        return not_found
 
     best = recordings[0]
 
@@ -227,6 +234,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     }
     
     slog(f"[SPELLCHECK END] Corrected: {is_corrected} | Artist sim: {artist_sim:.2f} | Title sim: {title_sim:.2f}")
+    spellcheck_cache.put(artist, title, result)
     return result
 
 

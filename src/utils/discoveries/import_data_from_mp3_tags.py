@@ -11,6 +11,8 @@ from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold
 from config.constants import SPELLING_CHECK_THRESHOLD
+from utils.common import spellcheck_cache
+from utils.common.musicbrainz_client import MBStats
 from rich import print
 import questionary
 from sqlalchemy import func
@@ -315,6 +317,9 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
     # This avoids redundant database queries and similarity calculations
     artist_cache = {}
 
+    # Reset MusicBrainz counters so the summary at the end reflects this run only.
+    MBStats.reset()
+
     folder = Path(folder_path).resolve()
     if not folder.exists():
         print(f"Folder {folder_path} does not exist.")
@@ -427,7 +432,12 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
         print(f"   Cache entries: {cache_keys[:5]}")
         if len(cache_keys) > 5:
             print(f"   ... and {len(cache_keys) - 5} more")
-    
+
+    # Persist the disk-backed spell-check cache and report MusicBrainz traffic.
+    spellcheck_cache.save()
+    print()
+    print(MBStats.format_summary())
+
     print("="*70)
     
     print(f"Skipped {skipped_count} songs:")

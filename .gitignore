@@ -1,42 +1,38 @@
-# Python cache
+# Python
 __pycache__/
 *.pyc
-src/__pychahe__/
+.pytest_cache/
 
 # Virtual environment
 venv/
-.env/
 
-# Secrets folder
+# Secrets / credentials
 .secrets/
+.env
+*.env
 
-# Optional OS junk
+# OS junk
 .DS_Store
 Thumbs.db
-
 .directory
-.debuga
+
+# Local runtime state / machine-specific config (not versioned)
 .debug
-*.sqlite3
-*.env
 recent_dirs.json
 discovery_modules_config.json
-documentation/ARCHITECTURE.md
-documentation/DATA_FLOW.md
-documentation/DEVELOPER_GUIDE.md
-documentation/DOCS_CREATED.md
-documentation/DOCUMENTATION_INDEX.md
-documentation/QUICK_REFERENCE.md
-documentation/QUICK_SUMMARY.md
-documentation/README_DOCUMENTATION.md
-import
-src/old/create_yt_playlist.py
-src/old/import_from_txt.py
-src/old/yt_cache.py
-debug.log
+
+# Databases (runtime / user data)
 /src/database/
+*.sqlite3
+
+# User data (not fixtures)
+/data/
+
+# Import staging (user's real MP3 collection)
+/import/
 /backimport/
+
+# Disposable debug dumps
+debug.log
 debug.html
-src/database/music.db
-src/database/tag.db
-debug.html
+tests/!DOCTYPE_html_html.txt

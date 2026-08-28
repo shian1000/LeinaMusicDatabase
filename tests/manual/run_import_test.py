@@ -3,18 +3,20 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-
-import time
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
+
+import time
+
 # Enable debug output
-(Path(__file__).parent / ".debug").write_text("verbosity = 1\n")
+(_ROOT / ".debug").write_text("verbosity = 1\n")
 
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
 
 if __name__ == "__main__":
-    import_dir = Path(__file__).parent / "import"
+    import_dir = _ROOT / "import"
     
     print("\n" + "="*70)
     print("STARTING MP3 IMPORT WITH PERFORMANCE ANALYSIS")

@@ -2,13 +2,13 @@
 """Performance testing script for MP3 import."""
 
 import sys
-import os
 import time
 from pathlib import Path
 from datetime import datetime
 
 # Setup path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
 
 # Monkey-patch to add timing information
 original_time = time.time
@@ -38,7 +38,7 @@ from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tag
 
 def main():
     """Run import with performance metrics."""
-    import_dir = Path(__file__).parent / "import"
+    import_dir = _ROOT / "import"
     
     print(f"\n{'='*60}")
     print(f"MP3 Import Performance Test")

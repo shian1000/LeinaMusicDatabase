@@ -2,14 +2,15 @@
 """Test check_spelling performance."""
 
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
-
-import time
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT / "src"))
+
+import time
+
 # Enable debug
-(Path(__file__).parent / ".debug").write_text("verbosity = 0\n")
+(_ROOT / ".debug").write_text("verbosity = 0\n")
 
 from utils.common.text_utils import check_spelling
 
