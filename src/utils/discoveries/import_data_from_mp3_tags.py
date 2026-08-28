@@ -124,6 +124,10 @@ def does_similar_song_exists(metadata: dict, artist_obj: Artist) -> bool:
     
     slog(spell_check_result)
 
+    if not spell_check_result.get("found"):
+        slog("      [NO MB MATCH] Spell check found no match, treating as new song", priority=1)
+        return False
+
     corrected_spelling = spell_check_result["corrected_title"]
     slog(corrected_spelling)
 
