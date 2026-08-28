@@ -195,45 +195,64 @@ A spelling-variant/orthography problem, not a popularity or quality-weighting pr
 from the diacritic-folding fix below: Belarusian "і" (U+0456) doesn't NFKD-decompose into Russian
 "и" + a mark — it's a genuinely separate base letter, not an accent variant, so folding can't help.
 
-## Open: artist identity that no string algorithm can bridge — needs a synonym/alias mechanism
+## Artist identity that no string algorithm can bridge — solved via the `synonyms` column
 
-Three related, still-unfixed cases, grouped here because they're the same underlying problem, not
-three different ones — the real channel/title uses a *different name* for the artist than the DB
-does, not a spelling variant of the same name, so no amount of fuzzy string matching (containment,
-similarity, diacritic-folding) can close the gap:
-- `Бумбокс - Нездара`: the real upload's channel is `familyboombox` (an English fan-channel name),
-  sharing zero characters with the Cyrillic artist name `Бумбокс` — `artist_relevance` scores `0.0`
-  and, since it's compared before `quality` in the sort tuple, a much worse but textually-matching
-  candidate wins regardless of popularity. Should resolve to
-  [youtu.be/zDVzqqTzTDE](https://youtu.be/zDVzqqTzTDE).
-- `Stray Kids - 특(S-Class)`: the DB title mixes Hangul and a Latin-alphabet parenthetical
-  (`특(S-Class)_ MV`) in a way that doesn't line up character-for-character with how the real
-  video titles it (relevance 0.60 against a required 0.92 for a title this short) — likely a
-  Hangul/Latin transliteration or spacing/punctuation convention mismatch specific to Korean titles,
-  not yet diagnosed in detail. Should resolve to
-  [youtu.be/JsOOis4bBFg](https://youtu.be/JsOOis4bBFg).
-- `Плач Єремії - Вона`: the band is fronted by (and sometimes uploads under) Taras Chubai's own
-  name rather than the band name — an artist-alias problem, not a spelling or script one. Should
-  resolve to [youtu.be/EaQEnpYoA2U](https://youtu.be/EaQEnpYoA2U).
+Four real cases shared one root problem: the real channel/title uses a genuinely *different name*
+for the artist than the DB does — not a spelling variant of the same name — so no amount of fuzzy
+string matching (containment, similarity, diacritic-folding) could ever close the gap on its own:
+- `Бумбокс - Нездара`: real channel `familyboombox` (an English fan-channel name), sharing zero
+  characters with the Cyrillic artist name `Бумбокс`.
+- `Плач Єремії - Вона`: the band is fronted by (and uploads under) Taras Chubai's own name.
+- `Hall & Oates - Maneater`: real channel `Daryl Hall & John Oates` (full names), not the DB's
+  shortened stage name.
+- `Junecapone - Depravity`: real (Topic) channel just `June`, not the DB's fuller stage handle.
 
-A fix here likely means a small manual synonym/alias table (`"Бумбокс"` ↔ `"familyboombox"`,
-`"Плач Єремії"` ↔ `"Taras Chubai"`/`"Тарас Чубай"`, etc.) consulted as an *additional* signal
-alongside `artist_relevance`, since there's no way to derive these algorithmically — deliberately
-not attempted yet, flagged here to revisit as more of these turn up rather than one-off patching
-each song's DB row.
+The `artists` table already has a `synonyms` column (`src/utils/database/datatables.py`'s `Artist`
+model) that was essentially unused before this — read in exactly one unrelated place
+(`discoveries_manager.py`, as an album-lookup fallback name) and never populated by any current
+code path. It's a plain string with no enforced format; comma-separated is now the convention for
+multiple aliases (`_parse_synonyms()`).
 
-## Keyword scanning now covers `tags` too, not just the title (yt-dlp only, free)
+`score_result()` takes an optional `artist_synonyms: str | None` and checks `artist_relevance`
+against the primary DB artist name *and* every parsed synonym, taking the max
+(`_artist_relevance_for()`, called once per name). This flows from `create_yt_playlist()` reading
+`entry.get("synonyms")` from the cache, which `init_cache()` (`yt_cache.py`) now populates from
+`song.artist.synonyms` — i.e. the fix only takes effect once the DB row's `synonyms` field is
+actually filled in for that artist; the mechanism alone doesn't do anything for an artist with no
+synonyms recorded. Verified all four cases jump to `artist_relevance == 1.0` once the synonym is
+supplied (previously `0.0`–`0.69` depending on how much accidental character overlap there was).
+
+**Not fixed by this**: `Stray Kids - 특(S-Class)` stays open — that's a *title*-formatting mismatch
+(Hangul mixed with a Latin parenthetical, not diagnosed in detail yet), not an artist-name problem,
+so the synonym mechanism doesn't apply to it. Should resolve to
+[youtu.be/JsOOis4bBFg](https://youtu.be/JsOOis4bBFg) once someone gets to it.
+
+## `tags` scanning is scoped to `STRONG_LQ_KEYWORDS` only — generic tags get SEO-stuffed
 
 A live recording's *title* often carries no signal at all —
 `"Oberschlesien - Król Olch #Woodstock2016"` has no English "live"/"concert" word — but yt-dlp's
 free `tags` field did: `"Oberschlesien Król Olch na żywo"` ("na żywo" is Polish for "live"), plus
-repeated festival names, while the actual studio upload's tags were clean (verified both, no
-false-positive risk observed). `score_result()` now takes an optional `tags: list[str] | None` and
-builds `keyword_text = title + " " + " ".join(tags)` for the `HQ_KEYWORDS`/`LQ_KEYWORDS`/
-`VIDEO_KEYWORDS`/`HIGH_TRUST_KEYWORDS` scan — relevance/artist_relevance still use the title alone,
-unaffected. Deliberately `tags` only, not `description`: tags are curated keywords an uploader
-picked, description is freeform prose where "live" could appear in unrelated boilerplate (tour
-dates, etc.) and false-positive. `LQ_KEYWORDS` gained `"na żywo"` for this.
+repeated festival names, while the actual studio upload's tags were clean. That held up — but
+**not universally**: `Elvis Crespo - Suavemente`'s real official Vevo upload's tags include
+generic, broadly-cast SEO terms (`"remix"`, `"karaoke"`, `"instrumental"`, `"en vivo"`/`"en
+directo"` — Spanish for "live") that don't describe *this* upload's content at all, just adjacent
+searches the label also wants to rank for. Scanning those against the full `LQ_KEYWORDS` list
+wrongly penalized the real video (299M views) — and, since an `LQ_KEYWORDS` hit suppresses the
+whole HQ bonus block, cost it the `"official"` bonus too, a big enough swing to lose to an
+unrelated collab reupload with far fewer views (19.6M).
+
+`HQ_KEYWORDS`/`LQ_KEYWORDS`/`VIDEO_KEYWORDS`/`HIGH_TRUST_KEYWORDS` now scan the **title only**
+(`title_lower`). Only `STRONG_LQ_KEYWORDS` (and the remix-selector-hint bonus, see below) still
+scans `title + tags` (`keyword_text`) — the distinction is deliberate, not arbitrary: a channel is
+unlikely to blanket-SEO-tag something as specific as `"live"`/`"na żywo"`/`"woodstock"` onto an
+unrelated upload the way it will tag generic descriptor words like `"remix"`/`"karaoke"` for reach.
+(That said, this line of reasoning has a known crack — Suavemente's own tags *do* include `"en
+vivo"`, so adding Spanish live-synonyms to `STRONG_LQ_KEYWORDS` in the future could reintroduce the
+same false-positive on this exact song. Not added preemptively; only add a language's "live" term
+to that list once a real case actually needs it, and re-check against Suavemente's tags first.)
+Deliberately `tags` only, never `description`: tags are curated keywords an uploader picked,
+description is freeform prose where "live" could appear in unrelated boilerplate (tour dates,
+etc.) and false-positive even worse. `LQ_KEYWORDS` gained `"na żywo"` for the original fix.
 
 `HIGH_TRUST_KEYWORDS`/`HIGH_TRUST_BONUS` (currently just `"oficjalny odsłuch albumu"` — Polish for
 "official album listen", a label's official full-album premiere upload) is a separate list from
@@ -406,3 +425,10 @@ simplified:
   song) only barely lost to the real official audio — margin 0.29, the same fragile-near-tie shape
   as `Daði Freyr - Bitte` above. `"track by track"` joined `LQ_KEYWORDS` alongside
   "react"/"review"/"teaser" as the same category of signal: content that isn't the song at all.
+- `Elvis Crespo - Suavemente` → the real video's own SEO-stuffed tags ("remix", "karaoke",
+  "instrumental") tripped `LQ_KEYWORDS` and cost it the HQ bonus too, dropping a 299M-view official
+  upload below a 19.6M-view unrelated collab (see the `tags`-scoping section above).
+- `Бумбокс - Нездара` / `Плач Єремії - Вона` / `Hall & Oates - Maneater` / `Junecapone -
+  Depravity` → the real channel uses a genuinely different name for the artist than the DB
+  (`familyboombox`, Taras Chubai, "Daryl Hall & John Oates", "June" respectively) — no fuzzy
+  string match can bridge a real name change; fixed via the `synonyms` column (see above).

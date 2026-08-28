@@ -38,6 +38,7 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
         cache["songs"][key] = {
             "artist": artist,
             "title": title,
+            "synonyms": song.artist.synonyms,
             "video_id": None,
             "added": False
         }

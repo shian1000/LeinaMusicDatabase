@@ -2,6 +2,7 @@ from utils.common.text_utils import truncate_at_word, is_blacklisted_album, simi
 from utils.discoveries.discovery_result import DiscoveryResult
 from utils.discoveries.discovery_settings import reconcile_discovery_config
 from config.constants import SPELLING_CHECK_THRESHOLD
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -19,6 +20,29 @@ def _import_module(script_path: Path):
     sys.modules[module_id] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _read_module_name(script_path: Path) -> str:
+    """Extract a module's ``MODULE_NAME`` by statically parsing the file, without
+    importing (executing) it. The Settings menu only needs the display name;
+    importing every module just to read one string would run all their
+    top-level side effects (selenium, network clients, musicbrainzngs
+    useragent setup, ...) — for disabled modules too. Falls back to the
+    filename stem if the constant is missing or the file can't be parsed."""
+    try:
+        tree = ast.parse(script_path.read_text(encoding="utf-8"), filename=str(script_path))
+    except (OSError, SyntaxError):
+        return script_path.stem
+
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "MODULE_NAME" for t in node.targets):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            return node.value.value
+
+    return script_path.stem
 
 
 def load_discovery_modules():
@@ -40,19 +64,20 @@ def load_discovery_modules():
 
 
 def load_all_discovery_modules_metadata():
-    """Import every discovery module file (enabled or not) and return
-    [(module_id, display_name), ...] in the user's configured order, for use
-    by the Settings menu (enable/disable + reorder screens)."""
+    """Return [(module_id, display_name), ...] for every discovery module file
+    (enabled or not), in the user's configured order, for use by the Settings
+    menu (enable/disable + reorder screens).
+
+    Display names are read by statically parsing each file's ``MODULE_NAME``
+    (see _read_module_name) rather than importing the modules, so opening the
+    Settings menu doesn't run every module's import-time side effects."""
     module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
     config = reconcile_discovery_config(module_files.keys())
 
-    metadata = []
-    for module_id in config["order"]:
-        module = _import_module(module_files[module_id])
-        display_name = getattr(module, "MODULE_NAME", module_id)
-        metadata.append((module_id, display_name))
-
-    return metadata
+    return [
+        (module_id, _read_module_name(module_files[module_id]))
+        for module_id in config["order"]
+    ]
 
 
 def _validate_result(result, queried_artist: str, queried_title: str, module_name: str) -> str | None:

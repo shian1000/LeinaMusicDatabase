@@ -10,6 +10,27 @@ that's gone. Order and enabled/disabled state now live in `discovery_settings.py
 at runtime via Settings -> Discovery modules in the main menu
 (`src/menu/main_menu/settings/__init__.py`). See `AGENTS.md` for the mechanics.
 
+## The Settings menu reads `MODULE_NAME` without importing the module
+
+Two loaders in `discoveries_manager.py`, deliberately asymmetric:
+
+- `load_discovery_modules()` — the actual "Fill missing data -> Albums" path. Skips disabled
+  modules *before* importing them, so a disabled module's import-time code never runs.
+- `load_all_discovery_modules_metadata()` — the Settings enable/disable + reorder screens. Needs
+  every module's display name (enabled or not), but does **not** import them. `_read_module_name()`
+  statically parses each file with `ast` and pulls the `MODULE_NAME` value out of the syntax tree.
+
+The reason it doesn't just import them: the fetchers do real work at import time — `selenium`,
+`requests`, `musicbrainzngs.set_useragent(...)`, `import wikipedia` — and importing all five
+(including disabled ones) just to read one string each is pure waste every time someone opens the
+Settings menu.
+
+Consequence for anyone adding or renaming a fetcher: `MODULE_NAME` **must be a plain top-level
+string-literal assignment** (`MODULE_NAME = "Foo fetcher"`). An f-string, a concatenation, or a
+computed value is invisible to the static parser — the Settings menu will silently fall back to
+showing the filename stem (the runtime path still works, since `load_discovery_modules()` reads it
+via `getattr` on the real module). Keep it a literal.
+
 ## Title/artist truncation before querying, and the untruncated fallback
 
 Before calling any module, `discover_album_name()` runs the artist and title through

@@ -54,7 +54,7 @@ BERLIN_SEX_VIDEO_ID = "R_H_w0_-GSQ"
 
 def test_search_video_disables_safe_search_on_api_fallback(monkeypatch):
     # yt-dlp exhausted first and (per the real bug) came back empty.
-    monkeypatch.setattr(m, "search_video_ytdlp", lambda artist, title, max_results=8: None)
+    monkeypatch.setattr(m, "search_video_ytdlp", lambda artist, title, max_results=8, artist_synonyms=None: None)
 
     items = [
         {
@@ -473,6 +473,111 @@ def test_search_video_ytdlp_deprioritizes_track_by_track_promo(monkeypatch):
     video_id = m.search_video_ytdlp("Rival Sons", "Darkfighter")
 
     assert video_id == "GEW7zR1aIUI"
+
+
+def test_search_video_ytdlp_ignores_seo_stuffed_tags(monkeypatch):
+    # Real case: "Elvis Crespo - Suavemente". The real official Vevo upload's
+    # tags include generic, broadly-cast SEO terms ("remix", "karaoke",
+    # "instrumental", "en vivo"/"en directo" — Spanish for "live") that
+    # don't describe *this* video's content at all, just adjacent searches
+    # the label also wants to rank for. Scanning those against LQ_KEYWORDS
+    # incorrectly penalized the real video (299M views) — and, since an LQ
+    # hit suppresses the whole HQ bonus block, cost it the "official" bonus
+    # too — enough to lose to an unrelated collab reupload with far fewer
+    # views (19.6M, whose own tags include "En vivo" — a real live-recording
+    # signal, unlike the noise on the correct video's tags). LQ_KEYWORDS/
+    # HQ_KEYWORDS/VIDEO_KEYWORDS now scan the title only; STRONG_LQ_KEYWORDS
+    # still scans tags (that's what OBERSCHLESIEN needs), so this doesn't
+    # regress that fix — see test_search_video_ytdlp_prefers_studio_video_over_viral_live_clip.
+    real_tags = [
+        "suavemente álbum", "ElvisCrespovevo", "tu sonrisa", "official", "video",
+        "vídeo musical", "music video", "elvis crespo en directo", "album",
+        "Salsa tropical", "elvis crespo en vivo", "instrumental", "música",
+        "dance", "karaoke", "remix", "en directo", "audio",
+    ]
+    wrong_tags = ["Suavemente", "Luck Ra", "Elvis Crespo", "Cuarteto", "Latin", "En vivo", "Fiesta"]
+    candidates = [
+        {"id": "UMYAdGEXOn0", "title": "Luck Ra, Elvis Crespo - SUAVEMENTE", "channel": "Luck Ra", "view_count": 19611031, "tags": wrong_tags},
+        {"id": "WPiEbYSF9kE", "title": "Elvis Crespo - Suavemente", "channel": "Elvis Crespo", "view_count": 299876074, "tags": real_tags},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Elvis Crespo", "Suavemente")
+
+    assert video_id == "WPiEbYSF9kE"
+
+
+# Real cases: the artists table's `synonyms` column (a plain comma-separated
+# string — see _parse_synonyms()) is now consulted for artist_relevance
+# alongside the DB artist name, taking the max across all of them. This is
+# the only fix that can bridge a genuine name change — no string-similarity
+# technique can turn "Бумбокс" into "familyboombox", "Hall & Oates" into
+# "Daryl Hall & John Oates", or "Junecapone" into "June". These four
+# previously lived in docs/agent-notes/youtube-search-matching.md as an open,
+# unfixed limitation; moved to the regression checklist now that the
+# mechanism exists. (Stray Kids stayed out — that one's a title-formatting
+# problem, not an artist-name mismatch, so it isn't fixed by this.)
+
+
+def test_search_video_ytdlp_uses_artist_synonym_for_script_mismatch(monkeypatch):
+    # Real case: "Бумбокс - Нездара". The real upload's channel,
+    # `familyboombox`, shares zero characters with the Cyrillic artist name
+    # `Бумбокс` — artist_relevance was 0.0 without a synonym.
+    candidates = [
+        {"id": "G7-lJGOOOIc", "title": "Бумбокс - Нездара", "channel": "Maria Matrunich", "view_count": 1154},
+        {"id": "zDVzqqTzTDE", "title": "Нездара", "channel": "familyboombox", "view_count": 674464},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Бумбокс", "Нездара", artist_synonyms="familyboombox")
+
+    assert video_id == "zDVzqqTzTDE"
+
+
+def test_search_video_ytdlp_uses_artist_synonym_for_full_legal_name(monkeypatch):
+    # Real case: "Hall & Oates - Maneater". The real official channel is
+    # "Daryl Hall & John Oates" (full names), not the DB's shortened stage
+    # name — artist_relevance was 0.69 without a synonym, versus 1.0 for an
+    # unrelated lyric-video reupload from a generic channel that happened to
+    # spell the shortened name correctly.
+    candidates = [
+        {"id": "IqF7S3zXl1A", "title": "Daryl Hall & John Oates - Maneater (Lyrics)", "channel": "7clouds", "view_count": 3999026},
+        {"id": "yRYFKcMa_Ek", "title": "Daryl Hall & John Oates - Maneater (Official Video)", "channel": "Daryl Hall & John Oates", "view_count": 404412123},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Hall & Oates", "Maneater", artist_synonyms="Daryl Hall & John Oates")
+
+    assert video_id == "yRYFKcMa_Ek"
+
+
+def test_search_video_ytdlp_uses_artist_synonym_for_shortened_stage_name(monkeypatch):
+    # Real case: "Junecapone - Depravity". The real official (Topic) channel
+    # uses the artist's short name, "June", not the fuller stage handle
+    # "Junecapone" the DB uses.
+    candidates = [
+        {"id": "qMmVQbH3sKQ", "title": "Depravity", "channel": "June - Topic", "view_count": 106},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Junecapone", "Depravity", artist_synonyms="June")
+
+    assert video_id == "qMmVQbH3sKQ"
+
+
+def test_search_video_ytdlp_uses_multiple_comma_separated_synonyms(monkeypatch):
+    # Real case: "Плач Єремії - Вона". The band is fronted by (and uploads
+    # under) Taras Chubai's own name — two synonyms needed at once (Latin
+    # and Cyrillic spelling), verifying the comma-separated parsing handles
+    # more than one alias.
+    candidates = [
+        {"id": "EaQEnpYoA2U", "title": "Вона", "channel": "Taras Chubai", "view_count": 55337789},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Плач Єремії", "Вона", artist_synonyms="Taras Chubai, Тарас Чубай")
+
+    assert video_id == "EaQEnpYoA2U"
 
 
 def test_search_video_ytdlp_prefers_official_video_over_live_recording(monkeypatch):

@@ -449,6 +449,44 @@ def _text_containment(expected: str, candidate: str) -> float:
     return 1.0 if re.search(pattern, candidate.lower()) else 0.0
 
 
+def _parse_synonyms(synonyms: str | None) -> list[str]:
+    """Split the artists table's `synonyms` column (a plain comma-separated
+    string, no other convention exists in the DB) into individual names.
+
+    Exists because no string-similarity technique can bridge a real name
+    change — a fan channel using a translated/English name for a
+    non-Latin-script artist, a full legal name vs. a shortened stage name,
+    an artist fronting a band under their own name. Real cases: `Бумбокс`'s
+    real channel is `familyboombox` (zero character overlap); `Hall & Oates`'
+    real channel is `Daryl Hall & John Oates`; `Junecapone`'s real (Topic)
+    channel is just `June`. See docs/agent-notes/youtube-search-matching.md.
+    """
+    if not synonyms:
+        return []
+    return [s.strip() for s in synonyms.split(",") if s.strip()]
+
+
+def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -> float:
+    """artist_relevance for one candidate name against one artist name —
+    factored out so score_result() can take the max across the DB artist
+    name and any known synonyms without duplicating this logic per name.
+    """
+    expected = _relevance_text(name)
+    relevance = 0.0
+    if expected and candidate_clean:
+        relevance = max(
+            similarity(expected, candidate_clean),
+            _text_containment(expected, candidate_clean),
+        )
+    if expected and channel_clean:
+        relevance = max(
+            relevance,
+            similarity(expected, channel_clean),
+            _text_containment(expected, channel_clean),
+        )
+    return relevance
+
+
 def _min_relevance_for(title: str) -> float:
     """Short titles need a near-exact match.
 
@@ -494,6 +532,7 @@ def score_result(
     channel: str = "",
     view_count: int | None = None,
     tags: list[str] | None = None,
+    artist_synonyms: str | None = None,
 ) -> tuple[float, float, float]:
     """Score a candidate video: (title relevance, artist relevance, quality).
 
@@ -531,6 +570,12 @@ def score_result(
     doesn't affect the relevance gate itself, only the tiebreak — if no
     candidate mentions the specific remix asked for, we still want to fall
     back to whatever's available rather than reject everything outright.
+
+    `artist_synonyms` (the artists table's `synonyms` column, comma-separated
+    — see _parse_synonyms()) is checked alongside `artist` for
+    artist_relevance, taking the max across all names. No amount of
+    string-similarity tuning can bridge a real name change — this is the
+    only mechanism that can.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
@@ -553,36 +598,45 @@ def score_result(
     else:
         relevance = 0.0
 
-    expected_artist = _relevance_text(artist)
     channel_clean = _relevance_text(channel)
-    artist_relevance = 0.0
-    if expected_artist and candidate_clean:
-        artist_relevance = max(
-            similarity(expected_artist, candidate_clean),
-            _text_containment(expected_artist, candidate_clean),
-        )
-    if expected_artist and channel_clean:
-        artist_relevance = max(
-            artist_relevance,
-            similarity(expected_artist, channel_clean),
-            _text_containment(expected_artist, channel_clean),
-        )
+    artist_relevance = max(
+        _artist_relevance_for(name, candidate_clean, channel_clean)
+        for name in [artist, *_parse_synonyms(artist_synonyms)]
+    )
 
-    keyword_text = candidate_title.lower()
+    # Title-only text for most keyword scanning. Uploader-supplied `tags`
+    # are much noisier than they first looked: real case, "Elvis Crespo -
+    # Suavemente"'s official Vevo upload carries generic, broadly-cast SEO
+    # tags ("remix", "karaoke", "instrumental") that don't describe *this*
+    # upload's content at all — they're just adjacent searches the label
+    # also wants to rank for. Scanning those against LQ_KEYWORDS incorrectly
+    # penalized the real video (and, since an LQ hit suppresses the whole HQ
+    # bonus block, cost it the "official" bonus too — a 5-point swing,
+    # enough to lose to an unrelated lower-view collab). tags stay in scope
+    # only for STRONG_LQ_KEYWORDS (see below) and the selector-hint bonus,
+    # both of which look for specific signals unlikely to be blanket
+    # SEO-stuffed the way generic descriptor words are.
+    title_lower = candidate_title.lower()
+    keyword_text = title_lower
     if tags:
         keyword_text += " " + " ".join(tags).lower()
 
-    def _non_overlapping_hits(keywords: list[str]) -> list[str]:
+    def _non_overlapping_hits(keywords: list[str], text: str) -> list[str]:
         # Some keyword-list entries are substrings of others in the same list
         # (e.g. "audio" inside "official audio", "mv" inside "official mv",
         # "orchestra" inside "orchestral") — matching both against the same
         # title text double-counts what is really a single signal. Drop any
         # hit that's wholly contained in another hit from the same list
         # before scoring.
-        hits = [kw for kw in keywords if kw in keyword_text]
+        hits = [kw for kw in keywords if kw in text]
         return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
 
-    lq_hits = _non_overlapping_hits(LQ_KEYWORDS)
+    lq_hits = _non_overlapping_hits(LQ_KEYWORDS, title_lower)
+    # STRONG_LQ_KEYWORDS deliberately still scans tags too — that's the
+    # entire reason it exists (OBERSCHLESIEN's live festival tag ("na żywo")
+    # wasn't in the title at all), and "live"/"na żywo"/"woodstock" are
+    # specific enough signals that a channel is unlikely to blanket-tag them
+    # onto an unrelated upload the way "remix"/"karaoke" get SEO-stuffed.
     strong_lq_hits = [kw for kw in STRONG_LQ_KEYWORDS if kw in keyword_text]
     quality = 0
     # An "Official Audio" / "HQ" label only means the video is well-produced,
@@ -595,13 +649,13 @@ def score_result(
     # because "official audio" gave +4 from the double-count bug above,
     # dwarfing a single -1 dub/remix hit).
     if not lq_hits and not strong_lq_hits:
-        quality += 2 * len(_non_overlapping_hits(HQ_KEYWORDS))
-    quality -= VIDEO_PENALTY * len(_non_overlapping_hits(VIDEO_KEYWORDS))
+        quality += 2 * len(_non_overlapping_hits(HQ_KEYWORDS, title_lower))
+    quality -= VIDEO_PENALTY * len(_non_overlapping_hits(VIDEO_KEYWORDS, title_lower))
     quality -= len(lq_hits)
     quality -= STRONG_LQ_PENALTY * len(strong_lq_hits)
     if channel and _is_topic_channel(channel):
         quality += 2
-    quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in keyword_text])
+    quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in title_lower])
     for hint in _bracket_selector_hints(title):
         tokens = _selector_tokens(hint)
         if tokens and all(re.search(r"\b" + re.escape(tok) + r"\b", keyword_text) for tok in tokens):
@@ -610,7 +664,7 @@ def score_result(
     quality += _popularity_bonus(view_count)
     return relevance, artist_relevance, quality
 
-def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | None:
+def search_video_ytdlp(artist: str, title: str, max_results: int = 8, artist_synonyms: str | None = None) -> str | None:
     """Search YouTube using yt-dlp (no API quota used)."""
     query = f"{artist} - {title}"
     print(f"\nSearching via yt-dlp for: {query}")
@@ -647,7 +701,7 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | N
             if video_id:
                 candidates.append(
                     (
-                        score_result(video_title, artist, title, channel, view_count, tags),
+                        score_result(video_title, artist, title, channel, view_count, tags, artist_synonyms),
                         video_id,
                         video_title,
                     )
@@ -667,11 +721,11 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 8) -> str | N
     print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
     return best_id
 
-def search_video(youtube, artist: str, title: str) -> str | None:
+def search_video(youtube, artist: str, title: str, artist_synonyms: str | None = None) -> str | None:
     """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback."""
 
     # Try yt-dlp first — free, no quota
-    video_id = search_video_ytdlp(artist, title)
+    video_id = search_video_ytdlp(artist, title, artist_synonyms=artist_synonyms)
     if video_id:
         return video_id
 
@@ -703,7 +757,13 @@ def search_video(youtube, artist: str, title: str) -> str | None:
 
     candidates = [
         (
-            score_result(item["snippet"]["title"], artist, title, item["snippet"].get("channelTitle", "")),
+            score_result(
+                item["snippet"]["title"],
+                artist,
+                title,
+                item["snippet"].get("channelTitle", ""),
+                artist_synonyms=artist_synonyms,
+            ),
             item["id"]["videoId"],
             item["snippet"]["title"],
         )
@@ -824,10 +884,11 @@ def create_yt_playlist(song_list, playlist_name: str):
 
             artist = entry["artist"]
             title = entry["title"]
+            artist_synonyms = entry.get("synonyms")
 
             video_id = entry.get("video_id")
             if not video_id:
-                video_id = search_video(youtube, artist, title)
+                video_id = search_video(youtube, artist, title, artist_synonyms=artist_synonyms)
                 if not video_id:
                     print("  ❌ No video found")
                     continue
