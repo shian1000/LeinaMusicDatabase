@@ -1,63 +1,198 @@
 # AGENTS.md
 
-This file is the single source of truth for AI agents working in this repository.
-Durable knowledge that used to sprawl across root-level session reports
-(`OPTIMIZATION_*.md`, `PERFORMANCE_*.md`, `LOCAL_DB_OPTIMIZATION.md`, `REFACTORING_NOTES.md`,
-`METADATA_FALLBACK*.md`, `NORMALIZATION_GUIDE.md`) has been folded into this file and
-`docs/agent-notes/`. Those reports were deleted in 2026-08 — see `git log` / `git show` if you
-ever need the originals. Don't recreate that pattern: persistent knowledge goes here or in
-`docs/agent-notes/`, never a fresh dated report at the repo root.
+Single source of truth for AI agents working in this repo. Persistent knowledge lives in exactly
+two places: **this file** (curated, always-read, edited in place — never a dated changelog) and
+**`docs/agent-notes/<topic>.md`** (deeper per-subsystem rationale). The `finalize-change` skill
+maintains both.
 
-- Project purpose: manage and enrich a local music database from local files and external metadata sources.
-- Entry point: run the app with `python main.py`.
-- Main code: `main.py` starts the CLI; app logic lives under `src/menu/` and `src/utils/`.
-- Important modules:
-  - `src/settings.py`: runtime paths and environment-based config (also holds SMB library paths — see Secrets below).
-  - `src/config/constants.py`: centralized magic numbers/thresholds (similarity thresholds, menu labels, etc.) — add new constants here instead of inlining them.
-  - `src/utils/database/`: database access and session management. `database_getter.get_artists_from_db_session(category, query)` does a SQL substring `contains()` search on `query` (not an exact match) and returns results **ordered alphabetically by name**, not by best match — `results[0]` is whichever matching name sorts first, not the closest match. Never call it with an already-resolved artist's name just to re-fetch that same object (e.g. right after an exact-match query or a similarity-based match already found it) — the substring search can silently return a *different* artist whose name happens to contain the query and sorts earlier alphabetically. This is exactly how an exact-matched artist named "Sting" got silently resolved to "POLKADOT STINGRAY" in `import_data_from_mp3_tags.resolve_artist()`. If you already have the matched `Artist` object, use it directly instead of re-querying.
-    - `get_songs_from_db_session` and `get_artists_from_db_session` both fall back to a Python-side "normalize each word, casefold, require all words to be substrings of the normalized field" filter when DB-level `LIKE` filtering can't be trusted (non-ASCII queries) or returns nothing. That fallback logic lives in one place, `database_getter._normalized_python_filter(candidates, words, get_field)` — reuse it for any new fallback-filtering call site in this file instead of reimplementing the word/casefold loop inline.
-    - `search_only_categories` (currently just `"name"`, a combined title+artist search) is a **song-only** category: `get_songs_from_db_session` accepts `song_categories + search_only_categories`, but `get_artists_from_db_session` only accepts `artist_categories` (`"artist name"`, `"artist origin"`, `"artist id"`) — `"name"` is not valid there. Passing it anyway fails category validation and the resulting `None` is then used as a dict key, crashing with `KeyError: None`. This exact bug broke the "Fetch artists" menu (`fetch_songs.fetch_artists()` had copy-pasted `search_only_categories + artist_categories` from the sibling `fetch_songs()`, where `"name"` *is* valid) until fixed. Never build an artist-search category list that includes `search_only_categories`.
-  - `src/utils/discoveries/`: metadata fetchers/import logic.
-    - `discoveries_manager.py` loads only the *enabled* modules from `discovery_modules/` (`music_brainz_fetcher.py`, `wikipedia_fetcher.py`, `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py`), in the order recorded by `discovery_settings.py`, and queries them in that order. Fetch priority is no longer encoded in filenames (there used to be numeric prefixes like `1music_brainz_fetcher.py` for this — removed) — it's user-configurable at runtime via Settings -> Discovery modules -> "Set modules order" / "Enable/disable modules" (`src/menu/main_menu/settings/__init__.py`), persisted to `discovery_modules_config.json` (gitignored, repo root) keyed by filename stem. `discovery_settings.reconcile_discovery_config()` auto-appends any new file dropped into `discovery_modules/` (enabled by default) and drops stale entries for deleted/renamed files, so adding a new fetcher just means adding the file — no naming scheme to maintain.
-    - `discover_album_name()` never trusts a fetcher module's own matching logic: every `get_album_name()` call is wrapped in try/except (a crashing module is skipped, not fatal to the whole "Fill missing data" run) and its result is independently re-validated — type, non-emptiness, blacklist, and, if the module reports what it actually matched, a similarity cross-check against the query. Modules report matches via `discovery_result.DiscoveryResult(album, matched_title=None, matched_artist=None)` instead of a bare string (a bare string still works, it just skips the cross-check). See `docs/agent-notes/discovery-modules.md` before adding a new fetcher or touching this validation — it explains why the manager doesn't just trust modules' internal checks.
-    - `google_search_fetcher.py` writes the raw HTML response to `debug.html` in the repo root for debugging. That file — like `debug.log` — is a large, disposable scrape/log dump, not documentation: both are gitignored, don't read them for context and don't hand-edit them.
-      - It relies on Google rendering a `music/recording_cluster` Knowledge Panel for the query, which a fresh automated browser session can fail to reach for two *different* reasons that both look identical from the fetcher's output (no album found) but need different handling: (1) Google's EU cookie-consent interstitial ("Before you continue to Google Search"), worked around by `selenium_sessions._build_driver()` preemptively setting a `CONSENT` cookie on the driver before any search happens; (2) Google's separate bot-detection CAPTCHA block, which redirects to `google.com/sorry/...` when the request pattern looks automated — this is detected explicitly (`"/sorry/" in driver.current_url` right after the page loads) and the fetcher bails with a clear log message instead of falling through to the generic, misleading "no Knowledge Panel found" path. Do not attempt to solve or evade the CAPTCHA itself (rotating IPs, mimicking human timing, auto-solving the challenge, etc.) — that's bypassing Google's anti-bot system, not fixing a bug, and isn't something to build here regardless of how it's requested. If this fetcher starts failing consistently again, check which of these two states it's hitting before assuming the CSS selectors (`LrzXr`/`w8qArf`, hardcoded in `_extract_value()`) rotted.
-  - `src/utils/common/normalizer.py`: the **single, centralized** string-normalization implementation (`normalize()`, `compare()` — handles diacritics, Unicode scripts, apostrophes, punctuation). `text_utils.normalize_text()` and other call sites delegate to it. Do not write a new ad-hoc normalize/compare function elsewhere; extend this one.
-    - `extract_unknown_data(filepath)` (same file) derives artist/title from a filename when ID3 tags are missing/empty, via three sequential fallback stages, each tried only if the previous one finds no separator. Stage 1 requires a *spaced* separator — ` - `, ` – ` (en dash, U+2013), ` — ` (em dash, U+2014), or ` _ ` — chosen deliberately since en dash and em dash are visually near-identical but are different codepoints and filenames in the wild use both (e.g. `Zdob și Zdub — La mijloc...`). Stage 2 splits on a bare `-`/`_` with no required surrounding spaces (recovers filenames like `Emade-Pierwszy stopień wtajemniczenia.mp3` or `Die Ärzte _Unrockbar_.mp3`), stripping stray `-`/`_`/spaces off both resulting halves. Stage 2 is intentionally more permissive and is a last resort for exactly that reason — a title with an incidental hyphen and no real artist (e.g. `Re-Animator.mp3`) would misparse into artist `Re` / title `Animator` rather than correctly being reported as unparseable. Stage 3 splits on 2+ consecutive spaces (recovers filenames with no punctuation separator at all, e.g. `Akiko Yano  Iroha Ni Konpeitou.mp3`, where the artist/title boundary is just a double space). Keep the stages in this order and don't merge them into one greedier regex — each is a fallback for when the stricter, less error-prone stage before it fails to match.
-  - `src/utils/common/selenium_sessions.py`: `open_global_driver()`/`close_global_driver()` manage a single process-wide headless Chrome instance (reused across `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py` via `get_global_driver()` rather than each fetcher opening its own). Any call site that opens the driver **must** call `close_global_driver()` in a `finally` — `fill_missing_albums.py` originally called it as a plain last statement after its fetch loop, so an exception (or the underlying Chrome process itself crashing) skipped cleanup and left an orphaned headless `chromedriver`/`chrome` process running indefinitely. This isn't just a resource nit: on the user's machine one leaked instance's memory footprint contributed to a system-wide OOM that crashed an unrelated desktop app. `close_global_driver()` also now clears its reference in a `finally` (so a `.quit()` failure on an already-crashed browser can't wedge it) and an `atexit` hook calls it as a last-resort net — but that's defense-in-depth, not a substitute for wrapping new call sites in their own `try/finally`.
-  - `src/utils/common/text_utils.py` similarity functions: `similarity(a, b)` is the plain two-string comparator (0–1 ratio, backed by `difflib.SequenceMatcher`) — use it directly when comparing two raw strings. `are_song_entries_similar(db_object, title_query, artist_query, threshold)` and `are_artists_entries_similar(db_object, artist_query, threshold)` are *not* alternate signatures for the same thing — they require an actual DB object (`.title`/`.artist.name`/`.name`) as the first argument, not a second plain string. Passing two plain strings to either raises a `TypeError` (this broke `discovery_modules/genius_fetcher.py`'s `title_matches_url()` until fixed). If you're comparing two strings, call `similarity()`; only use the `are_*_entries_similar` helpers when you actually have a DB row to compare a query against.
-    - `SequenceMatcher`'s ratio is unreliable on short strings: two different names sharing just a first letter and a common suffix can still score high (e.g. `similarity("A.Mia", "Armia")` is 0.8) purely because most of the characters happen to line up in a short string. When comparing a similarity score against a match threshold for artist names, use `scaled_similarity_threshold(a, b, base_threshold)` instead of comparing against `base_threshold` directly — it raises the required ratio for short strings (≤5 chars → 0.92, ≤8 chars → 0.85) before falling back to `base_threshold` for longer names. `are_artists_entries_similar()` already applies this internally; `resolve_artist()` and `check_artist_spelling()` in `import_data_from_mp3_tags.py` call it explicitly at their fuzzy-match checks.
-    - `check_spelling(artist, title)` always returns a dict with `corrected_artist`/`corrected_title` present: on a MusicBrainz hit they hold the corrected values (plus `_norm` variants, scores, `"found": True`); on no match they echo the unchanged inputs with `"found": False`. Callers still branch on `spell_check_result.get("found")` for **semantics** — an unchanged echo is not a real correction — with `check_artist_spelling()` returning `None` on the not-found path and `does_similar_song_exists()` returning `False` (same guard, caller-appropriate sentinel). Historically the no-match path returned a different stub shape *without* the `corrected_*` keys, which repeatedly caused `KeyError` crashes (`check_artist_spelling()` on `corrected_artist`, `does_similar_song_exists()` on `corrected_title`, the spell-check menu on both); the shape was unified when the disk-backed cache landed, but keep new call sites shape-agnostic anyway. Results (including no-match answers) are cached on disk by `utils/common/spellcheck_cache.py` — see Performance notes; delete `data/spellcheck_cache.json` to force a fresh lookup.
-  - `src/utils/common/debug.py`: project logging convention — use `slog(var)` / `mlog(message)` instead of bare `print()` for diagnostics. Output is gated by a `.debug` file at repo root (`verbosity = N`); everything also appends to `debug.log` (gitignored) regardless of that gate.
-  - `src/utils/youtube/`: YouTube playlist and single-video download helpers. `manage_youtube_playlists.score_result(candidate_title, artist, title, channel="", view_count=None, tags=None, artist_synonyms=None)` picks a search candidate's "best match": acceptance is gated on **title-only** relevance (not artist+title combined) against a **dynamic** per-title threshold from `_min_relevance_for()` (short titles need a much stricter bar than long ones — there is no single flat constant to compare against); `channel`/uploader name is factored in too, since YouTube's auto-generated `"<Artist> - Topic"` channels title videos with just the bare song name; `view_count`/`tags` (only populated by `search_video_ytdlp()` — free from yt-dlp's JSON, not from the Data API) add a popularity bonus and extend keyword scanning beyond just the title; and `artist_synonyms` (the `artists` table's `synonyms` column, comma-separated, threaded through from `song.artist.synonyms` via `yt_cache.init_cache()`) lets `artist_relevance` match a real name change (e.g. a fan channel using a translated/English name) that no string-similarity technique can bridge on its own. This encodes several non-obvious lessons from real wrong-match bugs — see `docs/agent-notes/youtube-search-matching.md` before changing any of it.
-  - `src/utils/ui/menu_utils.py`: `search_and_pick_db_object(mode, ...)` is the shared "prompt for a query → look up Song/Artist rows → auto-pick if there's exactly one match, else show `pick_from_db_objects`" flow, used by `edit_entry_menu` and `remove_song_menu` in `edit_songs.py`. Reuse it for any new "search then resolve to a single DB row" flow instead of re-duplicating the pattern — the previous duplicated copies had drifted and were passing stale extra arguments that crashed both functions. It searches songs via `search_only_categories[0]` and artists via `artist_categories[0]`, i.e. it already respects the song/artist category split noted above.
-  - `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py`: the per-field song cleanup rules (`convert_characters_encoding`, `strip_leading_spaces`, `replace_double_spaces`) all go through the shared `_apply_field_cleanup(songs, needs_transform, transform, action_description)` helper, which applies a rule across title/artist name/album (album is skipped when empty/None) and logs which fields changed. Add new cleanup rules by calling this helper with a new predicate/transform pair rather than writing another per-field loop. Its console log format (`"{action} field: 'new value', ... for artist - title"`) is now identical for all three rules — previously two of the three printed the pre-transform field values instead, which was an inconsistency, not an intentional difference.
-  - `tests/`: regression tests. Note `tests/test_scripts.py` is explicitly a scratch/manual-testing file (its own docstring says "meant to be a mess... nothing depends on this script") — don't use it as a style reference or worry about its quality. `tests/manual/` holds manual diagnostic/timing scripts (real imports + live network) that are excluded from `pytest` collection via its `conftest.py` — run them directly, don't treat them as regression tests.
-- Data/paths that are not fixtures:
-  - `import/` contains the user's real personal MP3 collection used as the local import staging folder, not sample/test data. Don't move, delete, rename in bulk, or commit its contents.
-  - `data/` and the SQLite DB under `src/database/` are runtime/user data, not fixtures. `main.py` is a desktop app the user runs interactively, not a server — if it's running (`ps aux | grep main.py`), it can be actively writing to `music.db` at the same time an agent is reading/editing it directly via SQL. Check for a live process (and prefer the app's own edit flow, or ask the user to pause it) before writing to the DB out-of-band, or a direct SQL write can race with/clobber the user's in-progress edits. This isn't hypothetical — a live `main.py` session was caught mid-write to `music.db` (title cleanup) while investigating a matching bug in the same table.
-- Secrets: `smb_username`/`smb_password` in `src/settings.py` are loaded from environment (`.env`, gitignored) and used to build `smb://` URIs for the local library. Never hardcode, print, or log these values.
-- Setup:
-  - `python3 -m venv venv`
-  - `source venv/bin/activate`
-  - `pip install -r requirements.txt`
-- When modifying code:
-  - Prefer small, focused changes in existing modules.
-  - Preserve current CLI flow unless the task explicitly requires a redesign.
-  - Reuse `src/utils/common/normalizer.py` and `src/utils/common/debug.py` rather than reintroducing local equivalents.
-  - If a change affects workflow, setup, entry points, or architecture, update this file briefly.
-- Verification:
-  - Run the relevant test or command before claiming success.
-  - Several tests under `tests/` (Wikipedia/iTunes/Genius/MusicBrainz fetchers, YouTube download) exercise real network calls or scrape live pages; expect them to be slower and occasionally flaky, and prefer running the specific test file relevant to your change over the full suite unless the user asks for a full run.
-  - Before creating or adding regression tests, ask the user for confirmation unless the request explicitly requires test changes.
-- Performance notes:
-  - The expensive bottleneck is not the local DB comparison itself; it is the MusicBrainz network call used by `check_spelling()`. `docs/agent-notes/import-pipeline.md` has the full picture.
-  - Every MusicBrainz HTTP request routes through `utils/common/musicbrainz_client.mb_get()`: one shared `requests.Session`, a process-wide ~1 req/s rate limiter, a hard `(5, 12)s` timeout, and distinct retry handling for 429/503 (linear backoff) vs. connection/timeout errors (one quick retry). Don't call `requests.get` against `musicbrainz.org` directly from new code — go through `mb_get()` so the single global rate limit actually holds.
-  - `check_spelling()` results are cached on disk by `utils/common/spellcheck_cache.py` at `data/spellcheck_cache.json` (gitignored under `/data/`), **including "no match" answers** (the slowest kind). It autosaves every 20 new entries and the import flushes it at the end, so a re-import only pays network cost for genuinely new `(artist, title)` pairs; delete the file to force fresh lookups. This supersedes the older per-session in-memory `_SPELL_CHECK_CACHE` / `_MENU_SPELLCHECK_CACHE` dicts (still present, now largely redundant).
-  - Both the import path and the spell-check menu try the local database first and only fall back to MusicBrainz when no good local match exists.
-  - MusicBrainz tunables live in `config/constants.py`: `MUSICBRAINZ_API_TIMEOUT`, `MUSICBRAINZ_API_MIN_INTERVAL`, `MUSICBRAINZ_SPELLCHECK_USE_FALLBACK` (the broad unfielded fallback query, on by default), `SPELLCHECK_CACHE_FILE`. An import prints an `MBStats` summary (requests sent, cache hits/misses, 429/503 counts, time spent throttling vs. in requests) at the end.
-  - If a user is actively running an import or spell checking, avoid running the whole test suite while the live work is in progress unless they explicitly ask for it.
-- Topic notes: deeper, subsystem-specific rationale/history (the kind of detail that used to sprawl across root-level `*.md` reports) lives under `docs/agent-notes/<topic>.md` — one file per subsystem, kept up to date in place by the `finalize-change` skill. Each one gets a one-line pointer here as it's created:
-  - [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance, containment matching for both title and artist, dynamic thresholds, Topic-channel awareness, non-overlapping keyword scoring, rebalanced video/live-format penalties, free-only popularity/tags signals, doubled-letter/diacritic typo tolerance, bracket content preserved as a remix-selector hint, the `artists.synonyms` column for real artist-name changes), plus a regression checklist of real wrong-match bugs it fixes and one still-open limitation (`Stray Kids - 특(S-Class)`, a Hangul/Latin title-formatting mismatch, not an artist-name one — the synonym mechanism doesn't apply to it). Regression tests in `tests/test_youtube_search.py` are pinned to the exact expected video for each song (not just "isn't wrong"), so a resolution change shows up as a test failure requiring review, not a silent update.
-  - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py` independently re-validates every fetcher's result instead of trusting each module's own matching logic, the `DiscoveryResult` contract, which fetchers report matches vs. plain strings, and why the Settings menu reads each module's `MODULE_NAME` by static parsing (so it must stay a plain string literal) instead of importing the modules.
-  - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed `spellcheck_cache`, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the precise fielded query gets only one attempt before falling through to the broad keyword query, and the `MBStats` run summary.
+Durable content that used to sprawl across root-level session reports (`OPTIMIZATION_*.md`,
+`PERFORMANCE_*.md`, `LOCAL_DB_OPTIMIZATION.md`, `REFACTORING_NOTES.md`, `METADATA_FALLBACK*.md`,
+`NORMALIZATION_GUIDE.md`) has been folded into these two places. Those reports were deleted in
+2026-08 — see `git log` / `git show` if you ever need the originals. Don't recreate that pattern.
+
+## Project
+
+- Purpose: manage and enrich a local music database from local files and external metadata sources.
+- Primary implementation: Python, SQLite via SQLAlchemy, an interactive terminal menu UI. Not a
+  server — `main.py` is a desktop app the user runs and clicks through.
+- Mobile clients may come later. Keep SQL and matching/domain logic in `src/utils/*`, not in the
+  `src/menu/` handlers, so it stays reusable.
+
+## Read order
+
+1. This file.
+2. The `docs/agent-notes/` topic note(s) for the area you're touching — index at the bottom.
+3. Verify behaviour in the source before editing. The codebase is ~7k lines; read the actual
+   function rather than trusting a summary.
+
+## Sources of truth
+
+1. Source code. There is no migration tool yet — the SQLAlchemy models are authoritative for
+   schema: `src/utils/database/datatables.py` for `music.db`, `src/utils/database/create_tag_db.py`
+   for `tag.db`.
+2. Tests and `requirements.txt` (pinned).
+3. This file.
+4. `docs/agent-notes/`.
+5. Plans and conversation notes.
+
+When this file disagrees with the code, trust the code and fix this file.
+
+## Standard commands
+
+- Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
+- Run the app: `python main.py`
+- Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
+- Full suite: `venv/bin/python -m pytest` — slow and occasionally flaky (several tests hit the
+  live network; see Testing & verification)
+- Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
+  collection)
+- Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
+
+Use the venv and the pinned versions. Don't install globally or bump dependencies unless the task
+requires it.
+
+## Module map
+
+One line per module — what it owns, and where the depth lives. Read the linked topic note before
+non-trivial work in that area.
+
+- `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets).
+- `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
+  don't inline them.
+- `src/utils/database/` — DB access, sessions, and the search/getter layer + song/artist
+  **category** system. Non-obvious ordering and category gotchas (alphabetical-not-best-match
+  results, `search_only_categories` is song-only, shared fallback filter):
+  `docs/agent-notes/database-search.md`.
+- `src/utils/discoveries/` — external-metadata fetchers and the MP3-tag import.
+  `docs/agent-notes/discovery-modules.md` (fetcher loading, result validation, shared browser,
+  scraping failure modes) and `docs/agent-notes/import-pipeline.md` (why import is slow).
+- `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
+  write a second one. `docs/agent-notes/normalization-and-matching.md`.
+- `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
+  short-string-threshold pitfalls: `docs/agent-notes/normalization-and-matching.md`. The
+  `check_spelling()` cost path and return shape: `docs/agent-notes/import-pipeline.md`.
+- `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
+  scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
+- `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):
+  shared session, process-wide ~1 req/s limiter, hard timeout, split retry policy. Don't call
+  `requests.get` against `musicbrainz.org` from anywhere else. `docs/agent-notes/import-pipeline.md`.
+- `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
+  `data/spellcheck_cache.json`. `docs/agent-notes/import-pipeline.md`.
+- `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console
+  output is gated by a `.debug` file (`verbosity = N`) at the repo root; everything also appends
+  to `debug.log` (gitignored) regardless.
+- `src/utils/youtube/` — YouTube playlist/download helpers and `score_result()` match ranking.
+  `docs/agent-notes/youtube-search-matching.md`.
+- `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
+  it for "search then resolve to one DB row" rather than re-duplicating.
+  `docs/agent-notes/database-search.md`.
+- `src/menu/` — the terminal menu tree (presentation + workflow wiring).
+- `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
+  cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
+  per-field loop.
+- `tests/` — regression tests. `tests/test_scripts.py` is an explicit scratch file (its own
+  docstring: "meant to be a mess") — not a style reference. `tests/manual/` holds manual
+  diagnostic scripts (real imports + live network), excluded from collection via its `conftest.py`.
+
+## Architecture boundaries
+
+- `src/menu/` drives workflow and presentation. Keep SQL and matching logic in `src/utils/*`, not
+  in menu handlers.
+- One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
+  HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →
+  `debug.py`. Don't add a parallel local version of any of these.
+- Constants and config load from `constants.py` / `settings.py`; don't scatter literals.
+- SQL goes through SQLAlchemy and stays parameterized — never build a query by string-concatenating
+  user input.
+
+## Database safety
+
+- Two SQLite DBs under `src/database/` (gitignored): `music.db` (catalog: `artists`, `songs`) and
+  `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). Schema is defined only by the
+  SQLAlchemy models; there is no migration tool, so a schema change means editing the model and
+  reconciling existing DB files by hand. Back up first.
+- `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
+  `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
+  write has already been caught racing a live session mid-edit (title cleanup) and clobbering
+  in-progress work.
+- Timestamped copies in `src/database/archive/` are the existing backup habit — make one before a
+  risky change.
+
+## Data and paths that are not fixtures
+
+- `import/` — the user's real personal MP3 collection, used as the import staging folder. Don't
+  move, rename, bulk-delete, or commit its contents.
+- `data/` and `src/database/` — runtime/user data, not fixtures (both gitignored).
+
+## Secrets
+
+- `SMB_USERNAME` / `SMB_PASSWORD` load from `.env` (gitignored) into `src/settings.py`, used to
+  build `smb://` URIs for the local library. Never hardcode, print, or log these.
+
+## Coding conventions
+
+- Prefer small, focused changes in existing modules. Preserve the current CLI flow unless a
+  redesign is explicitly requested.
+- Reuse the shared helpers listed in the Module map rather than reintroducing local equivalents.
+- Comments for non-obvious constraints, not line-by-line narration.
+- If a change touches setup, entry points, commands, or architecture, update this file in place.
+
+## Testing & verification
+
+- Match effort to risk. Run the focused test file for your change while iterating.
+- Several tests (Wikipedia / iTunes / Genius / MusicBrainz fetchers, YouTube download) make real
+  network calls or scrape live pages — slower and occasionally flaky. Prefer the specific file
+  over the full suite unless a full run is asked for.
+- Don't claim a check passed unless you ran it in this workspace.
+- Ask before creating or changing regression tests unless the task explicitly requires it.
+- If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.
+
+## Performance notes
+
+- Importing MP3 tags is bottlenecked on MusicBrainz network calls, not local work. Full picture:
+  `docs/agent-notes/import-pipeline.md`.
+- Both the import path and the spell-check menu try the local DB first, and only fall back to
+  MusicBrainz when there's no good local match.
+- `check_spelling()` results — including "no match" answers — are cached on disk
+  (`spellcheck_cache.py` → `data/spellcheck_cache.json`), so a re-import only pays network cost
+  for genuinely new `(artist, title)` pairs. Delete the file to force fresh lookups.
+- MusicBrainz tunables (`MUSICBRAINZ_API_TIMEOUT`, `MUSICBRAINZ_API_MIN_INTERVAL`,
+  `MUSICBRAINZ_SPELLCHECK_USE_FALLBACK`, `SPELLCHECK_CACHE_FILE`) live in `constants.py`. An
+  import prints an `MBStats` summary (requests, cache hits/misses, 429/503 counts, time throttling
+  vs. in requests) at the end.
+
+## Git policy
+
+- Preserve unrelated working-tree changes. Don't discard, rewrite, or overwrite the user's changes.
+- Keep generated files and local DBs out of version control.
+- Don't commit, push, or tag unless explicitly asked. Prefer small, single-purpose commits.
+
+## Topic notes (`docs/agent-notes/`)
+
+- [database-search.md](docs/agent-notes/database-search.md) — the `database_getter` search API and
+  category system: why `get_artists_from_db_session()` returns alphabetical order rather than best
+  match (the "Sting" → "POLKADOT STINGRAY" bug), the shared `_normalized_python_filter` fallback,
+  why `search_only_categories` must never reach artist search (`KeyError: None`), and the shared
+  `search_and_pick_db_object()` flow.
+- [normalization-and-matching.md](docs/agent-notes/normalization-and-matching.md) — the one
+  canonical `normalizer`, the three ordered fallback stages of `extract_unknown_data()` for
+  filename parsing, the three distinct `text_utils` similarity functions (and the `TypeError` from
+  confusing them), and why artist-name matching uses `scaled_similarity_threshold()` for short
+  strings.
+- [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
+  re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
+  contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
+  lifecycle, and `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs.
+  CAPTCHA — don't try to evade the latter).
+- [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why
+  MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
+  cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the
+  fielded query gets only one attempt, the `check_spelling()` return shape, and the `MBStats` run
+  summary.
+- [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
+  `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
+  containment matching, dynamic thresholds, Topic-channel awareness, popularity/tags signals, typo
+  tolerance, the `artists.synonyms` column for real name changes), a regression checklist of real
+  wrong-match bugs it fixes, and one still-open limitation. Regression tests in
+  `tests/test_youtube_search.py` are pinned to the exact expected video per song, so a resolution
+  change is a test failure to review, not a silent update.

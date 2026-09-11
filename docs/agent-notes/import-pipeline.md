@@ -2,9 +2,10 @@
 
 Scope: `import_data_from_mp3_tags.py` and the `check_spelling()` path it (and the
 "Spell check existing data" menu, and `music_brainz_fetcher`) depends on. This
-note is about *why importing MP3 tags is slow and what's been done about it* —
-the mechanics of resolving artists/songs against the local DB are covered inline
-in `AGENTS.md`.
+note is about *why importing MP3 tags is slow and what's been done about it*. The
+mechanics of resolving artists/songs against the local DB are in
+`docs/agent-notes/database-search.md`; string normalization and the fuzzy-match
+helpers are in `docs/agent-notes/normalization-and-matching.md`.
 
 ## The bottleneck
 
@@ -69,6 +70,26 @@ The fallback query itself is toggleable via
 `MUSICBRAINZ_SPELLCHECK_USE_FALLBACK` (default `True`). It roughly doubles the
 request count for every miss; turn it off to trade recall for speed on large
 imports.
+
+## `check_spelling()` return shape
+
+`check_spelling(artist, title)` always returns a dict with `corrected_artist` /
+`corrected_title` **present**: on a MusicBrainz hit they hold the corrected
+values (plus `_norm` variants, scores, `"found": True`); on no match they echo
+the unchanged inputs with `"found": False`.
+
+Callers still branch on `spell_check_result.get("found")` for **semantics** — an
+unchanged echo is not a real correction. `check_artist_spelling()` returns `None`
+on the not-found path; `does_similar_song_exists()` returns `False` (same guard,
+caller-appropriate sentinel).
+
+Historically the no-match path returned a different stub shape *without* the
+`corrected_*` keys, which repeatedly caused `KeyError` crashes
+(`check_artist_spelling()` on `corrected_artist`, `does_similar_song_exists()` on
+`corrected_title`, the spell-check menu on both). The shape was unified when the
+disk-backed cache landed — but keep new call sites shape-agnostic anyway
+(`.get()` with a guard on `found`), since the disk cache stores the no-match
+answers too and a cache hit reproduces whatever shape was stored.
 
 ## Observability
 
