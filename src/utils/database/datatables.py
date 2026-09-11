@@ -33,6 +33,7 @@ class Song(Base):
     album = Column(String)   # NEW
     year = Column(Integer)
     language = Column(String)
+    youtube_video_id = Column(String)  # NEW — manual override, see search_video()
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
 

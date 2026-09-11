@@ -223,8 +223,12 @@ non-trivial work in that area.
   summary.
 - [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
-  containment matching, dynamic thresholds, Topic-channel awareness, popularity/tags signals, typo
-  tolerance, the `artists.synonyms` column for real name changes), a regression checklist of real
-  wrong-match bugs it fixes, and one still-open limitation. Regression tests in
-  `tests/test_youtube_search.py` are pinned to the exact expected video per song, so a resolution
-  change is a test failure to review, not a silent update.
+  containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`
+  metadata, popularity/tags signals, typo tolerance, the `artists.synonyms` column for real name
+  changes, a `MIN_ARTIST_RELEVANCE` floor, and `Song.youtube_video_id` as the escape hatch for a
+  video excluded from search results entirely), `transliteration.py`'s alternate-script retry for
+  a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered when the
+  winning pick isn't a confirmed official release, not by a relevance floor), a regression
+  checklist of real wrong-match bugs it fixes, and remaining open limitations (non-Cyrillic
+  scripts). Regression tests in `tests/test_youtube_search.py` are pinned to the exact expected
+  video per song, so a resolution change is a test failure to review, not a silent update.

@@ -5,8 +5,10 @@ Two separate SQLite databases, each its own SQLAlchemy `Base` / engine / session
 (`tag.db`). Both live under `src/database/` (gitignored — runtime data, not fixtures; see
 `AGENTS.md` → Database safety before writing to either directly).
 
-Source code is authoritative here: there is no migration tool, so these models *are* the schema.
-If this page and the code disagree, trust the code and fix this page.
+`datatables.py`/`create_tag_db.py` are authoritative for the *current* shape; schema history is
+tracked by the migration runner (`src/utils/database/migrations.py` — see
+[`runbooks/database.md`](runbooks/database.md) before adding a column). If this page and the code
+disagree, trust the code and fix this page.
 
 ## `music.db`
 
@@ -22,6 +24,7 @@ synonyms                        year
                                  nostalgic
                                  melancholic
                                  party
+                                 youtube_video_id
 ```
 
 - `Artist.name` has **no uniqueness constraint** — the DB will happily hold two rows with the same
@@ -34,6 +37,11 @@ synonyms                        year
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 - `Song.nostalgic` / `melancholic` / `party` — integer mood flags, set through the terminal UI.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.
+- `Song.youtube_video_id` — manual, persistent override for a song whose correct video YouTube's
+  own search excludes from results entirely (e.g. age-restricted content — confirmed true even for
+  an authenticated Data API request, not just anonymous scraping). When set, the YouTube sync flow
+  uses it directly and never searches for that song again; see
+  [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 
 ## `tag.db`
 

@@ -54,7 +54,10 @@ BERLIN_SEX_VIDEO_ID = "R_H_w0_-GSQ"
 
 def test_search_video_disables_safe_search_on_api_fallback(monkeypatch):
     # yt-dlp exhausted first and (per the real bug) came back empty.
-    monkeypatch.setattr(m, "search_video_ytdlp", lambda artist, title, max_results=8, artist_synonyms=None: None)
+    monkeypatch.setattr(
+        m, "search_video_ytdlp",
+        lambda artist, title, max_results=8, artist_synonyms=None, language=None: None,
+    )
 
     items = [
         {
@@ -656,6 +659,280 @@ def test_search_video_ytdlp_matches_specific_requested_remix(monkeypatch):
     video_id = m.search_video_ytdlp("Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)")
 
     assert video_id == "zliatPv0RGU"
+
+
+# Real cases from a live production run flagged by the user (2026-09-11), all
+# captured directly from yt-dlp against the real, live YouTube search backend
+# (not synthesized) — see docs/agent-notes/youtube-search-matching.md for the
+# full investigation. Six cases; a seventh (Vinsent - "Praciahvaju Żyć") is
+# deliberately not covered here — the DB title is a Latin-script
+# transliteration of a Belarusian song whose only real upload is titled in
+# Cyrillic only, a data-modeling problem the transliteration-retry mechanism
+# above is aimed at, not this scoring layer — left out per user request.
+
+
+def test_search_video_ytdlp_recognizes_official_release_without_topic_suffix(monkeypatch):
+    # Real case: "Al Di Meola - Double Concerto". The real official upload's
+    # yt-dlp `channel` field is literally "Al Di Meola" — no "- Topic" suffix
+    # at all, even though the YouTube website displays it as "Al Di Meola –
+    # Topic" — so _is_topic_channel() never recognized it, and a live
+    # Budapest recording (91K views, no English "live"/"concert" keyword in
+    # its title) won purely on view count. `track` (yt-dlp's free YouTube
+    # Music metadata, populated only for genuinely label-distributed
+    # releases) is what actually distinguishes them: every real official
+    # upload here has it, the live recording and the two lower-effort
+    # reuploads don't.
+    candidates = [
+        {"id": "3KLQfbHCYKU", "title": "Al Di Meola - Double Concerto - Live in Warsaw, 2000 [3]", "channel": "AhnDanil", "view_count": 39943},
+        {"id": "qLXJTpgS-w4", "title": "Al di Meola - Double Concerto", "channel": "Harmonia Cordis A.", "view_count": 19824},
+        {"id": "Hi1KxO32DFU", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 10883, "track": "Double Concerto"},
+        {"id": "ua9iYiOtqEE", "title": "Al Di Meola - Horgas Eszter: Astor Piazzolla - Double concerto (Budapest, 2008)", "channel": "ttttunde", "view_count": 91489},
+        {"id": "8fTeHHLcxYs", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 2294, "track": "Double Concerto"},
+        {"id": "vUelO4lctg4", "title": "AL DI MEOLA   - Double Concerto", "channel": "Jazz 4 All", "view_count": 1474},
+        {"id": "Q4g6Ln1kX50", "title": 'Al Di Meola in Sofia "Double Concerto"', "channel": "Dimitar Velichkov", "view_count": 7106},
+        {"id": "hCUYSTjfDbw", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 1802, "track": "Double Concerto"},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Al Di Meola", "Double Concerto")
+
+    assert video_id == "Hi1KxO32DFU"
+
+
+def test_search_video_ytdlp_matches_channel_handle_concatenated_with_artist_name(monkeypatch):
+    # Real case: "SunSay - В твоих глазах сияю я". The real channel handle
+    # is "sunsaymusic" — the artist name concatenated with a suffix, no
+    # separator — so _text_containment()'s whole-word-boundary requirement
+    # never matches it (no boundary between "sunsay" and "music"), leaving
+    # only a similarity() ratio of ~0.71. A wrong candidate — an "acoustic"
+    # cover reupload (LQ_KEYWORDS-penalized) from an unrelated channel whose
+    # own *title* spells "SunSay" as a separate word — scored a full 1.0
+    # there instead. Since artist_relevance sorts before quality, that alone
+    # picked the wrong video regardless of the quality gap. A channel-handle
+    # prefix match (_artist_channel_handle_match) fixes this without
+    # touching the sort order.
+    candidates = [
+        {"id": "tpOD1ZgP2Ik", "title": "SunSay – В твоих глазах сияю я | fairlane acoustic (2011)", "channel": "fairlane acoustic", "view_count": 34277},
+        {"id": "xQejzb1JDQo", "title": "В твоих глазах сияю я", "channel": "sunsaymusic", "view_count": 16639, "track": "В твоих глазах сияю я"},
+        {"id": "crnWx2Avou4", "title": "Sunsay - В твоих глазах сияю я", "channel": "MaximAndrosyuk", "view_count": 17387},
+        {"id": "Jo0k5OkNk_Y", "title": "SunSay - В твоих глазах сияю я", "channel": "Алексей Лакиза", "view_count": 485},
+        {"id": "bdGkqE1lUrs", "title": "В твоих глазах сияю я (Sunsay Cover)", "channel": "Леонид Оганесян", "view_count": 1933},
+        {"id": "kQlW8ZIb94o", "title": "Sunsay - В твоих глазах сияю я", "channel": "Alexander Tokarev", "view_count": 108},
+        {"id": "QQ6ckbaIaG8", "title": "SunSay - В Твоих Глазах Сияю Я", "channel": "marinellagomes", "view_count": 240},
+        {"id": "exGnkkLBChQ", "title": "SunSay - В твоих глазах сияю я (cover)", "channel": "Алексей Леонов", "view_count": 1144},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("SunSay", "В твоих глазах сияю я")
+
+    assert video_id == "xQejzb1JDQo"
+
+
+def test_search_video_ytdlp_prefers_official_release_over_duplicate_title(monkeypatch):
+    # Real case: "SunSay - Немовля". Two candidates share the real channel
+    # handle "sunsaymusic" (see the channel-handle-prefix case above) and so
+    # both tie on artist_relevance — the deciding factor is `quality`, where
+    # only the genuine official/auto-generated upload carries `track`
+    # metadata (the other is a fan reupload from a 2010 club show, its own
+    # description reading "Spb, PlaceClub / 12.12.2010 by Ivan Goryachev").
+    candidates = [
+        {"id": "_edxVM3PylU", "title": "Немовля", "channel": "sunsaymusic", "view_count": 14724, "track": "Немовля"},
+        {"id": "hahNWO_nIuA", "title": "SunSay  - Немовля", "channel": "sunsaymusic", "view_count": 16647},
+        {"id": "0qRq6rscWfU", "title": "Sunsay - Немовля [MINUS vocal; Karaoke]", "channel": "MINUS vocal; Karaoke", "view_count": 18},
+        {"id": "yPMAVzzfi4o", "title": "SunSay - Немовля", "channel": "Nelu Botnaru", "view_count": 3570},
+        {"id": "bnsTeKZnxzo", "title": "SunSay - Немовля.mp4", "channel": "TheWillyamG", "view_count": 100},
+        {"id": "N2DaKCUyX0M", "title": "Sunsay - Немовля", "channel": "IExistExist", "view_count": 810},
+        {"id": "hsveP_cuA7g", "title": "SunSay - Немовля (Live)", "channel": "Dima Suchay", "view_count": 82},
+        {"id": "K8ZmBpOIBjc", "title": "SunSay - Немовля [live in Cherkassy 19.04.2013]", "channel": "Vadym Sapatrylo", "view_count": 609},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("SunSay", "Немовля")
+
+    assert video_id == "_edxVM3PylU"
+
+
+def test_search_video_ytdlp_declines_when_only_match_is_a_translation_video(monkeypatch):
+    # Real case: "Taco Hemingway - Fuck Your List". The real official upload
+    # is age-restricted by YouTube's own community guidelines and is
+    # invisible to anonymous yt-dlp search entirely — verified directly
+    # against every yt-dlp player_client option (web, tv_embedded, android,
+    # ios, mweb), none surface it, even though it's the #1 organic result on
+    # youtube.com's own search for a signed-out session. This candidate pool
+    # reflects the real (age-restricted-excluded) yt-dlp result set. Two
+    # things must both hold for this to end in "no match" rather than a
+    # confidently wrong pick:
+    #   - the "Tłumaczenie ... | LyricsTranslationTV" video (a lyrics
+    #     translation, not the song) title-contains the exact expected
+    #     title and would otherwise score relevance 1.0 — NOT_THE_SONG_KEYWORDS
+    #     forces it to 0 instead.
+    #   - "Fuck ya list" by the entirely unrelated artist "Paccman chico"
+    #     (relevance ~0.85 from coincidental character overlap) is rejected
+    #     by the MIN_ARTIST_RELEVANCE floor (artist_relevance ~0.29).
+    # With both gone, nothing clears the bar and the search correctly
+    # reports no match rather than adding a wrong song.
+    candidates = [
+        {"id": "qNmEvnJS-kI", "title": "Tłumaczenie Taco Hemingway - Fuck Your List | LyricsTranslationTV", "channel": "LyricsTranslationTV", "view_count": 5496},
+        {"id": "8cHBSpb2XE4", "title": "Taco Hemingway - YOUNG HEMS  - cały album", "channel": "Pełne Albumy", "view_count": 138371},
+        {"id": "xiZSpazO_Jo", "title": "Fuck ya list", "channel": "Paccman chico - Topic", "view_count": 130, "track": "Fuck ya list"},
+        {"id": "gZ4PX3NXRFs", "title": "Alfabet z Taco Hemingwayem - ABC (nie) dla dzieci", "channel": "Maciej Adamczyk", "view_count": 2010},
+        {"id": "PT14Nu5bmXI", "title": "APPLY YOURSELF THEN TOUCH A BAG 8D", "channel": "Hey Lol", "view_count": 360},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Taco Hemingway", "Fuck Your List")
+
+    assert video_id is None
+
+
+def test_search_video_ytdlp_normalizes_comma_slash_artist_separators(monkeypatch):
+    # Real case: "Waglewski, Fisz, Emade - Bóg". The DB spells the trio with
+    # commas; the real Topic channel's display name uses slashes
+    # ("Waglewski / Fisz / Emade - Topic") — plain similarity() rates that
+    # punctuation-only difference (artist_relevance 0.74) *below* an
+    # unrelated "(live Frytka Off)" reupload whose title happens to use
+    # plain spaces with no punctuation at all (0.83), even though `quality`
+    # correctly ranks them the other way around (+3.33 vs -2.77) via the
+    # Topic-channel/track bonus and the STRONG_LQ_KEYWORDS "live" penalty.
+    # Since artist_relevance sorts before quality, that was enough to pick
+    # the live recording. _normalize_multi_artist_punctuation() treats
+    # comma/slash/ampersand as interchangeable separators, so both tie at
+    # 1.0 and quality decides correctly.
+    candidates = [
+        {"id": "tRHIqK_vy6M", "title": "Bóg", "channel": "Waglewski / Fisz / Emade - Topic", "view_count": 21231, "track": "Bóg"},
+        {"id": "ZeQecB1KyCw", "title": "Waglewski Fisz Emade - Bóg/Ile jeszcze życia? - live in Toruń 14.11.2018", "channel": "Piotr Raczkowski", "view_count": 339},
+        {"id": "ROTYmNckBCw", "title": "Waglewski Fisz Emade - Ojciec", "channel": "Next Music", "view_count": 1125464},
+        {"id": "t7r6x_Ajuho", "title": "Waglewski Fisz Emade - Bóg (live Frytka Off)", "channel": "nothingsalright", "view_count": 1684},
+        {"id": "J4_4dJawgM4", "title": "Waglewski Fisz Emade - Syn", "channel": "Next Music", "view_count": 397227},
+        {"id": "RuIeM4Qu_NE", "title": "Waglewski Fisz Emade - Bóg - 26.11.2013", "channel": "slodzias", "view_count": 10561},
+        {"id": "sySsenGiBUw", "title": "Waglewski Fisz Emade - Ziemia (Official Video)", "channel": "Mystic Production TV", "view_count": 619553},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Waglewski, Fisz, Emade", "Bóg")
+
+    assert video_id == "tRHIqK_vy6M"
+
+
+def test_search_video_ytdlp_prefers_topic_channel_over_reupload_with_more_context(monkeypatch):
+    # Real case: "Вольны хор - Пагоня". Confirmed against real yt-dlp output
+    # that the genuine Topic-channel release (full track/artists/album
+    # metadata, 70.7K views) outranks a legitimate but non-canonical
+    # reupload (symbal.by, 6.2K views, no official-release metadata) once
+    # the official-release bonus is in play — the user's own manually-found
+    # link was the symbal.by upload, confirmed via follow-up discussion to
+    # accept the Topic-channel release as the better answer instead (more
+    # views, full official metadata) rather than tuning scoring to force the
+    # old pick.
+    candidates = [
+        {"id": "jn_vnj4_vQg", "title": "Вольны хор — Пагоня (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 6195},
+        {"id": "x_52myRgoGM", "title": "Вольны хор: Нацыянальны гімн Беларусі «Пагоня» (калядны анлайн-канцэрт)", "channel": "Годна", "view_count": 129043},
+        {"id": "suN9LYsC1qU", "title": "«Вольны хор» прэзентаваў альбом «Годныя песні»: Пагоня, Муры, Магутны Божа, Сцяг, Гэта мы, Нёман", "channel": "Годна", "view_count": 28623},
+        {"id": "Nxs3TGwI07Q", "title": "Вольны хор — Жыве Беларусь (анлайн-канцэрт «Муры», 27.05.2021)", "channel": "Годна", "view_count": 4901},
+        {"id": "FsskFUad88o", "title": 'VOLNY CHOR / ВОЛЬНЫ ХОР - Ой, шлі-прайшлі (анлайн-канцэрт "Муры", 27.05.2021)', "channel": "VOLNY CHOR / ВОЛЬНЫ ХОР", "view_count": 4899},
+        {"id": "5kgvHgqr2aE", "title": "Пагоня", "channel": "Вольны Хор - Topic", "view_count": 70680, "track": "Пагоня"},
+        {"id": "tpLfAhQUZy8", "title": "Вольны хор — Разбуры турмы муры (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 7311},
+        {"id": "8o1-Zt5eN1Y", "title": "Вольны хор — Гэта мы (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 3437},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Вольны хор", "Пагоня (запіс з анлайн - канцэрта Муры)")
+
+    assert video_id == "5kgvHgqr2aE"
+
+
+# Real cases the alternate-script retry (transliteration.py) is meant for:
+# a Belarusian song's DB title is in Cyrillic, but the only matching upload
+# on YouTube spells it romanized (or vice versa) — or, the real case found
+# testing Akute's catalog, the *official* upload exists under the other
+# script but scores too low on relevance to be picked, leaving only live
+# reuploads (which DO match the DB script) as the only accepted candidate.
+# The retry triggers whenever the language is transliterable AND the current
+# best pick isn't a confirmed official release (see _is_official_release())
+# — including "found nothing at all", which trivially isn't official either.
+
+
+def _fake_run_by_query(routes):
+    """routes: {substring-of-query: candidates-list}. Returns a fake
+    subprocess.run replacement keyed on which substring appears in the
+    query; unmatched queries get an empty result."""
+    def fake_run(command, **kwargs):
+        query = command[-1]
+        candidates = next((c for key, c in routes.items() if key in query), [])
+        stdout = "\n".join(json.dumps(c) for c in candidates)
+
+        class FakeCompletedProcess:
+            def __init__(self, stdout):
+                self.returncode = 0
+                self.stdout = stdout
+
+        return FakeCompletedProcess(stdout)
+    return fake_run
+
+
+def test_search_video_ytdlp_retries_transliterated_when_nothing_found_originally(monkeypatch):
+    # Cyrillic query returns nothing usable at all; the same song only
+    # turns up under its romanized (Lacinka) title.
+    monkeypatch.setattr(m.subprocess, "run", _fake_run_by_query({
+        "Адзіноцтва": [],
+        "Adzinoctva": [{"id": "rightVideoId", "title": "Test Artist - Adzinoctva", "channel": "Test Artist - Topic"}],
+    }))
+
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+
+    assert video_id == "rightVideoId"
+
+
+def test_search_video_ytdlp_prefers_transliterated_official_release_over_non_official_original(monkeypatch):
+    # Real case: "Akute - Cicha, jak maja śmierć"/"Ihołki". The Cyrillic
+    # query matches fine but only turns up live reuploads (no official
+    # release among them); the genuine official (Topic/track-metadata)
+    # upload only appears under the transliterated Latin query.
+    monkeypatch.setattr(m.subprocess, "run", _fake_run_by_query({
+        "Адзіноцтва": [{"id": "liveVideoId", "title": "Test Artist - Адзіноцтва (live)", "channel": "Someone"}],
+        "Adzinoctva": [{"id": "officialVideoId", "title": "Adzinoctva", "channel": "Test Artist - Topic"}],
+    }))
+
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+
+    assert video_id == "officialVideoId"
+
+
+def test_search_video_ytdlp_keeps_original_pick_when_transliterated_retry_is_also_not_official(monkeypatch):
+    # Neither script turns up a confirmed official release — the original,
+    # already-accepted pick should still win rather than being discarded for
+    # an equally-unofficial alternate-script candidate.
+    monkeypatch.setattr(m.subprocess, "run", _fake_run_by_query({
+        "Адзіноцтва": [{"id": "originalVideoId", "title": "Test Artist - Адзіноцтва (live)", "channel": "Someone"}],
+        "Adzinoctva": [{"id": "altVideoId", "title": "Test Artist - Adzinoctva (also live)", "channel": "Someone Else"}],
+    }))
+
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+
+    assert video_id == "originalVideoId"
+
+
+def test_search_video_ytdlp_does_not_retry_for_non_transliterable_language(monkeypatch):
+    captured_queries = []
+
+    def fake_run(command, **kwargs):
+        captured_queries.append(command[-1])
+        candidates = [{"id": "wrongVideoId", "title": "Unrelated video", "channel": "Someone"}]
+        stdout = "\n".join(json.dumps(c) for c in candidates)
+
+        class FakeCompletedProcess:
+            def __init__(self, stdout):
+                self.returncode = 0
+                self.stdout = stdout
+
+        return FakeCompletedProcess(stdout)
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Polish")
+
+    assert video_id is None
+    assert len(captured_queries) == 1  # no second attempt for a non-transliterable language
 
 
 def test_score_result_selector_bonus_ignores_generic_bracket_content():

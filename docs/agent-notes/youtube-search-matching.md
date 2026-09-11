@@ -223,9 +223,66 @@ synonyms recorded. Verified all four cases jump to `artist_relevance == 1.0` onc
 supplied (previously `0.0`–`0.69` depending on how much accidental character overlap there was).
 
 **Not fixed by this**: `Stray Kids - 특(S-Class)` stays open — that's a *title*-formatting mismatch
-(Hangul mixed with a Latin parenthetical, not diagnosed in detail yet), not an artist-name problem,
-so the synonym mechanism doesn't apply to it. Should resolve to
+(Hangul mixed with a Latin parenthetical), not an artist-name problem, so the synonym mechanism
+doesn't apply to it. See the next section for the title-level equivalent of this mechanism — it
+doesn't cover Hangul yet either, but is the right place to add it. Should resolve to
 [youtu.be/JsOOis4bBFg](https://youtu.be/JsOOis4bBFg) once someone gets to it.
+
+## Title identity across scripts that no string algorithm can bridge — `transliteration.py`
+
+The title-level version of the artist problem above: a song's DB title and its real YouTube
+upload's title can legitimately be written in *either* of two alphabets (native script vs. a
+romanization), and which one the real upload uses isn't predictable per song. Real cases —
+Akute's `Cicha, jak maja śmierć` and `Ihołki` — have their DB title in Lacinka (Belarusian Latin
+script), but the real official upload (confirmed via yt-dlp's `track` metadata, channel
+`akutemusic`) is titled in Cyrillic (`Ціха, як мая смерць`, `Іголкі`). That upload scored only
+0.16–0.20 relevance against the Lacinka DB title — well below the acceptance bar — so it never
+even reached the quality/official-release tiebreak; the only candidates that *did* clear relevance
+were live bootleg reuploads whose titles happened to already be in Latin script. No amount of
+`similarity()`/diacritic-folding tuning closes a whole-alphabet gap, the same reason the `synonyms`
+column exists for artist names — except a DB-column-per-song approach doesn't scale here the way it
+does for artists, because the relationship between the two spellings is systematic (a real
+transliteration scheme), not an arbitrary alias.
+
+`transliteration.py`'s `TRANSLITERABLE_LANGUAGES` registry (keyed by the `songs.language` column,
+lowercased) maps a language to a `to_latin`/`to_native` function pair; currently only
+`"belarusian"` is registered (`belarusian_to_latin()` / `latin_to_belarusian()`, an
+Instruction-2000-style Cyrillic↔Lacinka table). `transliterate(title, language)` picks the
+direction automatically by detecting which script `title` is already in. The letter-level rules
+have real, non-obvious phonological gotchas — regressive softness assimilation cascades *backward*
+through a whole consonant cluster to whatever я/е/ё/ю/і/ь follows it (`сне` → `śnie`, `смерць` →
+`śmierć`: `с` softens even two letters back from `е`, across the unmarked `м`), except `л`, whose
+hard/soft split (`ł`/`l`) is always determined by its own immediate next letter and never cascades
+in from later in its cluster (`Іголкі` → `Ihołki`, not `Iholki`), and a hard apostrophe blocks the
+cascade entirely rather than triggering it the way `ь` does (`з'ява` → `zjava`, not `źjava`). See
+that file's docstrings and `tests/test_transliteration.py` for the full derivation — every rule was
+derived from a specific real-word counterexample, not assumed up front. The reverse direction
+(Lacinka → Cyrillic) has one accepted, unrecoverable ambiguity: a soft marker (`ś`/`ń`/`ć`/`ż`)
+immediately before another letter could have come from a real `ь` *or* from cluster assimilation
+with no `ь` at all (`śnie` → `сне`, correctly no `ь`) — since the Latin spelling alone can't
+disambiguate, `ь` is only reinserted when the marker is at a genuine word boundary (nothing follows
+at all); this occasionally drops a real `ь` on reversal (`piśmieńnikami` → `пісменнікамі`, missing
+one `ь`), accepted as fine for a search-query generator, not acceptable if this were ever repurposed
+for canonical spelling storage.
+
+The retry itself lives in `search_video_ytdlp()`/`search_video()` (`manage_youtube_playlists.py`):
+triggered when `is_transliterable(language)` **and** (nothing cleared the relevance bar, **or** the
+winning pick isn't a confirmed official release per `_is_official_release()`). That second
+condition was the one that actually mattered in practice — an earlier version gated the retry on a
+numeric relevance floor (the theory being "only retry when the original search found nothing even
+loosely relevant"), but real testing against Akute's catalog showed the actual failure shape is the
+opposite: the original search *succeeds* at relevance 1.0 (a live reupload's Latin title matches
+fine), so a pure "did it fail" trigger never fires at all, no matter how the floor is tuned. Once a
+result is found, retrying only when it isn't a confirmed official release is what actually catches
+the case — confirmed fixed for `Cicha, jak maja śmierć` end-to-end. **Known limitation**: yt-dlp's
+anonymous search is non-deterministic (see below) — the exact transliterated query that found
+`Ihołki`'s official upload in one run returned zero results moments later in the same session; when
+the alt-script attempt also comes up empty, the original (possibly wrong) pick is kept rather than
+returning nothing, which is correct behavior but doesn't guarantee the fix engages on every run.
+Not yet handled: non-Cyrillic scripts (Stray Kids' Hangul case above) — `to_native` is `None`-able
+in `TransliterableLanguage` specifically so a future one-directional-only language (e.g. Japanese
+romaji, where kana/kanji reconstruction isn't well-defined) can register without needing a reverse
+function.
 
 ## `tags` scanning is scoped to `STRONG_LQ_KEYWORDS` only — generic tags get SEO-stuffed
 
@@ -365,6 +422,133 @@ repeated letters) rather than kept as separate `max()` branches — a title can 
 and running them together costs nothing extra since neither transform does anything when its own
 pattern isn't present.
 
+## `track`/`artists`/`album` — a free, reliable "genuine official release" signal from yt-dlp
+
+`_is_topic_channel()`'s "-topic" channel-name suffix check turns out not to be reliable: yt-dlp's
+`channel` field doesn't always carry it even for a genuine auto-generated Topic channel. Verified
+directly against real yt-dlp output — `Al Di Meola`'s Topic channel reports `channel: "Al Di
+Meola"` (no suffix at all), `SunSay`'s reports `channel: "sunsaymusic"`, while `Вольны Хор`'s
+reports the literal `"Вольны Хор - Topic"` — the same underlying kind of channel, three different
+reported forms, even though the YouTube *website* displays all three as "\<Artist\> – Topic". Real
+case: `Al Di Meola - Double Concerto` — the actual official upload (`channel="Al Di Meola"`, 10.9K
+views) lost to a live Budapest recording (91K views, no English "live"/"concert" keyword in its
+title) purely because the channel-suffix check silently didn't fire.
+
+yt-dlp's search JSON separately exposes YouTube Music's own `track`/`artists`/`album` metadata,
+populated *only* for a track actually distributed to YouTube by a label/aggregator — every such
+candidate's `description` literally reads "Provided to YouTube by ..." / "Auto-generated by
+YouTube.". A fan reupload, live bootleg, or cover never has it. Verified directly: across three
+real cases (Al Di Meola above, `SunSay - В твоих глазах сияю я`, `SunSay - Немовля`), every wrong
+production pick had `track=None`, every correct pick had `track` set. `_is_official_release(channel,
+track)` grants the same `+2` quality bonus `_is_topic_channel()` used to grant alone, now on
+*either* signal — `track` catches exactly the real Topic uploads the channel-name check misses,
+without double-counting when both happen to agree.
+
+## A channel *handle* concatenated with the artist name defeats whole-word containment
+
+`_text_containment()` requires a whole-word match (`\bsunsay\b`) to avoid the "netflix ≈ nix"
+false-positive problem — but a real channel handle often squeezes the artist name and a suffix
+together with no separator at all: `SunSay`'s real channel is literally `"sunsaymusic"`, and the
+already-documented Suavemente case (above) has an `"ElvisCrespovevo"` *tag* doing the same thing.
+There's no word boundary between "sunsay" and "music", so containment can never match it — only a
+diluted `similarity()` ratio (~0.71) applies. Real case: `SunSay - В твоих глазах сияю я` — a wrong
+"acoustic" cover reupload, whose own *title* spells "SunSay" as a separate word, scored a full 1.0
+artist_relevance there, while the genuine `sunsaymusic`-channel upload scored only ~0.71 — and
+since `artist_relevance` sorts before `quality` in score_result()'s tuple, that alone decided the
+match regardless of the `quality` gap (the acoustic cover is also LQ_KEYWORDS-penalized).
+`_artist_channel_handle_match()` squeezes both sides (strips spaces) and checks a plain prefix
+match — safe because it only ever adds a match for a channel that starts with the *exact* artist
+name, never loosens an existing one.
+
+## Comma vs. slash vs. plain spaces for a multi-artist DB field
+
+A DB `artist` field for a collaboration and a candidate's own title/channel name often list the
+same artists with different punctuation conventions. Real case: `Waglewski, Fisz, Emade - Bóg` —
+the DB spells the trio with commas; the real Topic channel's display name uses slashes
+(`"Waglewski / Fisz / Emade - Topic"`). Plain `similarity()` rates that punctuation-only difference
+(`artist_relevance` 0.74) *below* an unrelated `"(live Frytka Off)"` reupload whose title happens to
+spell the same names with plain spaces and no punctuation at all (0.83) — even though `quality`
+correctly ranks the Topic channel far above the live recording (`+3.33` vs. `-2.77`, the same
+official-release bonus above plus the existing `STRONG_LQ_KEYWORDS` "live" penalty). Since
+`artist_relevance` sorts before `quality`, the live recording won anyway. This is the "SLAUGHTER TO
+PREVAIL" tuple-ordering failure shape (see above) recurring a further time, in a new form
+(separator punctuation, not whitespace). `_normalize_multi_artist_punctuation()` treats
+comma/slash/ampersand as interchangeable separators — folded into `_artist_relevance_for()`'s
+existing `max()` pattern, so it only ever adds a way to match.
+
+**This tuple-ordering failure has now recurred three times** (Bratva/whitespace, Foals/quality
+double-count, Waglewski/punctuation) with three different one-off fixes. Each fix was still the
+right call for its specific missing signal, per the "Future redesign trigger" note above — but if
+a *fourth* shape of this same failure turns up, that's a strong signal the additive
+`(relevance, artist_relevance, quality)` lexicographic tuple itself needs replacing with one
+blended score, not another targeted patch.
+
+## Content *about* the song can defeat the relevance gate entirely — `NOT_THE_SONG_KEYWORDS`
+
+`LQ_KEYWORDS` only ever costs a candidate a `quality` tiebreak — and a tiebreak only matters when
+something else ties its `relevance` for `quality` to be consulted against. That assumption breaks
+when the *only* candidate that title-matches at all is the wrong kind of content. Real case: `Taco
+Hemingway - Fuck Your List` — the real official upload is age-restricted and excluded from YouTube
+search results entirely, even for an authenticated Data API request (see below), so a
+`"Tłumaczenie Taco Hemingway - Fuck Your List | LyricsTranslationTV"` video (a lyrics *translation*,
+not the song) was the only candidate whose title contained the exact expected title — no `quality`
+penalty, however large, could stop it from winning, since nothing else tied its relevance.
+`NOT_THE_SONG_KEYWORDS` (currently `"tłumaczenie"`, `"lyrics translation"`) forces `relevance` to
+`0.0` outright for a title matching one of these — a disqualification, not a tiebreak penalty, and
+deliberately a separate list from `LQ_KEYWORDS`: unlike a remix/cover/live version (still a real
+recording of the song, just a different arrangement), a translation/reaction-to-lyrics video isn't
+the song at all.
+
+## `MIN_ARTIST_RELEVANCE` — a floor under the (deliberately title-only) relevance gate
+
+Disqualifying the translation video above surfaced a second problem in the same real case: the
+next-best title match, once that one's gone, was `"Fuck ya list"` by `"Paccman chico"` — a
+completely unrelated song by a completely unrelated artist, `relevance` ~0.85 from coincidental
+character overlap with "Fuck Your List" alone. The title-only relevance gate (see "Why title-only"
+above) has no way to catch this on its own — that's the tradeoff it was designed around. Rather
+than folding artist name into the relevance computation (reopening the exact failure mode that
+design avoids), `MIN_ARTIST_RELEVANCE` (`0.35`) is a second, independent gate: a candidate must
+clear *both* the title-relevance bar and this artist floor to be picked at all. 0.29
+(`artist_relevance` for the wrong Paccman chico pick) sits below it; every legitimate candidate's
+`artist_relevance` across the whole regression suite sits comfortably above it (checked directly —
+the lowest deliberately-matching case is ~0.5). Enforced in one place, `_select_best_candidate()`,
+shared by both the yt-dlp and Data API search paths so they reject the same way — and both now
+return `(video_id, best_relevance)` so a caller (e.g. the transliteration retry in
+`transliteration.py`) can see how close the closest *artist-plausible* candidate got.
+
+## yt-dlp's anonymous search is confirmed non-deterministic run-to-run
+
+`search_video_ytdlp()` now retries once (`max_attempts=2`, no backoff) on a `returncode != 0` or
+empty-stdout response before giving up. Not a wider net — a transient-failure retry. Real case:
+`Waglewski, Fisz, Emade - Bóg` returned **zero** results in one production run (forcing a fallback
+to the Data API, which only had the `"(live Frytka Off)"` reupload to offer — see the sort-order
+case above), but returned **7** good candidates, including the correct Topic-channel upload,
+moments later on an identical retry with the same query. One cheap retry is enough to survive a
+momentary hiccup; a real, sustained outage still falls through to the API fallback as before.
+
+## Age-restricted content is excluded from YouTube search results even for an authenticated request
+
+The already-documented `"<name> Sex ..."` case (above) was diagnosed as an anonymous-scraping/
+`safeSearch` problem, fixed by passing `safeSearch="none"` on the Data API call. `Taco Hemingway -
+Fuck Your List` looked like the same category at first — but is a materially different, *stronger*
+limitation: the real video (age-restricted per YouTube's own community guidelines) is invisible to
+**every** yt-dlp `player_client` option tried (web, tv_embedded, android, ios, mweb — none surface
+it), and, verified directly with this project's own authenticated OAuth credentials
+(`get_youtube_service()`, real API call, not a mock), is **also absent** from the Data API's
+`search().list()` results with `safeSearch="none"` already set. It's the #1 organic result on
+youtube.com's own search for a signed-out browser session, but neither search backend this app
+uses returns it. There is no code-level fix for this — no query phrasing, `player_client`, or API
+parameter bypasses it (confirmed empirically, not theorized).
+
+The only real fix is `Song.youtube_video_id` (see `docs/data-model.md`): a manual, persistent
+override, once a human confirms the correct video by any other means. `yt_cache.py`'s
+`init_cache()` pre-fills a song's cache `video_id` from it, which `create_yt_playlist()`'s existing
+"already have a video_id, skip search" check picks up for free — no code path needed searching at
+all. Reach for this whenever a song's correct video is confirmed unreachable by automated search
+(age-restriction is the one confirmed trigger so far, but the mechanism doesn't assume that's the
+only possible cause) rather than trying to tune scoring around a candidate pool that structurally
+can never contain the right answer.
+
 ## Known regressions this logic exists to prevent
 
 Concrete cases hit during development — useful as a regression checklist if this scoring is ever
@@ -432,3 +616,36 @@ simplified:
   Depravity` → the real channel uses a genuinely different name for the artist than the DB
   (`familyboombox`, Taras Chubai, "Daryl Hall & John Oates", "June" respectively) — no fuzzy
   string match can bridge a real name change; fixed via the `synonyms` column (see above).
+- `Al Di Meola - Double Concerto` → the real Topic-channel upload's `channel` field carries no
+  "-Topic" suffix at all, so a live Budapest recording won on view count alone; fixed via the
+  `track` official-release signal (see above).
+- `SunSay - В твоих глазах сияю я` / `SunSay - Немовля` → the real channel handle
+  (`"sunsaymusic"`) concatenates the artist name with no separator, defeating whole-word
+  containment; fixed via the channel-handle-prefix match (see above). The second case also needed
+  the `track` signal to pick between two candidates sharing that same channel.
+- `Waglewski, Fisz, Emade - Bóg` → comma- vs. slash-separated multi-artist punctuation dropped the
+  real Topic channel's `artist_relevance` below an unrelated live reupload's, a further recurrence
+  of the tuple-ordering failure shape; fixed via `_normalize_multi_artist_punctuation()` (see
+  above).
+- `Taco Hemingway - Fuck Your List` → the real video is age-restricted and excluded from every
+  search backend this app uses (verified, not theorized — see above); a lyrics-translation video
+  that only *mentioned* the song used to win by default. Fixed two ways: `NOT_THE_SONG_KEYWORDS`
+  rejects the translation video outright, `MIN_ARTIST_RELEVANCE` rejects an unrelated
+  coincidentally-similar-titled song by a different artist — and `Song.youtube_video_id` is the
+  actual way this one specific song now resolves correctly, since no search-side fix can find a
+  video the search backend itself excludes.
+- `Вольны хор - Пагоня` → confirmed the official-release signal correctly prefers a genuine
+  Topic-channel release (full `track`/`artists`/`album` metadata, more views) over a legitimate but
+  non-canonical reupload once both clear the relevance bar.
+- `Akute - Cicha, jak maja śmierć` / `Akute - Ihołki` → the real official upload (Cyrillic title,
+  `akutemusic` channel, `track` metadata set) scored too low on relevance against the Lacinka DB
+  title to be considered at all, leaving only live bootleg reuploads (Latin-titled, so they matched
+  fine) to win by default; fixed via the alternate-script retry (see `transliteration.py` above) —
+  confirmed end-to-end for the first song, confirmed the retry engages correctly for the second but
+  landed back on the live pick that specific run because yt-dlp's anonymous search returned zero
+  results for the transliterated query at that moment (see that section's known limitation).
+
+**Not covered by any of the above:** `Vinsent - Praciahvaju Żyć` — same shape as the Akute cases
+above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism
+was built. `Stray Kids - 특(S-Class)` (Hangul, not Cyrillic) stays fully open — see
+`transliteration.py`'s section above for why.

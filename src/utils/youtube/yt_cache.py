@@ -39,7 +39,16 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
             "artist": artist,
             "title": title,
             "synonyms": song.artist.synonyms,
-            "video_id": None,
+            "language": song.language,
+            # A manually-confirmed video, set once and reused forever — for
+            # songs no automated search will ever find (e.g. a video
+            # YouTube's own search excludes from results for being
+            # age-restricted, confirmed true even for an authenticated Data
+            # API request — see docs/agent-notes/youtube-search-matching.md,
+            # "Taco Hemingway - Fuck Your List"). Pre-filling it here means
+            # create_yt_playlist()'s existing "already have a video_id, skip
+            # search" check picks it up for free.
+            "video_id": song.youtube_video_id,
             "added": False
         }
 

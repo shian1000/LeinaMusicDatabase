@@ -22,6 +22,7 @@ from utils.youtube.yt_cache import save_cache
 from utils.youtube.yt_cache import make_song_key
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
 from utils.common.normalizer import APOSTROPHES
+from utils.youtube.transliteration import is_transliterable, transliterate
 import json
 
 
@@ -58,6 +59,23 @@ HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster"
 # fixed for Daði Freyr, but for "isn't music at all" rather than "isn't the
 # canonical arrangement".
 LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "review", "teaser", "eurovision version", "high tone", "track by track"]
+# Titles matching these are content *explaining/analyzing* the song, not a
+# recording of it at all — unlike LQ_KEYWORDS above (still real recordings
+# of the song, just a different arrangement/quality), these fully
+# disqualify a candidate (relevance forced to 0, see score_result()) rather
+# than just costing it a quality tiebreak. That distinction matters
+# structurally: `quality` only ever breaks a tie between candidates already
+# sharing the top relevance score — it can never rescue a search where the
+# *only* candidate at 1.0 relevance is the wrong kind of content. Real case:
+# Taco Hemingway - "Fuck Your List" is age-restricted and invisible to
+# anonymous search entirely (verified against every yt-dlp `player_client`
+# option — see search_video_ytdlp()'s docstring), so a "Tłumaczenie Taco
+# Hemingway - Fuck Your List | LyricsTranslationTV" video (a lyrics
+# translation, not the song) was the *only* candidate whose title
+# title-contained the exact expected title — no quality penalty, however
+# large, could have stopped it from winning, since nothing else tied its
+# relevance for `quality` to even be consulted against.
+NOT_THE_SONG_KEYWORDS = ["tłumaczenie", "lyrics translation"]
 # "live"/"na żywo" get a bigger penalty than the rest of LQ_KEYWORDS: a live
 # recording is essentially never the plain studio version (unlike, say, an
 # "acoustic" cut, which occasionally *is* the canonical release), so it
@@ -111,6 +129,27 @@ SELECTOR_MATCH_BONUS = 3
 # requested title, can still look deceptively similar once the artist name
 # or shared junk text is folded into one comparison string.
 MIN_RELEVANCE = 0.5
+
+# Minimum artist_relevance a candidate must clear to be picked at all, on
+# top of (never instead of) the title relevance gate above. The title-only
+# gate (see score_result()'s docstring for why relevance is title-only) has
+# a blind spot: a completely unrelated song by a completely unrelated
+# artist can still pass it on title alone, by coincidence. Real case: Taco
+# Hemingway - "Fuck Your List" is age-restricted and invisible to anonymous
+# search entirely (see search_video_ytdlp()'s docstring). Once the one
+# candidate that did title-match ("Tłumaczenie ... | LyricsTranslationTV",
+# a translation video, not the song — see NOT_THE_SONG_KEYWORDS) is
+# disqualified, the next-best title match was "Fuck ya list" by "Paccman
+# chico" — an entirely unrelated artist, relevance 0.85 from coincidental
+# character overlap with "Fuck Your List", but artist_relevance only 0.29.
+# Rejecting that (reporting no match, which is what happens when the
+# genuine video is unreachable) is safer than confidently adding a wrong
+# song. 0.35 sits well above that 0.29 and well below every legitimate
+# candidate's artist_relevance across the existing regression suite (a real
+# title/channel match — even a heavily decorated one, or one relying on
+# containment rather than a raw ratio — clears at least ~0.5 in every case
+# checked).
+MIN_ARTIST_RELEVANCE = 0.35
 
 # Unicode ranges for scripts written without spaces between words/characters
 # (hiragana/katakana, CJK ideographs, hangul syllables). Titles in these
@@ -466,23 +505,80 @@ def _parse_synonyms(synonyms: str | None) -> list[str]:
     return [s.strip() for s in synonyms.split(",") if s.strip()]
 
 
+def _normalize_multi_artist_punctuation(text: str) -> str:
+    """Treat comma/slash/ampersand as interchangeable multi-artist separators.
+
+    A DB artist field for a collaboration and a candidate's own title/channel
+    name often list the same artists with different punctuation conventions
+    — DB `"Waglewski, Fisz, Emade"` (comma-separated) vs. the real Topic
+    channel's display name `"Waglewski / Fisz / Emade - Topic"`
+    (slash-separated). Real case: this punctuation-only difference dropped
+    `artist_relevance` to 0.741 for the genuine Topic-channel upload while an
+    unrelated "(live Frytka Off)" reupload — whose title happens to spell the
+    names with plain spaces, no punctuation at all — scored 0.833 purely from
+    being textually closer to the comma-separated DB spelling. Since
+    `artist_relevance` is compared *before* `quality` in score_result()'s sort
+    tuple, that was enough to pick the live recording over the Topic-channel
+    upload despite `quality` correctly ranking them the other way around
+    (+3.33 vs -2.77) — see docs/agent-notes/youtube-search-matching.md's
+    "SLAUGHTER TO PREVAIL" case for the same tuple-ordering failure shape.
+    Used as an extra `max()` candidate in `_artist_relevance_for()`, not a
+    destructive rewrite, so this only ever adds a way to match, never
+    loosens what already matched.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[,/&]", " ", text)).strip()
+
+
+def _artist_channel_handle_match(expected: str, channel_clean: str) -> float:
+    """A channel *handle* often concatenates the artist name with a suffix
+    and no separator at all (e.g. `"sunsaymusic"`, or the already-documented
+    `"ElvisCrespovevo"` tag in the Suavemente case) — squeezed together with
+    no word boundary, `_text_containment()`'s whole-word requirement can
+    never match it (`\\bsunsay\\b` doesn't match inside "sunsaymusic": there's
+    no boundary before the "m"). Real case: SunSay's real channel is
+    literally `"sunsaymusic"` — the correct, bare-title Topic-style upload
+    there only ever scored artist_relevance ~0.71 via plain similarity(),
+    while a wrong candidate whose own *title* spells "SunSay" as a separate
+    word scored a full 1.0 via ordinary containment. Since artist_relevance
+    is compared *before* `quality` in score_result()'s sort tuple, the wrong
+    candidate won even though `quality` (view count, official-release
+    metadata) decisively favored the right one. Squeeze both sides (strip
+    spaces) and check a plain prefix match instead — safe because it only
+    ever adds a match for a channel that starts with the *exact* artist
+    name, never loosens an existing match.
+    """
+    squeezed_expected = re.sub(r"\s+", "", expected.lower())
+    squeezed_channel = re.sub(r"\s+", "", channel_clean.lower())
+    if squeezed_expected and squeezed_channel.startswith(squeezed_expected):
+        return 1.0
+    return 0.0
+
+
 def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -> float:
     """artist_relevance for one candidate name against one artist name —
     factored out so score_result() can take the max across the DB artist
     name and any known synonyms without duplicating this logic per name.
     """
     expected = _relevance_text(name)
+    expected_normalized = _normalize_multi_artist_punctuation(expected)
     relevance = 0.0
     if expected and candidate_clean:
+        candidate_normalized = _normalize_multi_artist_punctuation(candidate_clean)
         relevance = max(
             similarity(expected, candidate_clean),
             _text_containment(expected, candidate_clean),
+            similarity(expected_normalized, candidate_normalized),
+            _text_containment(expected_normalized, candidate_normalized),
         )
     if expected and channel_clean:
+        channel_normalized = _normalize_multi_artist_punctuation(channel_clean)
         relevance = max(
             relevance,
             similarity(expected, channel_clean),
             _text_containment(expected, channel_clean),
+            similarity(expected_normalized, channel_normalized),
+            _text_containment(expected_normalized, channel_normalized),
+            _artist_channel_handle_match(expected, channel_clean),
         )
     return relevance
 
@@ -505,8 +601,46 @@ def _is_topic_channel(channel: str) -> bool:
     """YouTube auto-generates a "<Artist> - Topic" channel per artist for
     official, single-track audio uploads (title = bare song title, no
     artist prefix). These are exactly the plain, unedited version a music
-    library wants, so they're worth a quality bonus like HQ_KEYWORDS."""
+    library wants, so they're worth a quality bonus like HQ_KEYWORDS.
+
+    Real gap this doesn't cover: yt-dlp's `channel` field doesn't reliably
+    carry the "- Topic" suffix even for a genuine auto-generated Topic
+    channel — some report the underlying default name literally (e.g.
+    `"Вольны Хор - Topic"`), but others report a claimed/branded custom name
+    with no "Topic" wording anywhere (e.g. Al Di Meola's Topic channel is
+    just `"Al Di Meola"`, SunSay's is `"sunsaymusic"`), even though the
+    YouTube website displays both as "<Artist> – Topic". This function only
+    catches the first kind — see `_is_official_release()` below for the
+    signal that catches both.
+    """
     return channel.strip().lower().replace(" ", "").endswith("-topic")
+
+
+def _is_official_release(channel: str, track: str | None) -> bool:
+    """True for a genuine official/auto-generated music distribution upload,
+    catching both the channels `_is_topic_channel()` recognizes by name and
+    the ones it can't (see its docstring).
+
+    `track` is yt-dlp-only (its search JSON exposes YouTube Music's own
+    `track`/`artists`/`album` metadata for free; the Data API's
+    `search().list()` doesn't) and is populated *only* for tracks actually
+    distributed to YouTube by a label/aggregator — every such candidate's
+    `description` literally starts "Provided to YouTube by ..." / contains
+    "Auto-generated by YouTube.". A fan reupload, live bootleg, or cover
+    never has it, `None` reliably. Verified directly against real yt-dlp
+    output for three real cases (Al Di Meola - Double Concerto, SunSay - В
+    твоих глазах сияю я, SunSay - Немовля): every wrong pick in production
+    had `track=None`, every correct pick had `track` set — including cases
+    where the wrong pick had *far* more views (a live Budapest recording,
+    91K views, beat the real Topic-channel upload, 10.9K views, purely
+    because `_is_topic_channel()` didn't recognize `channel="Al Di Meola"`
+    as a Topic channel at all and no other signal offset the view-count
+    gap). This is a stronger, more general signal than any keyword list or
+    the channel-name heuristic, and previously went unused entirely.
+    """
+    if channel and _is_topic_channel(channel):
+        return True
+    return bool(track)
 
 
 def _popularity_bonus(view_count: int | None) -> float:
@@ -533,6 +667,7 @@ def score_result(
     view_count: int | None = None,
     tags: list[str] | None = None,
     artist_synonyms: str | None = None,
+    track: str | None = None,
 ) -> tuple[float, float, float]:
     """Score a candidate video: (title relevance, artist relevance, quality).
 
@@ -576,6 +711,14 @@ def score_result(
     artist_relevance, taking the max across all names. No amount of
     string-similarity tuning can bridge a real name change — this is the
     only mechanism that can.
+
+    `track` (yt-dlp-only/free, like `view_count`/`tags`) is YouTube Music's
+    own metadata for a genuinely label-distributed release — see
+    `_is_official_release()`. It's an alternative to `_is_topic_channel()`'s
+    channel-name-suffix check, not an addition to it: both grant the same
+    quality bonus, since yt-dlp's `channel` field doesn't reliably carry the
+    "- Topic" suffix even for a real Topic channel (see that function's
+    docstring), and `track` catches exactly the cases it misses.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
@@ -596,6 +739,8 @@ def score_result(
             _text_containment(expected_title_normalized, candidate_clean_normalized),
         )
     else:
+        relevance = 0.0
+    if any(kw in candidate_title.lower() for kw in NOT_THE_SONG_KEYWORDS):
         relevance = 0.0
 
     channel_clean = _relevance_text(channel)
@@ -653,7 +798,7 @@ def score_result(
     quality -= VIDEO_PENALTY * len(_non_overlapping_hits(VIDEO_KEYWORDS, title_lower))
     quality -= len(lq_hits)
     quality -= STRONG_LQ_PENALTY * len(strong_lq_hits)
-    if channel and _is_topic_channel(channel):
+    if _is_official_release(channel, track):
         quality += 2
     quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in title_lower])
     for hint in _bracket_selector_hints(title):
@@ -664,13 +809,50 @@ def score_result(
     quality += _popularity_bonus(view_count)
     return relevance, artist_relevance, quality
 
-def search_video_ytdlp(artist: str, title: str, max_results: int = 8, artist_synonyms: str | None = None) -> str | None:
-    """Search YouTube using yt-dlp (no API quota used)."""
-    query = f"{artist} - {title}"
-    print(f"\nSearching via yt-dlp for: {query}")
 
+def _select_best_candidate(
+    candidates: list[tuple[tuple[float, float, float], str, str, bool]], title: str
+) -> tuple[str | None, float, bool]:
+    """Pick the winning (video_id, best_relevance, is_official) from a
+    (score, video_id, video_title, is_official) list, gated on both title
+    relevance (_min_relevance_for) and MIN_ARTIST_RELEVANCE — see that
+    constant's docstring for why the artist floor is needed on top of the
+    (deliberately title-only) relevance gate. Shared by the yt-dlp and Data
+    API search paths so both reject the same way and both report
+    `is_official` (see _is_official_release()) for the alternate-script
+    retry (transliteration.py) to decide against: a winning candidate that
+    isn't a confirmed official release is exactly the case where the *real*
+    official upload might be hiding under the other script — see the
+    "Cicha, jak maja śmierć"/"Ihołki" real cases in the conversation this
+    was built from, where the genuine official upload (Cyrillic title)
+    scored too low on relevance to even be considered against the DB's
+    Lacinka title, leaving only live reuploads to pick from.
+
+    `best_relevance` is 0.0 and `is_official` is False when no candidate
+    even clears the artist floor — there's no meaningful "closest" title
+    relevance to report in that case since every title-only match was to an
+    implausible artist.
+    """
+    plausible = [c for c in candidates if c[0][1] >= MIN_ARTIST_RELEVANCE]
+    if not plausible:
+        print("  ✖ No relevant match (no candidate had a plausible artist match)")
+        return None, 0.0, False
+
+    plausible.sort(key=lambda x: x[0], reverse=True)
+    (best_relevance, best_artist_relevance, best_quality), best_id, best_title, is_official = plausible[0]
+    required = _min_relevance_for(title)
+    if best_relevance < required:
+        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
+        return None, best_relevance, False
+    print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
+    return best_id, best_relevance, is_official
+
+
+def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
+    """One yt-dlp `--dump-json` search attempt. Returns the completed process,
+    or None on timeout/missing-binary (a real failure, not worth retrying)."""
     try:
-        result = subprocess.run(
+        return subprocess.run(
             [
                 "yt-dlp",
                 "--dump-json",
@@ -679,15 +861,68 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 8, artist_syn
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  ✖ yt-dlp unavailable: {e}")
         return None
 
+
+def _search_video_ytdlp_once(
+    artist: str, title: str, max_results: int, artist_synonyms: str | None, max_attempts: int
+) -> tuple[str | None, float, bool]:
+    """One yt-dlp search-and-score attempt for one exact title string.
+
+    Returns (video_id, best_relevance, is_official) — video_id is None when
+    nothing cleared _min_relevance_for(title), but best_relevance still
+    reports how close the closest candidate got. `is_official` (see
+    _is_official_release()) tells a caller whether the winning pick is a
+    confirmed official release, so it can decide whether a transliterated
+    retry (see search_video_ytdlp) is worth attempting.
+
+    `max_attempts` retries a returncode!=0/empty-stdout response once before
+    giving up. This is a transient-failure retry, not a wider net: yt-dlp's
+    anonymous scraping search is confirmed non-deterministic run-to-run for
+    the exact same query — real case, "Waglewski, Fisz, Emade - Bóg" returned
+    zero results in one production run (forcing a fallback to the API, which
+    only had a "(live Frytka Off)" reupload to offer) but returned 7 good
+    candidates, including the correct Topic-channel upload, moments later on
+    an identical retry. One retry, no backoff, is deliberately cheap — it
+    only needs to survive a momentary hiccup, not a real outage (the
+    subprocess timeout/API fallback already handle that).
+
+    Known limitation this can't fix: an age-restricted video (e.g. Taco
+    Hemingway - "Fuck Your List", flagged by YouTube's own community
+    guidelines) is invisible to anonymous `ytsearch` regardless of retries —
+    verified directly against every yt-dlp `player_client` option (web,
+    tv_embedded, android, ios, mweb, ...), none surface it, while it's the
+    #1 organic result on youtube.com's own search for a signed-out session.
+    This is the same failure mode already documented for `"<name> Sex ..."`
+    queries, just a different trigger (profanity vs. the word "Sex") — no
+    retry count or client switch bypasses it; only a signed-in/age-verified
+    session could, which the API fallback's OAuth session may or may not
+    have depending on the authenticated account's own age-verification
+    status. `LQ_KEYWORDS` gaining "tłumaczenie"/"lyrics translation" is what
+    actually helps this specific case — it stops the API fallback's best
+    candidate (a lyrics-translation channel, not the song) from winning by
+    default once nothing better is available.
+    """
+    query = f"{artist} - {title}"
+    print(f"\nSearching via yt-dlp for: {query}")
+
+    result = None
+    for attempt in range(max_attempts):
+        result = _run_ytdlp_search(query, max_results)
+        if result is None:
+            return None, 0.0, False  # timeout/missing binary — not a transient case, don't retry
+        if result.returncode == 0 and result.stdout.strip():
+            break
+        if attempt + 1 < max_attempts:
+            print("  ⚠ yt-dlp returned no results, retrying once...")
+
     if result.returncode != 0 or not result.stdout.strip():
         print("  ✖ yt-dlp returned no results")
-        return None
+        return None, 0.0, False
 
     candidates = []
     for line in result.stdout.strip().splitlines():
@@ -698,39 +933,75 @@ def search_video_ytdlp(artist: str, title: str, max_results: int = 8, artist_syn
             channel = info.get("channel") or info.get("uploader") or ""
             view_count = info.get("view_count")
             tags = info.get("tags")
+            track = info.get("track")
             if video_id:
                 candidates.append(
                     (
-                        score_result(video_title, artist, title, channel, view_count, tags, artist_synonyms),
+                        score_result(video_title, artist, title, channel, view_count, tags, artist_synonyms, track),
                         video_id,
                         video_title,
+                        _is_official_release(channel, track),
                     )
                 )
         except json.JSONDecodeError:
             continue
 
     if not candidates:
-        return None
+        return None, 0.0, False
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    (best_relevance, best_artist_relevance, best_quality), best_id, best_title = candidates[0]
-    required = _min_relevance_for(title)
-    if best_relevance < required:
-        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
-        return None
-    print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
-    return best_id
+    return _select_best_candidate(candidates, title)
 
-def search_video(youtube, artist: str, title: str, artist_synonyms: str | None = None) -> str | None:
-    """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback."""
 
-    # Try yt-dlp first — free, no quota
-    video_id = search_video_ytdlp(artist, title, artist_synonyms=artist_synonyms)
-    if video_id:
+def search_video_ytdlp(
+    artist: str,
+    title: str,
+    max_results: int = 8,
+    artist_synonyms: str | None = None,
+    max_attempts: int = 2,
+    language: str | None = None,
+) -> str | None:
+    """Search YouTube using yt-dlp (no API quota used). See
+    _search_video_ytdlp_once() for the actual search-and-score logic.
+
+    `language` (the songs table's `language` column) enables a second
+    attempt with the title transliterated into the other script — triggered
+    when this attempt found nothing at all, OR found something that isn't a
+    confirmed official release (see _is_official_release()): a non-official
+    winner is exactly the situation where the genuine official upload might
+    be sitting under the other script, invisible to this attempt's relevance
+    check (real case: "Cicha, jak maja śmierć"/"Ihołki" — the official
+    Cyrillic-titled upload scored too low against the Lacinka DB title to
+    even be considered, leaving only live reuploads to pick from). If the
+    alt attempt also fails to find an official release, the original pick
+    (if any) is kept — it's still better than nothing.
+    """
+    video_id, best_relevance, is_official = _search_video_ytdlp_once(
+        artist, title, max_results, artist_synonyms, max_attempts
+    )
+    if video_id and is_official:
         return video_id
 
-    # Fallback: YouTube Data API
-    print("  ↩ Falling back to YouTube API...")
+    if is_transliterable(language):
+        alt_title = transliterate(title, language)
+        if alt_title and alt_title != title:
+            print(f"  ↩ Retrying yt-dlp with transliterated title: {alt_title}")
+            alt_video_id, _, alt_official = _search_video_ytdlp_once(
+                artist, alt_title, max_results, artist_synonyms, max_attempts
+            )
+            if alt_video_id and (alt_official or not video_id):
+                return alt_video_id
+
+    return video_id
+
+
+def _search_video_api_once(
+    youtube, artist: str, title: str, artist_synonyms: str | None
+) -> tuple[str | None, float, bool]:
+    """One YouTube Data API search-and-score attempt for one exact title
+    string. Returns (video_id, best_relevance, is_official) — see
+    _search_video_ytdlp_once(). The Data API never exposes yt-dlp's `track`
+    metadata, so `is_official` here can only ever come from
+    _is_topic_channel()'s channel-name check, never the track-based signal."""
     query = f"{artist} - {title}"
     print(f"  Searching API for: {query}")
 
@@ -753,7 +1024,7 @@ def search_video(youtube, artist: str, title: str, artist_synonyms: str | None =
     items = response.get("items", [])
     if not items:
         print("  ✖ No results found")
-        return None
+        return None, 0.0, False
 
     candidates = [
         (
@@ -766,17 +1037,45 @@ def search_video(youtube, artist: str, title: str, artist_synonyms: str | None =
             ),
             item["id"]["videoId"],
             item["snippet"]["title"],
+            _is_official_release(item["snippet"].get("channelTitle", ""), None),
         )
         for item in items
     ]
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    (best_relevance, best_artist_relevance, best_quality), best_id, best_title = candidates[0]
-    required = _min_relevance_for(title)
-    if best_relevance < required:
-        print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
-        return None
-    print(f"  ✔ Best match (relevance={best_relevance:.2f}, score={best_quality}): {best_title} [{best_id}]")
-    return best_id
+    return _select_best_candidate(candidates, title)
+
+
+def search_video(
+    youtube, artist: str, title: str, artist_synonyms: str | None = None, language: str | None = None
+) -> str | None:
+    """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback.
+
+    `language` (the songs table's `language` column) enables a second search
+    attempt, with the title transliterated into the other script, for
+    languages registered in transliteration.py — see search_video_ytdlp()'s
+    docstring for the exact trigger condition (nothing found, or the winner
+    isn't a confirmed official release).
+    """
+
+    # Try yt-dlp first — free, no quota
+    video_id = search_video_ytdlp(artist, title, artist_synonyms=artist_synonyms, language=language)
+    if video_id:
+        return video_id
+
+    # Fallback: YouTube Data API
+    print("  ↩ Falling back to YouTube API...")
+    video_id, best_relevance, is_official = _search_video_api_once(youtube, artist, title, artist_synonyms)
+    if video_id and is_official:
+        return video_id
+
+    if is_transliterable(language):
+        alt_title = transliterate(title, language)
+        if alt_title and alt_title != title:
+            print(f"  ↩ Retrying YouTube API with transliterated title: {alt_title}")
+            alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms)
+            if alt_video_id and (alt_official or not video_id):
+                return alt_video_id
+
+    return video_id
 
 
 # ---------------------------------------------------------
@@ -885,10 +1184,11 @@ def create_yt_playlist(song_list, playlist_name: str):
             artist = entry["artist"]
             title = entry["title"]
             artist_synonyms = entry.get("synonyms")
+            language = entry.get("language")
 
             video_id = entry.get("video_id")
             if not video_id:
-                video_id = search_video(youtube, artist, title, artist_synonyms=artist_synonyms)
+                video_id = search_video(youtube, artist, title, artist_synonyms=artist_synonyms, language=language)
                 if not video_id:
                     print("  ❌ No video found")
                     continue
