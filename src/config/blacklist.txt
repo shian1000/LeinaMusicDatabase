@@ -34,6 +34,7 @@ pop
 itunes
 remix
 germany
+german
 festival
 United Palace Theatre
 1996-2011
@@ -41,6 +42,7 @@ radio
 spotify
 paris
 session
+sessions
 ultimate
 hits
 edition

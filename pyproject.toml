@@ -1,0 +1,12 @@
+[project]
+name = "musicdatabase"
+version = "0.0.0"
+description = "Terminal app for browsing and enriching a local music database."
+requires-python = ">=3.13"
+
+# Dependencies are still pinned in requirements.txt and installed into the
+# repo-local venv/ (see AGENTS.md -> Standard commands) -- this file is for
+# tool configuration (pytest, etc.), not packaging or a build backend.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

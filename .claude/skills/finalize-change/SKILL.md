@@ -1,6 +1,6 @@
 ---
 name: finalize-change
-description: 'Use at the end of a coding task in the MusicDatabase repo to decide whether anything from this session is worth persisting for future AI agents, and if so, fold it into AGENTS.md or docs/agent-notes/ in place. Trigger this when the user says things like "finalize this change", "wrap this up", "document what we did for future agents", "update the guidelines", or invokes /finalize-change directly at the close of a task. Do not trigger it mid-task, for routine code review, or for every small commit — only when the user is closing out work and wants durable lessons captured, not a changelog of everything that happened.'
+description: 'Use at the end of a coding task in the MusicDatabase repo to decide whether anything from this session is worth persisting for future AI agents, and if so, fold it into AGENTS.md or docs/agent-notes/ in place; also drafts a ready-to-use commit message for the user to review and commit themselves (the skill never runs git add/commit/push). Trigger this when the user says things like "finalize this change", "wrap this up", "document what we did for future agents", "update the guidelines", or invokes /finalize-change directly at the close of a task. Do not trigger it mid-task, for routine code review, or for every small commit — only when the user is closing out work and wants durable lessons captured, not a changelog of everything that happened.'
 ---
 
 # Finalize Change
@@ -90,12 +90,53 @@ For anything that does clear the bar:
 5. Running this skill twice on the same underlying change should converge, not duplicate — the
    second pass should find its own earlier edit already covering the ground and leave it alone
    (or tighten it further), never add a second, near-identical bullet next to the first.
+6. **Keep the indexes honest, mechanically.** This is a different, narrower check than steps 1–5
+   above — not "is this worth persisting" but "did the session change the *shape* of something
+   that's already indexed elsewhere, and did that index get updated." If the session:
+   - added, removed, or renamed a subsystem, or changed which subsystems depend on which —
+     `docs/systems/index.md` needs the matching row/edge;
+   - added, removed, or renamed a top-level doc or doc category — `docs/index.md` needs updating;
+   - added a reusable script under `tools/` — `tools/README.md` needs an entry for it (what it
+     does, when to use it, invocation, what it may change, dry-run/backup behavior, limitations —
+     see that file's existing entries for the shape);
+   - made a choice that affects several systems or would be expensive to reverse (this is a higher
+     bar than an ordinary AGENTS.md-worthy convention — see Step 2) — it may be worth a new ADR
+     under `docs/decisions/`, indexed from `docs/index.md`. Don't write one for an ordinary
+     refactor; when in doubt, this one's worth asking the user about rather than guessing.
+   Each of these is a mechanical sync, not a new judgment call — if nothing changed shape, there's
+   nothing to touch here.
 
 ## Step 4 — Report back
 
 Since this skill writes directly (no draft-and-confirm step — the user reviews via normal `git
-diff` afterward), end with a short, concrete summary: which file(s) you touched and, in a
-sentence each, what changed in them. If you decided nothing was worth persisting, say that
-explicitly and briefly explain why (e.g. "straightforward bug fix, fully explained by the diff and
-commit message") — an agent that silently does nothing is indistinguishable from one that forgot
-to run, so always state the outcome.
+diff` afterward), give a short, concrete summary: which file(s) you touched and, in a sentence
+each, what changed in them. If you decided nothing was worth persisting, say that explicitly and
+briefly explain why (e.g. "straightforward bug fix, fully explained by the diff and commit
+message") — an agent that silently does nothing is indistinguishable from one that forgot to run,
+so always state the outcome.
+
+## Step 5 — Draft a commit message (text only — never commit it yourself)
+
+After Step 4, draft a ready-to-use commit message covering the session's actual changes (the same
+`git status`/`git diff` ground truth from Step 1 — the whole diff, not just whatever this skill
+itself edited in Steps 1–3) and put it in your chat response in a fenced code block, so the user
+can copy it as-is, edit it, or ignore it.
+
+**Never run `git add`, `git commit`, `git push`, or any other git write yourself as part of this
+step** — `AGENTS.md` → Git policy already says not to commit unless explicitly asked, and drafting
+a message is not that ask. This step produces text for the user to act on, nothing else.
+
+Match this repo's actual commit style rather than a generic template — check recent history first
+(`git log --format="%s%n%b%n---" -10`) if you haven't already this session. As of this writing that
+style is a single terse subject line, imperative mood, occasionally multiple clauses joined by
+`" - "` for a session that touched several things; no blank-line body, no Conventional Commits
+prefix, no trailer. Follow that shape unless the user's own recent commits have visibly drifted
+from it — don't impose a different convention (e.g. a multi-paragraph body, a `feat:`/`fix:`
+prefix) just because it's more common elsewhere.
+
+If `git status`/`git diff` shows changes this session didn't make — a real, recurring situation in
+this repo, which the user often works in concurrently with the running app or another session —
+**do not describe those changes as if this session made them.** Either scope the draft message to
+only this session's own changes (preferred when the two are cleanly separable, e.g. by file), or
+say plainly in your chat response (not inside the drafted message) that the working tree has
+unrelated changes mixed in and the user should split them before committing.

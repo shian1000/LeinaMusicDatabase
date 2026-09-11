@@ -20,6 +20,7 @@ Thumbs.db
 .debug
 recent_dirs.json
 discovery_modules_config.json
+/.agents/local.md
 
 # Databases (runtime / user data)
 /src/database/

@@ -21,8 +21,13 @@ Durable content that used to sprawl across root-level session reports (`OPTIMIZA
 ## Read order
 
 1. This file.
-2. The `docs/agent-notes/` topic note(s) for the area you're touching — index at the bottom.
-3. Verify behaviour in the source before editing. The codebase is ~7k lines; read the actual
+2. `.agents/local.md` if it exists — gitignored, machine-specific facts and per-developer
+   workflow permissions (template: `.agents/local.example.md`).
+3. For unfamiliar territory: [`docs/index.md`](docs/index.md) → [`docs/systems/index.md`](docs/systems/index.md)
+   to find which subsystem owns the area, then [`docs/architecture.md`](docs/architecture.md) /
+   [`docs/data-model.md`](docs/data-model.md) if you need layout or schema.
+4. The `docs/agent-notes/` topic note(s) for that subsystem — index at the bottom of this file.
+5. Verify behaviour in the source before editing. The codebase is ~7k lines; read the actual
    function rather than trusting a summary.
 
 ## Sources of truth
@@ -42,8 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — slow and occasionally flaky (several tests hit the
-  live network; see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~30 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -62,7 +66,8 @@ non-trivial work in that area.
 - `src/utils/database/` — DB access, sessions, and the search/getter layer + song/artist
   **category** system. Non-obvious ordering and category gotchas (alphabetical-not-best-match
   results, `search_only_categories` is song-only, shared fallback filter):
-  `docs/agent-notes/database-search.md`.
+  `docs/agent-notes/database-search.md`. `backup.py` / `migrations.py` — automatic backups and
+  schema migrations, run from `main.py` at every startup: `docs/runbooks/database.md`.
 - `src/utils/discoveries/` — external-metadata fetchers and the MP3-tag import.
   `docs/agent-notes/discovery-modules.md` (fetcher loading, result validation, shared browser,
   scraping failure modes) and `docs/agent-notes/import-pipeline.md` (why import is slow).
@@ -86,18 +91,27 @@ non-trivial work in that area.
 - `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
   it for "search then resolve to one DB row" rather than re-duplicating.
   `docs/agent-notes/database-search.md`.
-- `src/menu/` — the terminal menu tree (presentation + workflow wiring).
+- `src/menu/` — the terminal menu tree (presentation + workflow wiring). Known fragility:
+  importing `menu.song_actions` before `menu.main_menu` triggers a circular import
+  (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
+  affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
+  excluded from pytest collection (`tests/conftest.py`). Not yet fixed; not a reason to avoid
+  importing `menu.song_actions` normally through `main.py`'s own path.
 - `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
   per-field loop.
-- `tests/` — regression tests. `tests/test_scripts.py` is an explicit scratch file (its own
-  docstring: "meant to be a mess") — not a style reference. `tests/manual/` holds manual
-  diagnostic scripts (real imports + live network), excluded from collection via its `conftest.py`.
+- `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
+  covers — keep it in sync with the tests). `tests/test_scripts.py` is an explicit scratch file
+  (its own docstring: "meant to be a mess"), excluded from collection via `tests/conftest.py`.
+  `tests/manual/` holds manual diagnostic scripts (real imports + live network), excluded from
+  collection via its own `conftest.py`.
 
 ## Architecture boundaries
 
 - `src/menu/` drives workflow and presentation. Keep SQL and matching logic in `src/utils/*`, not
-  in menu handlers.
+  in menu handlers — a future API/mobile client would call the same `src/utils/*` layer rather
+  than repurposing `src/menu/`. Why this is a recorded decision, not just a convention:
+  [ADR-0001](docs/decisions/0001-ui-independent-business-logic.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →
   `debug.py`. Don't add a parallel local version of any of these.
@@ -108,15 +122,21 @@ non-trivial work in that area.
 ## Database safety
 
 - Two SQLite DBs under `src/database/` (gitignored): `music.db` (catalog: `artists`, `songs`) and
-  `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). Schema is defined only by the
-  SQLAlchemy models; there is no migration tool, so a schema change means editing the model and
-  reconciling existing DB files by hand. Back up first.
+  `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). `datatables.py` /
+  `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
+  tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
+  restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
+- Backups are automatic, not manual: `main.py` takes one at startup (once per calendar day) and
+  another, unconditionally, immediately before applying any pending migration. Don't skip either
+  when changing this code path — a schema change without a fresh backup right before it is exactly
+  the failure mode this mechanism exists to remove.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
   `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
   write has already been caught racing a live session mid-edit (title cleanup) and clobbering
   in-progress work.
-- Timestamped copies in `src/database/archive/` are the existing backup habit — make one before a
-  risky change.
+- Add a schema change via a new file in `migrations/<db_name>/`, never by hand-editing a DB file or
+  relying on `Base.metadata.create_all()` (which only creates missing tables — it never alters an
+  existing one). See the runbook before adding one.
 
 ## Data and paths that are not fixtures
 
@@ -139,13 +159,16 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- Match effort to risk. Run the focused test file for your change while iterating.
-- Several tests (Wikipedia / iTunes / Genius / MusicBrainz fetchers, YouTube download) make real
-  network calls or scrape live pages — slower and occasionally flaky. Prefer the specific file
-  over the full suite unless a full run is asked for.
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~30 tests, ~2 seconds, all
+  mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
+  See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
 - Ask before creating or changing regression tests unless the task explicitly requires it.
 - If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.
+- If you rename or remove something a test covers, update that test (and its row in
+  `tests/README.md`) in the same change. A test can silently stop being collected or start
+  asserting against an API that no longer exists, and nothing else will catch it —
+  `test_import_mp3.py` sat broken and undetected for ~3.5 months this way before being deleted.
 
 ## Performance notes
 
@@ -160,6 +183,15 @@ non-trivial work in that area.
   `MUSICBRAINZ_SPELLCHECK_USE_FALLBACK`, `SPELLCHECK_CACHE_FILE`) live in `constants.py`. An
   import prints an `MBStats` summary (requests, cache hits/misses, 429/503 counts, time throttling
   vs. in requests) at the end.
+
+## Tools
+
+- Check `tools/README.md` before writing a new reusable script; extend an existing tool if it
+  already owns that operation family rather than adding a near-duplicate.
+- `tools/db_inspect.py` — read-only report of both DBs (row counts, applied migrations, whether
+  `main.py` is running). Run it before any direct, out-of-band DB read/write instead of retyping
+  an ad-hoc `sqlite3` one-liner.
+- Don't create a tool for a one-line command — see `tools/README.md`'s own header for the bar.
 
 ## Git policy
 
