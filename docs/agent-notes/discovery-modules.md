@@ -145,6 +145,31 @@ Defense-in-depth already added (not a substitute for the `try/finally` at new ca
 `close_global_driver()` clears its module reference in a `finally` so a `.quit()` failure on an
 already-crashed browser can't wedge it, and an `atexit` hook calls it as a last-resort net.
 
+### Chrome launch failures: snap Chromium, and `ChromeDriverLaunchError`
+
+On Ubuntu, a snap-packaged `chromium`/`chromium-browser` runs Chrome inside its own mount
+namespace that gives it a **private `/tmp`** (bind-mounted from
+`/tmp/snap-private-tmp/snap.chromium/tmp` on the host). Chrome itself starts fine and DevTools
+does come up, but it writes the `DevToolsActivePort` file into that private `/tmp` — invisible to
+`chromedriver`, which polls for it from outside the snap sandbox. Selenium never sees the file,
+waits out its timeout, and raises `SessionNotCreatedException: ... DevToolsActivePort file
+doesn't exist`, even though nothing is actually wrong with Chrome. This only reproduces on a
+machine where Chrome/Chromium is snap-installed (the common case on stock Ubuntu, since
+`chromium-driver` was dropped from apt); it won't reproduce by reasoning about the code.
+
+Fix: `_find_chrome_binary()` in `selenium_sessions.py` prefers a real, non-snap
+`google-chrome-stable`/`google-chrome` binary (found via `shutil.which`) and pins
+`options.binary_location` to it, falling back to `chromium-browser`/`chromium` (i.e. the snap)
+only if Chrome isn't installed at all. If this bug resurfaces, check `which google-chrome-stable`
+first before re-diagnosing from scratch.
+
+Separately, `_build_driver()` wraps the Chrome/chromedriver launch and re-raises any
+`WebDriverException` as `ChromeDriverLaunchError` — a driver-launch failure (missing browser,
+this snap issue, etc.) used to be an uncaught exception that crashed the whole program via
+`utils.common.debug`'s global `sys.excepthook`. Any call site that calls `open_global_driver()`
+directly (not just `get_global_driver()`) should catch `ChromeDriverLaunchError` and fail that one
+operation gracefully instead of letting it escape — see `fill_missing_albums.py` for the pattern.
+
 ## `google_search_fetcher.py` — two different failure modes that look identical
 
 The fetcher depends on Google rendering a `music/recording_cluster` Knowledge Panel for the

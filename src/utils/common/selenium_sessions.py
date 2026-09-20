@@ -3,8 +3,13 @@ import shutil
 import threading
 from typing import Optional
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+
+
+class ChromeDriverLaunchError(RuntimeError):
+    """Raised when Chrome/chromedriver fails to start a browser session."""
 
 try:
     from webdriver_manager.chrome import ChromeDriverManager
@@ -107,11 +112,19 @@ def _build_driver(headless: bool = True) -> webdriver.Chrome:
         "Chrome/124.0.0.0 Safari/537.36"
     )
 
-    if USE_WDM:
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=options)
-    else:
-        driver = webdriver.Chrome(options=options)
+    try:
+        if USE_WDM:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=options)
+        else:
+            driver = webdriver.Chrome(options=options)
+    except WebDriverException as exc:
+        raise ChromeDriverLaunchError(
+            "Nie udało się uruchomić przeglądarki Chrome/Chromium do wyszukiwania "
+            "(Selenium). Sprawdź, czy Chrome/Chromium jest zainstalowany i czy nie "
+            "jest to wersja snap (znany konflikt: 'DevToolsActivePort file doesn't "
+            f"exist'). Szczegóły: {exc}"
+        ) from exc
 
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"

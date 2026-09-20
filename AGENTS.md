@@ -218,8 +218,9 @@ non-trivial work in that area.
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
-  lifecycle, and `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs.
-  CAPTCHA — don't try to evade the latter).
+  lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
+  and `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
+  try to evade the latter).
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why
   MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
   cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the
