@@ -1,5 +1,5 @@
 [] Zrobić YT fetcher
-[] Optymalizacja?
+
 [] Zrobić Spotify fetcher:
 Przygotuj Spotify fetcher, który będzie wykonywał podobną funkcję, co inne fetchery, ale na spotify. Zanim to zrobisz to napisz mi plan, ak byś to rozwiązał?
 
@@ -7,4 +7,3 @@ Utwory do testu:
 MRFY + Laibach - Poskočna
 
 [] Modyfikacja klawiatury
-[] Działa, tylko jest to ostrzeżenie. Możemy coś z nim zrobić?

@@ -56,8 +56,10 @@ def copy_to_clipboard(message: str):
         pyperclip.copy(message)
         return True
     except pyperclip.PyperclipException as e:
+        if _copy_via_osc52(message):
+            return True
         print(f"Clipboard unavailable: {e}")
-        return _copy_via_osc52(message)
+        return False
 
 
 def _copy_via_osc52(message: str) -> bool:

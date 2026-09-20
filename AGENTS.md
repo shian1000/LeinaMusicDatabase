@@ -80,6 +80,13 @@ non-trivial work in that area.
 - `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
   short-string-threshold pitfalls: `docs/agent-notes/normalization-and-matching.md`. The
   `check_spelling()` cost path and return shape: `docs/agent-notes/import-pipeline.md`.
+  `copy_to_clipboard()` falls back to an OSC 52 terminal escape sequence when `pyperclip` finds no
+  clipboard mechanism — the normal case when the app is launched via the root `MusicDatabase-
+  Remote-*.sh` scripts, which run the whole program on a remote host over `ssh -t` (no local
+  display for xclip/xsel/wl-clipboard to attach to). OSC 52 asks the local terminal emulator
+  itself to set the clipboard, so it works headless; the plain "Clipboard unavailable" warning
+  only prints if that also fails (e.g. non-interactive stdout, or a terminal that doesn't support
+  OSC 52 writes).
 - `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
   scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
 - `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):
