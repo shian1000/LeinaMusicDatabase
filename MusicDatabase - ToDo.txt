@@ -1,0 +1,47 @@
+Zrobić YT fetcher
+
+Zrobić Spotify fetcher
+
+Czy Google fetcher sprawdza swoje nazwy w blackliscie?
+
+Dodać do listy, że nie ma na YT:
+Сербский Нож - Рруа
+Wãbórk Sztrómù - Wôżne, że...
+Хлопці Горобці - 301 307
+
+Wyszukiwanie albumów - Google:
+The Car Is On Fire - Can't Cook
+
+Spotify fetcher
+
+
+
+None - None (reason - Couldn't establish the artist and title (Filename: /home/owner/Documents/Code/MusicDatabase/import/Haiku Garden ~ Avalanš.mp3))
+None - None (reason - Couldn't establish the artist and title (Filename: /home/owner/Documents/Code/MusicDatabase/import/Haiku Garden ~ Structures.mp3))
+
+
+1. Searching via yt-dlp for: Betoko - Breaking (Original Mix)
+  ✔ Best match (relevance=1.00, score=1.6464037262230695): Breaking (Club Edit) [GMYG_mxMoN8]
+  ➕ Added to playlist
+Powinno być [https://youtu.be/Dnum8gOlrME]
+
+2. Searching via yt-dlp for: Genesis - Firth Of Fifth
+  ✔ Best match (relevance=1.00, score=4.054124677490044): Genesis - Firth Of Fifth, I Know What I Like (When in Rome 2007) [gsIC3TvzLXE]
+  ➕ Added to playlist
+To wersa live. Powinno być [https://youtu.be/Rz-tHZEr37I]
+
+3. Searching via yt-dlp for: Koala Voice  -  Vest
+  ✔ Best match (relevance=1.00, score=-1.4377071355435254): Vest (Live) [kN41GTal6Pw]
+  ➕ Added to playlist
+To wersja live. Powinno być [https://youtu.be/Vv6fECSGkKg]
+
+4. Searching via yt-dlp for: Krzysztof Zalewski - Milosc Milosc
+  ✔ Best match (relevance=0.85, score=1.211854428720641): Miłość Miłość (Live) [Sr6JP_eYbTI]
+  ➕ Added to playlist
+To jest live. A powinno być [https://youtu.be/7i1ggMU2JSQ]
+
+5. Searching via yt-dlp for: La Vida Bohème - Radio Capital
+  ✔ Best match (relevance=1.00, score=1.5145079073020398): Radio Capital en vivo en El Palacio de los Deportes [YAin39TU3EE]
+  ➕ Added to playlist
+To jest wersja live. A powinno być [https://youtu.be/F9gb9SsO_O8]
+

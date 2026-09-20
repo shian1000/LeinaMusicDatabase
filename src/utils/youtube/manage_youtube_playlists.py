@@ -104,7 +104,15 @@ NOT_THE_SONG_KEYWORDS = ["tłumaczenie", "lyrics translation"]
 # festival is a live-performance event, and its name shows up in tags/titles
 # in many forms ("Woodstock", "#Woodstock2016", "woodstock") that a plain
 # lowercased substring check already catches without listing each variant.
-STRONG_LQ_KEYWORDS = ["live", "na żywo", "woodstock"]
+# "jools holland" is the same shape of gap as "woodstock": a specific,
+# unambiguous live-performance venue whose own name carries no English
+# "live"/"concert" word at all. Real case: Benjamin Clementine - Cornerstone
+# — the real official video (7Dc5BQ31iLw, 6.7M views) lost to a BBC "Later...
+# with Jools Holland" clip (CJJNl1p-PGA, 1.2M views, quality 5.06 vs 4.83)
+# purely because the official video's own "(Official Video)" tag cost it the
+# VIDEO_PENALTY while the Jools Holland clip incurred no LQ penalty at all
+# and even picked up an HQ bonus from "HD" (BBC Two HD).
+STRONG_LQ_KEYWORDS = ["live", "na żywo", "woodstock", "jools holland"]
 STRONG_LQ_PENALTY = 3
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
 # Lowered from -2: being a video instead of an audio-only upload isn't

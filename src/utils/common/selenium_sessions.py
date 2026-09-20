@@ -1,4 +1,5 @@
 import atexit
+import shutil
 import threading
 from typing import Optional
 from selenium import webdriver
@@ -63,11 +64,37 @@ def close_global_driver() -> None:
 # try/finally, or the process exits after an unhandled exception.
 atexit.register(close_global_driver)
 
+# The snap-packaged chromium-browser isolates /tmp in its own mount
+# namespace, so chromedriver (running outside the snap) can never see the
+# DevToolsActivePort file Chrome writes there — every launch fails with
+# "session not created: DevToolsActivePort file doesn't exist" even though
+# Chrome itself starts fine. Prefer a non-snap Chrome/Chromium binary when
+# one is installed.
+_CHROME_BINARY_CANDIDATES = (
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium-browser",
+    "chromium",
+)
+
+
+def _find_chrome_binary() -> Optional[str]:
+    for name in _CHROME_BINARY_CANDIDATES:
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
 def _build_driver(headless: bool = True) -> webdriver.Chrome:
     """Build and return a new Chrome WebDriver instance."""
     options = Options()
     if headless:
         options.add_argument("--headless=new")  # Chrome 112+
+
+    binary = _find_chrome_binary()
+    if binary:
+        options.binary_location = binary
 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")

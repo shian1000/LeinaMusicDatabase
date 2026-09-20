@@ -103,6 +103,34 @@ directly in `music.db` (ids 2780, 2790, 2795, 2797); if this recurs for other ar
 same import path (no ID3 tags + `extract_unknown_data()`'s raw filename split) rather than trying to
 patch `score_result()` to guess which part of a title is branding.
 
+## A collab track credited in the DB solely to the featured/guest artist defeats matching entirely
+
+Same category as the contaminated-title case above — bad `songs`/`artists` data defeating a
+matching function that assumes the DB's artist attribution is the one the real upload actually
+uses, not a `score_result()` bug. Real case: `Gaba Kulka - Biegnij dalej sam`. The DB credited the
+song to `Gaba Kulka` alone (her only song in the whole database), but the track is actually a
+`Fisz Emade Tworzywo` release on which she's a guest vocalist — confirmed via yt-dlp's official
+track metadata on the real upload (`cQ_wNp43ulM`, 247K views): `"Provided to YouTube by Agora
+Digital Music"`, `artists: ["Fisz Emade Tworzywo"]`, no mention of Gaba Kulka anywhere in YouTube's
+own credit. Every real candidate's title/channel says "Fisz Emade Tworzywo", never "Gaba Kulka", so
+`MIN_ARTIST_RELEVANCE` correctly rejected all of them — the *only* candidate that ever
+title-contained "Gaba Kulka" was an unrelated song by a different band (`HEY`) that happens to
+feature her too, and even that only cleared relevance 0.25, below the gate.
+
+No scoring change can fix this — `artist_synonyms` doesn't apply either, since "Fisz Emade
+Tworzywo" isn't an alias of "Gaba Kulka", it's a different (real, already-existing) artist row that
+happens to also credit her as a guest. The actual fix is re-pointing `songs.artist_id` at the
+correct artist via `merge_artists_in_db()` (`database_management.py`) — reassigns the song and
+deletes the now-empty source artist row in one step, the same helper the app's own merge-artist
+menu flow uses, rather than a raw `UPDATE` (see the Database safety section of `AGENTS.md` before
+any direct write like this: check `ps aux` for a running `main.py` first). Once repointed to `Fisz
+Emade Tworzywo`, `search_video_ytdlp()` resolves the real upload immediately, no other change
+needed. If a search keeps failing even after every relevance/quality signal checks out, check
+whether the DB's credited artist is actually who YouTube itself credits the track to before
+assuming it's a scoring gap — a plausible-looking single-artist credit that's actually a
+mis-attributed feature/collab is invisible to every mechanism in this file, the same structural
+blind spot the `synonyms` column and this note both exist to flag, not fix automatically.
+
 ## HQ_KEYWORDS matched overlapping substrings, double-counting one signal as two
 
 `quality` scoring looped every keyword in `HQ_KEYWORDS`/`VIDEO_KEYWORDS` independently and summed
@@ -556,6 +584,30 @@ failure, search miss, and DB save in this flow is logged to `youtube_link_cache.
 gitignored, always-on regardless of the `.debug` flag that gates `debug.log`) — check it first if
 a playlist run picks an unexpected video or a stored link stops working.
 
+## A live TV performance show's own name can carry no "live" wording at all
+
+Same failure shape as `"woodstock"` joining `STRONG_LQ_KEYWORDS` (see the rebalancing section
+above), a second instance rather than a new mechanism. Real case: `Benjamin Clementine -
+Cornerstone` — the real official video (`7Dc5BQ31iLw`, 6.7M views) lost to a BBC "Later... with
+Jools Holland" TV performance clip (`CJJNl1p-PGA`, 1.2M views) by a narrow quality margin (5.06 vs
+4.83), because:
+- The official video's own `"(Official Video)"` label costs it `VIDEO_PENALTY` (`-1`) for being a
+  video, per the existing tradeoff documented above.
+- The Jools Holland clip's title (`"... - Later... with Jools Holland - BBC Two HD"`) mentions no
+  English "live"/"concert"/"session" word anywhere — the show's own name is the only signal it's a
+  live performance — so it took zero `LQ_KEYWORDS`/`STRONG_LQ_KEYWORDS` penalty, and even picked up
+  an HQ bonus from `"HD"` (`"BBC Two HD"`).
+
+`"jools holland"` joined `STRONG_LQ_KEYWORDS` (not the generic `LQ_KEYWORDS` list) since, like
+Woodstock, a Jools Holland performance is never the plain studio version. Verified directly against
+real yt-dlp output for this song: quality flips from `5.06` (wrongly won) to `0.06`, correctly
+losing to the real official video's `4.83`. Other live-session shows already self-report via the
+word "Live" in their own name/title convention (e.g. `"Live on The Tonight Show Starring Jimmy
+Fallon"`, already caught by the existing `"live"` entry) — Jools Holland was the one seen in
+practice that doesn't. Same whack-a-mole caveat as every other one-off keyword addition in this
+file: add another specific show name only once a real case surfaces needing it, don't try to
+enumerate every TV/session brand preemptively.
+
 ## Known regressions this logic exists to prevent
 
 Concrete cases hit during development — useful as a regression checklist if this scoring is ever
@@ -651,6 +703,12 @@ simplified:
   confirmed end-to-end for the first song, confirmed the retry engages correctly for the second but
   landed back on the live pick that specific run because yt-dlp's anonymous search returned zero
   results for the transliterated query at that moment (see that section's known limitation).
+- `Benjamin Clementine - Cornerstone` → a BBC "Later... with Jools Holland" TV performance beat the
+  real official video on a narrow quality margin because the show's own name carries no "live"
+  wording at all (see the Jools Holland section above).
+- `Gaba Kulka - Biegnij dalej sam` → the DB credited the song solely to Gaba Kulka (a guest
+  vocalist), not the real credited act `Fisz Emade Tworzywo`, so no real upload's title/channel
+  ever matched — a data-attribution problem, not a scoring one (see the section above).
 
 **Not covered by any of the above:** `Vinsent - Praciahvaju Żyć` — same shape as the Akute cases
 above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism

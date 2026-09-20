@@ -644,6 +644,36 @@ def test_search_video_ytdlp_prefers_studio_video_over_viral_live_clip(monkeypatc
     assert video_id == "KPJPJzpk_QQ"
 
 
+def test_search_video_ytdlp_prefers_official_video_over_jools_holland_session(monkeypatch):
+    # Real case: "Benjamin Clementine - Cornerstone". The real official video
+    # (7Dc5BQ31iLw, 6.7M views) lost to a BBC "Later... with Jools Holland"
+    # TV performance clip (CJJNl1p-PGA, 1.2M views) at the old weights:
+    # quality 4.83 vs 5.06, because the official video's own "(Official
+    # Video)" label cost it VIDEO_PENALTY while the Jools Holland clip's
+    # title mentions no English "live"/"concert"/"session" word at all (the
+    # show's own name is the only signal it's a live performance) and even
+    # picked up an HQ bonus from "HD" ("BBC Two HD"). Same shape as
+    # "woodstock" joining STRONG_LQ_KEYWORDS above — asserting on the margin,
+    # not just the final pick, since the old weights actually won this one
+    # (wrongly) rather than merely tying.
+    official_title = "Benjamin Clementine - Cornerstone (Official Video)"
+    jools_holland_title = "Benjamin Clementine - Cornerstone - Later... with Jools Holland - BBC Two HD"
+
+    official_score = m.score_result(official_title, "Benjamin Clementine", "Cornerstone", "Benjamin Clementine", 6706571)
+    jools_holland_score = m.score_result(jools_holland_title, "Benjamin Clementine", "Cornerstone", "BBC", 1155234)
+    assert official_score[2] - jools_holland_score[2] > 4  # was ~-0.24 before "jools holland" joined STRONG_LQ_KEYWORDS
+
+    candidates = [
+        {"id": "CJJNl1p-PGA", "title": jools_holland_title, "channel": "BBC", "view_count": 1155234},
+        {"id": "7Dc5BQ31iLw", "title": official_title, "channel": "Benjamin Clementine", "view_count": 6706571},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Benjamin Clementine", "Cornerstone")
+
+    assert video_id == "7Dc5BQ31iLw"
+
+
 def test_search_video_ytdlp_matches_specific_requested_remix(monkeypatch):
     # Real case: "Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix
     # Extended)". Bracket-stripping for relevance meant *any* remix scored
@@ -994,6 +1024,7 @@ DB_REFERENCE_REGRESSION_CASES = [
     ("SunSay - Немовля", "SunSay", "Немовля", "_edxVM3PylU"),
     ("Waglewski, Fisz, Emade - Bóg", "Waglewski, Fisz, Emade", "Bóg", "tRHIqK_vy6M"),
     ("Вольны хор - Пагоня", "Вольны хор", "Пагоня (запіс з анлайн - канцэрта Муры)", "5kgvHgqr2aE"),
+    ("Benjamin Clementine - Cornerstone", "Benjamin Clementine", "Cornerstone", "7Dc5BQ31iLw"),
     # The one case where the without-DB-reference test above
     # (test_search_video_ytdlp_declines_when_only_match_is_a_translation_video)
     # asserts `video_id is None`: the real video is age-restricted and
@@ -1050,3 +1081,367 @@ def _resolve_via_db_reference(monkeypatch, artist: str, title: str, video_id: st
 def test_regression_suite_resolves_via_db_reference(monkeypatch, artist, title, expected_video_id):
     resolved = _resolve_via_db_reference(monkeypatch, artist, title, expected_video_id)
     assert resolved == expected_video_id
+
+
+# ---------------------------------------------------------
+# Fresh-search regression: the same real songs, resolved with NO
+# Song.youtube_video_id involved at all
+# ---------------------------------------------------------
+#
+# DB_REFERENCE_REGRESSION_CASES above proves "if the DB already has the right
+# answer, we keep reusing it" — but it deliberately never calls search_video()
+# (that path fails the test on purpose, see _resolve_via_db_reference's
+# fail_if_searched). Every individual test earlier in this file already
+# proves the other half — that a *fresh* search resolves a given real song
+# correctly on its own — but each one lives under its own bespoke name and
+# docstring documenting the specific bug it caught; there was no single place
+# to see "yes, every real case in the DB-reference list is still covered by
+# an independent fresh-search path", the way the table above makes that
+# explicit for the DB path. This section restates the *same* real candidate
+# pools already used above (copied, not imported — this table is meant to be
+# a standalone audit of coverage, not a refactor of the tests above, so a
+# rename/removal of one of those tests' local variables can't silently shrink
+# this list too) and re-verifies every one via search_video_ytdlp() (or
+# search_video() for the one case — Berlin — whose bug lives in the Data API
+# fallback, not yt-dlp), completely independent of whatever Song.youtube_video_id
+# a real database might hold.
+#
+# One entry is deliberately not "resolves to the same id": Taco Hemingway -
+# Fuck Your List is expected to resolve to None here — the real video is
+# age-restricted and invisible to every search backend this app uses (see
+# that song's dedicated test above), so Song.youtube_video_id is the *only*
+# way it ever resolves. A fresh search correctly finding nothing is the
+# right behavior, not a gap this table should paper over.
+FRESH_SEARCH_REGRESSION_CASES = [
+    (
+        "Berlin - Sex (I'm A...)",
+        BERLIN_SEX_ARTIST, BERLIN_SEX_TITLE,
+        [],  # yt-dlp's anonymous search returns nothing for this query, always (see safeSearch case above)
+        (BERLIN_SEX_VIDEO_ID,),
+        {"api_items": [
+            {"id": {"videoId": BERLIN_SEX_VIDEO_ID}, "snippet": {"title": "Berlin - Sex (I'm A...) [Official Audio]", "channelTitle": "Berlin - Topic"}},
+        ]},
+    ),
+    (
+        "Foals - 2001", "Foals", "2001",
+        [
+            {"id": "ydBQz3SecaE", "title": "FOALS - 2001 [Official Music Video]", "channel": "Foals"},
+            {"id": "E2WD04MPkG4", "title": "FOALS x LONDON CONTEMPORARY ORCHESTRA - 2001 [Official Video]", "channel": "Foals"},
+            {"id": "hhUaLCBqpWA", "title": "Foals - 2001 Demo Version (2001 Vibes)", "channel": "Isolarian"},
+            {"id": "NK4uIxFkEL0", "title": "Foals - 2001 (Lyrics)", "channel": "Lyriclist"},
+            {"id": "1dSy1psZhGE", "title": "FOALS: 2001 // Life Is Yours // The Colour Wheel Session", "channel": "Foals"},
+            {"id": "n1zr1LBr51c", "title": "FOALS - '2001'", "channel": "ACID STAG"},
+            {"id": "CYU9Yz2RayU", "title": MYD_REMIX_TITLE, "channel": "Foals"},
+            {"id": "SVxLol5MIdA", "title": "Foals - 2001 (Glastonbury 2022)", "channel": "BBC Music"},
+            {"id": "6Q_58jY9A0Q", "title": DAN_CAREY_DUB_TITLE, "channel": "Foals"},
+        ],
+        ("ydBQz3SecaE",), {},
+    ),
+    (
+        "SLAUGHTER TO PREVAIL - Bratva", "SLAUGHTER TO PREVAIL", "Bratva",
+        [
+            {"id": "iUZRLYfHEgA", "title": "Slaughter To Prevail - Bratva (Live In Moscow)", "channel": "SUMERIAN", "view_count": 3737158},
+            {"id": "XFzB3TXoG4A", "title": "Slaughter To Prevail - Bratva", "channel": "SUMERIAN", "view_count": 8369100},
+            {"id": "zRJSZKW4r1Q", "title": "Slaughter To Prevail - BRATVA - Live @ INKcarceration Fest 2023 @AlexTerrible", "channel": "EvilVox", "view_count": 224622},
+            {"id": "CMoSzybZ2BQ", "title": "SLAUGHTER TO PREVAIL - Bratva (Lyrics/перевод)", "channel": "Hard Rock World", "view_count": 60425},
+            {"id": "WKb0gB1lLww", "title": "SLAUGHTER TO PREVAIL  HELLFEST LIVE BIGGEST WALL OF DEATH 2024", "channel": "Alex Terrible", "view_count": 1010008},
+            {"id": "4GXlOS486fs", "title": "Slaughter To Prevail - Bratva (Lyric Video) (HQ)", "channel": "Black Fire", "view_count": 73481},
+            {"id": "87K_mGzACpc", "title": "Musician's Slaughter To Prevail reaction - Bratva", "channel": "Steve O'G", "view_count": 9555},
+        ],
+        ("XFzB3TXoG4A",), {},
+    ),
+    (
+        "Passive Voice - Тебе пам'ятаю", "Passive Voice", "Тебе пам'ятаю",
+        [
+            {"id": "Vd5epmcIamY", "title": "Passive Voice - Тебе пам’ятаю", "channel": "Passive Voice", "view_count": 347},
+            {"id": "jJbAmWBLs80", "title": "Passive Voice – Тебе пам’ятаю @ TNT Rock Club, Мінск, 02.11.2025", "channel": "ochtilno", "view_count": 15},
+            {"id": "3sG_TPI-eiA", "title": "Black Line Studio | Passive Voice | Live", "channel": "Black Line Studio", "view_count": 10048},
+            {"id": "_ezASsdYwmY", "title": "Нажаль | Passive Voice", "channel": "Passive Voice", "view_count": 3809},
+        ],
+        ("Vd5epmcIamY",), {},
+    ),
+    (
+        "Ten Preston feat. Sitek - 71", "Ten Preston feat. Sitek", "71 (prod. lil aloes)",
+        [
+            {"id": "R5eMExxWu1M", "title": "Ten Preston feat. Sitek - 71 (prod. lil aloes)", "channel": "chillwagon", "view_count": 3260870},
+            {"id": "RZVKNq7OwoI", "title": "Ten Preston feat. Sitek - 71 (prod. lil aloes) (Bass Boosted)", "channel": "FistachNation", "view_count": 1994},
+            {"id": "0PWBdfKU5Xs", "title": "Ten Preston - SHEESH (prod. lil aloes)", "channel": "chillwagon", "view_count": 2154422},
+            {"id": "31VKUYwRjQY", "title": "Ten Preston feat. Sitek - 71 (prod. lil aloes) (Bass Boosted)", "channel": "Bass Boosted", "view_count": 518},
+            {"id": "kzqzV_TNVMw", "title": "Ten Preston - Fan (prod. lil aloes)", "channel": "chillwagon", "view_count": 140285},
+        ],
+        ("R5eMExxWu1M",), {},
+    ),
+    (
+        "Gary Clark Jr. - Ain't Messin' 'Round", "Gary Clark Jr.", "Ain't Messin' 'Round",
+        [
+            {"id": "fyBem5-Bfpg", "title": "Gary Clark Jr. - Ain't Messin' Round [Official Music Video]", "channel": "garyclarkjr", "view_count": 1029669},
+            {"id": "EyFFuEY_S6Q", "title": "Gary Clark Jr - Ain't Messin 'Round [Official Audio]", "channel": "garyclarkjr", "view_count": 400470},
+            {"id": "AdK8QEMIKN4", "title": "Gary Clark Jr - Ain't Messin' 'Round (Live at Farm Aid 2014)", "channel": "Farm Aid", "view_count": 64223},
+        ],
+        ("EyFFuEY_S6Q",), {},
+    ),
+    (
+        "WE BUTTER THE BREAD WITH BUTTER - N!CE", "WE BUTTER THE BREAD WITH BUTTER", "N!CE",
+        [
+            {"id": "E49Qrhdk2cI", "title": "WE BUTTER THE BREAD WITH BUTTER - N!CE (2021) // Official Music Video // AFM Records", "channel": "AFM Records", "view_count": 890446},
+            {"id": "qSNnl-w0_c8", "title": "We Butter The Bread With Butter - N!CE (React/Review)", "channel": "Mat and Chels React", "view_count": 13231},
+        ],
+        ("E49Qrhdk2cI",), {},
+    ),
+    (
+        "Måneskin - Zitti e buoni", "Måneskin", "Zitti e buoni",
+        [
+            {"id": "QN1odfjtMoo", "title": "Måneskin - ZITTI E BUONI (Official Video – Sanremo & EUROVISION 2021 Winners)", "channel": "Måneskin Official", "view_count": 230071757},
+            {"id": "0Upt-ddaw04", "title": "ZITTI E BUONI (Eurovision Version)", "channel": "Måneskin Official", "view_count": 8897851},
+        ],
+        ("QN1odfjtMoo",), {},
+    ),
+    (
+        "Bloodywood - Ari Ari", "Bloodywood", "INDIAN STREET METAL (_Ari Ari_ ft. Raoul Kerr)",
+        [
+            {"id": "i4FqGPRQWFM", "title": 'INDIAN STREET METAL ("Ari Ari" ft. Raoul Kerr) - Bloodywood', "channel": "Bloodywood", "view_count": 7946578},
+            {"id": "6uJoN_I9ebQ", "title": 'INDIAN FOLK METAL (Bloodywood - "Jee Veerey" ft. Raoul Kerr)', "channel": "Bloodywood", "view_count": 2536950},
+            {"id": "1nvgTbEdH8E", "title": "Ari Ari", "channel": "Bloodywood", "view_count": 313093},
+            {"id": "TcpgRq-bCTs", "title": 'INDIAN STREET METAL ("Ari Ari" ft. Raoul Kerr) - Bloodywood (REACTION)', "channel": "Alex N Channel", "view_count": 4556},
+            {"id": "Fvu3uPNiWNk", "title": "Bloodywood - Ari Ari - Live at Wacken Open Air 2019", "channel": "WackenTV", "view_count": 290477},
+            {"id": "LZcjfLMzDuw", "title": "Bloodywood & Raoul Kerr - Ari Ari", "channel": "All Kind Of Music", "view_count": 201},
+            {"id": "a65A626Ed20", "title": "Bloodywood - Dana Dan (Indian Folk Metal)", "channel": "Bloodywood", "view_count": 9423555},
+        ],
+        ("i4FqGPRQWFM",), {},
+    ),
+    (
+        # Either the band's own upload or the official video is accepted —
+        # same tolerance as this song's dedicated test above, which found
+        # both legitimate once containment-based artist_relevance was fixed.
+        "Zob - Cantec de dragoste", "Zob", "Cantec de dragoste",
+        [
+            {"id": "KGPft935c00", "title": "Zob - Cantec De Dragoste (Official Video)", "channel": "Roton Hits", "view_count": 188747},
+            {"id": "D398DGsBP1I", "title": "Zob & Mara - Cantec de dragoste", "channel": "Vali Moga", "view_count": 54880},
+            {"id": "5n_cKrQYeoU", "title": "ZOB- 'Cântec de dragoste' la BTLive @Guerrilive Radio Session", "channel": "Radio Guerrilla", "view_count": 5904},
+            {"id": "X86Vjl3SCpc", "title": "Alexandra Usurelu și Dan Bordeianu - Cantec de dragoste", "channel": "Alexandra Usurelu", "view_count": 563148},
+            {"id": "-oDSUwRm64Y", "title": "Zob - Cantec de dragoste", "channel": "Alexandru Popa", "view_count": 1095},
+            {"id": "-lssuVMpvFo", "title": "Zob-Cantec de dragoste ( Cristina Țițescu cover)", "channel": "Cristina Țițescu", "view_count": 1046},
+        ],
+        ("D398DGsBP1I", "KGPft935c00"), {},
+    ),
+    (
+        "Bastille - Pompei", "Bastille", "Pompei",
+        [
+            {"id": "F90Cw4l-8NY", "title": "Bastille - Pompeii (Official Music Video)", "channel": "BASTILLEvideos", "view_count": 839916374},
+            {"id": "ilLEuwH4hws", "title": "Bastille - Pompeii (Lyric Video)", "channel": "BASTILLEvideos", "view_count": 32408712},
+            {"id": "cvQ2LF3hyuY", "title": "Bastille - Pompeii (Lyrics)", "channel": "Cosmos Music", "view_count": 23270768},
+        ],
+        ("F90Cw4l-8NY",), {},
+    ),
+    (
+        "ABRADAB - Niesmiertelnosc", "ABRADAB", "Niesmiertelnosc (Muzyka Daje)",
+        [
+            {"id": "vIGV7z31vj8", "title": "Nieśmiertelność (Live)", "channel": "Abradab - Topic", "view_count": 294},
+            {"id": "T3bqVFKEoDA", "title": "ABRADAB - Nieśmiertelność (Muzyka daje) [OFFICIAL AUDIO]", "channel": "S.P. RECORDS", "view_count": 22699},
+        ],
+        ("T3bqVFKEoDA",), {},
+    ),
+    (
+        "bayski - набіраи", "bayski", "набіраи (acoustic)",
+        [
+            {"id": "l8cJML7BJUg", "title": "bayski - набірай (acoustic)", "channel": "bayski", "view_count": 686},
+        ],
+        ("l8cJML7BJUg",), {},
+    ),
+    (
+        "Rival Sons - Darkfighter", "Rival Sons", "Darkfighter",
+        [
+            {"id": "uX7ZXF2EyeE", "title": "DARKFIGHTER Track by Track (Official)", "channel": "Rival Sons", "view_count": 50000},
+            {"id": "GEW7zR1aIUI", "title": 'Rival Sons - "DARKFIGHTER" (Official Audio)', "channel": "Rival Sons", "view_count": 97112},
+        ],
+        ("GEW7zR1aIUI",), {},
+    ),
+    (
+        "Elvis Crespo - Suavemente", "Elvis Crespo", "Suavemente",
+        [
+            {"id": "UMYAdGEXOn0", "title": "Luck Ra, Elvis Crespo - SUAVEMENTE", "channel": "Luck Ra", "view_count": 19611031, "tags": ["Suavemente", "Luck Ra", "Elvis Crespo", "Cuarteto", "Latin", "En vivo", "Fiesta"]},
+            {"id": "WPiEbYSF9kE", "title": "Elvis Crespo - Suavemente", "channel": "Elvis Crespo", "view_count": 299876074, "tags": [
+                "suavemente álbum", "ElvisCrespovevo", "tu sonrisa", "official", "video",
+                "vídeo musical", "music video", "elvis crespo en directo", "album",
+                "Salsa tropical", "elvis crespo en vivo", "instrumental", "música",
+                "dance", "karaoke", "remix", "en directo", "audio",
+            ]},
+        ],
+        ("WPiEbYSF9kE",), {},
+    ),
+    (
+        "Бумбокс - Нездара", "Бумбокс", "Нездара",
+        [
+            {"id": "G7-lJGOOOIc", "title": "Бумбокс - Нездара", "channel": "Maria Matrunich", "view_count": 1154},
+            {"id": "zDVzqqTzTDE", "title": "Нездара", "channel": "familyboombox", "view_count": 674464},
+        ],
+        ("zDVzqqTzTDE",), {"artist_synonyms": "familyboombox"},
+    ),
+    (
+        "Hall & Oates - Maneater", "Hall & Oates", "Maneater",
+        [
+            {"id": "IqF7S3zXl1A", "title": "Daryl Hall & John Oates - Maneater (Lyrics)", "channel": "7clouds", "view_count": 3999026},
+            {"id": "yRYFKcMa_Ek", "title": "Daryl Hall & John Oates - Maneater (Official Video)", "channel": "Daryl Hall & John Oates", "view_count": 404412123},
+        ],
+        ("yRYFKcMa_Ek",), {"artist_synonyms": "Daryl Hall & John Oates"},
+    ),
+    (
+        "Junecapone - Depravity", "Junecapone", "Depravity",
+        [
+            {"id": "qMmVQbH3sKQ", "title": "Depravity", "channel": "June - Topic", "view_count": 106},
+        ],
+        ("qMmVQbH3sKQ",), {"artist_synonyms": "June"},
+    ),
+    (
+        "Плач Єремії - Вона", "Плач Єремії", "Вона",
+        [
+            {"id": "EaQEnpYoA2U", "title": "Вона", "channel": "Taras Chubai", "view_count": 55337789},
+        ],
+        ("EaQEnpYoA2U",), {"artist_synonyms": "Taras Chubai, Тарас Чубай"},
+    ),
+    (
+        "Daði Freyr - Bitte", "Daði Freyr", "Bitte",
+        [
+            {"id": "Wotwtc9tA-Q", "title": "Daði Freyr - Bitte (Official Video)", "channel": "Daði Freyr", "view_count": 235334},
+            {"id": "2oDi4xLk1L0", "title": "Daði Freyr - Bitte (Live from Vikan með Gísla Marteini)", "channel": "Daði Freyr", "view_count": 23322},
+        ],
+        ("Wotwtc9tA-Q",), {},
+    ),
+    (
+        "OBERSCHLESIEN - Król Olch", "OBERSCHLESIEN", "Król Olch",
+        [
+            {"id": "NhPpu_WGAng", "title": "Oberschlesien - Król Olch #Woodstock2016", "channel": "KręciołaTV", "view_count": 5123817, "tags": ["Oberschlesien Król Olch na żywo", "oberschlesien woodstock", "polandrock festival"]},
+            {"id": "KPJPJzpk_QQ", "title": "OBERSCHLESIEN - Król Olch [OFFICIAL VIDEO]", "channel": "S.P. RECORDS", "view_count": 1417183, "tags": ["s.p. records", "OBERSCHLESIEN", "Król Olch"]},
+        ],
+        ("KPJPJzpk_QQ",), {},
+    ),
+    (
+        "Benjamin Clementine - Cornerstone", "Benjamin Clementine", "Cornerstone",
+        [
+            {"id": "CJJNl1p-PGA", "title": "Benjamin Clementine - Cornerstone - Later... with Jools Holland - BBC Two HD", "channel": "BBC", "view_count": 1155234},
+            {"id": "7Dc5BQ31iLw", "title": "Benjamin Clementine - Cornerstone (Official Video)", "channel": "Benjamin Clementine", "view_count": 6706571},
+        ],
+        ("7Dc5BQ31iLw",), {},
+    ),
+    (
+        "Valeria Stoica - Get Back", "Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)",
+        [
+            {"id": "YeQHuxFw31I", "title": "Valeria Stoica — Get Back (Deepshader's Reconstruction)", "channel": "Valeria Stoica", "view_count": 1202},
+            {"id": "zliatPv0RGU", "title": "Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix)", "channel": "Valeria Stoica", "view_count": 1938},
+        ],
+        ("zliatPv0RGU",), {},
+    ),
+    (
+        "Al Di Meola - Double Concerto", "Al Di Meola", "Double Concerto",
+        [
+            {"id": "3KLQfbHCYKU", "title": "Al Di Meola - Double Concerto - Live in Warsaw, 2000 [3]", "channel": "AhnDanil", "view_count": 39943},
+            {"id": "qLXJTpgS-w4", "title": "Al di Meola - Double Concerto", "channel": "Harmonia Cordis A.", "view_count": 19824},
+            {"id": "Hi1KxO32DFU", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 10883, "track": "Double Concerto"},
+            {"id": "ua9iYiOtqEE", "title": "Al Di Meola - Horgas Eszter: Astor Piazzolla - Double concerto (Budapest, 2008)", "channel": "ttttunde", "view_count": 91489},
+            {"id": "8fTeHHLcxYs", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 2294, "track": "Double Concerto"},
+            {"id": "vUelO4lctg4", "title": "AL DI MEOLA   - Double Concerto", "channel": "Jazz 4 All", "view_count": 1474},
+            {"id": "Q4g6Ln1kX50", "title": 'Al Di Meola in Sofia "Double Concerto"', "channel": "Dimitar Velichkov", "view_count": 7106},
+            {"id": "hCUYSTjfDbw", "title": "Double Concerto", "channel": "Al Di Meola", "view_count": 1802, "track": "Double Concerto"},
+        ],
+        ("Hi1KxO32DFU",), {},
+    ),
+    (
+        "SunSay - В твоих глазах сияю я", "SunSay", "В твоих глазах сияю я",
+        [
+            {"id": "tpOD1ZgP2Ik", "title": "SunSay – В твоих глазах сияю я | fairlane acoustic (2011)", "channel": "fairlane acoustic", "view_count": 34277},
+            {"id": "xQejzb1JDQo", "title": "В твоих глазах сияю я", "channel": "sunsaymusic", "view_count": 16639, "track": "В твоих глазах сияю я"},
+            {"id": "crnWx2Avou4", "title": "Sunsay - В твоих глазах сияю я", "channel": "MaximAndrosyuk", "view_count": 17387},
+            {"id": "Jo0k5OkNk_Y", "title": "SunSay - В твоих глазах сияю я", "channel": "Алексей Лакиза", "view_count": 485},
+            {"id": "bdGkqE1lUrs", "title": "В твоих глазах сияю я (Sunsay Cover)", "channel": "Леонид Оганесян", "view_count": 1933},
+            {"id": "kQlW8ZIb94o", "title": "Sunsay - В твоих глазах сияю я", "channel": "Alexander Tokarev", "view_count": 108},
+            {"id": "QQ6ckbaIaG8", "title": "SunSay - В Твоих Глазах Сияю Я", "channel": "marinellagomes", "view_count": 240},
+            {"id": "exGnkkLBChQ", "title": "SunSay - В твоих глазах сияю я (cover)", "channel": "Алексей Леонов", "view_count": 1144},
+        ],
+        ("xQejzb1JDQo",), {},
+    ),
+    (
+        "SunSay - Немовля", "SunSay", "Немовля",
+        [
+            {"id": "_edxVM3PylU", "title": "Немовля", "channel": "sunsaymusic", "view_count": 14724, "track": "Немовля"},
+            {"id": "hahNWO_nIuA", "title": "SunSay  - Немовля", "channel": "sunsaymusic", "view_count": 16647},
+            {"id": "0qRq6rscWfU", "title": "Sunsay - Немовля [MINUS vocal; Karaoke]", "channel": "MINUS vocal; Karaoke", "view_count": 18},
+            {"id": "yPMAVzzfi4o", "title": "SunSay - Немовля", "channel": "Nelu Botnaru", "view_count": 3570},
+            {"id": "bnsTeKZnxzo", "title": "SunSay - Немовля.mp4", "channel": "TheWillyamG", "view_count": 100},
+            {"id": "N2DaKCUyX0M", "title": "Sunsay - Немовля", "channel": "IExistExist", "view_count": 810},
+            {"id": "hsveP_cuA7g", "title": "SunSay - Немовля (Live)", "channel": "Dima Suchay", "view_count": 82},
+            {"id": "K8ZmBpOIBjc", "title": "SunSay - Немовля [live in Cherkassy 19.04.2013]", "channel": "Vadym Sapatrylo", "view_count": 609},
+        ],
+        ("_edxVM3PylU",), {},
+    ),
+    (
+        "Waglewski, Fisz, Emade - Bóg", "Waglewski, Fisz, Emade", "Bóg",
+        [
+            {"id": "tRHIqK_vy6M", "title": "Bóg", "channel": "Waglewski / Fisz / Emade - Topic", "view_count": 21231, "track": "Bóg"},
+            {"id": "ZeQecB1KyCw", "title": "Waglewski Fisz Emade - Bóg/Ile jeszcze życia? - live in Toruń 14.11.2018", "channel": "Piotr Raczkowski", "view_count": 339},
+            {"id": "ROTYmNckBCw", "title": "Waglewski Fisz Emade - Ojciec", "channel": "Next Music", "view_count": 1125464},
+            {"id": "t7r6x_Ajuho", "title": "Waglewski Fisz Emade - Bóg (live Frytka Off)", "channel": "nothingsalright", "view_count": 1684},
+            {"id": "J4_4dJawgM4", "title": "Waglewski Fisz Emade - Syn", "channel": "Next Music", "view_count": 397227},
+            {"id": "RuIeM4Qu_NE", "title": "Waglewski Fisz Emade - Bóg - 26.11.2013", "channel": "slodzias", "view_count": 10561},
+            {"id": "sySsenGiBUw", "title": "Waglewski Fisz Emade - Ziemia (Official Video)", "channel": "Mystic Production TV", "view_count": 619553},
+        ],
+        ("tRHIqK_vy6M",), {},
+    ),
+    (
+        "Вольны хор - Пагоня", "Вольны хор", "Пагоня (запіс з анлайн - канцэрта Муры)",
+        [
+            {"id": "jn_vnj4_vQg", "title": "Вольны хор — Пагоня (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 6195},
+            {"id": "x_52myRgoGM", "title": "Вольны хор: Нацыянальны гімн Беларусі «Пагоня» (калядны анлайн-канцэрт)", "channel": "Годна", "view_count": 129043},
+            {"id": "suN9LYsC1qU", "title": "«Вольны хор» прэзентаваў альбом «Годныя песні»: Пагоня, Муры, Магутны Божа, Сцяг, Гэта мы, Нёман", "channel": "Годна", "view_count": 28623},
+            {"id": "Nxs3TGwI07Q", "title": "Вольны хор — Жыве Беларусь (анлайн-канцэрт «Муры», 27.05.2021)", "channel": "Годна", "view_count": 4901},
+            {"id": "FsskFUad88o", "title": 'VOLNY CHOR / ВОЛЬНЫ ХОР - Ой, шлі-прайшлі (анлайн-канцэрт "Муры", 27.05.2021)', "channel": "VOLNY CHOR / ВОЛЬНЫ ХОР", "view_count": 4899},
+            {"id": "5kgvHgqr2aE", "title": "Пагоня", "channel": "Вольны Хор - Topic", "view_count": 70680, "track": "Пагоня"},
+            {"id": "tpLfAhQUZy8", "title": "Вольны хор — Разбуры турмы муры (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 7311},
+            {"id": "8o1-Zt5eN1Y", "title": "Вольны хор — Гэта мы (запіс з анлайн-канцэрта «Муры»)", "channel": "symbal.by", "view_count": 3437},
+        ],
+        ("5kgvHgqr2aE",), {},
+    ),
+    (
+        # Deliberately NOT the DB-reference id — see this table's docstring.
+        # The real video is age-restricted and invisible to every search
+        # backend this app uses; a fresh search correctly finding nothing is
+        # the expected, correct behavior here, not a gap.
+        "Taco Hemingway - Fuck Your List (expected: unresolvable via search)", "Taco Hemingway", "Fuck Your List",
+        [
+            {"id": "qNmEvnJS-kI", "title": "Tłumaczenie Taco Hemingway - Fuck Your List | LyricsTranslationTV", "channel": "LyricsTranslationTV", "view_count": 5496},
+            {"id": "8cHBSpb2XE4", "title": "Taco Hemingway - YOUNG HEMS  - cały album", "channel": "Pełne Albumy", "view_count": 138371},
+            {"id": "xiZSpazO_Jo", "title": "Fuck ya list", "channel": "Paccman chico - Topic", "view_count": 130, "track": "Fuck ya list"},
+            {"id": "gZ4PX3NXRFs", "title": "Alfabet z Taco Hemingwayem - ABC (nie) dla dzieci", "channel": "Maciej Adamczyk", "view_count": 2010},
+            {"id": "PT14Nu5bmXI", "title": "APPLY YOURSELF THEN TOUCH A BAG 8D", "channel": "Hey Lol", "view_count": 360},
+        ],
+        (None,), {},
+    ),
+]
+
+
+def _resolve_via_fresh_search(monkeypatch, artist, title, candidates, kwargs):
+    """Resolve one song via a brand-new search — no Song.youtube_video_id
+    involved anywhere. Ordinarily mocks yt-dlp with `candidates` and calls
+    search_video_ytdlp() directly; for the one case (`api_items` present)
+    whose bug lives in the Data API fallback instead, mocks yt-dlp to return
+    nothing (its real behavior for that query) and the API to return
+    `api_items`, then calls the top-level search_video() so the fallback
+    path itself is exercised too.
+    """
+    kwargs = dict(kwargs)
+    api_items = kwargs.pop("api_items", None)
+    if api_items is not None:
+        _mock_ytdlp_search(monkeypatch, [])
+        youtube = FakeYoutube(api_items)
+        return m.search_video(youtube, artist, title, **kwargs)
+    _mock_ytdlp_search(monkeypatch, candidates)
+    return m.search_video_ytdlp(artist, title, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "artist, title, candidates, expected_ids, kwargs",
+    [case[1:] for case in FRESH_SEARCH_REGRESSION_CASES],
+    ids=[case[0] for case in FRESH_SEARCH_REGRESSION_CASES],
+)
+def test_regression_suite_resolves_via_fresh_search(monkeypatch, artist, title, candidates, expected_ids, kwargs):
+    resolved = _resolve_via_fresh_search(monkeypatch, artist, title, candidates, kwargs)
+    assert resolved in expected_ids
