@@ -25,13 +25,13 @@ for when the stricter, less error-prone stage before it fails.
    dash, U+2014), or ` _ `. En dash and em dash are visually near-identical but
    distinct codepoints, and real-world filenames use both (e.g. `Zdob și Zdub —
    La mijloc...`).
-2. **Bare `-` / `_`, no surrounding spaces required** — recovers
-   `Emade-Pierwszy stopień wtajemniczenia.mp3`, `Die Ärzte _Unrockbar_.mp3`;
-   strips stray `-` / `_` / spaces off both halves. Intentionally permissive and
-   a genuine last resort: a title with an incidental hyphen and no real artist
-   (`Re-Animator.mp3`) misparses into artist `Re` / title `Animator` here rather
-   than being reported unparseable — acceptable only because stage 1 already
-   failed.
+2. **Bare `-` / `_` / `~`, no surrounding spaces required** — recovers
+   `Emade-Pierwszy stopień wtajemniczenia.mp3`, `Die Ärzte _Unrockbar_.mp3`,
+   `Haiku Garden ~ Avalanš.mp3`; strips stray `-` / `_` / `~` / spaces off both
+   halves. Intentionally permissive and a genuine last resort: a title with an
+   incidental hyphen and no real artist (`Re-Animator.mp3`) misparses into
+   artist `Re` / title `Animator` here rather than being reported unparseable —
+   acceptable only because stage 1 already failed.
 3. **Split on 2+ consecutive spaces** — recovers filenames with no punctuation
    separator at all, e.g. `Akiko Yano  Iroha Ni Konpeitou.mp3`, where the
    artist/title boundary is just a double space.

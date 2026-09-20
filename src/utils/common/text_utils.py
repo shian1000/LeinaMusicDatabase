@@ -8,6 +8,8 @@ from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
 import time
+import base64
+import sys
 from utils.common.normalizer import normalize
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import mb_get, MBStats
@@ -55,7 +57,21 @@ def copy_to_clipboard(message: str):
         return True
     except pyperclip.PyperclipException as e:
         print(f"Clipboard unavailable: {e}")
+        return _copy_via_osc52(message)
+
+
+def _copy_via_osc52(message: str) -> bool:
+    """Fallback for headless/SSH sessions: ask the terminal emulator itself
+    to set the clipboard via the OSC 52 escape sequence. This reaches the
+    clipboard of the machine running the terminal (e.g. over `ssh -t`)
+    without needing xclip/xsel/wl-clipboard or a display on the remote host.
+    """
+    if not sys.stdout.isatty():
         return False
+    encoded = base64.b64encode(message.encode("utf-8")).decode("ascii")
+    sys.stdout.write(f"\x1b]52;c;{encoded}\x07")
+    sys.stdout.flush()
+    return True
 
 
 def normalize_text(s: str) -> str:

@@ -97,8 +97,8 @@ def extract_unknown_data(filepath: Path):
     name = filepath.stem
     parts = re.split(r" [–—\-_] ", name, maxsplit=1)
     if len(parts) < 2:
-        # Secondary fallback: hyphen/underscore without surrounding spaces
-        parts = re.split(r"[-_]", name, maxsplit=1)
+        # Secondary fallback: hyphen/underscore/tilde without surrounding spaces
+        parts = re.split(r"[-_~]", name, maxsplit=1)
         if len(parts) < 2:
             # Tertiary fallback: two or more consecutive spaces
             parts = re.split(r"\s{2,}", name, maxsplit=1)
@@ -111,7 +111,7 @@ def extract_unknown_data(filepath: Path):
 
             return artist, title
 
-        artist, title = (p.strip(" -_") for p in parts)
+        artist, title = (p.strip(" -_~") for p in parts)
         if not artist or not title:
             return None, None
 
