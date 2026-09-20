@@ -23,6 +23,7 @@ DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
 DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
+    "spotify_fetcher",
     "wikipedia_fetcher",
     "google_search_fetcher",
     "itunes_fetcher",

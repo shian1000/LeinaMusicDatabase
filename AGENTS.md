@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~142 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~152 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -170,7 +170,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~142 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~152 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
@@ -226,8 +226,9 @@ non-trivial work in that area.
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
-  and `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
-  try to evade the latter).
+  `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
+  try to evade the latter), and why `spotify_fetcher.py` scrapes the public web player's
+  `data-testid` markup instead of the official (credential-requiring) Web API.
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why
   MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
   cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the

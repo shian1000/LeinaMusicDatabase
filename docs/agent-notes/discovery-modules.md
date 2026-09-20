@@ -52,6 +52,16 @@ more with the original, untruncated (but still parenthetical-stripped) artist/ti
 on. This runs before the synonym-retry step. Because it's implemented in the manager rather than
 per-module, every fetcher gets the fallback for free.
 
+A different, still-open gap in the same stop-word list, found while smoke-testing
+`spotify_fetcher.py` against a real "Artist1 + Artist2" collab (`MRFY + Laibach - Poskočna`): `+`
+isn't a stop word, so a plus-joined artist credit is never truncated and reaches every fetcher's
+artist-similarity check as one unbroken string. Spotify credits that track to two separate artists
+(`MRFY`, `Laibach`), and neither one alone — nor any fetcher's combined-artist string comparison —
+resembles the full `"MRFY + Laibach"` query closely enough to clear `SPELLING_CHECK_THRESHOLD`, so
+the album lookup fails across the board, not just on Spotify. This is a `truncate_at_word()` /
+manager-level gap (the same class of problem as the comma case above, just a different separator),
+not something `spotify_fetcher.py` itself can fix — left as-is rather than special-cased locally.
+
 ## Why the manager validates results itself instead of trusting modules
 
 Each fetcher scrapes/searches its own source and, historically, did its own match verification
@@ -116,6 +126,9 @@ module degrades gracefully rather than breaking.
   with no clean delimiter).
 - `google_search_fetcher.py` — reports the artist field from the Google Knowledge Panel when
   present; no reliably-extractable matched title from that source.
+- `spotify_fetcher.py` — reports the track title/artist scraped from the matched track's own page
+  (`entityTitle` / `creator-link`), falling back to what it already matched on the search-results
+  row if the track page's markup doesn't have them.
 - `wikipedia_fetcher.py` was **not** upgraded — it already requires the query title to appear in
   the page/container text before accepting a result, so the marginal benefit was low, and its
   extraction logic wasn't touched.
@@ -131,8 +144,8 @@ manager's check and remove them — they serve a genuinely different purpose and
 ## The shared headless browser (`src/utils/common/selenium_sessions.py`)
 
 `open_global_driver()` / `close_global_driver()` manage **one** process-wide headless Chrome
-instance, reused across `google_search_fetcher.py`, `itunes_fetcher.py`, and `genius_fetcher.py`
-via `get_global_driver()` rather than each fetcher opening its own.
+instance, reused across `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py`, and
+`spotify_fetcher.py` via `get_global_driver()` rather than each fetcher opening its own.
 
 Any call site that opens the driver **must** call `close_global_driver()` in a `finally`.
 `fill_missing_albums.py` originally called it as a plain last statement after its fetch loop, so
@@ -193,3 +206,43 @@ states it's hitting *before* assuming the CSS selectors (`LrzXr` / `w8qArf`, har
 `google_search_fetcher.py` also writes the raw HTML response to `debug.html` at the repo root —
 a large disposable scrape dump (gitignored, like `debug.log`). Not documentation; don't read it
 for context or hand-edit it.
+
+## `spotify_fetcher.py` — scrapes the public web player, not the official Web API
+
+Deliberately does **not** use Spotify's official Web API (which needs a registered app's
+`client_id`/`client_secret` and an access-token exchange). Instead it scrapes
+`open.spotify.com/search/.../tracks` and the matched track's own `open.spotify.com/track/<id>`
+page with the shared Selenium driver, the same way `itunes_fetcher.py` and `genius_fetcher.py`
+scrape their sources — searching and viewing a track/album on open.spotify.com doesn't require
+being logged in. This was a deliberate choice to get something working without first setting up
+API credentials; swapping in the official API later (better data quality guarantees, no frontend-
+markup fragility) would only mean changing this file's internals — `get_album_name(artist, title)`
+and `MODULE_NAME` are the whole contract.
+
+The page is a fully client-rendered SPA (a plain `requests.get()` returns an empty shell with no
+song/album data — confirmed by inspecting the raw response), so this fetcher, like the other
+Selenium-based ones, can only work by waiting for React to hydrate and then parsing
+`driver.page_source`.
+
+Two-step flow, mirroring `itunes_fetcher.py`'s search-then-follow-link pattern:
+
+1. Load `.../search/<query>/tracks`, wait for `[data-testid="tracklist-row"]` rows, and pick the
+   best-scoring row whose title *and* artist both clear `SPELLING_CHECK_THRESHOLD` against the
+   query (`_find_matching_track()`). Live/alternate-version results with the same artist (e.g. "...
+   - Live at Wembley Stadium") lose to the plain studio title purely because the studio title's
+   title-similarity score is higher — there's no separate live/remix penalty like the YouTube
+   matcher has.
+2. Follow that track's `/track/<id>` page, wait for `[data-testid="track-page"]`, and read the
+   album from the first `a[href^="/album/"]` inside it (`_extract_album_from_track_page()`), plus
+   `entityTitle`/`creator-link` for the `DiscoveryResult` match-report fields.
+
+All of `tracklist-row`, `track-page`, `entityTitle`, and `creator-link` are Spotify's own
+`data-testid` attributes (not hashed Encore CSS classes), which tend to be more stable across
+frontend deploys than class names — but this is still unofficial markup Spotify owes no
+compatibility guarantee for. If this fetcher starts returning `None` for everything, check
+`driver.page_source` for those attributes still existing before assuming the matching logic broke.
+
+The two pure-parsing helpers (`_find_matching_track`, `_extract_album_from_track_page`) are unit
+tested against static HTML fixtures in `tests/test_spotify_fetcher.py` — no live network/Selenium
+in the test, consistent with the rest of `tests/` — but that only locks in the parsing logic
+against the *fixture*, not against Spotify's real markup drifting out from under it.
