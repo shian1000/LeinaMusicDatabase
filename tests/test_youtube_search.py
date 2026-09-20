@@ -1,12 +1,16 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
 from utils.youtube import manage_youtube_playlists as m
+from utils.youtube import yt_cache
 
 
 class FakeListRequest:
@@ -942,3 +946,107 @@ def test_score_result_selector_bonus_ignores_generic_bracket_content():
     # no bonus to any random candidate that happens to also say "Official
     # Video" (which is nearly all of them).
     assert m._selector_tokens("Official Video") == set()
+
+
+# ---------------------------------------------------------
+# DB-reference regression: the same real songs, resolved via
+# Song.youtube_video_id instead of a fresh search
+# ---------------------------------------------------------
+#
+# Every test above proves the search/scoring engine (score_result(),
+# search_video_ytdlp(), search_video()) resolves a given real song correctly
+# with *no* database involved. But create_yt_playlist() (see
+# manage_youtube_playlists.py) has a second path for the exact same songs:
+# if Song.youtube_video_id already holds the right answer (confirmed by a
+# prior run via save_video_id_to_song(), or set manually), it's reused
+# directly — after is_video_id_valid() confirms it still resolves — instead
+# of repeating the search. That path doesn't touch score_result() at all, so
+# nothing above would catch a regression in it. This table re-runs the same
+# real songs through create_yt_playlist() with the DB reference already
+# populated, checking the other half of the same guarantee: "does this song
+# still resolve to the video I approved" holds whether or not a fresh search
+# is needed to get there.
+DB_REFERENCE_REGRESSION_CASES = [
+    ("Berlin - Sex (I'm A...)", BERLIN_SEX_ARTIST, BERLIN_SEX_TITLE, BERLIN_SEX_VIDEO_ID),
+    ("Foals - 2001", "Foals", "2001", "ydBQz3SecaE"),
+    ("SLAUGHTER TO PREVAIL - Bratva", "SLAUGHTER TO PREVAIL", "Bratva", "XFzB3TXoG4A"),
+    ("Passive Voice - Тебе пам'ятаю", "Passive Voice", "Тебе пам'ятаю", "Vd5epmcIamY"),
+    ("Ten Preston feat. Sitek - 71", "Ten Preston feat. Sitek", "71 (prod. lil aloes)", "R5eMExxWu1M"),
+    ("Gary Clark Jr. - Ain't Messin' 'Round", "Gary Clark Jr.", "Ain't Messin' 'Round", "EyFFuEY_S6Q"),
+    ("WE BUTTER THE BREAD WITH BUTTER - N!CE", "WE BUTTER THE BREAD WITH BUTTER", "N!CE", "E49Qrhdk2cI"),
+    ("Måneskin - Zitti e buoni", "Måneskin", "Zitti e buoni", "QN1odfjtMoo"),
+    ("Bloodywood - Ari Ari", "Bloodywood", "INDIAN STREET METAL (_Ari Ari_ ft. Raoul Kerr)", "i4FqGPRQWFM"),
+    ("Zob - Cantec de dragoste", "Zob", "Cantec de dragoste", "D398DGsBP1I"),
+    ("Bastille - Pompei", "Bastille", "Pompei", "F90Cw4l-8NY"),
+    ("ABRADAB - Niesmiertelnosc", "ABRADAB", "Niesmiertelnosc (Muzyka Daje)", "T3bqVFKEoDA"),
+    ("bayski - набіраи", "bayski", "набіраи (acoustic)", "l8cJML7BJUg"),
+    ("Rival Sons - Darkfighter", "Rival Sons", "Darkfighter", "GEW7zR1aIUI"),
+    ("Elvis Crespo - Suavemente", "Elvis Crespo", "Suavemente", "WPiEbYSF9kE"),
+    ("Бумбокс - Нездара", "Бумбокс", "Нездара", "zDVzqqTzTDE"),
+    ("Hall & Oates - Maneater", "Hall & Oates", "Maneater", "yRYFKcMa_Ek"),
+    ("Junecapone - Depravity", "Junecapone", "Depravity", "qMmVQbH3sKQ"),
+    ("Плач Єремії - Вона", "Плач Єремії", "Вона", "EaQEnpYoA2U"),
+    ("Daði Freyr - Bitte", "Daði Freyr", "Bitte", "Wotwtc9tA-Q"),
+    ("OBERSCHLESIEN - Król Olch", "OBERSCHLESIEN", "Król Olch", "KPJPJzpk_QQ"),
+    ("Valeria Stoica - Get Back", "Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)", "zliatPv0RGU"),
+    ("Al Di Meola - Double Concerto", "Al Di Meola", "Double Concerto", "Hi1KxO32DFU"),
+    ("SunSay - В твоих глазах сияю я", "SunSay", "В твоих глазах сияю я", "xQejzb1JDQo"),
+    ("SunSay - Немовля", "SunSay", "Немовля", "_edxVM3PylU"),
+    ("Waglewski, Fisz, Emade - Bóg", "Waglewski, Fisz, Emade", "Bóg", "tRHIqK_vy6M"),
+    ("Вольны хор - Пагоня", "Вольны хор", "Пагоня (запіс з анлайн - канцэрта Муры)", "5kgvHgqr2aE"),
+    # The one case where the without-DB-reference test above
+    # (test_search_video_ytdlp_declines_when_only_match_is_a_translation_video)
+    # asserts `video_id is None`: the real video is age-restricted and
+    # invisible to every search backend this app uses (see that test's
+    # docstring). Song.youtube_video_id is the *only* way this song ever
+    # resolves at all — this case is exactly why the DB-reference path
+    # exists, not just an alternate route to an answer search could find
+    # anyway.
+    ("Taco Hemingway - Fuck Your List (DB-only, search finds nothing)", "Taco Hemingway", "Fuck Your List", "bLOSjREikDc"),
+]
+
+
+def _resolve_via_db_reference(monkeypatch, artist: str, title: str, video_id: str) -> str:
+    """Run create_yt_playlist() for a single song whose Song.youtube_video_id
+    is already `video_id`, with every dependency except the DB-reference
+    logic itself stubbed out, and search_video() wired to fail the test if
+    it's ever called. Returns whatever video_id actually got added to the
+    playlist, so the caller can assert it matches the approved id — proving
+    the "check the DB, validate, reuse" path resolves the song correctly on
+    its own, independent of the search/scoring logic the rest of this file
+    exercises.
+    """
+    monkeypatch.setattr(m, "get_youtube_service", lambda: object())
+    monkeypatch.setattr(m, "load_cache", lambda: None)
+    monkeypatch.setattr(m, "create_playlist", lambda youtube, title, description="": "PLAYLIST1")
+    monkeypatch.setattr(yt_cache, "save_cache", lambda cache: None)
+    monkeypatch.setattr(m, "save_cache", lambda cache: None)
+    monkeypatch.setattr(m, "clear_cache", lambda: None)
+    monkeypatch.setattr(m, "is_video_id_valid", lambda vid, timeout=20: True)
+    monkeypatch.setattr(m, "submit_global_database_session", lambda: None)
+
+    def fail_if_searched(*a, **k):
+        raise AssertionError(f"search_video should not run for {artist} - {title}: a valid DB reference was available")
+
+    monkeypatch.setattr(m, "search_video", fail_if_searched)
+
+    added = []
+    monkeypatch.setattr(m, "add_video_to_playlist", lambda youtube, playlist_id, vid: added.append(vid) or True)
+
+    artist_obj = SimpleNamespace(name=artist, synonyms=None)
+    song = SimpleNamespace(artist=artist_obj, title=title, language=None, youtube_video_id=video_id)
+
+    m.create_yt_playlist([song], "Regression Playlist")
+
+    assert len(added) == 1, f"expected exactly one video added to the playlist for {artist} - {title}"
+    return added[0]
+
+
+@pytest.mark.parametrize(
+    "artist, title, expected_video_id",
+    [case[1:] for case in DB_REFERENCE_REGRESSION_CASES],
+    ids=[case[0] for case in DB_REFERENCE_REGRESSION_CASES],
+)
+def test_regression_suite_resolves_via_db_reference(monkeypatch, artist, title, expected_video_id):
+    resolved = _resolve_via_db_reference(monkeypatch, artist, title, expected_video_id)
+    assert resolved == expected_video_id

@@ -225,10 +225,14 @@ non-trivial work in that area.
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`
   metadata, popularity/tags signals, typo tolerance, the `artists.synonyms` column for real name
-  changes, a `MIN_ARTIST_RELEVANCE` floor, and `Song.youtube_video_id` as the escape hatch for a
-  video excluded from search results entirely), `transliteration.py`'s alternate-script retry for
-  a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered when the
-  winning pick isn't a confirmed official release, not by a relevance floor), a regression
+  changes, a `MIN_ARTIST_RELEVANCE` floor, and `Song.youtube_video_id` as both a manual escape
+  hatch for a video excluded from search results entirely and a self-populating cache — written by
+  `save_video_id_to_song()` after every fresh search hit and re-validated by `is_video_id_valid()`
+  before reuse, both logged to `youtube_link_cache.log`), `transliteration.py`'s alternate-script
+  retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
+  when the winning pick isn't a confirmed official release, not by a relevance floor), a regression
   checklist of real wrong-match bugs it fixes, and remaining open limitations (non-Cyrillic
   scripts). Regression tests in `tests/test_youtube_search.py` are pinned to the exact expected
-  video per song, so a resolution change is a test failure to review, not a silent update.
+  video per song — both a search-only assertion and, for the same songs, a paired DB-reference
+  assertion resolving via `Song.youtube_video_id` without searching — so a resolution change is a
+  test failure to review, not a silent update.

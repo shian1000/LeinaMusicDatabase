@@ -540,14 +540,21 @@ youtube.com's own search for a signed-out browser session, but neither search ba
 uses returns it. There is no code-level fix for this — no query phrasing, `player_client`, or API
 parameter bypasses it (confirmed empirically, not theorized).
 
-The only real fix is `Song.youtube_video_id` (see `docs/data-model.md`): a manual, persistent
-override, once a human confirms the correct video by any other means. `yt_cache.py`'s
-`init_cache()` pre-fills a song's cache `video_id` from it, which `create_yt_playlist()`'s existing
-"already have a video_id, skip search" check picks up for free — no code path needed searching at
-all. Reach for this whenever a song's correct video is confirmed unreachable by automated search
-(age-restriction is the one confirmed trigger so far, but the mechanism doesn't assume that's the
-only possible cause) rather than trying to tune scoring around a candidate pool that structurally
-can never contain the right answer.
+The only real fix is `Song.youtube_video_id` (see `docs/data-model.md`) — originally built as a
+manual, human-set override, it's since become dual-purpose: `create_yt_playlist()` also writes to
+it itself, via `save_video_id_to_song()`, the moment a fresh search succeeds, so *every* song's
+video only ever needs to be found once, not just the ones a human manually confirmed. `yt_cache.py`'s
+`init_cache()` still pre-fills a song's cache `video_id` from it, but `create_yt_playlist()` no
+longer trusts that value blindly — `is_video_id_valid()` (`yt-dlp --simulate`, no API quota)
+confirms it still resolves before reuse, since a video can go stale (deleted, made private) long
+after it was set; a failed check falls back to a fresh search instead of silently keeping a dead
+link. Reach for a *manual* set of this field whenever a song's correct video is confirmed
+unreachable by automated search (age-restriction is the one confirmed trigger so far, but the
+mechanism doesn't assume that's the only possible cause) rather than trying to tune scoring around
+a candidate pool that structurally can never contain the right answer. Every reuse, validation
+failure, search miss, and DB save in this flow is logged to `youtube_link_cache.log` (repo root,
+gitignored, always-on regardless of the `.debug` flag that gates `debug.log`) — check it first if
+a playlist run picks an unexpected video or a stored link stops working.
 
 ## Known regressions this logic exists to prevent
 

@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 import re
@@ -23,6 +24,7 @@ from utils.youtube.yt_cache import make_song_key
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
 from utils.common.normalizer import APOSTROPHES
 from utils.youtube.transliteration import is_transliterable, transliterate
+from utils.database.database_sessions import submit_global_database_session
 import json
 
 
@@ -34,6 +36,21 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 TOKEN_PATH = ".secrets/token.json"
 CLIENT_SECRET_PATH = ".secrets/client_secret.json"
+
+# Dedicated, always-on log file for the "reuse/validate/persist
+# Song.youtube_video_id" flow in create_yt_playlist() — separate from the
+# app-wide debug.log (utils.common.debug), which is silent unless a `.debug`
+# file is present, so a stale/invalid stored link or a failed DB write is
+# still traceable after the fact without the user needing to have debug mode
+# on ahead of time.
+_LOG_PATH = Path(__file__).resolve().parents[3] / "youtube_link_cache.log"
+_logger = logging.getLogger("youtube_link_cache")
+if not _logger.handlers:
+    _handler = logging.FileHandler(_LOG_PATH, encoding="utf-8")
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _logger.addHandler(_handler)
+    _logger.setLevel(logging.INFO)
+    _logger.propagate = False
 
 HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster", "flac", "320", "official"]
 # "official" is a genuine trust signal on its own, not just as part of
@@ -1078,6 +1095,55 @@ def search_video(
     return video_id
 
 
+def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
+    """Check whether a stored YouTube video ID still resolves to a watchable
+    video.
+
+    `Song.youtube_video_id` (whether set manually or by `save_video_id_to_song()`
+    below) can go stale after the fact — the video gets deleted, made
+    private, or taken down — and trusting it blindly would keep adding a dead
+    link to every future playlist instead of falling back to a fresh search.
+    Uses yt-dlp (`--simulate`, no download) rather than the Data API so
+    validating a stored link doesn't burn API quota, consistent with
+    `search_video()`'s yt-dlp-first preference.
+    """
+    if not video_id:
+        return False
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--simulate", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        _logger.warning(f"Could not validate video_id={video_id} ({e}) — assuming it's still valid")
+        return True
+
+    if result.returncode != 0:
+        error_output = (result.stderr or result.stdout or "").strip().splitlines()
+        _logger.info(f"video_id={video_id} failed validation: {error_output[-1] if error_output else 'unknown error'}")
+        return False
+
+    return True
+
+
+def save_video_id_to_song(song, video_id: str) -> None:
+    """Persist a resolved YouTube video ID onto the song's DB record.
+
+    Called by `create_yt_playlist()` whenever `search_video()` finds a match
+    for a song, so the video only ever needs to be found once — future
+    playlist runs pick it up straight from `Song.youtube_video_id`, the same
+    "already have a video_id, skip search" path a manually-set override
+    already uses (see docs/agent-notes/youtube-search-matching.md).
+    """
+    if song.youtube_video_id == video_id:
+        return
+    song.youtube_video_id = video_id
+    submit_global_database_session()
+    _logger.info(f"Saved video_id={video_id} to DB for {song.artist.name} - {song.title}")
+
+
 # ---------------------------------------------------------
 # INSERTING VIDEOS WITH RETRY LOGIC
 # ---------------------------------------------------------
@@ -1174,6 +1240,11 @@ def create_yt_playlist(song_list, playlist_name: str):
         if not cache:
             raise RuntimeError("Cache was not initialized")
 
+        # Maps a cache key back to the actual Song DB object, so a
+        # freshly-found video can be written back to Song.youtube_video_id
+        # (see save_video_id_to_song()) once search_video() finds it.
+        songs_by_key = {make_song_key(song.artist.name, song.title): song for song in song_list}
+
         # -------------------
         # Add videos to playlist
         # -------------------
@@ -1186,14 +1257,36 @@ def create_yt_playlist(song_list, playlist_name: str):
             artist_synonyms = entry.get("synonyms")
             language = entry.get("language")
 
+            # Step 1: a video_id already on the cache entry (pre-filled from
+            # Song.youtube_video_id at init_cache() time, or left over from a
+            # previous, interrupted run) is trusted only after confirming it
+            # still resolves — a link can go stale after it was set.
             video_id = entry.get("video_id")
+            if video_id:
+                if is_video_id_valid(video_id):
+                    _logger.info(f"Reusing stored video_id={video_id} for {artist} - {title}")
+                else:
+                    _logger.warning(f"Stored video_id={video_id} for {artist} - {title} is no longer valid — searching again")
+                    print("  ⚠ Stored YouTube link looks invalid, searching again...")
+                    video_id = None
+
+            # Step 2: no usable stored link — search as before.
             if not video_id:
                 video_id = search_video(youtube, artist, title, artist_synonyms=artist_synonyms, language=language)
                 if not video_id:
+                    _logger.info(f"No video found for {artist} - {title}")
                     print("  ❌ No video found")
                     continue
                 entry["video_id"] = video_id
                 save_cache(cache)
+
+                # Step 3: a newly-found video is saved back to the DB so
+                # future playlist runs don't need to search for it again.
+                song = songs_by_key.get(key)
+                if song is not None:
+                    save_video_id_to_song(song, video_id)
+                else:
+                    _logger.warning(f"Could not map {artist} - {title} back to a Song object — video_id not persisted to DB")
 
             add_video_to_playlist(youtube, playlist_id, video_id)
 

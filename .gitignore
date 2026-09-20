@@ -37,3 +37,4 @@ discovery_modules_config.json
 debug.log
 debug.html
 tests/!DOCTYPE_html_html.txt
+youtube_link_cache.log

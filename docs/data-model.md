@@ -37,10 +37,13 @@ synonyms                        year
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 - `Song.nostalgic` / `melancholic` / `party` — integer mood flags, set through the terminal UI.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.
-- `Song.youtube_video_id` — manual, persistent override for a song whose correct video YouTube's
-  own search excludes from results entirely (e.g. age-restricted content — confirmed true even for
-  an authenticated Data API request, not just anonymous scraping). When set, the YouTube sync flow
-  uses it directly and never searches for that song again; see
+- `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually for a song
+  whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
+  content — confirmed true even for an authenticated Data API request, not just anonymous
+  scraping), or automatically by `create_yt_playlist()` itself the moment a fresh search succeeds,
+  so a song only ever needs to be found once. Either way, the YouTube sync flow re-validates it
+  (`is_video_id_valid()`, no API quota) before reusing it, falling back to a fresh search if it's
+  gone stale (deleted/private) rather than trusting it blindly; see
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 
 ## `tag.db`
