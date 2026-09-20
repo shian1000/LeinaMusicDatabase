@@ -129,6 +129,8 @@ module degrades gracefully rather than breaking.
 - `spotify_fetcher.py` — reports the track title/artist scraped from the matched track's own page
   (`entityTitle` / `creator-link`), falling back to what it already matched on the search-results
   row if the track page's markup doesn't have them.
+- `youtube_fetcher.py` — reports the title/artist scraped straight from the matched row in the
+  filtered "Songs" search results (no separate track page to visit; see below).
 - `wikipedia_fetcher.py` was **not** upgraded — it already requires the query title to appear in
   the page/container text before accepting a result, so the marginal benefit was low, and its
   extraction logic wasn't touched.
@@ -144,8 +146,9 @@ manager's check and remove them — they serve a genuinely different purpose and
 ## The shared headless browser (`src/utils/common/selenium_sessions.py`)
 
 `open_global_driver()` / `close_global_driver()` manage **one** process-wide headless Chrome
-instance, reused across `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py`, and
-`spotify_fetcher.py` via `get_global_driver()` rather than each fetcher opening its own.
+instance, reused across `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py`,
+`spotify_fetcher.py`, and `youtube_fetcher.py` via `get_global_driver()` rather than each fetcher
+opening its own.
 
 Any call site that opens the driver **must** call `close_global_driver()` in a `finally`.
 `fill_missing_albums.py` originally called it as a plain last statement after its fetch loop, so
@@ -246,6 +249,50 @@ The two pure-parsing helpers (`_find_matching_track`, `_extract_album_from_track
 tested against static HTML fixtures in `tests/test_spotify_fetcher.py` — no live network/Selenium
 in the test, consistent with the rest of `tests/` — but that only locks in the parsing logic
 against the *fixture*, not against Spotify's real markup drifting out from under it.
+
+## `youtube_fetcher.py` — scrapes the public music.youtube.com web player, not the Data API
+
+Deliberately does **not** use the official YouTube Data API (needs an API key and is quota-limited).
+Instead it scrapes `music.youtube.com/search`, filtered to the "Songs" tab, with the shared Selenium
+driver — the same public-web-player approach as `spotify_fetcher.py`. Unlike Spotify, the filtered
+Songs list already renders artist *and* album inline per row, so there's no second "open the track's
+own page" step: `_find_matching_song()` reads everything it needs straight out of the search results.
+
+Flow:
+
+1. Load `.../search?q=<query>`. A cookie-less driver gets redirected to a `consent.youtube.com`
+   interstitial the first time any `youtube.com` page loads in that Chrome profile;
+   `_reject_consent_if_present()` detects that redirect and clicks "Reject all" (the privacy-
+   preserving choice), which sends YouTube back to the originally requested URL — re-encoded with
+   `+` instead of `%20` for spaces, which is why the fetcher re-issues `driver.get(search_url)`
+   with its own exact URL afterward rather than trusting the redirect target. This only costs an
+   extra round trip the first time the shared driver visits YouTube in a given process; the
+   resulting cookie makes every later call skip straight through.
+2. Click the "Songs" filter chip (`ytmusic-chip-cloud-chip-renderer` containing a
+   `yt-formatted-string` reading exactly "Songs") and wait for
+   `ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer` rows. The chip has no filterable
+   URL/query-param of its own — YouTube Music drives it entirely with a client-side click handler —
+   so this can't be short-circuited by requesting a different URL. Skipping this step and parsing
+   the unfiltered page instead was tried and rejected: the default mixed results page wraps every
+   individual hit (songs, videos, unrelated channel uploads, community posts) in its own
+   `ytmusic-item-section-renderer`, with no reliable per-row way to tell a song apart from a video
+   essay that happens to match on title text.
+3. Parse each row (`_find_matching_song()`): title from the `.title` element's `title` attribute
+   (not truncated by CSS ellipsis, unlike its rendered text), artist(s) from every
+   `a[href^="channel/"]`, album from `a[href^="browse/"]` — YouTube Music always orders a row's
+   links as artist(s) first, then album, so the href prefix alone (not position) is what
+   distinguishes them; this also handles multi-artist rows (e.g. "NIGHTMARE" by "Cody Ko &
+   Young Nut", which renders as two separate `channel/` links) without extra-casing them. Pick the
+   best-scoring row whose title *and* artist both clear `SPELLING_CHECK_THRESHOLD` against the
+   query, same scoring approach as `spotify_fetcher.py`'s `_find_matching_track()`.
+
+If this fetcher starts returning `None` for everything, check that `ytmusic-responsive-list-item-
+renderer` and the `channel/` / `browse/` href prefixes still exist in `driver.page_source` before
+assuming the matching logic broke — these are internal custom-element/routing names, not a
+documented contract, so YouTube Music's frontend can change them without notice.
+
+The pure-parsing helper (`_find_matching_song`) is unit tested against a static HTML fixture in
+`tests/test_youtube_fetcher.py`, same no-live-network approach as `tests/test_spotify_fetcher.py`.
 
 ## Per-fetcher invocation/success stats (Statistics menu)
 

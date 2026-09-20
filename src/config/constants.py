@@ -30,6 +30,7 @@ DISCOVERY_STATS_FILE = "discovery_fetcher_stats.json"
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
     "spotify_fetcher",
+    "youtube_fetcher",
     "wikipedia_fetcher",
     "google_search_fetcher",
     "itunes_fetcher",
