@@ -576,13 +576,27 @@ video only ever needs to be found once, not just the ones a human manually confi
 longer trusts that value blindly — `is_video_id_valid()` (`yt-dlp --simulate`, no API quota)
 confirms it still resolves before reuse, since a video can go stale (deleted, made private) long
 after it was set; a failed check falls back to a fresh search instead of silently keeping a dead
-link. Reach for a *manual* set of this field whenever a song's correct video is confirmed
-unreachable by automated search (age-restriction is the one confirmed trigger so far, but the
-mechanism doesn't assume that's the only possible cause) rather than trying to tune scoring around
-a candidate pool that structurally can never contain the right answer. Every reuse, validation
-failure, search miss, and DB save in this flow is logged to `youtube_link_cache.log` (repo root,
-gitignored, always-on regardless of the `.debug` flag that gates `debug.log`) — check it first if
-a playlist run picks an unexpected video or a stored link stops working.
+link. If that fallback search also comes up empty, `save_video_id_to_song()` is called again with
+`video_id=None` to wipe the dead link from the DB (and the cache entry) — otherwise it would sit
+there forever, silently re-failing the same `is_video_id_valid()` check on every future run instead
+of ever getting a real second chance at a fresh search. Reach for a *manual* set of this field
+whenever a song's correct video is confirmed unreachable by automated search (age-restriction is
+the one confirmed trigger so far, but the mechanism doesn't assume that's the only possible cause)
+rather than trying to tune scoring around a candidate pool that structurally can never contain the
+right answer. Every reuse, validation failure, search miss, and DB save in this flow is logged to
+`youtube_link_cache.log` (repo root, gitignored, always-on regardless of the `.debug` flag that
+gates `debug.log`) — check it first if a playlist run picks an unexpected video or a stored link
+stops working.
+
+A separate, human-only annotation — `manage_youtube_playlists.NO_VIDEO_SENTINEL` (the literal
+string `"N/A"`) — can also be written to `Song.youtube_video_id` to record "checked, this song has
+no video on YouTube in any form" (as opposed to the above, where a real video exists but is
+unreachable by search). It's currently data-only: nothing writes it automatically (set it by hand,
+directly in the DB — no menu option exists), and `create_yt_playlist()` doesn't skip on it — it
+normalizes `"N/A"` to "no stored link" and runs a normal search every time, exactly as if the field
+were empty, because *is_video_id_valid()* would just fail on a non-id string and there's no
+mechanism yet to have the sentinel actually short-circuit the search. If a future change adds that
+skip behavior, this is the place both to add it and to update.
 
 ## YouTube Data API quota budget, and why `add_video_to_playlist()` must propagate `quotaExceeded`
 

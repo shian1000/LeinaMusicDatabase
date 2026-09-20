@@ -37,6 +37,17 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_PATH = ".secrets/token.json"
 CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 
+# Manual `Song.youtube_video_id` annotation meaning "a human has confirmed
+# this song has no video on YouTube at all" — distinct from the field being
+# empty/unset (never checked) and from a real video_id (found, possibly
+# stale), as opposed to the existing "excluded from search results" escape
+# hatch (see docs/agent-notes/youtube-search-matching.md), where a real
+# video_id does exist and is stored instead. For now this is a data-only
+# record with no dedicated runtime behavior yet: create_yt_playlist()
+# normalizes it to "no stored link" and searches normally, same as an empty
+# field — there's no mechanism yet to have it actually skip the search.
+NO_VIDEO_SENTINEL = "N/A"
+
 # Dedicated, always-on log file for the "reuse/validate/persist
 # Song.youtube_video_id" flow in create_yt_playlist() — separate from the
 # app-wide debug.log (utils.common.debug), which is silent unless a `.debug`
@@ -1239,20 +1250,28 @@ def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
     return True
 
 
-def save_video_id_to_song(song, video_id: str) -> None:
-    """Persist a resolved YouTube video ID onto the song's DB record.
+def save_video_id_to_song(song, video_id: str | None) -> None:
+    """Persist a resolved YouTube video ID onto the song's DB record, or
+    clear a stale one when `video_id` is `None`.
 
     Called by `create_yt_playlist()` whenever `search_video()` finds a match
     for a song, so the video only ever needs to be found once — future
     playlist runs pick it up straight from `Song.youtube_video_id`, the same
     "already have a video_id, skip search" path a manually-set override
-    already uses (see docs/agent-notes/youtube-search-matching.md).
+    already uses (see docs/agent-notes/youtube-search-matching.md). Also
+    called with `video_id=None` to wipe a stored link that `is_video_id_valid()`
+    just found dead (deleted/private on YouTube's end) and that a fallback
+    search couldn't replace — otherwise the dead link would sit in the DB
+    and get re-validated (and fail again) on every future run.
     """
     if song.youtube_video_id == video_id:
         return
     song.youtube_video_id = video_id
     submit_global_database_session()
-    _logger.info(f"Saved video_id={video_id} to DB for {song.artist.name} - {song.title}")
+    if video_id:
+        _logger.info(f"Saved video_id={video_id} to DB for {song.artist.name} - {song.title}")
+    else:
+        _logger.info(f"Cleared stale video_id from DB for {song.artist.name} - {song.title}")
 
 
 # ---------------------------------------------------------
@@ -1379,6 +1398,16 @@ def create_yt_playlist(song_list, playlist_name: str):
             # previous, interrupted run) is trusted only after confirming it
             # still resolves — a link can go stale after it was set.
             video_id = entry.get("video_id")
+
+            # NO_VIDEO_SENTINEL isn't a real id to validate — there's no
+            # behavior difference from an empty/unset field yet (no code
+            # currently branches on the two differently), so it's normalized
+            # to "no stored link" here and falls through to a normal search
+            # below, same as any other song without a stored video_id.
+            if video_id == NO_VIDEO_SENTINEL:
+                video_id = None
+
+            stored_video_id_was_invalid = False
             if video_id:
                 if is_video_id_valid(video_id):
                     _logger.info(f"Reusing stored video_id={video_id} for {artist} - {title}")
@@ -1386,6 +1415,7 @@ def create_yt_playlist(song_list, playlist_name: str):
                     _logger.warning(f"Stored video_id={video_id} for {artist} - {title} is no longer valid — searching again")
                     print("  ⚠ Stored YouTube link looks invalid, searching again...")
                     video_id = None
+                    stored_video_id_was_invalid = True
 
             # Step 2: no usable stored link — search as before.
             if not video_id:
@@ -1393,6 +1423,18 @@ def create_yt_playlist(song_list, playlist_name: str):
                 if not video_id:
                     _logger.info(f"No video found for {artist} - {title}")
                     print("  ❌ No video found")
+                    if stored_video_id_was_invalid:
+                        # The old link is confirmed dead and nothing replaced
+                        # it — clear it from both the cache and the DB so it
+                        # doesn't keep getting re-validated (and failing
+                        # again) on every future run.
+                        entry["video_id"] = None
+                        save_cache(cache)
+                        song = songs_by_key.get(key)
+                        if song is not None:
+                            save_video_id_to_song(song, None)
+                        else:
+                            _logger.warning(f"Could not map {artist} - {title} back to a Song object — stale video_id not cleared from DB")
                     continue
                 entry["video_id"] = video_id
                 save_cache(cache)

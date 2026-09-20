@@ -43,7 +43,14 @@ synonyms                        year
   scraping), or automatically by `create_yt_playlist()` itself the moment a fresh search succeeds,
   so a song only ever needs to be found once. Either way, the YouTube sync flow re-validates it
   (`is_video_id_valid()`, no API quota) before reusing it, falling back to a fresh search if it's
-  gone stale (deleted/private) rather than trusting it blindly; see
+  gone stale (deleted/private) rather than trusting it blindly — and if that fallback search also
+  comes up empty, the dead link is cleared from the DB (`save_video_id_to_song(song, None)`) rather
+  than left to fail validation again on every future run. Can also be set to the literal string
+  `"N/A"` (`manage_youtube_playlists.NO_VIDEO_SENTINEL`) — a human's record that no video for this
+  song exists on YouTube at all (as opposed to existing but excluded from search). For now this is
+  data-only: `create_yt_playlist()` normalizes it to "no stored link" and searches normally, same
+  as an empty field — there's no dedicated runtime behavior (e.g. skipping the search) for it yet.
+  Currently set by hand (direct DB write) only, no menu option. See
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 
 ## `tag.db`

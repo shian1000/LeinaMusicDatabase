@@ -76,7 +76,6 @@ def get_album_name(artist: str, song: str) -> str | None:
             break
 
     if not song_link:
-        print("Song not found")
         return None
 
     slog(f"Found song link: {song_link}", priority=1)

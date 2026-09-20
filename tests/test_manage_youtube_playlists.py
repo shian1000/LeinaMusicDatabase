@@ -220,3 +220,61 @@ def test_create_yt_playlist_does_not_mark_added_when_add_to_playlist_fails(monke
     # (see manage_youtube_playlists.py's create_yt_playlist()).
     assert saved_caches[-1]["songs"][key]["added"] is False
     assert song.youtube_video_id == "foundid"
+
+
+# ---------------------------------------------------------
+# create_yt_playlist(): NO_VIDEO_SENTINEL ("N/A") — data-only for now,
+# normalized to "no stored link" so a normal search still runs.
+# ---------------------------------------------------------
+
+def test_create_yt_playlist_searches_normally_for_song_marked_no_video_sentinel(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+
+    def fail_if_validated(*a, **k):
+        raise AssertionError("is_video_id_valid should not run for the N/A sentinel — it isn't a real id")
+
+    monkeypatch.setattr(m, "is_video_id_valid", fail_if_validated)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: "foundid")
+
+    song = _fake_song("Сербский Нож", "Рруа", youtube_video_id=m.NO_VIDEO_SENTINEL)
+    m.create_yt_playlist([song], "Test Playlist")
+
+    assert added == ["foundid"]
+    assert committed == [True]
+    assert song.youtube_video_id == "foundid"
+
+
+def test_create_yt_playlist_keeps_no_video_sentinel_when_search_finds_nothing(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: None)
+
+    song = _fake_song("Сербский Нож", "Рруа", youtube_video_id=m.NO_VIDEO_SENTINEL)
+    m.create_yt_playlist([song], "Test Playlist")
+
+    # No search hit and no prior real link to clear — the annotation is left
+    # untouched, same as an empty field would be.
+    assert added == []
+    assert committed == []
+    assert song.youtube_video_id == m.NO_VIDEO_SENTINEL
+
+
+# ---------------------------------------------------------
+# create_yt_playlist(): clearing a dead stored link nothing replaces
+# ---------------------------------------------------------
+
+def test_create_yt_playlist_clears_stale_link_when_replacement_search_finds_nothing(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "is_video_id_valid", lambda video_id, timeout=20: False)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: None)
+
+    saved_caches = []
+    monkeypatch.setattr(m, "save_cache", lambda cache: saved_caches.append(json.loads(json.dumps(cache))))
+
+    song = _fake_song("Some Artist", "Some Song", youtube_video_id="deadvideoid")
+    m.create_yt_playlist([song], "Test Playlist")
+
+    key = yt_cache.make_song_key("Some Artist", "Some Song")
+    assert added == []
+    assert committed == [True]
+    assert song.youtube_video_id is None
+    assert saved_caches[-1]["songs"][key]["video_id"] is None

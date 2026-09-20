@@ -47,7 +47,12 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
             # API request — see docs/agent-notes/youtube-search-matching.md,
             # "Taco Hemingway - Fuck Your List"). Pre-filling it here means
             # create_yt_playlist()'s existing "already have a video_id, skip
-            # search" check picks it up for free.
+            # search" check picks it up for free. Can also be
+            # manage_youtube_playlists.NO_VIDEO_SENTINEL ("N/A") — a human's
+            # record that no video for this song exists on YouTube at all,
+            # currently treated identically to an unset field (normalized to
+            # "no stored link", search still runs) since there's no
+            # dedicated runtime behavior for it yet.
             "video_id": song.youtube_video_id,
             "added": False
         }

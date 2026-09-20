@@ -1,10 +1,10 @@
-Zrobić YT fetcher
+[] Zrobić YT fetcher
+[] Optymalizacja?
+[] Zrobić Spotify fetcher:
+Przygotuj Spotify fetcher, który będzie wykonywał podobną funkcję, co inne fetchery, ale na spotify. Zanim to zrobisz to napisz mi plan, ak byś to rozwiązał?
 
-Zrobić Spotify fetcher
+Utwory do testu:
+MRFY + Laibach - Poskočna
 
-Dodać do listy, że nie ma na YT:
-Сербский Нож - Рруа
-Wãbórk Sztrómù - Wôżne, że...
-Хлопці Горобці - 301 307
-
-Muszę zmienić kolejność, żeby Google było na końcu
+[] Modyfikacja klawiatury
+[] Działa, tylko jest to ostrzeżenie. Możemy coś z nim zrobić?

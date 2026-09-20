@@ -232,8 +232,11 @@ non-trivial work in that area.
   metadata, popularity/tags signals, typo tolerance, the `artists.synonyms` column for real name
   changes, a `MIN_ARTIST_RELEVANCE` floor, and `Song.youtube_video_id` as both a manual escape
   hatch for a video excluded from search results entirely and a self-populating cache — written by
-  `save_video_id_to_song()` after every fresh search hit and re-validated by `is_video_id_valid()`
-  before reuse, both logged to `youtube_link_cache.log`), `transliteration.py`'s alternate-script
+  `save_video_id_to_song()` after every fresh search hit, re-validated by `is_video_id_valid()`
+  before reuse, and cleared back to `None` if a stale link fails both validation and a fallback
+  re-search, both logged to `youtube_link_cache.log`; see also `NO_VIDEO_SENTINEL`, the separate
+  `"N/A"` human annotation for "confirmed no video exists at all," currently data-only with no
+  dedicated skip behavior), `transliteration.py`'s alternate-script
   retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
   when the winning pick isn't a confirmed official release, not by a relevance floor), why a collab
   track credited in the DB solely to a featured/guest artist defeats matching entirely (no scoring
