@@ -246,3 +246,24 @@ The two pure-parsing helpers (`_find_matching_track`, `_extract_album_from_track
 tested against static HTML fixtures in `tests/test_spotify_fetcher.py` — no live network/Selenium
 in the test, consistent with the rest of `tests/` — but that only locks in the parsing logic
 against the *fixture*, not against Spotify's real markup drifting out from under it.
+
+## Per-fetcher invocation/success stats (Statistics menu)
+
+`discovery_stats.py` persists two counters per module id (filename stem, same key as
+`discovery_settings.py` for the same rename-stability reason) to `discovery_fetcher_stats.json`
+(gitignored, repo root): `invocations` and `successes`. `discoveries_manager._call_module()` bumps
+`invocations` right before every `get_album_name()` call and `successes` only when
+`_validate_result()` accepts what came back — so a module that returns a mismatched or blacklisted
+album is invoked but not counted as successful. A module retried with untruncated text or an
+artist synonym for the same song counts as a separate invocation each time, since each is a real
+call.
+
+Counters are loaded into an in-memory cache on first use per process (avoids re-reading the file on
+every single invocation during a large "Fill missing data" run) but written straight back to disk
+on every mutation, so nothing is lost if the process is killed mid-run.
+
+The main menu's "Statistics" option (`src/menu/main_menu/statistics/__init__.py`) reads the
+counters plus `load_all_discovery_modules_metadata()` (same source the Settings enable/disable
+screen uses, so disabled modules still show their historical numbers) and prints invocations,
+successes, and success rate per fetcher — no aggregation logic lives in the menu layer beyond
+formatting, matching how `settings_menu` already merges config with module metadata for display.

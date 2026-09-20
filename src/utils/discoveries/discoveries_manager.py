@@ -1,6 +1,7 @@
 from utils.common.text_utils import truncate_at_word, is_blacklisted_album, similarity, scaled_similarity_threshold
 from utils.discoveries.discovery_result import DiscoveryResult
 from utils.discoveries.discovery_settings import reconcile_discovery_config
+from utils.discoveries.discovery_stats import record_invocation, record_success
 from config.constants import SPELLING_CHECK_THRESHOLD
 import ast
 import importlib.util
@@ -58,7 +59,7 @@ def load_discovery_modules():
             continue
         module = _import_module(module_files[module_id])
         module_name = getattr(module, "MODULE_NAME", module_id)  # fallback to filename if missing
-        modules.append((module_name, module))
+        modules.append((module_id, module_name, module))
 
     return modules
 
@@ -131,15 +132,24 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
     return album
 
 
-def _call_module(module, module_name: str, artist: str, title: str) -> str | None:
-    """Run a module's get_album_name, isolated from crashes and bad output."""
+def _call_module(module, module_id: str, module_name: str, artist: str, title: str) -> str | None:
+    """Run a module's get_album_name, isolated from crashes and bad output.
+
+    Counts as one invocation for the Statistics menu even if this is a retry
+    of the same module with untruncated text or an artist synonym -- each
+    such retry is a real call to get_album_name().
+    """
+    record_invocation(module_id)
     try:
         result = module.get_album_name(artist, title)
     except Exception as e:
         slog(f"[{module_name}] crashed while looking up '{artist} - {title}': {e}")
         print(f"{module_name} failed unexpectedly, skipping it for this song")
         return None
-    return _validate_result(result, artist, title, module_name)
+    album = _validate_result(result, artist, title, module_name)
+    if album:
+        record_success(module_id)
+    return album
 
 
 def discover_album_name(song, modules):
@@ -154,9 +164,9 @@ def discover_album_name(song, modules):
     truncated = art_cln != art_cln_full or son_cln != son_cln_full
 
     slog("About to lunch modules' loop")
-    for module_name, module in modules:
+    for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
-        album = _call_module(module, module_name, art_cln, son_cln)
+        album = _call_module(module, module_id, module_name, art_cln, son_cln)
 
         # truncate_at_word() strips trailing "feat. X" / "& X" credits, but it
         # can also cut into a legitimate title/artist (e.g. "Bang, Bang").
@@ -164,12 +174,12 @@ def discover_album_name(song, modules):
         # strings before giving up on this module.
         if not album and truncated:
             print(f"Looking in {module_name} using untruncated title/artist")
-            album = _call_module(module, module_name, art_cln_full, son_cln_full)
+            album = _call_module(module, module_id, module_name, art_cln_full, son_cln_full)
 
         #Repeat the searching if there is a synonym for an artist
         if not album and song.artist.synonyms is not None:
             print(f"Looking for it in {module_name} using synonyms")
-            album = _call_module(module, module_name, song.artist.synonyms, son_cln)
+            album = _call_module(module, module_id, module_name, song.artist.synonyms, son_cln)
 
         if album:
             return album

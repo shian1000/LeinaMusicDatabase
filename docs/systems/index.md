@@ -17,7 +17,7 @@ One row per subsystem. "Docs" links to where the *depth* lives — a system with
 One edge per line so both directions are `grep`-able.
 
 - Terminal UI -> Catalog/DB search — resolves and displays `Song`/`Artist` rows for every menu flow
-- Terminal UI -> Discovery — drives "Fill missing data", MP3 import, and spell-check menus
+- Terminal UI -> Discovery — drives "Fill missing data", MP3 import, spell-check, and Statistics menus
 - Terminal UI -> YouTube — drives playlist creation, video matching, and download menus
 - Discovery -> Catalog/DB search — resolves existing rows and creates new `Artist`/`Song` rows during import
 - Discovery -> Normalization & matching — normalizes and scores fetched values against the query

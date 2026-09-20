@@ -21,6 +21,12 @@ DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
 # tag.db), persisted as JSON. Read once at startup, so a change made through
 # the Settings menu only takes effect after the app is restarted.
 DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
+
+# Per-module invocation/success counters for the Statistics menu, persisted
+# as JSON and keyed by module id (filename stem) for the same reason as
+# DISCOVERY_MODULES_CONFIG_FILE: stable across MODULE_NAME renames.
+DISCOVERY_STATS_FILE = "discovery_fetcher_stats.json"
+
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
     "spotify_fetcher",
