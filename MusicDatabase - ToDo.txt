@@ -2,19 +2,9 @@ Zrobić YT fetcher
 
 Zrobić Spotify fetcher
 
-Czy Google fetcher sprawdza swoje nazwy w blackliscie?
-
 Dodać do listy, że nie ma na YT:
 Сербский Нож - Рруа
 Wãbórk Sztrómù - Wôżne, że...
 Хлопці Горобці - 301 307
 
-Wyszukiwanie albumów - Google:
-The Car Is On Fire - Can't Cook
-
-Spotify fetcher
-
-
-
-None - None (reason - Couldn't establish the artist and title (Filename: /home/owner/Documents/Code/MusicDatabase/import/Haiku Garden ~ Avalanš.mp3))
-None - None (reason - Couldn't establish the artist and title (Filename: /home/owner/Documents/Code/MusicDatabase/import/Haiku Garden ~ Structures.mp3))
+Muszę zmienić kolejność, żeby Google było na końcu

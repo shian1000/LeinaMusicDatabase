@@ -584,6 +584,29 @@ failure, search miss, and DB save in this flow is logged to `youtube_link_cache.
 gitignored, always-on regardless of the `.debug` flag that gates `debug.log`) — check it first if
 a playlist run picks an unexpected video or a stored link stops working.
 
+## YouTube Data API quota budget, and why `add_video_to_playlist()` must propagate `quotaExceeded`
+
+Quota (standard project grant: 10,000 units/day) is the real ceiling on how many songs one playlist
+run can process per day, and it's spent on two separate calls, not one: `playlistItems().insert()`
+(50 units) fires once per song, unconditionally, the moment a video_id is found; the Data API
+`search().list()` fallback (100 units, up to twice if the transliteration retry in
+`transliteration.py` also fires) is skipped entirely whenever yt-dlp itself resolves the song, which
+is the common case — `videos().list()` is deliberately never called at all (see the age-restriction
+section above) specifically to avoid a third per-candidate cost. Roughly: ~200 songs/day if yt-dlp
+resolves everything itself, down to ~40/day in the worst case where every single song needs both an
+API search and a transliteration retry.
+
+Because quota is shared across both calls, it can run out mid-`playlistItems().insert()` just as
+easily as mid-search — and the two call sites used to handle that very differently.
+`add_video_to_playlist()` re-raises `HttpError` when `is_quota_exceeded()` is true instead of
+treating it as an ordinary permanent per-video failure, so it reaches `create_yt_playlist()`'s own
+`except HttpError` block — the same "save progress, print a resume message, stop" path the
+search-side quota check already used. `create_yt_playlist()` in turn only sets a cache entry's
+`"added"` flag after `add_video_to_playlist()` actually returns `True`. Both matter together: since
+`"added"` entries are skipped on resume, setting the flag unconditionally (the original bug) would
+silently mark a song "done" the moment quota ran out mid-insert — or on any other insert failure —
+and it would never be retried on a later run.
+
 ## A live TV performance show's own name can carry no "live" wording at all
 
 Same failure shape as `"woodstock"` joining `STRONG_LQ_KEYWORDS` (see the rebalancing section

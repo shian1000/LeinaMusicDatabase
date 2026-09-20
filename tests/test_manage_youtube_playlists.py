@@ -1,6 +1,10 @@
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from googleapiclient.errors import HttpError
 
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
@@ -13,6 +17,11 @@ from utils.youtube import yt_cache
 def _fake_song(artist_name, title, youtube_video_id=None):
     artist = SimpleNamespace(name=artist_name, synonyms=None)
     return SimpleNamespace(artist=artist, title=title, language=None, youtube_video_id=youtube_video_id)
+
+
+def _http_error(status, reason=None):
+    content = json.dumps({"error": {"errors": [{"reason": reason}]}}).encode("utf-8") if reason else b"{}"
+    return HttpError(SimpleNamespace(status=status, reason="error"), content)
 
 
 class FakeCompletedProcess:
@@ -77,6 +86,35 @@ def test_save_video_id_to_song_is_noop_when_unchanged(monkeypatch):
     m.save_video_id_to_song(song, "sameid")
 
     assert committed == []
+
+
+# ---------------------------------------------------------
+# add_video_to_playlist()
+# ---------------------------------------------------------
+
+def test_add_video_to_playlist_reraises_quota_exceeded(monkeypatch):
+    def raise_quota_exceeded(part, body):
+        raise _http_error(403, reason="quotaExceeded")
+
+    youtube = SimpleNamespace(
+        playlistItems=lambda: SimpleNamespace(
+            insert=lambda part, body: SimpleNamespace(execute=lambda: raise_quota_exceeded(part, body))
+        )
+    )
+
+    with pytest.raises(HttpError):
+        m.add_video_to_playlist(youtube, "PLAYLIST1", "someid")
+
+
+def test_add_video_to_playlist_returns_false_on_other_permanent_error():
+    def raise_forbidden():
+        raise _http_error(403, reason="forbidden")
+
+    youtube = SimpleNamespace(
+        playlistItems=lambda: SimpleNamespace(insert=lambda part, body: SimpleNamespace(execute=raise_forbidden))
+    )
+
+    assert m.add_video_to_playlist(youtube, "PLAYLIST1", "someid") is False
 
 
 # ---------------------------------------------------------
@@ -162,3 +200,23 @@ def test_create_yt_playlist_does_not_persist_when_search_finds_nothing(monkeypat
     assert added == []
     assert committed == []
     assert song.youtube_video_id is None
+
+
+def test_create_yt_playlist_does_not_mark_added_when_add_to_playlist_fails(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "add_video_to_playlist", lambda youtube, playlist_id, video_id: False)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: "foundid")
+
+    saved_caches = []
+    monkeypatch.setattr(m, "save_cache", lambda cache: saved_caches.append(json.loads(json.dumps(cache))))
+
+    song = _fake_song("Some Artist", "Some Song")
+    m.create_yt_playlist([song], "Test Playlist")
+
+    key = yt_cache.make_song_key("Some Artist", "Some Song")
+    # The video was found and persisted to the DB, but never actually
+    # added to the playlist — the cache entry must stay unmarked so the
+    # song is retried on the next run instead of being silently dropped
+    # (see manage_youtube_playlists.py's create_yt_playlist()).
+    assert saved_caches[-1]["songs"][key]["added"] is False
+    assert song.youtube_video_id == "foundid"

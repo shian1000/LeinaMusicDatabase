@@ -1292,6 +1292,12 @@ def add_video_to_playlist(youtube, playlist_id: str, video_id: str) -> bool:
             return True
 
         except HttpError as e:
+            if is_quota_exceeded(e):
+                # Let the caller's `except HttpError` handle this the same
+                # way it does for search-quota errors: save progress and
+                # stop, instead of silently dropping this song.
+                raise
+
             if e.resp.status in (409, 500, 503):
                 print(f"  ⚠ API error {e.resp.status}, retry {attempt+1}/3 …")
                 time.sleep(1 + attempt)
@@ -1399,7 +1405,10 @@ def create_yt_playlist(song_list, playlist_name: str):
                 else:
                     _logger.warning(f"Could not map {artist} - {title} back to a Song object — video_id not persisted to DB")
 
-            add_video_to_playlist(youtube, playlist_id, video_id)
+            if not add_video_to_playlist(youtube, playlist_id, video_id):
+                # Not added — leave entry["added"] False so this song is
+                # retried on the next run instead of being silently dropped.
+                continue
 
             entry["added"] = True
             save_cache(cache)
