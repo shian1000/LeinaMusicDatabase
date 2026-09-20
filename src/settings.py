@@ -21,8 +21,7 @@ class Settings:
     database_dir: UPath = _default_database_dir()
     config_dir: UPath = UPath(__file__).parent / "config"
     music_database_dir: UPath = database_dir / UPath("music.db")
-    local_library_dir_str: str = "smb://server.local/Shared/Music/"
-    # local_library_dir_str: str = "/home/owner/Documents/Code/MusicDatabase/"
+    local_library_dir_str: str = "/media/owner/ServerHDD/Shared/Music/"
     local_library_dir: UPath = UPath(local_library_dir_str)
     smb_username: str = os.getenv("SMB_USERNAME")
     smb_password: str = os.getenv("SMB_PASSWORD")
