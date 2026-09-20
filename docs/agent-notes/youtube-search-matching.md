@@ -608,6 +608,103 @@ practice that doesn't. Same whack-a-mole caveat as every other one-off keyword a
 file: add another specific show name only once a real case surfaces needing it, don't try to
 enumerate every TV/session brand preemptively.
 
+A second, near-identical case surfaced in the same batch of user-reported failures: `"when in
+rome"` (Genesis' named 2007 live concert film/DVD) joined `STRONG_LQ_KEYWORDS` for `Genesis - Firth
+Of Fifth`, where an 11.3M-view reupload of it took no LQ penalty at all and nearly won on view count
+alone against the real official audio (2.9M views) — the official audio only survived that
+particular run because it happened to still be in the fetched yt-dlp candidate pool.
+
+## Keyword matching needed a word boundary — a keyword can be a substring of an unrelated word
+
+Every `HQ_KEYWORDS`/`LQ_KEYWORDS`/`STRONG_LQ_KEYWORDS`/`VIDEO_KEYWORDS`/`HIGH_TRUST_KEYWORDS`/
+`NOT_THE_SONG_KEYWORDS` check used to be plain `keyword in text` — safe for the multi-word phrases
+these lists are mostly made of, but not for a short, single-word entry that happens to also be a
+literal prefix of some other, unrelated word. Real case: `Al Di Meola - Double Concerto` — the real
+Topic-channel upload (bare title `"Double Concerto"`, genuine `track` metadata) silently took
+`LQ_KEYWORDS`' `"concert"` entry as a hit, because `"concert"` is a literal substring of
+`"Concerto"` — an unrelated classical-music term, not a live-performance signal at all. This had
+always been true, but stayed harmless as long as the official-release quality bonus applied
+unconditionally (see the next section) — once that bonus was gated on "no LQ hit at all" to fix a
+different real case, this latent false positive became decisive on its own, dropping the real
+upload below an unrelated live recording.
+
+`_keyword_present(keyword, text)` (a `\bkeyword\b` regex, Unicode-aware so accented-letter keywords
+like `"na żywo"` still get real word boundaries) replaces every one of those `in` checks. This is
+strictly more correct, not narrower — every keyword-list entry is meant to match as a real word or
+phrase on its own, never as a fragment of a longer word, and the existing same-list dedup in
+`_non_overlapping_hits()` (e.g. `"audio"` inside `"official audio"`, `"orchestra"` inside
+`"orchestral"`) still works unchanged, since those are a whole word appearing inside a longer
+*phrase* (a real word boundary exists at the space), not inside a longer single word. The one
+adjustment this forced: `"react"` no longer substring-matches `"reaction"` under a word-boundary
+check, so `"reaction"` joined `LQ_KEYWORDS` as its own explicit entry to keep that real, previously
+relied-upon match (`Bloodywood`'s `"(REACTION)"` case, see below) working.
+
+## The official-release quality bonus needed the same "don't offset an alternate-version penalty" gate as the HQ bonus
+
+`_is_official_release()`'s `+2` bonus (genuine label/aggregator distribution, or a Topic channel —
+see that function's own docstring) used to apply completely unconditionally, unlike the `HQ_KEYWORDS`
+bonus right above it in `score_result()`, which is already withheld whenever an `LQ_KEYWORDS`/
+`STRONG_LQ_KEYWORDS` hit signals an alternate arrangement (see the Foals - 2001 double-count section
+above). Being genuinely, officially distributed doesn't mean being the plain canonical version — a
+label can distribute a remix or club edit through the exact same Topic-channel/`track`-metadata
+pipeline as the original release. Real case: `Betoko - Breaking (Original Mix)` — a `"(Club Edit)"`
+upload had its own `track` metadata (a real official release, not a fan reupload) and this bonus
+applied regardless, outscoring the real `"(OKO Recordings)"` upload (an ordinary artist-channel
+upload, no official-release metadata at all) despite both tying on relevance/artist_relevance
+(quality `1.65` vs `0.19` — wrong candidate winning). Fixed two ways together, neither sufficient
+alone: `"club edit"` joined `LQ_KEYWORDS` (same category as `"remix"`), and the bonus itself is now
+gated by `and not lq_hits and not strong_lq_hits`, mirroring the HQ bonus's existing gate exactly.
+
+## Polish "ł" doesn't NFKD-decompose — `_fold_diacritics()` needed a direct substitution for it
+
+Same non-decomposing-letter shape already documented above for Belarusian "і" (`NIZKIZ - Правілы`)
+— Polish "ł" (U+0142) is a genuinely separate base letter in Unicode, not a base letter plus a
+combining mark, so NFKD folding leaves it untouched. Unlike the Belarusian case, though, there's no
+cross-script ambiguity here: an ASCII-typed DB title dropping "ł" always means plain "l" was
+intended, so a direct substitution table (`_NON_DECOMPOSING_LETTER_FOLDS`, applied inside
+`_fold_diacritics()` after the NFKD pass) closes this gap safely, the same "only ever adds a way to
+match" guarantee the rest of this diacritic-tolerance machinery already relies on.
+
+Real case: `Krzysztof Zalewski - Milosc Milosc` (DB, ASCII) vs the real `"Miłość Miłość"` — NFKD
+folds `"ość"`'s `"ś"` to `"s"` fine, but the untouched `"ł"` meant the folded candidate was still
+`"Miłosc"`, not `"Milosc"`, so exact containment never matched *any* candidate. This compounded with
+the usual decoration-dilutes-similarity problem: every properly-labeled official candidate carried
+an `"Krzysztof Zalewski - "` prefix, diluting the fallback `similarity()` ratio to ~0.47, while a
+`"(Live)"` upload (bare title, no artist prefix at all) coincidentally scored `0.85` — closer to the
+bar, and the one that won, purely from having nothing to dilute it. Folding `"ł"→"l"` restores exact
+containment for every candidate equally (all back to `1.0` relevance), so `quality` — which already
+correctly penalized `"(Live)"` — decides instead.
+
+## `artist_relevance` needed diacritic folding too — it was only ever applied to title relevance
+
+`_fold_diacritics()` existed for years before this was ever applied inside `_artist_relevance_for()`
+— an oversight, not a deliberate scope limit. Real case: `La Vida Bohème - Radio Capital` (DB has
+the accented "è"). The real official upload is hosted on a *label* channel ("Nacional Records",
+contributing nothing to artist_relevance on its own), so its only artist-match signal was a
+`similarity()` ratio against its own video title text (`"La Vida Boheme - Radio Capital"`, no
+accent), further diluted by the trailing song title — `0.59` unfolded. A lower-quality `"(En Vivo)"`
+reupload happened to be hosted on the *artist's own* channel (bare `"La Vida Boheme"`, no accent, no
+decoration at all) — a clean channel-name match scoring `0.93`, enough to win on artist_relevance
+(sorted before `quality` in the tuple) even though `quality` correctly favored the official video
+(`4.29` vs `1.20`). This is the tuple-ordering failure shape recurring again (see the "Future
+redesign trigger" note above) — but unlike the three prior recurrences, this one had a real,
+fixable root cause: the missing-diacritic gap folding already closes for title relevance, just never
+extended to artist_relevance. Added as extra `similarity()`/`_text_containment()` branches on the
+folded text, on both the candidate-title and channel comparisons — the same "only ever adds a way to
+match" pattern `_normalize_multi_artist_punctuation()` already uses in this function.
+
+## `yt-dlp` candidate-pool non-determinism can look like a scoring bug when it isn't
+
+`Koala Voice - Vest` was reported as a wrong pick (a `"(Live)"` upload won) alongside the four real
+bugs above, but reproducing it against live yt-dlp output afterward found the scoring already
+correct: once the official video is in the candidate pool, it wins decisively (the existing `"live"`
+`STRONG_LQ_KEYWORDS` penalty already handles it). The original wrong run most likely just didn't
+have the official video in that particular `ytsearch8` call's results at all — see "yt-dlp's
+anonymous search is confirmed non-deterministic run-to-run" above. Kept as a regression test anyway
+(with the official video *in* the pool) since it costs nothing and guards the scoring behavior
+itself, but no code change was needed or made for this one — resist the urge to "fix" a case that
+turns out to already work; tune scoring changes to cases that actually reproduce wrong.
+
 ## Known regressions this logic exists to prevent
 
 Concrete cases hit during development — useful as a regression checklist if this scoring is ever
@@ -709,6 +806,19 @@ simplified:
 - `Gaba Kulka - Biegnij dalej sam` → the DB credited the song solely to Gaba Kulka (a guest
   vocalist), not the real credited act `Fisz Emade Tworzywo`, so no real upload's title/channel
   ever matched — a data-attribution problem, not a scoring one (see the section above).
+- `Betoko - Breaking (Original Mix)` → an officially-released "(Club Edit)" beat the real Original
+  Mix purely from an unconditional official-release bonus that didn't check for an alternate-version
+  keyword hit first (see the official-release-bonus-gating section above).
+- `Genesis - Firth Of Fifth` → a named live concert film ("When in Rome 2007") with no "live"
+  wording nearly won on view count alone (see the Jools Holland section above).
+- `Krzysztof Zalewski - Milosc Milosc` → Polish "ł" doesn't NFKD-decompose, so an ASCII-typed DB
+  title never exact-matched any candidate, including the real ones (see the "ł" section above).
+- `La Vida Bohème - Radio Capital` → `artist_relevance` never folded diacritics, so a label-hosted
+  official video's accent-mismatched channel/title match lost to a live reupload hosted on the
+  artist's own (also accent-mismatched, but undecorated) channel (see the section above).
+- `Koala Voice - Vest` → reported as wrong but not actually a scoring bug — reproducing it found the
+  scoring already correct once the official video is in the candidate pool; the original run's
+  candidate pool likely just didn't include it (see the non-determinism section above).
 
 **Not covered by any of the above:** `Vinsent - Praciahvaju Żyć` — same shape as the Akute cases
 above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism

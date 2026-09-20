@@ -74,8 +74,19 @@ HQ_KEYWORDS = ["hq", "hd", "high quality", "official audio", "audio", "remaster"
 # Track" promo video only barely lost to the real official audio (margin
 # 0.29) on view count alone before this — the same fragile-near-tie shape
 # fixed for Daði Freyr, but for "isn't music at all" rather than "isn't the
-# canonical arrangement".
-LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "review", "teaser", "eurovision version", "high tone", "track by track"]
+# canonical arrangement". "club edit" joins for the same reason as "remix" —
+# a genuinely different mix of the track, not the plain one. Real case:
+# Betoko - Breaking (Original Mix) — a "(Club Edit)" upload, distributed to
+# a Topic channel with its own `track` metadata, tied 1.0/1.0
+# relevance/artist_relevance with the real "(OKO Recordings)" upload (an
+# artist-channel upload with no official-release metadata at all) and won
+# purely on the unconditional official-release quality bonus — see that
+# bonus's own gating fix below for why this keyword alone wasn't enough.
+# "reaction" joins "react" as its own explicit entry (rather than relying on
+# "react" substring-matching it) now that keyword matching requires a whole
+# word — see _keyword_present()'s docstring for why plain substring matching
+# was retired.
+LQ_KEYWORDS = ["concert", "tour", "performance", "session", "acoustic", "cover", "karaoke", "instrumental", "remix", "club edit", "sped up", "slowed", "nightcore", "8d audio", "bass boosted", "demo", "dub", "orchestra", "orchestral", "react", "reaction", "review", "teaser", "eurovision version", "high tone", "track by track"]
 # Titles matching these are content *explaining/analyzing* the song, not a
 # recording of it at all — unlike LQ_KEYWORDS above (still real recordings
 # of the song, just a different arrangement/quality), these fully
@@ -112,7 +123,15 @@ NOT_THE_SONG_KEYWORDS = ["tłumaczenie", "lyrics translation"]
 # purely because the official video's own "(Official Video)" tag cost it the
 # VIDEO_PENALTY while the Jools Holland clip incurred no LQ penalty at all
 # and even picked up an HQ bonus from "HD" (BBC Two HD).
-STRONG_LQ_KEYWORDS = ["live", "na żywo", "woodstock", "jools holland"]
+# "when in rome" is the same shape again — Genesis' "When in Rome 2007" is a
+# specific, named live concert film/DVD whose own title carries no "live"
+# wording. Real case: Genesis - Firth Of Fifth — a "..., I Know What I Like
+# (When in Rome 2007)" reupload (11.3M views) had no LQ penalty at all and
+# nearly outscored the real official audio purely on view count; the
+# official audio still won that particular run, but only because it happened
+# to be in the fetched candidate pool — a less popular or absent official
+# candidate would have lost to this the same way Jools Holland did.
+STRONG_LQ_KEYWORDS = ["live", "na żywo", "woodstock", "jools holland", "when in rome"]
 STRONG_LQ_PENALTY = 3
 VIDEO_KEYWORDS = ["official video", "music video", "mv", "official mv", "video clip"]
 # Lowered from -2: being a video instead of an audio-only upload isn't
@@ -181,6 +200,30 @@ MIN_ARTIST_RELEVANCE = 0.35
 # scripts need substring-containment matching instead of whole-word regex
 # matching, since there's no word boundary to anchor on.
 _NO_SPACES_SCRIPT = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
+
+
+def _keyword_present(keyword: str, text: str) -> bool:
+    """Whether `keyword` appears in `text` as a whole word/phrase, not merely
+    as a substring of a longer, unrelated word. Used for every keyword list
+    in this file (HQ/LQ/STRONG_LQ/VIDEO/HIGH_TRUST/NOT_THE_SONG) — plain `kw
+    in text` was the check here until a real case exposed it as unsafe: `Al
+    Di Meola - Double Concerto`'s real Topic-channel upload (bare title
+    "Double Concerto") silently took LQ_KEYWORDS' "concert" entry as a hit,
+    because "concert" is a literal substring of "Concerto". This had always
+    been true, but stayed harmless as long as the official-release quality
+    bonus applied unconditionally (see that bonus's own docstring) — gating
+    the bonus on "no LQ hit at all" (to fix a different real case, Betoko -
+    Breaking) suddenly made this latent false positive decisive, dropping
+    the real upload's quality enough to lose to an unrelated live recording.
+    Every existing keyword-list entry is a real word or phrase on its own
+    (never intended to match as a fragment of some other word), so this is a
+    strictly more correct check everywhere it's used, not a narrower one for
+    just this case — the existing dedup in `_non_overlapping_hits()` (e.g.
+    "audio" inside "official audio") still works unchanged, since those are
+    cases of one *whole word* being a phrase's own substring, which a word
+    boundary still finds on both sides of the space.
+    """
+    return re.search(r"\b" + re.escape(keyword) + r"\b", text) is not None
 
 
 
@@ -453,6 +496,12 @@ def _collapse_repeated_letters(text: str) -> str:
     return re.sub(r"(.)\1+", r"\1", text)
 
 
+# Letters that don't NFKD-decompose (see _fold_diacritics()'s docstring for
+# why NFKD alone can't fold these) but have one unambiguous plain-Latin
+# equivalent worth substituting directly.
+_NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L"})
+
+
 def _fold_diacritics(text: str) -> str:
     """Strip accents/diacritics via Unicode NFKD decomposition + dropping
     combining marks — the same technique `normalizer.normalize()` already
@@ -475,9 +524,26 @@ def _fold_diacritics(text: str) -> str:
     "и") vs the real "...набірай" (Cyrillic "й", short I) — "й" decomposes
     to "и" + a combining breve, so folding makes the typo and the correct
     spelling identical too, without a Cyrillic-specific rule.
+
+    Not every "looks like a diacritic" letter decomposes this way, though —
+    Polish "ł" (U+0142) has no NFKD decomposition at all; it's a genuinely
+    separate base letter in Unicode, the same non-decomposing shape already
+    documented for Belarusian "і" (see `NIZKIZ - Правілы` above) — but unlike
+    "і", an ASCII-typed DB title dropping it almost always means plain "l"
+    (there's no ambiguity the way there can be across scripts), so a direct
+    substitution table closes this specific gap safely. Real case:
+    `Krzysztof Zalewski - Milosc Milosc` (DB, ASCII) vs the real "Miłość
+    Miłość" — NFKD folds "ość"'s "ś" to "s" but leaves "ł" untouched, so the
+    folded candidate stayed "Miłosc" (still containing "ł"), missing an exact
+    match against the DB's plain "Milosc" — this bug then compounded with
+    every decorated candidate's own artist-name prefix diluting the
+    similarity() fallback, so only the shortest, bare-titled candidate (a
+    "(Live)" upload happening to have no artist prefix at all) got close
+    enough to clear the relevance bar.
     """
     decomposed = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in decomposed if not unicodedata.combining(c))
+    folded = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return folded.translate(_NON_DECOMPOSING_LETTER_FOLDS)
 
 
 def _text_containment(expected: str, candidate: str) -> float:
@@ -583,26 +649,50 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -
     """artist_relevance for one candidate name against one artist name —
     factored out so score_result() can take the max across the DB artist
     name and any known synonyms without duplicating this logic per name.
+
+    Also tries a diacritic-folded comparison (`_fold_diacritics()`, the same
+    helper title relevance already uses) — unlike title relevance, this
+    wasn't previously applied here at all. Real case: `La Vida Bohème -
+    Radio Capital` (DB has the accented "è") — the real official upload is
+    hosted on a label channel ("Nacional Records", contributing nothing to
+    artist_relevance), so its only signal is a `similarity()` ratio against
+    the video's own title text ("La Vida Boheme - Radio Capital", no accent),
+    diluted further by the trailing song title — without folding, that
+    scored only 0.59. A lower-quality "(En Vivo)" reupload, hosted on the
+    artist's *own* channel (bare "La Vida Boheme", no accent, no decoration
+    at all), scored 0.93 from that clean channel-name match alone — enough to
+    win on artist_relevance before `quality` (which correctly favored the
+    official video, 4.29 vs 1.20) was ever consulted. Folding closes the
+    accent gap for both the label-hosted and artist-hosted case, so this only
+    ever adds a way to match — the same "extra max() branch" pattern already
+    used for punctuation normalization above.
     """
     expected = _relevance_text(name)
     expected_normalized = _normalize_multi_artist_punctuation(expected)
+    expected_folded = _fold_diacritics(expected)
     relevance = 0.0
     if expected and candidate_clean:
         candidate_normalized = _normalize_multi_artist_punctuation(candidate_clean)
+        candidate_folded = _fold_diacritics(candidate_clean)
         relevance = max(
             similarity(expected, candidate_clean),
             _text_containment(expected, candidate_clean),
             similarity(expected_normalized, candidate_normalized),
             _text_containment(expected_normalized, candidate_normalized),
+            similarity(expected_folded, candidate_folded),
+            _text_containment(expected_folded, candidate_folded),
         )
     if expected and channel_clean:
         channel_normalized = _normalize_multi_artist_punctuation(channel_clean)
+        channel_folded = _fold_diacritics(channel_clean)
         relevance = max(
             relevance,
             similarity(expected, channel_clean),
             _text_containment(expected, channel_clean),
             similarity(expected_normalized, channel_normalized),
             _text_containment(expected_normalized, channel_normalized),
+            similarity(expected_folded, channel_folded),
+            _text_containment(expected_folded, channel_folded),
             _artist_channel_handle_match(expected, channel_clean),
         )
     return relevance
@@ -765,7 +855,7 @@ def score_result(
         )
     else:
         relevance = 0.0
-    if any(kw in candidate_title.lower() for kw in NOT_THE_SONG_KEYWORDS):
+    if any(_keyword_present(kw, candidate_title.lower()) for kw in NOT_THE_SONG_KEYWORDS):
         relevance = 0.0
 
     channel_clean = _relevance_text(channel)
@@ -798,7 +888,7 @@ def score_result(
         # title text double-counts what is really a single signal. Drop any
         # hit that's wholly contained in another hit from the same list
         # before scoring.
-        hits = [kw for kw in keywords if kw in text]
+        hits = [kw for kw in keywords if _keyword_present(kw, text)]
         return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
 
     lq_hits = _non_overlapping_hits(LQ_KEYWORDS, title_lower)
@@ -807,7 +897,7 @@ def score_result(
     # wasn't in the title at all), and "live"/"na żywo"/"woodstock" are
     # specific enough signals that a channel is unlikely to blanket-tag them
     # onto an unrelated upload the way "remix"/"karaoke" get SEO-stuffed.
-    strong_lq_hits = [kw for kw in STRONG_LQ_KEYWORDS if kw in keyword_text]
+    strong_lq_hits = [kw for kw in STRONG_LQ_KEYWORDS if _keyword_present(kw, keyword_text)]
     quality = 0
     # An "Official Audio" / "HQ" label only means the video is well-produced,
     # not that it's the plain studio version — a professionally released
@@ -823,9 +913,22 @@ def score_result(
     quality -= VIDEO_PENALTY * len(_non_overlapping_hits(VIDEO_KEYWORDS, title_lower))
     quality -= len(lq_hits)
     quality -= STRONG_LQ_PENALTY * len(strong_lq_hits)
-    if _is_official_release(channel, track):
+    # Same reasoning as the HQ bonus above, extended to this trust signal:
+    # being a genuine label/aggregator-distributed release doesn't mean it's
+    # the plain canonical version — a label can distribute a remix or club
+    # edit through the same Topic-channel/`track`-metadata pipeline as the
+    # original. Real case: Betoko - Breaking (Original Mix) — a "(Club
+    # Edit)" upload had its own `track` metadata (genuinely official-release,
+    # not a fan reupload) and this bonus applied unconditionally, outscoring
+    # the real "(OKO Recordings)" upload (no official-release metadata at
+    # all, just the artist's own channel) despite both tying on
+    # relevance/artist_relevance. Withholding this bonus when the title
+    # already signals an alternate version — same gate as the HQ block — lets
+    # the LQ_KEYWORDS penalty actually decide instead of being swamped by an
+    # unconditional trust bonus for the wrong version.
+    if _is_official_release(channel, track) and not lq_hits and not strong_lq_hits:
         quality += 2
-    quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if kw in title_lower])
+    quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if _keyword_present(kw, title_lower)])
     for hint in _bracket_selector_hints(title):
         tokens = _selector_tokens(hint)
         if tokens and all(re.search(r"\b" + re.escape(tok) + r"\b", keyword_text) for tok in tokens):

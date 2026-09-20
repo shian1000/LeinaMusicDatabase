@@ -674,6 +674,128 @@ def test_search_video_ytdlp_prefers_official_video_over_jools_holland_session(mo
     assert video_id == "7Dc5BQ31iLw"
 
 
+def test_search_video_ytdlp_prefers_original_mix_over_official_club_edit(monkeypatch):
+    # Real case: "Betoko - Breaking (Original Mix)". The real upload ("Betoko
+    # - Breaking (OKO Recordings)", the artist's own channel, no
+    # official-release metadata) tied 1.0/1.0 relevance/artist_relevance with
+    # a "(Club Edit)" upload distributed to a Topic channel (its own `track`
+    # metadata, so a *genuine* official release — just of a different mix).
+    # The official-release bonus used to apply unconditionally, letting the
+    # wrong mix win (quality 1.65 vs 0.19) purely for being an official
+    # release of *something*. "club edit" joining LQ_KEYWORDS plus gating the
+    # official-release bonus on "no LQ hit" together fix this — asserted on
+    # the pick, since the margin flips sign (see score comment below).
+    real_title = "Betoko - Breaking (OKO Recordings)"
+    club_edit_title = "Breaking (Club Edit)"
+    real_score = m.score_result(real_title, "Betoko", "Breaking (Original Mix)", "Betoko", 1544, None, None, None)
+    club_edit_score = m.score_result(club_edit_title, "Betoko", "Breaking (Original Mix)", "Betoko - Topic", 443, None, None, "Breaking (Club Edit)")
+    assert real_score[2] > club_edit_score[2]  # was 0.19 < 1.65 (wrong direction) before this fix
+
+    candidates = [
+        {"id": "GMYG_mxMoN8", "title": club_edit_title, "channel": "Betoko - Topic", "view_count": 443, "track": "Breaking (Club Edit)"},
+        {"id": "Dnum8gOlrME", "title": real_title, "channel": "Betoko", "view_count": 1544},
+        {"id": "YyN5kcjlexs", "title": "Breaking (Original Mix)", "channel": "Simplicity Official", "view_count": 2840, "track": "Breaking (Original Mix)"},
+        {"id": "oPjVgnRkmqQ", "title": "Betoko - Metoko (Original Mix)", "channel": "Techplug", "view_count": 1451},
+        {"id": "K4JJRBGvEIE", "title": "Betoko - Slow Motion (Original Mix)", "channel": "Born In Mexico", "view_count": 801},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Betoko", "Breaking (Original Mix)")
+
+    assert video_id == "Dnum8gOlrME"
+
+
+def test_search_video_ytdlp_prefers_official_audio_over_when_in_rome_concert_film(monkeypatch):
+    # Real case: "Genesis - Firth Of Fifth". Genesis' "When in Rome 2007" is a
+    # specific, named live concert film/DVD whose own title carries no "live"
+    # wording at all — the same shape of gap as "jools holland" above. A
+    # reupload of it (11.3M views) took no LQ penalty and nearly won on view
+    # count alone; the real official audio only survived because it happened
+    # to be in the fetched candidate pool that run. "when in rome" joining
+    # STRONG_LQ_KEYWORDS makes this decisive rather than pool-composition
+    # luck.
+    candidates = [
+        {"id": "gsIC3TvzLXE", "title": "Genesis - Firth Of Fifth, I Know What I Like (When in Rome 2007)", "channel": "WalkerCorps", "view_count": 11327356},
+        {"id": "Rz-tHZEr37I", "title": "Genesis - Firth Of Fifth (Official Audio)", "channel": "Genesis", "view_count": 2888615},
+        {"id": "NRygkSV7OzY", "title": "Genesis - Firth of Fifth", "channel": "moonlitknight009", "view_count": 237320},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Genesis", "Firth Of Fifth")
+
+    assert video_id == "Rz-tHZEr37I"
+
+
+def test_search_video_ytdlp_folds_polish_l_with_stroke(monkeypatch):
+    # Real case: "Krzysztof Zalewski - Milosc Milosc" (DB title, ASCII, no
+    # Polish diacritics at all) vs the real "Miłość Miłość". NFKD folds the
+    # "ś"/"ć" fine but leaves "ł" untouched (it has no NFKD decomposition —
+    # same non-decomposing-letter shape as Belarusian "і", see
+    # NIZKIZ - Правілы above), so exact containment never matched, and the
+    # fallback similarity() ratio favored a "(Live)" upload (relevance 0.85)
+    # over every decorated official candidate (all diluted by an artist-name
+    # prefix, relevance only ~0.47) — the "(Live)" one had no artist prefix
+    # to dilute it, purely by chance. Folding "ł"→"l" restores exact
+    # containment for every candidate equally, so `quality` (which already
+    # correctly penalized "(Live)") decides instead.
+    candidates = [
+        {"id": "IEiRPInizgQ", "title": "Krzysztof Zalewski - Miłość Miłość (Official Video)", "channel": "Krzysztof Zalewski", "view_count": 33241385},
+        {"id": "7i1ggMU2JSQ", "title": "Krzysztof Zalewski - Miłość Miłość (Official Audio)", "channel": "KayaxTV", "view_count": 7511170},
+        {"id": "Sr6JP_eYbTI", "title": "Miłość Miłość (Live)", "channel": "Krzysztof Zalewski", "view_count": 162875, "track": "Miłość Miłość (Live)"},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Krzysztof Zalewski", "Milosc Milosc")
+
+    assert video_id == "7i1ggMU2JSQ"
+
+
+def test_search_video_ytdlp_artist_relevance_folds_diacritics(monkeypatch):
+    # Real case: "La Vida Bohème - Radio Capital" (DB has the accented "è").
+    # The real official upload is hosted on a label channel ("Nacional
+    # Records", contributing nothing to artist_relevance), so its only
+    # artist-match signal was a similarity() ratio against its own title text
+    # ("La Vida Boheme - Radio Capital", no accent) diluted by the trailing
+    # song title — 0.59 without folding. A lower-quality "(En Vivo)" reupload
+    # hosted on the artist's *own* channel (bare "La Vida Boheme", no accent,
+    # no decoration) scored 0.93 from that clean channel-name match alone —
+    # enough to win on artist_relevance, sorted before quality, even though
+    # quality correctly favored the official video (4.29 vs 1.20). Folding
+    # diacritics in artist_relevance (previously only done for title
+    # relevance) closes the accent gap for both, so quality decides.
+    candidates = [
+        {"id": "EMzyug5oDdg", "title": 'La Vida Boheme - "Radio Capital (En Vivo)" (Video Oficial)', "channel": "La Vida Boheme", "view_count": 15814},
+        {"id": "F9gb9SsO_O8", "title": "La Vida Boheme - Radio Capital (Official Music Video)", "channel": "Nacional Records", "view_count": 1935147},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("La Vida Bohème", "Radio Capital")
+
+    assert video_id == "F9gb9SsO_O8"
+
+
+def test_search_video_ytdlp_prefers_official_video_over_live_when_pool_has_both(monkeypatch):
+    # Real case: "Koala Voice - Vest". A production run added the "(Live)"
+    # upload instead of the real official video — reproduced against live
+    # yt-dlp output afterward, this candidate pool already resolves
+    # correctly (the "live" STRONG_LQ_KEYWORDS penalty already existed), so
+    # the original wrong pick was yt-dlp's anonymous search not returning the
+    # official video in that run's candidate pool at all (see the
+    # non-determinism section above), not a scoring gap. Kept as a
+    # regression guard for the scoring behavior itself, independent of
+    # search-pool luck.
+    candidates = [
+        {"id": "kN41GTal6Pw", "title": "Vest (Live)", "channel": "Koala Voice", "view_count": 365, "track": "Vest (Live)"},
+        {"id": "HjYcF9UGDR0", "title": "Koala Voice- Vest // LIVE @ Kino Šiška, 18.10.2024", "channel": "LHphotographer", "view_count": 495},
+        {"id": "Vv6fECSGkKg", "title": "Koala Voice  -  Vest  (official video)", "channel": "Koala Voice", "view_count": 73069},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Koala Voice", "Vest")
+
+    assert video_id == "Vv6fECSGkKg"
+
+
 def test_search_video_ytdlp_matches_specific_requested_remix(monkeypatch):
     # Real case: "Valeria Stoica - Get Back (Lorin Rymbu & Denis Rynda Remix
     # Extended)". Bracket-stripping for relevance meant *any* remix scored
@@ -1025,6 +1147,11 @@ DB_REFERENCE_REGRESSION_CASES = [
     ("Waglewski, Fisz, Emade - Bóg", "Waglewski, Fisz, Emade", "Bóg", "tRHIqK_vy6M"),
     ("Вольны хор - Пагоня", "Вольны хор", "Пагоня (запіс з анлайн - канцэрта Муры)", "5kgvHgqr2aE"),
     ("Benjamin Clementine - Cornerstone", "Benjamin Clementine", "Cornerstone", "7Dc5BQ31iLw"),
+    ("Betoko - Breaking (Original Mix)", "Betoko", "Breaking (Original Mix)", "Dnum8gOlrME"),
+    ("Genesis - Firth Of Fifth", "Genesis", "Firth Of Fifth", "Rz-tHZEr37I"),
+    ("Koala Voice - Vest", "Koala Voice", "Vest", "Vv6fECSGkKg"),
+    ("Krzysztof Zalewski - Milosc Milosc", "Krzysztof Zalewski", "Milosc Milosc", "7i1ggMU2JSQ"),
+    ("La Vida Bohème - Radio Capital", "La Vida Bohème", "Radio Capital", "F9gb9SsO_O8"),
     # The one case where the without-DB-reference test above
     # (test_search_video_ytdlp_declines_when_only_match_is_a_translation_video)
     # asserts `video_id is None`: the real video is age-restricted and
@@ -1322,6 +1449,52 @@ FRESH_SEARCH_REGRESSION_CASES = [
             {"id": "7Dc5BQ31iLw", "title": "Benjamin Clementine - Cornerstone (Official Video)", "channel": "Benjamin Clementine", "view_count": 6706571},
         ],
         ("7Dc5BQ31iLw",), {},
+    ),
+    (
+        "Betoko - Breaking (Original Mix)", "Betoko", "Breaking (Original Mix)",
+        [
+            {"id": "GMYG_mxMoN8", "title": "Breaking (Club Edit)", "channel": "Betoko - Topic", "view_count": 443, "track": "Breaking (Club Edit)"},
+            {"id": "Dnum8gOlrME", "title": "Betoko - Breaking (OKO Recordings)", "channel": "Betoko", "view_count": 1544},
+            {"id": "YyN5kcjlexs", "title": "Breaking (Original Mix)", "channel": "Simplicity Official", "view_count": 2840, "track": "Breaking (Original Mix)"},
+            {"id": "oPjVgnRkmqQ", "title": "Betoko - Metoko (Original Mix)", "channel": "Techplug", "view_count": 1451},
+            {"id": "K4JJRBGvEIE", "title": "Betoko - Slow Motion (Original Mix)", "channel": "Born In Mexico", "view_count": 801},
+        ],
+        ("Dnum8gOlrME",), {},
+    ),
+    (
+        "Genesis - Firth Of Fifth", "Genesis", "Firth Of Fifth",
+        [
+            {"id": "gsIC3TvzLXE", "title": "Genesis - Firth Of Fifth, I Know What I Like (When in Rome 2007)", "channel": "WalkerCorps", "view_count": 11327356},
+            {"id": "Rz-tHZEr37I", "title": "Genesis - Firth Of Fifth (Official Audio)", "channel": "Genesis", "view_count": 2888615},
+            {"id": "NRygkSV7OzY", "title": "Genesis - Firth of Fifth", "channel": "moonlitknight009", "view_count": 237320},
+        ],
+        ("Rz-tHZEr37I",), {},
+    ),
+    (
+        "Koala Voice - Vest", "Koala Voice", "Vest",
+        [
+            {"id": "kN41GTal6Pw", "title": "Vest (Live)", "channel": "Koala Voice", "view_count": 365, "track": "Vest (Live)"},
+            {"id": "HjYcF9UGDR0", "title": "Koala Voice- Vest // LIVE @ Kino Šiška, 18.10.2024", "channel": "LHphotographer", "view_count": 495},
+            {"id": "Vv6fECSGkKg", "title": "Koala Voice  -  Vest  (official video)", "channel": "Koala Voice", "view_count": 73069},
+        ],
+        ("Vv6fECSGkKg",), {},
+    ),
+    (
+        "Krzysztof Zalewski - Milosc Milosc", "Krzysztof Zalewski", "Milosc Milosc",
+        [
+            {"id": "IEiRPInizgQ", "title": "Krzysztof Zalewski - Miłość Miłość (Official Video)", "channel": "Krzysztof Zalewski", "view_count": 33241385},
+            {"id": "7i1ggMU2JSQ", "title": "Krzysztof Zalewski - Miłość Miłość (Official Audio)", "channel": "KayaxTV", "view_count": 7511170},
+            {"id": "Sr6JP_eYbTI", "title": "Miłość Miłość (Live)", "channel": "Krzysztof Zalewski", "view_count": 162875, "track": "Miłość Miłość (Live)"},
+        ],
+        ("7i1ggMU2JSQ",), {},
+    ),
+    (
+        "La Vida Bohème - Radio Capital", "La Vida Bohème", "Radio Capital",
+        [
+            {"id": "EMzyug5oDdg", "title": 'La Vida Boheme - "Radio Capital (En Vivo)" (Video Oficial)', "channel": "La Vida Boheme", "view_count": 15814},
+            {"id": "F9gb9SsO_O8", "title": "La Vida Boheme - Radio Capital (Official Music Video)", "channel": "Nacional Records", "view_count": 1935147},
+        ],
+        ("F9gb9SsO_O8",), {},
     ),
     (
         "Valeria Stoica - Get Back", "Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)",
