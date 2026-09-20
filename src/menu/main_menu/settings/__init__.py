@@ -1,12 +1,16 @@
 import questionary
-from utils.ui.menu_utils import execute_menu_item, clear_screen
+from upath import UPath
+from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
 from utils.discoveries.discoveries_manager import load_all_discovery_modules_metadata
 from utils.discoveries.discovery_settings import load_discovery_config, save_discovery_config
+from utils.database.database_location import load_database_dir_override, save_database_dir_override
+from settings import settings
 
 
 def settings_menu():
     action_map = {
         "Discovery modules": discovery_modules_menu,
+        "Database location": database_location_menu,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
 
@@ -91,3 +95,49 @@ def reorder_discovery_modules():
     config["order"] = order
     save_discovery_config(config)
     print("Module order saved.")
+
+
+def database_location_menu():
+    action_map = {
+        "Change database folder": change_database_location,
+        "Reset to default": reset_database_location,
+    }
+    execute_menu_item("Database location", action_map, exit_label="Back")
+
+
+def change_database_location():
+    """Set the folder music.db and tag.db are read from and written to.
+
+    Only updates the persisted override -- the app reads Settings.database_dir
+    once at startup, so this takes effect after a restart, not immediately.
+    """
+    current = load_database_dir_override() or str(settings.database_dir)
+    print(f"Current database folder: {current}\n")
+
+    method = questionary.select(
+        "How do you want to set the new database folder?",
+        choices=["Open file manager", "Type path manually", "Cancel"],
+    ).ask()
+
+    if method == "Open file manager":
+        new_dir = open_file_browser_terminal(current)
+    elif method == "Type path manually":
+        typed = questionary.text("Type path:").ask()
+        new_dir = UPath(typed) if typed else None
+    else:
+        return
+
+    if new_dir is None:
+        print("Cancelled.")
+        return
+
+    save_database_dir_override(str(new_dir))
+    print(f"Database folder set to: {new_dir}")
+    print("Restart the app for this to take effect.")
+
+
+def reset_database_location():
+    """Clear the override, reverting to the default database folder."""
+    save_database_dir_override(None)
+    print("Database folder reset to default.")
+    print("Restart the app for this to take effect.")

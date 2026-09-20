@@ -60,14 +60,18 @@ requires it.
 One line per module — what it owns, and where the depth lives. Read the linked topic note before
 non-trivial work in that area.
 
-- `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets).
+- `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets). `database_dir`
+  defaults to `src/database/` but can be overridden via Settings → Database location in the menu
+  (persisted by `utils/database/database_location.py`); takes effect after a restart, not
+  immediately — why: `docs/runbooks/database.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
   don't inline them.
 - `src/utils/database/` — DB access, sessions, and the search/getter layer + song/artist
   **category** system. Non-obvious ordering and category gotchas (alphabetical-not-best-match
   results, `search_only_categories` is song-only, shared fallback filter):
-  `docs/agent-notes/database-search.md`. `backup.py` / `migrations.py` — automatic backups and
-  schema migrations, run from `main.py` at every startup: `docs/runbooks/database.md`.
+  `docs/agent-notes/database-search.md`. `backup.py` / `migrations.py` / `database_location.py` —
+  automatic backups, schema migrations, and the database folder override, all resolved at
+  startup: `docs/runbooks/database.md`.
 - `src/utils/discoveries/` — external-metadata fetchers and the MP3-tag import.
   `docs/agent-notes/discovery-modules.md` (fetcher loading, result validation, shared browser,
   scraping failure modes) and `docs/agent-notes/import-pipeline.md` (why import is slow).

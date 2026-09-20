@@ -15,6 +15,25 @@ behind them — a purely manual habit. This page describes the two pieces that r
 those with something repeatable: automatic backups (`src/utils/database/backup.py`) and a minimal
 forward-only migration runner (`src/utils/database/migrations.py`).
 
+## Database location
+
+`Settings.database_dir` (`src/settings.py`) defaults to `src/database/`, but can be overridden
+from the terminal UI: Settings → Database location → Change database folder (browse via
+`open_file_browser_terminal()` or type a path). The override is persisted to
+`database_location_config.json` at the project root by `utils/database/database_location.py`;
+"Reset to default" deletes that file.
+
+**The change only takes effect after restarting the app, never immediately.** This isn't a UI
+shortcoming — it falls out of the import graph: `music_db_manager.py`, `tag_db_manager.py`,
+`backup.py`, and `migrations.py` all snapshot `Settings.database_dir` into module-level constants
+(`BASE_DIR`, `DB_PATH`, `ARCHIVE_DIR`, `DB_FILES`, `ENGINE`) the instant they're first imported —
+and that import already happens while `menu.main_menu` is being imported to build the main menu's
+action map, i.e. before `main()` even runs, regardless of which menu item the user ends up
+picking. Deferring those imports so they only happen inside "Enter database" was considered and
+rejected: Python caches imported modules, so it would only work the *first* time in a session
+(before "Enter database" has ever been visited) and would silently skip the daily backup/migration
+run on any session that never opens the database menu at all.
+
 ## Backups
 
 `backup_databases(reason)` copies every existing DB file into `src/database/archive/`, named

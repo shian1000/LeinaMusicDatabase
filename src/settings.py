@@ -4,11 +4,21 @@ from upath import UPath
 from dotenv import load_dotenv
 import os
 
+from utils.database.database_location import load_database_dir_override
+
 load_dotenv()
+
+
+def _default_database_dir() -> UPath:
+    override = load_database_dir_override()
+    if override:
+        return UPath(override)
+    return UPath(__file__).parent / "database"
+
 
 @dataclass
 class Settings:
-    database_dir: UPath = UPath(__file__).parent / "database"
+    database_dir: UPath = _default_database_dir()
     config_dir: UPath = UPath(__file__).parent / "config"
     music_database_dir: UPath = database_dir / UPath("music.db")
     local_library_dir_str: str = "smb://server.local/Shared/Music/"

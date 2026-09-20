@@ -16,6 +16,11 @@ MAX_RECENT_DIRS = 5
 # Order here is only the seed used the first time the file is created — after
 # that, the JSON file is the source of truth and this is ignored.
 DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
+
+# Optional override for Settings.database_dir (the folder holding music.db /
+# tag.db), persisted as JSON. Read once at startup, so a change made through
+# the Settings menu only takes effect after the app is restarted.
+DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
     "wikipedia_fetcher",
