@@ -30,8 +30,11 @@ def edit_entry_menu(mode: str = None, db_object = None):
     back_option = "back"
     swap_option = "swap artist with title"
     merge_option = "merge artist with an existing one"
+    remove_links_option = "remove links"
     delete_option = "remove from the database"
     displayed_list.append(swap_option)
+    if mode == "Song":
+        displayed_list.append(remove_links_option)
     displayed_list.append(delete_option)
     displayed_list.append(back_option)
 
@@ -44,6 +47,14 @@ def edit_entry_menu(mode: str = None, db_object = None):
         db_object.artist.name = title
         db_object.title = artist_name
         submit_global_database_session()
+        return
+    if choice == remove_links_option:
+        if not db_object.youtube_video_id:
+            print("No YouTube link is assigned to this song.")
+            return
+        db_object.youtube_video_id = None
+        submit_global_database_session()
+        print(f"Removed the YouTube link from {db_object.artist.name} - {db_object.title}.")
         return
     if choice == delete_option:
         confirmation = questionary.confirm(f"Are you sure you want to delete {db_object.artist.name} - {db_object.title}???").ask()

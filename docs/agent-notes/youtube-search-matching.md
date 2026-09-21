@@ -598,6 +598,11 @@ were empty, because *is_video_id_valid()* would just fail on a non-id string and
 mechanism yet to have the sentinel actually short-circuit the search. If a future change adds that
 skip behavior, this is the place both to add it and to update.
 
+The song edit menu (`edit_entry_menu` in `edit_songs.py`) does have a "remove links" option, but it
+clears `youtube_video_id` back to `None` (plain "not searched yet"), **not** the `"N/A"` sentinel
+above — those mean different things (retry on the next playlist run vs. "confirmed no video,
+don't bother"), and the menu currently has no way to write the sentinel.
+
 ## YouTube Data API quota budget, and why `add_video_to_playlist()` must propagate `quotaExceeded`
 
 Quota (standard project grant: 10,000 units/day) is the real ceiling on how many songs one playlist
