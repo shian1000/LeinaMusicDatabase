@@ -23,8 +23,8 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
 
 ## Layered defenses (outermost first)
 
-1. **DB-first shortcut** — `resolve_artist()` / `does_similar_song_exists()` only
-   call `check_spelling()` when the local database has no good match. This is the
+1. **DB-first shortcut** — `resolve_artist()` / `find_similar_song()` only call
+   `check_spelling()` when the local database has no good match. This is the
    oldest optimization and still the highest-value one: most files in a re-import
    never touch the network.
 2. **Disk-backed cache** — `utils/common/spellcheck_cache.py`, persisted to
@@ -80,16 +80,39 @@ the unchanged inputs with `"found": False`.
 
 Callers still branch on `spell_check_result.get("found")` for **semantics** — an
 unchanged echo is not a real correction. `check_artist_spelling()` returns `None`
-on the not-found path; `does_similar_song_exists()` returns `False` (same guard,
+on the not-found path; `find_similar_song()` returns `None` (same guard,
 caller-appropriate sentinel).
 
 Historically the no-match path returned a different stub shape *without* the
 `corrected_*` keys, which repeatedly caused `KeyError` crashes
-(`check_artist_spelling()` on `corrected_artist`, `does_similar_song_exists()` on
+(`check_artist_spelling()` on `corrected_artist`, the song-matching lookup on
 `corrected_title`, the spell-check menu on both). The shape was unified when the
 disk-backed cache landed — but keep new call sites shape-agnostic anyway
 (`.get()` with a guard on `found`), since the disk cache stores the no-match
 answers too and a cache hit reproduces whatever shape was stored.
+
+## Similar-song conflicts are asked about after the batch, not inline
+
+`find_similar_song()` (formerly `does_similar_song_exists()`) only *looks up* a
+candidate match — it never prompts. `resolve_song()` takes a `pending_conflicts`
+list; when it gets a hit back, it appends
+`{"metadata", "artist_obj", "existing_song"}` to that list and returns
+`(None, is_pending=True)` instead of asking `Do you wish to use the song already
+in the database?` right there. The main `for` loop in
+`import_data_from_mp3_tags()` skips counting a pending file as added or skipped
+and moves straight to the next one.
+
+Only after every file in the folder has been processed does
+`import_data_from_mp3_tags()` walk `pending_conflicts` and ask the question once
+per queued conflict, updating `added_count`/`skipped_count` at that point. This
+runs before the function returns — i.e. before the caller's own "Do you want to
+do something with these songs?" prompt in
+`enter_database/manage_database/fetch_database_data/__init__.py`. The point is
+purely UX: a folder with several near-duplicates used to stop the import for
+input over and over; now it runs to completion unattended and the review happens
+as one batch at the end. Artist-level similarity (`check_artist_spelling()`,
+`resolve_artist()`) was intentionally left asking inline — it wasn't part of this
+change.
 
 ## Observability
 

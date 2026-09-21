@@ -73,14 +73,17 @@ def check_artist_spelling(metadata) -> Artist:
             else:
                 return None
             
-def does_similar_song_exists(metadata: dict, artist_obj: Artist) -> bool:
+def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
     """
-    Check if a similar song already exists for the artist.
-    
+    Check if a similar song already exists for the artist and return it.
+
     OPTIMIZATION: Check local database FIRST before expensive API call.
     Only call check_spelling() if no similar songs found locally.
-    
-    Returns True if user wants to use existing song, False otherwise.
+
+    Returns the matching Song if one is found, otherwise None. Does NOT ask
+    the user - callers are expected to queue the conflict and let the user
+    resolve it once the whole import batch is done, instead of interrupting
+    the import for every match.
     """
     new_artist_name = metadata["artist_name"]
     new_title = metadata["title"]
@@ -91,26 +94,20 @@ def does_similar_song_exists(metadata: dict, artist_obj: Artist) -> bool:
     existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
     local_check_time = time.time() - local_check_start
     slog(f"      [LOCAL DB] Retrieved {len(existing_artists_songs) if existing_artists_songs else 0} songs in {local_check_time:.4f}s", priority=1)
-    
+
     # Try to find similar songs using local similarity comparison (no API call)
     for ex_son in existing_artists_songs:
         local_sim_start = time.time()
         sim_percent = similarity(new_title, ex_son.title)
         local_sim_time = time.time() - local_sim_start
         slog(f"      [LOCAL SIMILARITY] '{new_title}' vs '{ex_son.title}': {sim_percent:.2f} in {local_sim_time:.4f}s", priority=1)
-        
+
         if sim_percent > SPELLING_CHECK_THRESHOLD:
-            print(f"Found similar song [blue]{ex_son.title} by {ex_son.artist.name}[/blue] but you were trying to add [green]{new_title}[/green]")
-            confirmation = questionary.confirm(f"Do you wish to use the song already in the database?").ask()
-            if confirmation:
-                slog(f"      [LOCAL MATCH] User confirmed using existing song", priority=1)
-                return True
-            else:
-                slog(f"      [LOCAL MATCH] User declined, continuing", priority=1)
-                return False
-    
+            slog(f"      [LOCAL MATCH] Similar song found, deferring decision to caller", priority=1)
+            return ex_son
+
     slog(f"      [NO LOCAL MATCH] No similar songs found in database, trying API spell check", priority=1)
-    
+
     # OPTIMIZATION STEP 2: Only call expensive API if no local match found
     cache_key = (new_artist_name, new_title)
     if cache_key in _SPELL_CHECK_CACHE:
@@ -120,15 +117,15 @@ def does_similar_song_exists(metadata: dict, artist_obj: Artist) -> bool:
         spell_check_start = time.time()
         spell_check_result = check_spelling(new_artist_name, new_title)
         spell_check_time = time.time() - spell_check_start
-        
+
         _SPELL_CHECK_CACHE[cache_key] = spell_check_result
         slog(f"      [API CALL] Spell check took {spell_check_time:.4f}s (cached for reuse)", priority=1)
-    
+
     slog(spell_check_result)
 
     if not spell_check_result.get("found"):
         slog("      [NO MB MATCH] Spell check found no match, treating as new song", priority=1)
-        return False
+        return None
 
     corrected_spelling = spell_check_result["corrected_title"]
     slog(corrected_spelling)
@@ -143,14 +140,10 @@ def does_similar_song_exists(metadata: dict, artist_obj: Artist) -> bool:
         # Search DB again with corrected spelling
         for ex_son in existing_artists_songs:
             if normalize(corrected_spelling) in normalize(ex_son.title):
-                print(f"Found similar song [blue]{ex_son.title} by {ex_son.artist.name}[/blue] but you were trying to add [green]{new_title}[/green]")
-                confirmation = questionary.confirm(f"Do you wish to use the song already in the database?").ask()
-                if confirmation:
-                    return True
-                else:
-                    return False
-    
-    return False
+                slog(f"      [SPELLCHECK MATCH] Similar song found, deferring decision to caller", priority=1)
+                return ex_son
+
+    return None
 
 def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
     """
@@ -267,31 +260,7 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
     
     return new_artist_obj
 
-def resolve_song(metadata: dict, artist_obj: Artist) -> Song:
-
-    song_check_start = time.time()
-    existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
-    song_check_time = time.time() - song_check_start
-    slog(f"    [SONG CHECK] Retrieved {len(existing_artists_songs) if existing_artists_songs else 0} existing songs in {song_check_time:.4f}s", priority=1)
-    
-    for ex_son in existing_artists_songs:
-        if normalize(metadata["title"]) in normalize(ex_son.title):
-            print("Yes, there is a song like this already. Skipping")
-            slog(f"    [SONG EXISTS] Exact match found", priority=1)
-            return
-    
-    slog("Couldn't find the song, trying spellchecking")
-    spell_check_start = time.time()
-    simlar_song_exists = does_similar_song_exists(metadata, artist_obj)
-    spell_check_time = time.time() - spell_check_start
-    slog(f"    [SPELL CHECK] Checked for similar song in {spell_check_time:.4f}s", priority=1)
-    
-    if simlar_song_exists:
-        print("Skipping song")
-        slog(f"    [SKIP] Similar song found", priority=1)
-        return
-    
-    create_start = time.time()
+def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
     new_song_obj = Song()
     new_song_obj.artist_id = artist_obj.id
     new_song_obj.title = metadata["title"]
@@ -302,17 +271,63 @@ def resolve_song(metadata: dict, artist_obj: Artist) -> Song:
         new_song_obj.year = None
     new_song_obj.language = metadata["language"]
     add_db_entry(new_song_obj)
+    return new_song_obj
+
+def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) -> tuple:
+    """
+    Resolve a song entry for the given artist.
+
+    Returns (song, is_pending):
+    - (song, False): song was created (or already existed - song is None then).
+    - (None, True): a similar song was found. The conflict was appended to
+      pending_conflicts instead of asking right away, so the caller should
+      skip it for now and resolve it later, once the whole batch is done.
+    """
+    song_check_start = time.time()
+    existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
+    song_check_time = time.time() - song_check_start
+    slog(f"    [SONG CHECK] Retrieved {len(existing_artists_songs) if existing_artists_songs else 0} existing songs in {song_check_time:.4f}s", priority=1)
+
+    for ex_son in existing_artists_songs:
+        if normalize(metadata["title"]) in normalize(ex_son.title):
+            print("Yes, there is a song like this already. Skipping")
+            slog(f"    [SONG EXISTS] Exact match found", priority=1)
+            return None, False
+
+    slog("Couldn't find the song, trying spellchecking")
+    spell_check_start = time.time()
+    similar_song = find_similar_song(metadata, artist_obj)
+    spell_check_time = time.time() - spell_check_start
+    slog(f"    [SPELL CHECK] Checked for similar song in {spell_check_time:.4f}s", priority=1)
+
+    if similar_song:
+        print(f"Found similar song [blue]{similar_song.title} by {similar_song.artist.name}[/blue] but you were trying to add [green]{metadata['title']}[/green] - review deferred until the import finishes")
+        slog(f"    [DEFERRED] Similar song conflict queued for later resolution", priority=1)
+        pending_conflicts.append({
+            "metadata": metadata,
+            "artist_obj": artist_obj,
+            "existing_song": similar_song,
+        })
+        return None, True
+
+    create_start = time.time()
+    new_song_obj = create_song_entry(metadata, artist_obj)
     create_time = time.time() - create_start
     slog(f"    [NEW SONG] Created in {create_time:.4f}s", priority=1)
 
-    return new_song_obj
+    return new_song_obj, False
 
 def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
     added_songs = []
     skipped_songs = []
     reason_for_skipping = []
     new_artists_added = []
-    
+
+    # Similar-song matches aren't resolved during the loop anymore - they're queued
+    # here and asked about in one batch after every file has been processed, so the
+    # import doesn't keep stopping for input.
+    pending_conflicts = []
+
     # OPTIMIZATION: Cache for artists found in this import batch
     # This avoids redundant database queries and similarity calculations
     artist_cache = {}
@@ -376,11 +391,13 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
 
         # TIMING: Song resolution
         song_start = time.time()
-        new_song_obj = resolve_song(metadata, new_artist_obj)
+        new_song_obj, is_pending = resolve_song(metadata, new_artist_obj, pending_conflicts)
         song_time = time.time() - song_start
         mlog(f"  └─ Song resolution: {song_time:.3f}s")
 
-        if new_song_obj:
+        if is_pending:
+            mlog(f"  └─ Song resolution deferred: similar song needs review")
+        elif new_song_obj:
             added_count = added_count +1
             added_songs.append(new_song_obj)
         else:
@@ -402,6 +419,29 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
         print()
 
         # submit_global_database_session()
+
+    # Now that every file has been processed, go through the similar-song matches
+    # that were queued along the way and ask about each one in a single batch,
+    # instead of interrupting the import every time one came up.
+    if pending_conflicts:
+        print("\n" + "="*70)
+        print(f"REVIEW: {len(pending_conflicts)} song(s) found a similar match in the database")
+        print("="*70)
+        for conflict in pending_conflicts:
+            conflict_metadata = conflict["metadata"]
+            conflict_artist_obj = conflict["artist_obj"]
+            existing_song = conflict["existing_song"]
+            print(f"Found similar song [blue]{existing_song.title} by {existing_song.artist.name}[/blue] but you were trying to add [green]{conflict_metadata['title']}[/green]")
+            confirmation = questionary.confirm("Do you wish to use the song already in the database?").ask()
+            if confirmation:
+                skipped_count = skipped_count + 1
+                skipped_songs.append(f"{conflict_metadata['artist_name']} - {conflict_metadata['title']}")
+                reason_for_skipping.append("Song already exists")
+            else:
+                new_song_obj = create_song_entry(conflict_metadata, conflict_artist_obj)
+                added_count = added_count + 1
+                added_songs.append(new_song_obj)
+            print()
 
     # Print timing summary
     print("\n" + "="*70)

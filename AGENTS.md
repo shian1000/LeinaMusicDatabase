@@ -233,8 +233,9 @@ non-trivial work in that area.
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why
   MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
   cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the
-  fielded query gets only one attempt, the `check_spelling()` return shape, and the `MBStats` run
-  summary.
+  fielded query gets only one attempt, the `check_spelling()` return shape, the `MBStats` run
+  summary, and why similar-song matches are queued in `pending_conflicts` and asked about in one
+  batch after the whole folder is processed instead of interrupting per file.
 - [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`
