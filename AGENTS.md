@@ -175,7 +175,12 @@ non-trivial work in that area.
   interrupt per item. Three places already do this: `import_data_from_mp3_tags()`,
   `check_spelling_menu()`, `seek_nonsense_names()` — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
-  included) and follow the same shape for a new one rather than inventing another.
+  included) and follow the same shape for a new one rather than inventing another. That's for
+  candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an
+  already-selected list (e.g. `swap_artist_with_title()`) instead asks one upfront confirm for the
+  whole batch, since there's nothing to discover — but still needs the same
+  dedup-by-`song.artist.id` gotcha if it mutates the shared `Artist` row (first song to hit a given
+  artist wins, later ones by the same artist are skipped with a message, not silently re-applied).
 
 ## Testing & verification
 

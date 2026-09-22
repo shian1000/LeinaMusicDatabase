@@ -1,3 +1,4 @@
+import questionary
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
@@ -10,6 +11,7 @@ from utils.youtube.manage_youtube_playlists import create_yt_playlist, NO_VIDEO_
 from utils.ui.display_utils import display_songs
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
+from utils.database.database_management import delete_db_entry
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -39,6 +41,64 @@ def report_no_yt_video(songs_objects):
     print(f"Marked {len(songs_objects)} song(s) with \"{NO_VIDEO_SENTINEL}\" (confirmed no YouTube video).")
 
 
+def swap_artist_with_title(songs_objects):
+    print("About to swap artist name and title for these songs:")
+    display_songs(songs_objects)
+    confirmation = questionary.confirm(f"Swap artist name and title for {len(songs_objects)} song(s)?").ask()
+    if not confirmation:
+        print("Aborted")
+        return
+
+    seen_artist_ids = set()
+    swapped_count = 0
+    for song in songs_objects:
+        if song.artist_id in seen_artist_ids:
+            print(f"Skipped \"{song.artist.name} - {song.title}\": artist \"{song.artist.name}\" was already swapped for another selected song.")
+            continue
+        seen_artist_ids.add(song.artist_id)
+        artist_name = song.artist.name
+        title = song.title
+        song.artist.name = title
+        song.title = artist_name
+        swapped_count += 1
+
+    submit_global_database_session()
+    print(f"Swapped artist name and title for {swapped_count} song(s).")
+
+
+def remove_links_from_songs(songs_objects):
+    print("About to remove the YouTube link from these songs:")
+    display_songs(songs_objects)
+    confirmation = questionary.confirm(f"Remove the YouTube link from {len(songs_objects)} song(s)?").ask()
+    if not confirmation:
+        print("Aborted")
+        return
+
+    removed_count = 0
+    for song in songs_objects:
+        if song.youtube_video_id:
+            song.youtube_video_id = None
+            removed_count += 1
+
+    submit_global_database_session()
+    print(f"Removed the YouTube link from {removed_count} song(s).")
+
+
+def remove_songs_from_database(songs_objects):
+    print("About to delete these songs from the database:")
+    display_songs(songs_objects)
+    confirmation = questionary.confirm(f"Are you sure you want to delete {len(songs_objects)} song(s)???").ask()
+    if not confirmation:
+        print("Aborted")
+        return
+
+    for song in songs_objects:
+        delete_db_entry(song)
+
+    submit_global_database_session()
+    print(f"Deleted {len(songs_objects)} song(s).")
+
+
 def song_actions(songs_objects):
     slog(songs_objects)
     songs_list = extract_db_object_info(songs_objects, f"{song_categories[1]}, {song_categories[0]}")
@@ -51,7 +111,10 @@ def song_actions(songs_objects):
         "Make YT playlist": lambda: make_yt_playlist_menu(songs_objects),
         "Make TXT file": lambda: print("In progress"),
         "Remove check protection": lambda: remove_check_protection(songs_objects),
-        "Report no YouTube video": lambda: report_no_yt_video(songs_objects)
+        "Report no YouTube video": lambda: report_no_yt_video(songs_objects),
+        "Swap artist with title": lambda: swap_artist_with_title(songs_objects),
+        "Remove links": lambda: remove_links_from_songs(songs_objects),
+        "Remove from the database": lambda: remove_songs_from_database(songs_objects)
     }
 
     slog(action_map)
