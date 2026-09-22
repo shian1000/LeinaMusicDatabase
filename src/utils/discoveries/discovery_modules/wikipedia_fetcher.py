@@ -1,12 +1,18 @@
+import warnings
 import wikipedia
 import requests
 import re
 import time
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, GuessedAtParserWarning
 
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
 from utils.common.file_management import save_string_to_file
+
+# The wikipedia package parses HTML internally without picking a parser,
+# which triggers this warning on every call — silence it here since our
+# own BeautifulSoup calls below all specify "html.parser" explicitly.
+warnings.filterwarnings("ignore", category=GuessedAtParserWarning, module="wikipedia")
 
 
 # ---------------------------------------------------------------------------
