@@ -3,6 +3,7 @@ from menu.main_menu.enter_database import enter_database
 from menu.main_menu.manage_local_files import manage_local_files
 from menu.main_menu.statistics import show_discovery_stats
 from menu.main_menu.settings import settings_menu
+from menu.main_menu.youtube import youtube_menu
 from utils.common.debug import slog
 
 def main_menu():
@@ -10,6 +11,7 @@ def main_menu():
         "Enter database": enter_database,
         "Manage local files": manage_local_files,
         "Statistics": show_discovery_stats,
+        "YouTube": youtube_menu,
         "Settings": settings_menu
     }
     

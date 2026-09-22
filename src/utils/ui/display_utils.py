@@ -117,6 +117,38 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
 
     console.print(table)
 
+def display_playlists(playlists: Optional[List[Dict]]) -> None:
+    """
+    Display a formatted table of YouTube playlists, newest created first.
+
+    Args:
+        playlists: List of playlist resources from the Data API v3
+                   (each with a "snippet" dict containing "title" and
+                   "publishedAt"), already sorted newest-first by the caller.
+    """
+    if not playlists:
+        return
+
+    console: Console = Console()
+
+    table: Table = _create_table("YouTube Playlists (creation order, newest first)", [
+        ("Created", "cyan", None),
+        ("Title", "magenta", None),
+        ("Videos", None, "right"),
+    ])
+
+    for playlist in playlists:
+        snippet = playlist["snippet"]
+        created = snippet["publishedAt"][:10]
+        video_count = playlist.get("contentDetails", {}).get("itemCount")
+        table.add_row(
+            created,
+            snippet["title"],
+            str(video_count) if video_count is not None else "—",
+        )
+
+    console.print(table)
+
 def display_songs_with_tags(songs: List[Song]) -> None:
     """
     Display a formatted table of songs with their associated tags.

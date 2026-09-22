@@ -386,6 +386,58 @@ def create_playlist(youtube, title: str, description: str = "") -> str:
 
 
 # ---------------------------------------------------------
+# LISTING PLAYLISTS
+# ---------------------------------------------------------
+
+def get_playlists_in_creation_order(youtube) -> List[Dict]:
+    """Fetch all of the authenticated user's playlists, newest created first.
+
+    The Data API v3 playlists().list endpoint has no sort/order parameter --
+    it returns items in whatever order YouTube's backend has them in, which
+    in practice tracks last-modified rather than creation date. Each item's
+    snippet.publishedAt is the actual creation timestamp, so we page through
+    every playlist and sort client-side to get true creation order.
+    """
+    playlists: List[Dict] = []
+    page_token = None
+
+    while True:
+        response = youtube.playlists().list(
+            part="snippet,contentDetails",
+            mine=True,
+            maxResults=50,
+            pageToken=page_token
+        ).execute()
+
+        playlists.extend(response.get("items", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    playlists.sort(key=lambda p: p["snippet"]["publishedAt"], reverse=True)
+    return playlists
+
+
+def show_playlists_in_creation_order():
+    """Print all of the user's YouTube playlists, newest created first."""
+    from utils.ui.display_utils import display_playlists
+
+    youtube = get_youtube_service()
+
+    try:
+        playlists = get_playlists_in_creation_order(youtube)
+    except HttpError as e:
+        print(f"  ✖ Failed to fetch playlists: {e}")
+        return
+
+    if not playlists:
+        print("No playlists found.")
+        return
+
+    display_playlists(playlists)
+
+
+# ---------------------------------------------------------
 # SEARCHING VIDEOS
 # ---------------------------------------------------------
 
