@@ -75,6 +75,15 @@ def check_spelling_menu():
     songs = get_songs_from_db_session()
     spell_check_cache = dict(_MENU_SPELLCHECK_CACHE)
 
+    # Corrections that need user review aren't asked about inline anymore -
+    # they're queued here and asked about in one batch after every song has
+    # been checked, so the menu doesn't keep stopping for input.
+    # Keyed by artist.id (not a list) because song.artist is a shared
+    # SQLAlchemy object: several songs by the same artist would otherwise
+    # queue the identical rename question once per song.
+    pending_artist_corrections = {}
+    pending_title_corrections = []
+
     for song in songs:
         if has_tag_on_song(song, "spellchecked"):
             continue
@@ -103,10 +112,12 @@ def check_spelling_menu():
             if should_auto_confirm(song.artist.name, new_artist):
                 print("Auto-confirmed")
                 song.artist.name = new_artist
-            else:
-                if questionary.confirm("Do you wish to correct this artist name?").ask():
-                    print("Confirmed")
-                    song.artist.name = new_artist
+            elif song.artist.id not in pending_artist_corrections:
+                pending_artist_corrections[song.artist.id] = {
+                    "artist": song.artist,
+                    "old_name": song.artist.name,
+                    "new_name": new_artist,
+                }
 
         # Handle Title Correction
         if new_title != song.title:
@@ -116,13 +127,39 @@ def check_spelling_menu():
                 print("Auto-confirmed")
                 song.title = new_title
             else:
-                if questionary.confirm("Do you wish to correct this song title?").ask():
-                    print("Confirmed")
-                    song.title = new_title
+                pending_title_corrections.append({
+                    "song": song,
+                    "old_title": song.title,
+                    "new_title": new_title,
+                })
 
         add_tag_to_song(song, "spellchecked")
         submit_global_database_session()
     submit_global_database_session()
+
+    # Now that every song has been checked, go through the artist/title
+    # corrections that were queued along the way and ask about each one in a
+    # single batch, instead of interrupting the menu every time one came up.
+    if pending_artist_corrections or pending_title_corrections:
+        print("\n" + "="*70)
+        print(f"REVIEW: {len(pending_artist_corrections)} artist name(s) and {len(pending_title_corrections)} song title(s) need review")
+        print("="*70)
+
+        for correction in pending_artist_corrections.values():
+            print(f"{RED}{correction['old_name']}{RESET} -> {GREEN}{correction['new_name']}{RESET}")
+            if questionary.confirm("Do you wish to correct this artist name?").ask():
+                print("Confirmed")
+                correction["artist"].name = correction["new_name"]
+
+        for correction in pending_title_corrections:
+            song = correction["song"]
+            print(f"{RED}{correction['old_title']}{RESET} -> {GREEN}{correction['new_title']}{RESET}")
+            print(f"song_id = {song.id}")
+            if questionary.confirm("Do you wish to correct this song title?").ask():
+                print("Confirmed")
+                song.title = correction["new_title"]
+
+        submit_global_database_session()
         
 
 def manage_database():

@@ -236,7 +236,9 @@ non-trivial work in that area.
   fielded query gets only one attempt, the `check_spelling()` return shape, the `MBStats` run
   summary, and why ambiguous-artist and similar-song matches are both queued (`pending_conflicts`,
   `deferred_files`) and asked about in two end-of-batch passes — artists then songs — instead of
-  interrupting the import per file.
+  interrupting the import per file. The "Spell check existing data" menu
+  (`check_spelling_menu()`) batches its own artist/title correction prompts the same way, with a
+  `song.artist.id`-keyed dict to dedupe the shared-`Artist`-object rename question.
 - [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`

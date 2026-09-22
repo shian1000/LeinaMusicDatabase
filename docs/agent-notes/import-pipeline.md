@@ -137,6 +137,38 @@ runs to completion unattended and both kinds of review happen as two batches at
 the end, artists before songs (since a song's dedup check needs its artist
 resolved first).
 
+## The "Spell check existing data" menu batches the same way
+
+`check_spelling_menu()` (`manage_database/__init__.py`) runs the same
+`check_spelling()` calls over every song already in the DB (not just an
+import), auto-applies a correction when `should_auto_confirm()` matches one of
+`AUTO_CONFIRM_RULES`, and otherwise used to ask `Do you wish to correct this
+artist name?` / `...song title?` inline, per song. It now queues those instead
+of asking, and reviews them in one batch after every song has been checked -
+same reasoning and same shape as the import path above.
+
+Two queues, not one, because of a data-model difference from the import path:
+`pending_title_corrections` is a plain list (`{"song", "old_title",
+"new_title"}`, one entry per song - titles are never shared), but
+`pending_artist_corrections` is a **dict keyed by `song.artist.id`**. `song.artist`
+is a shared SQLAlchemy object: in the original per-song-inline code, confirming
+one song's artist rename mutated `song.artist.name` immediately, so the *next*
+song by that artist would already see `new_artist == song.artist.name` and
+silently skip re-asking. Deferring the mutation to the end loses that
+side-effect-driven dedup for free, so the dict does it explicitly - only the
+first song to hit a given `artist.id` queues the question; every later song by
+the same artist finds it already queued and does nothing. If two songs by the
+same artist somehow produce two different corrected spellings, the first one
+queued wins and the second is silently dropped rather than asked (matches how
+`resolve_artist()`'s `pending_conflicts` in the import path takes "first
+candidate confirmed" and ignores the rest).
+
+Tagging a song `spellchecked` and `submit_global_database_session()` still
+happen immediately per song, independent of whether its correction is later
+confirmed - that tag means "already asked MusicBrainz about this song", not
+"correction applied", so it must not wait on the deferred review or the next
+menu run would burn another API call re-checking it.
+
 ## Observability
 
 `MBStats` (in `musicbrainz_client.py`) is a plain class of counters:
