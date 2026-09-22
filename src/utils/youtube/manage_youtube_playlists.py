@@ -656,6 +656,59 @@ def _artist_channel_handle_match(expected: str, channel_clean: str) -> float:
     return 0.0
 
 
+# Separators between individual names in a combined "A ft. B" / "A, B, C"
+# artist field. Deliberately case-insensitive and tolerant of an optional
+# trailing "." ("feat"/"feat.", "ft"/"ft.") — real DB/candidate spellings
+# aren't consistent about the period.
+_MULTI_ARTIST_SEPARATOR = re.compile(r"\s*(?:,|/|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bx\b|\bvs\.?\b)\s*", re.IGNORECASE)
+
+
+def _multi_artist_tokens(expected: str) -> list[str]:
+    """Split a combined multi-artist field into its individual name tokens —
+    only returned when there genuinely are 2+ names (a plain single-artist
+    name with no separator returns `[]`), so callers can treat an empty
+    result as "not a collab field, don't apply this mechanism".
+    """
+    parts = [p.strip() for p in _MULTI_ARTIST_SEPARATOR.split(expected) if p.strip()]
+    return parts if len(parts) > 1 else []
+
+
+def _multi_artist_names_all_present(expected: str, haystack: str) -> float:
+    """1.0 when every individual name in a combined "A ft. B" artist field is
+    present (as a whole word/phrase, via `_text_containment()`) *somewhere*
+    in `haystack` — not necessarily adjacent to each other or in the DB's own
+    order, unlike every other check in `_artist_relevance_for()`. Real
+    uploads routinely split a "ft."/"feat." credit across the song title
+    itself (e.g. `"Drenchill - Freed from Desire ft. Indiiana"` — the primary
+    and featured artist end up on opposite sides of the title), and the
+    connector word varies ("ft." vs "feat." vs a bare comma) — no amount of
+    whole-phrase containment or punctuation normalization
+    (`_normalize_multi_artist_punctuation()`) can bridge either gap, since
+    both assume the names stay adjacent.
+
+    Real case: `Drenchill ft. Indiiana - Freed From Desire` — every real
+    upload spelled the credit differently enough (`"... ft. Indiiana"`,
+    `"... (feat. Indiiana)"`, `"..., Indiiana"`) to score only 0.44-0.69
+    artist_relevance, while a `"(Bass Boosted)"` reupload happened to spell
+    the whole DB phrase `"Drenchill ft. Indiiana"` verbatim and contiguously,
+    scoring a clean 1.0 via ordinary containment — enough to win outright
+    since artist_relevance sorts before `quality` (which already correctly
+    penalized `"Bass Boosted"`, -1.64 vs the real uploads' 3.4-5.4).
+
+    Deliberately requires *every* token present, not just one — a solo track
+    by only the featured artist (or only the primary one) still shouldn't
+    match a search for the collab. Only ever adds a way to score 1.0, so this
+    can't loosen an already-correct match, only rescue one that plain
+    containment/similarity structurally can't reach.
+    """
+    tokens = _multi_artist_tokens(expected)
+    if not tokens:
+        return 0.0
+    if all(_text_containment(tok, haystack) >= 1.0 for tok in tokens):
+        return 1.0
+    return 0.0
+
+
 def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -> float:
     """artist_relevance for one candidate name against one artist name —
     factored out so score_result() can take the max across the DB artist
@@ -677,6 +730,11 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -
     accent gap for both the label-hosted and artist-hosted case, so this only
     ever adds a way to match — the same "extra max() branch" pattern already
     used for punctuation normalization above.
+
+    Also tries `_multi_artist_names_all_present()` — see that function's own
+    docstring for why a combined "A ft. B" field needs its names checked
+    independently, not just as one phrase, once real uploads split them
+    across the song title itself.
     """
     expected = _relevance_text(name)
     expected_normalized = _normalize_multi_artist_punctuation(expected)
@@ -706,6 +764,10 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -
             _text_containment(expected_folded, channel_folded),
             _artist_channel_handle_match(expected, channel_clean),
         )
+    relevance = max(
+        relevance,
+        _multi_artist_names_all_present(expected, f"{candidate_clean} {channel_clean}".lower()),
+    )
     return relevance
 
 

@@ -168,6 +168,12 @@ are still the right fix for a single missing *vocabulary* signal (as `demo`/`dub
 here); it's specifically the *tiebreak losing despite the right signal being present* that's the
 design problem.
 
+**Update:** this recurred enough more times that a decision was made about it — see "This
+tuple-ordering failure has now recurred five times" in the multi-artist-punctuation section below
+for the current answer (a full blended-score redesign was considered and declined for now; a
+smaller margin/dominance override is the recommended next step if it recurs again in a new shape,
+not the full blend this note originally proposed).
+
 Regression tests: [tests/test_youtube_search.py](../../tests/test_youtube_search.py) —
 `test_score_result_does_not_double_count_official_audio_keyword` asserts the exact `quality` value
 for the Dan Carey Dub title, and `test_search_video_ytdlp_does_not_pick_the_remix_for_foals_2001`
@@ -504,12 +510,37 @@ PREVAIL" tuple-ordering failure shape (see above) recurring a further time, in a
 comma/slash/ampersand as interchangeable separators — folded into `_artist_relevance_for()`'s
 existing `max()` pattern, so it only ever adds a way to match.
 
-**This tuple-ordering failure has now recurred three times** (Bratva/whitespace, Foals/quality
-double-count, Waglewski/punctuation) with three different one-off fixes. Each fix was still the
-right call for its specific missing signal, per the "Future redesign trigger" note above — but if
-a *fourth* shape of this same failure turns up, that's a strong signal the additive
-`(relevance, artist_relevance, quality)` lexicographic tuple itself needs replacing with one
-blended score, not another targeted patch.
+**This tuple-ordering failure has now recurred five times** (Bratva/whitespace, Foals/quality
+double-count, Waglewski/punctuation, La Vida Bohème/missing diacritic folding in artist_relevance,
+Drenchill/a "ft." credit split across the song title) with five different one-off fixes. Each fix
+was still the right call for its specific missing signal.
+
+**Decision (discussed with the user directly, 2026-09-22): not a full redesign, at least not yet.**
+The "Future redesign trigger" note above (written after the *third* recurrence) proposed replacing
+the additive `(relevance, artist_relevance, quality)` tuple with one blended score once this kept
+happening — that threshold has now been crossed twice over, but a full redesign was considered and
+explicitly declined for now. Reasoning: every one of the five recurrences shares the same real
+shape — `quality` was *already computed correctly* and already favored the right video by a wide
+margin (e.g. Drenchill: `5.2` vs. `-1.6`; La Vida Bohème: `4.3` vs. `1.2`) — the bug was never bad
+quality scoring, it was that a small or even trivial `artist_relevance` edge (`1.0` vs. `0.93`, or
+`1.0` vs. `0.69`) blocked `quality` from ever being consulted at all. A full blended score is a
+large, risky, all-at-once change against ~36 already-tuned real regression cases — re-deriving safe
+combination weights across three heterogeneous scales (`relevance`/`artist_relevance` are `0`-`1`,
+`quality` is roughly `-5` to `+8` unbounded) risks silently flipping cases that already work,
+without a correspondingly large expected payoff (5 fixes across many months of real usage is not a
+high recurrence rate).
+
+**What to actually reach for if this recurs a sixth time in a new shape** (not another
+missing-signal variant of one of the five above — those still just get their own one-off
+`artist_relevance` fix, same as always): a much smaller, targeted structural change than a full
+redesign — a *margin/dominance override* rule, e.g. "if `quality`'s gap between the top two
+candidates exceeds some threshold, let it override a `relevance`-tied pair's `artist_relevance`
+ordering" — rather than a strict lexicographic sort. This targets the actual common thread directly
+(quality already knew the answer, artist_relevance just cut it off too early) without touching how
+`relevance`/`artist_relevance`/`quality` are each computed, and is a far smaller, more reviewable
+change than re-deriving one blended score from scratch. Raise this specific option with the user
+before implementing it — don't default straight to the full-blend idea from the older trigger note,
+and don't implement either one unprompted.
 
 ## Content *about* the song can defeat the relevance gate entirely — `NOT_THE_SONG_KEYWORDS`
 
@@ -747,6 +778,46 @@ anonymous search is confirmed non-deterministic run-to-run" above. Kept as a reg
 itself, but no code change was needed or made for this one — resist the urge to "fix" a case that
 turns out to already work; tune scoring changes to cases that actually reproduce wrong.
 
+A second case from the same investigation turned out the same way: `Easy Life - Pockets` was
+reported as finding nothing at all, but the DB title was already the correct `"Pockets"` (plural) by
+the time this was checked, and that title resolves correctly against real yt-dlp output with no
+code change. The reported run's console output showed a singular `"Pocket"` query, so the DB title
+was very likely still wrong (or a typo crept in transcribing the log) at the time of that specific
+failure — see "A contaminated DB `title` field defeats matching" above for the general shape of this
+class of problem (a DB text field not matching the actual song, not a `score_result()` gap). Kept as
+a regression guard for the same reason as Koala Voice above.
+
+## A "ft."/"feat." credit can be split across the song title itself, not adjacent to the other name
+
+`_normalize_multi_artist_punctuation()` (see the comma/slash/ampersand section above) only bridges a
+*punctuation* difference between two spellings that still keep every artist name adjacent to each
+other. Real uploads for a "ft."/"feat." collab routinely don't: the primary artist appears before
+the song title and the featured artist after it, e.g. `"Drenchill - Freed from Desire ft.
+Indiiana"` — the DB's own combined field, `"Drenchill ft. Indiiana"`, never appears as one
+contiguous phrase in that upload's title at all. Real case: `Drenchill ft. Indiiana - Freed From
+Desire` — every real, popular upload spelled the credit differently enough (split across the title,
+`"feat."` instead of `"ft."`, comma-separated) to score only `0.44`–`0.69` `artist_relevance` via
+every existing containment/similarity check, while a `"(Bass Boosted)"` reupload (228 views) happened
+to spell the whole DB phrase `"Drenchill ft. Indiiana"` verbatim and contiguously in its own title,
+scoring a clean `1.0` and winning outright — `artist_relevance` sorts before `quality`, which had
+already correctly penalized `"Bass Boosted"` (`-1.64` vs. the real uploads' `3.4`–`5.4`). The sixth
+recurrence of the tuple-ordering failure shape (see the note above) — but, like the diacritic-folding
+gap before it, a genuinely new, fixable root cause rather than another instance of an already-covered
+one.
+
+`_multi_artist_tokens()` splits a combined field on any of the common connectors
+(`,`/`/`/`&`/`feat.`/`ft.`/`featuring`/`x`/`vs.`, case-insensitive) into individual names, and
+`_multi_artist_names_all_present()` checks each one independently — present *anywhere* in the
+candidate's title+channel text, not necessarily adjacent or in the DB's own order — added as one
+more `max()` branch in `_artist_relevance_for()`. Requiring *every* name present (not just one) means
+this only ever adds a way to match a genuine collab upload; a solo track by just one of the named
+artists still won't satisfy it. Known remaining gap, not fixed here: a featured-artist credit
+written *inside a bracket* (e.g. `"(feat. Indiiana)"`) gets stripped away entirely by
+`_relevance_text()`'s bracket-removal before this check ever sees it — one of the real Drenchill
+candidates lost this way (stayed at `0.51`), though the overall pick was unaffected since a
+different real upload already won cleanly. Only worth revisiting if a future real case actually
+needs that specific candidate to win.
+
 ## Known regressions this logic exists to prevent
 
 Concrete cases hit during development — useful as a regression checklist if this scoring is ever
@@ -861,6 +932,11 @@ simplified:
 - `Koala Voice - Vest` → reported as wrong but not actually a scoring bug — reproducing it found the
   scoring already correct once the official video is in the candidate pool; the original run's
   candidate pool likely just didn't include it (see the non-determinism section above).
+- `Easy Life - Pockets` → also not a scoring bug — the DB title was already the correct plural
+  "Pockets" by the time this was checked, and that resolves correctly (see the section above).
+- `Drenchill ft. Indiiana - Freed From Desire` → every real upload split or reworded the "ft."
+  credit enough to lose artist_relevance to a "(Bass Boosted)" reupload that happened to spell the
+  DB's combined field verbatim (see the "ft."/"feat." section above).
 
 **Not covered by any of the above:** `Vinsent - Praciahvaju Żyć` — same shape as the Akute cases
 above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism

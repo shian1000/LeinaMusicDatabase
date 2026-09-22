@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~166 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~172 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -170,7 +170,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~166 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~172 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
@@ -253,7 +253,7 @@ non-trivial work in that area.
   fix can help — it's a `songs.artist_id` data problem), a regression checklist of real wrong-match
   bugs it fixes, and remaining open limitations (non-Cyrillic scripts). Regression tests in
   `tests/test_youtube_search.py` are pinned to the exact expected video per song via two mirrored
-  parametrized suites over the same ~34 real cases —
+  parametrized suites over the same ~36 real cases —
   `test_regression_suite_resolves_via_fresh_search` (no DB involved at all) and
   `test_regression_suite_resolves_via_db_reference` (resolving via `Song.youtube_video_id`
   instead) — so a resolution change in either path is a test failure to review, not a silent

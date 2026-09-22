@@ -674,6 +674,35 @@ def test_search_video_ytdlp_prefers_official_video_over_jools_holland_session(mo
     assert video_id == "7Dc5BQ31iLw"
 
 
+def test_search_video_ytdlp_matches_feat_artist_split_across_title(monkeypatch):
+    # Real case: "Drenchill ft. Indiiana - Freed From Desire". Every real
+    # upload spelled the "ft."/"feat." credit differently enough (split
+    # across the song title, "feat." instead of "ft.", or comma-separated)
+    # to score only 0.44-0.69 artist_relevance via plain containment/
+    # similarity, while a "(Bass Boosted)" reupload happened to spell the
+    # whole DB phrase "Drenchill ft. Indiiana" verbatim and contiguously,
+    # scoring a clean 1.0 and winning outright despite quality -1.64 (vs the
+    # real uploads' 3.4-5.4) — artist_relevance sorts before quality.
+    # `_multi_artist_names_all_present()` checks each name independently
+    # instead of requiring the whole phrase intact.
+    candidates = [
+        {"id": "ZgF35aAArf4", "title": "Drenchill ft. Indiiana - Freed from Desire (Bass Boosted)", "channel": "TL Bass Boost", "view_count": 228},
+        {"id": "6b6FBneAENQ", "title": "Drenchill - Freed from Desire ft. Indiiana", "channel": "Club Sounds", "view_count": 165431335},
+        {"id": "uSTiA24KKRs", "title": "Drenchill - Freed From Desire (feat. Indiiana)", "channel": "House Nation", "view_count": 22130707},
+        {"id": "i3z5UV3kR20", "title": "Freed From Desire (Lyrics) - Drenchill, Indiiana", "channel": "The Vibe Guide", "view_count": 6491253},
+        {"id": "ntJYl-uvXNM", "title": "Freed from Desire (Extended Mix)", "channel": "Drenchill", "view_count": 2291816, "track": "Freed from Desire (Extended Mix)"},
+        {"id": "p3l7fgvrEKM", "title": "GALA - Freed from desire [Official 4K Video]", "channel": "DO IT YOURSELF", "view_count": 478193909},
+        {"id": "Qvu033SBMYU", "title": "Freed From Desire", "channel": "Gala", "view_count": 77559926, "track": "Freed From Desire"},
+        {"id": "vAS8lFW1zZc", "title": "Drenchill - Freed from Desire (Official Lyric Video) ft. Indiiana", "channel": "Club Sounds", "view_count": 26829},
+        {"id": "dZQrVXhdqZ4", "title": "Freed From Desire - Drenchill feat. Indiiana", "channel": "Lion Memes", "view_count": 5364},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Drenchill ft. Indiiana", "Freed From Desire")
+
+    assert video_id == "6b6FBneAENQ"
+
+
 def test_search_video_ytdlp_prefers_original_mix_over_official_club_edit(monkeypatch):
     # Real case: "Betoko - Breaking (Original Mix)". The real upload ("Betoko
     # - Breaking (OKO Recordings)", the artist's own channel, no
@@ -794,6 +823,32 @@ def test_search_video_ytdlp_prefers_official_video_over_live_when_pool_has_both(
     video_id = m.search_video_ytdlp("Koala Voice", "Vest")
 
     assert video_id == "Vv6fECSGkKg"
+
+
+def test_search_video_ytdlp_finds_easy_life_pockets(monkeypatch):
+    # Real case: "Easy Life - Pockets" was reported as finding nothing at
+    # all — but the DB title was already the correct "Pockets" (plural) by
+    # the time this was investigated, and this exact candidate pool already
+    # resolves correctly with it (relevance 1.0 for every real candidate,
+    # `quality`/popularity picking the FIFA 19 soundtrack upload). The
+    # reported failure most likely involved a *singular* "Pocket" title at
+    # the time — DB titles going stale relative to the actual song title is
+    # a real, previously-documented failure mode (see "A contaminated DB
+    # `title` field defeats matching" above), not a scoring gap here. Kept as
+    # a regression guard for the scoring behavior itself, like Koala Voice
+    # above — no code change was needed or made for this one.
+    candidates = [
+        {"id": "T7i-82QS0IA", "title": "Easy Life - Pockets (Lyrics)", "channel": "The Tiny Majority", "view_count": 446611},
+        {"id": "S_4ctRdfRns", "title": "Easy Life - Pockets | Glastonbury 2019", "channel": "BBC Music", "view_count": 170416},
+        {"id": "irruBdi_K3k", "title": "Easy Life- Pockets (FIFA 19 Official Soundtrack)", "channel": "favelamarek", "view_count": 946435},
+        {"id": "MwKuGl3Lpcw", "title": "Easy Life - Pockets | FIFA 19 OST", "channel": "Original Soundtrack", "view_count": 71127},
+        {"id": "RsnJugB5znM", "title": "Easy Life - Pockets (Official Instrumental)", "channel": "that random channel", "view_count": 8338},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Easy Life", "Pockets")
+
+    assert video_id == "irruBdi_K3k"
 
 
 def test_search_video_ytdlp_matches_specific_requested_remix(monkeypatch):
@@ -1152,6 +1207,8 @@ DB_REFERENCE_REGRESSION_CASES = [
     ("Koala Voice - Vest", "Koala Voice", "Vest", "Vv6fECSGkKg"),
     ("Krzysztof Zalewski - Milosc Milosc", "Krzysztof Zalewski", "Milosc Milosc", "7i1ggMU2JSQ"),
     ("La Vida Bohème - Radio Capital", "La Vida Bohème", "Radio Capital", "F9gb9SsO_O8"),
+    ("Drenchill ft. Indiiana - Freed From Desire", "Drenchill ft. Indiiana", "Freed From Desire", "6b6FBneAENQ"),
+    ("Easy Life - Pockets", "Easy Life", "Pockets", "irruBdi_K3k"),
     # The one case where the without-DB-reference test above
     # (test_search_video_ytdlp_declines_when_only_match_is_a_translation_video)
     # asserts `video_id is None`: the real video is age-restricted and
@@ -1495,6 +1552,29 @@ FRESH_SEARCH_REGRESSION_CASES = [
             {"id": "F9gb9SsO_O8", "title": "La Vida Boheme - Radio Capital (Official Music Video)", "channel": "Nacional Records", "view_count": 1935147},
         ],
         ("F9gb9SsO_O8",), {},
+    ),
+    (
+        "Drenchill ft. Indiiana - Freed From Desire", "Drenchill ft. Indiiana", "Freed From Desire",
+        [
+            {"id": "ZgF35aAArf4", "title": "Drenchill ft. Indiiana - Freed from Desire (Bass Boosted)", "channel": "TL Bass Boost", "view_count": 228},
+            {"id": "6b6FBneAENQ", "title": "Drenchill - Freed from Desire ft. Indiiana", "channel": "Club Sounds", "view_count": 165431335},
+            {"id": "uSTiA24KKRs", "title": "Drenchill - Freed From Desire (feat. Indiiana)", "channel": "House Nation", "view_count": 22130707},
+            {"id": "i3z5UV3kR20", "title": "Freed From Desire (Lyrics) - Drenchill, Indiiana", "channel": "The Vibe Guide", "view_count": 6491253},
+            {"id": "p3l7fgvrEKM", "title": "GALA - Freed from desire [Official 4K Video]", "channel": "DO IT YOURSELF", "view_count": 478193909},
+            {"id": "Qvu033SBMYU", "title": "Freed From Desire", "channel": "Gala", "view_count": 77559926, "track": "Freed From Desire"},
+        ],
+        ("6b6FBneAENQ",), {},
+    ),
+    (
+        "Easy Life - Pockets", "Easy Life", "Pockets",
+        [
+            {"id": "T7i-82QS0IA", "title": "Easy Life - Pockets (Lyrics)", "channel": "The Tiny Majority", "view_count": 446611},
+            {"id": "S_4ctRdfRns", "title": "Easy Life - Pockets | Glastonbury 2019", "channel": "BBC Music", "view_count": 170416},
+            {"id": "irruBdi_K3k", "title": "Easy Life- Pockets (FIFA 19 Official Soundtrack)", "channel": "favelamarek", "view_count": 946435},
+            {"id": "MwKuGl3Lpcw", "title": "Easy Life - Pockets | FIFA 19 OST", "channel": "Original Soundtrack", "view_count": 71127},
+            {"id": "RsnJugB5znM", "title": "Easy Life - Pockets (Official Instrumental)", "channel": "that random channel", "view_count": 8338},
+        ],
+        ("irruBdi_K3k",), {},
     ),
     (
         "Valeria Stoica - Get Back", "Valeria Stoica", "Get Back (Lorin Rymbu & Denis Rynda Remix Extended)",
