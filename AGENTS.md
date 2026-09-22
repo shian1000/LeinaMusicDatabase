@@ -110,7 +110,10 @@ non-trivial work in that area.
   importing `menu.song_actions` normally through `main.py`'s own path.
 - `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
-  per-field loop.
+  per-field loop. `seek_nonsense_names()` queues blacklisted album/title hits and asks about them
+  in one batch at the end (see the Coding conventions entry above); `resolve_unknown_artist()`
+  still applies its artist/title split unconditionally (no yes/no there) but prints one summary
+  instead of pausing per song.
 - `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
   covers — keep it in sync with the tests). `tests/test_scripts.py` is an explicit scratch file
   (its own docstring: "meant to be a mess"), excluded from collection via `tests/conftest.py`.
@@ -167,6 +170,12 @@ non-trivial work in that area.
 - Reuse the shared helpers listed in the Module map rather than reintroducing local equivalents.
 - Comments for non-obvious constraints, not line-by-line narration.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
+- A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
+  correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
+  interrupt per item. Three places already do this: `import_data_from_mp3_tags()`,
+  `check_spelling_menu()`, `seek_nonsense_names()` — see
+  `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
+  included) and follow the same shape for a new one rather than inventing another.
 
 ## Testing & verification
 

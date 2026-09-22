@@ -61,32 +61,65 @@ def replace_double_spaces(songs):
     )
 
 def seek_nonsense_names(songs):
+    # Blacklisted album/title values used to ask "do you wish to edit it?" right
+    # away, per song. Now the scan just tags and queues them, and the questions
+    # (plus the free-text replacement each "yes" needs) are asked in one batch
+    # once every song has been scanned - same pattern as the import pipeline and
+    # the spell-check menu.
+    pending_rubbish_corrections = []
     for song in songs:
         if not has_tag_on_song(song, "album_checked"):
-            if(is_blacklisted_album(song.album)):
-                copy_to_clipboard(f"{song.artist.name} - {song.title}")
-                confirmation = questionary.confirm(f"'{song.album}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
-                if confirmation:
-                    new_name = input("Enter new album name: ")
-                    edit_db_entry(song, "album", new_name)
-            if(is_blacklisted_album(song.title)):
-                copy_to_clipboard(f"{song.artist.name} - {song.title}")
-                confirmation = questionary.confirm(f"'{song.title}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
-                if confirmation:
-                    new_name = input("Enter new title: ")
-                    if new_name == "":
-                        new_name = strip_brackets(song.title)
-                        print(new_name)
-                    print(new_name)
-                    if new_name and new_name is not "":
-                        edit_db_entry(song, "title", new_name)
-                    else:
-                        print("Can't delete title name entirely")
+            if is_blacklisted_album(song.album):
+                pending_rubbish_corrections.append({
+                    "song": song,
+                    "field": "album",
+                    "old_value": song.album,
+                })
+            if is_blacklisted_album(song.title):
+                pending_rubbish_corrections.append({
+                    "song": song,
+                    "field": "title",
+                    "old_value": song.title,
+                })
             add_tag_to_song(song, "album_checked")
 
+    if not pending_rubbish_corrections:
+        return
+
+    print("\n" + "="*70)
+    print(f"REVIEW: {len(pending_rubbish_corrections)} field(s) look like rubbish and need your review")
+    print("="*70)
+    for correction in pending_rubbish_corrections:
+        song = correction["song"]
+        field = correction["field"]
+        old_value = correction["old_value"]
+
+        copy_to_clipboard(f"{song.artist.name} - {song.title}")
+        confirmation = questionary.confirm(f"'{old_value}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
+        if not confirmation:
+            continue
+
+        if field == "album":
+            new_name = input("Enter new album name: ")
+            edit_db_entry(song, "album", new_name)
+        else:
+            new_name = input("Enter new title: ")
+            if new_name == "":
+                new_name = strip_brackets(old_value)
+                print(new_name)
+            print(new_name)
+            if new_name:
+                edit_db_entry(song, "title", new_name)
+            else:
+                print("Can't delete title name entirely")
+
 def resolve_unknown_artist(songs):
-        new_title = ""
-        new_artist = ""
+        # Editing an unknown-artist/title split is unconditional (there's no
+        # yes/no decision to defer) - the per-song "Press anything to continue"
+        # was only there to pause and show what changed, one song at a time.
+        # Apply edits during the scan as before, but collect what changed and
+        # print it as a single summary at the end instead of blocking per song.
+        changes = []
         for song in songs:
             if not has_tag_on_song(song, "album_checked"):
                 lowered_artist = song.artist.name.strip().lower()
@@ -95,20 +128,27 @@ def resolve_unknown_artist(songs):
                 slog(lowered_title)
                 if "unknown" in lowered_artist or not lowered_artist:
                     print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
+                    new_artist = ""
+                    new_title = ""
                     if " - " in lowered_artist:
                         new_artist, new_title = lowered_artist.split(" - ", 1)
                     elif " - " in lowered_title:
                         new_artist, new_title = lowered_title.split(" - ", 1)
                     if new_artist:
-                        if new_artist is not "":
-                            input(f"editting entry of a song (song is {song.artist.name} - {song.title} [song_id is {song.id}]). New artist name = {new_artist}. Press anything to continue")
-                            edit_db_entry(song, song_categories[1], new_artist)
+                        old_artist = song.artist.name
+                        edit_db_entry(song, song_categories[1], new_artist)
+                        changes.append(f"song_id {song.id}: artist '{old_artist}' -> \033[93m'{new_artist}'\033[0m")
                     if new_title:
-                        if new_title is not "":
-                            edit_db_entry(song, song_categories[0], new_title)
-                            input(f"editting entry of a song (song is {song.artist.name} - {song.title} [song_id is {song.id}]). New title = {new_title}. Press anything to continue")
+                        old_title = song.title
+                        edit_db_entry(song, song_categories[0], new_title)
+                        changes.append(f"song_id {song.id}: title '{old_title}' -> \033[93m'{new_title}'\033[0m")
 
-                 
+        if changes:
+            print("\n" + "="*70)
+            print(f"Resolved {len(changes)} unknown-artist field(s):")
+            for change in changes:
+                print(f"  {change}")
+            print("="*70)
 
 
 
