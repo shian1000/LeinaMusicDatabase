@@ -119,8 +119,8 @@ module degrades gracefully rather than breaking.
 
 - `music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the
   chosen release came from.
-- `itunes_fetcher.py` — reports the JSON-LD `audio.name` / `byArtist[0].name` it already scrapes
-  to verify the match internally.
+- `itunes_fetcher.py` — reports the tracklist title / first credited artist it already scrapes
+  from the song's own page to verify the match internally (see dedicated section below).
 - `genius_fetcher.py` — reports the song-title portion of the matched URL slug (artist prefix
   stripped best-effort by `_title_portion_of_slug()`, since Genius slugs are `artist-title-lyrics`
   with no clean delimiter).
@@ -249,6 +249,55 @@ The two pure-parsing helpers (`_find_matching_track`, `_extract_album_from_track
 tested against static HTML fixtures in `tests/test_spotify_fetcher.py` — no live network/Selenium
 in the test, consistent with the rest of `tests/` — but that only locks in the parsing logic
 against the *fixture*, not against Spotify's real markup drifting out from under it.
+
+## `itunes_fetcher.py` — scrapes music.apple.com's web player; rewritten 2026-09 when the JSON-LD it relied on disappeared
+
+Originally parsed a `<script id="schema:song" type="application/ld+json">` tag on the song's own
+page for a clean, structured `audio.name`/`byArtist`/`inAlbum.name`. Apple stopped shipping that
+tag entirely (confirmed by inspecting a live page — it's just gone, not renamed), and the search
+page's old `.track-lockup__title` CSS class was also gone, so the fetcher was silently returning
+`None` for everything before this rewrite. It now reads stable `data-testid` attributes instead:
+`non-editable-product-title` (album), `product-subtitles` (artist link(s)), and `track-title`
+(tracklist rows) on the song's own page.
+
+**Apple serves two different search-results DOM layouts for the same URL/query**, and this
+fetcher has to handle both (`_iter_song_candidates()`):
+- `track-lockup` / `track-lockup-title` / `track-lockup-subtitle` — a dedicated "Songs" section,
+  closer to the old markup. Observed when the request's geo doesn't match the `/us/...` storefront
+  in the URL (e.g. scraping from a non-US IP, which is the common case for this app's actual
+  users) — Apple falls back to this layout instead of (or alongside) a region-mismatch prompt.
+- `top-search-list-result` / `top-search-list-result-title` / `top-search-list-result-subtitle` —
+  a mixed "Top Results" list (songs, albums, artists, videos interleaved); a row's type is only
+  knowable from its subtitle text ("Song · Artist" vs "Album · Artist" / "Artist" / "Music Video ·
+  Artist"). Observed when geo matches the storefront.
+Which one a given run gets isn't something the fetcher controls, so both are tried every time
+rather than picking one based on an assumption about the caller's network. If this fetcher starts
+returning `None` for everything again, check which (if either) of these `data-testid` sets is
+still in `driver.page_source` before assuming the matching logic broke.
+
+**Apple now bakes "(feat. X)" credits straight into the visible track title** on the song's own
+page (the old JSON-LD kept `audio.name` clean of them). `extract_from_itunes_soup()` compares
+against the part before the parenthetical — the same `.split("(")[0].strip()` convention
+`discover_album_name()` already uses to clean the query — otherwise a plain query like "Say So"
+would never clear `SPELLING_CHECK_THRESHOLD` against an on-page title like "Say So (feat. Nicki
+Minaj)".
+
+**Single-only releases report no real album.** Apple appends `" - Single"` to the product title of
+a release that never had a parent album (e.g. "Say So (feat. Nicki Minaj) - Single"). Rather than
+inventing a new field to carry that fact through `DiscoveryResult`/`discoveries_manager`/the DB
+(which would need a schema change), `extract_from_itunes_soup()` reports the album as the literal
+string `"Singles"` — the same sentinel `wikipedia_fetcher.py` already returns when a song is found
+under a Wikipedia discography's "Singles" heading (see `_find_song_under_heading()`). This needed
+no changes anywhere else: `"Singles"` isn't on the album blacklist, and `matched_title`/
+`matched_artist` are unaffected, so `discoveries_manager._validate_result()`'s cross-check still
+runs against the real scraped title/artist, not the sentinel.
+
+`_find_song_link()` / `_iter_song_candidates()` and `extract_from_itunes_soup()` are unit tested
+against static HTML fixtures (both search-results layouts, a single, a multi-artist single, a
+regular album track, and the mismatch/missing-data cases) in `tests/test_itunes_fetcher.py` — no
+live Selenium/network in the test, same approach as `tests/test_spotify_fetcher.py` /
+`tests/test_youtube_fetcher.py`. That only locks in the parsing logic against the *fixtures*,
+not against Apple's real markup drifting out from under it again.
 
 ## `youtube_fetcher.py` — scrapes the public music.youtube.com web player, not the Data API
 

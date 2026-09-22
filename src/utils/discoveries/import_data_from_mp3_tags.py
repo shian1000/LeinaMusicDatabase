@@ -21,8 +21,22 @@ from sqlalchemy import func
 # Key: (artist, title) tuple, Value: spell_check_result dict
 _SPELL_CHECK_CACHE = {}
 
-def check_artist_spelling(metadata) -> Artist:
+# Sentinel stored in artist_cache while an ambiguous artist match is waiting
+# for the user to review it after the batch, so repeat occurrences of the
+# same artist name reuse the pending state instead of re-querying MusicBrainz
+# and queueing a duplicate question.
+_PENDING_ARTIST = object()
 
+def find_similar_artist(metadata: dict) -> list:
+    """
+    Look up whether MusicBrainz's corrected spelling for this artist matches
+    one or more artists already in the database.
+
+    Pure lookup - does NOT ask the user. Returns the list of matching Artist
+    rows (possibly empty); the caller queues the conflict and lets the user
+    resolve it once the whole import batch is done, instead of interrupting
+    the import for every ambiguous artist name.
+    """
     new_artist_name = metadata["artist_name"]
     slog(metadata)
 
@@ -30,7 +44,7 @@ def check_artist_spelling(metadata) -> Artist:
 
     # OPTIMIZATION: Use title for spell check context
     spell_check_cache_key = (new_artist_name, metadata.get("title", ""))
-    
+
     if spell_check_cache_key in _SPELL_CHECK_CACHE:
         spell_check_result = _SPELL_CHECK_CACHE[spell_check_cache_key]
         slog(f"[CACHE HIT] Artist spell check cached", priority=1)
@@ -38,14 +52,14 @@ def check_artist_spelling(metadata) -> Artist:
         spell_check_result = check_spelling(new_artist_name, metadata["title"])
         _SPELL_CHECK_CACHE[spell_check_cache_key] = spell_check_result
         slog(f"[API CALL] Artist spell check performed and cached", priority=1)
-    
+
     slog(new_artist_name)
     slog(metadata["title"])
     slog(spell_check_result)
 
     if not spell_check_result.get("found"):
         slog(f"No MusicBrainz match for {new_artist_name}, skipping spellcheck correction", priority=1)
-        return None
+        return []
 
     corrected_spelling = spell_check_result["corrected_artist"]
     slog(corrected_spelling)
@@ -55,24 +69,25 @@ def check_artist_spelling(metadata) -> Artist:
     slog(corrected_spelling)
     slog(similarity_percent)
 
-    if(similarity_percent > scaled_similarity_threshold(new_artist_name, corrected_spelling, SPELLING_CHECK_THRESHOLD)):
-        existing_artists = get_artists_from_db_session(artist_categories[0], corrected_spelling)
-        if existing_artists:
-            for art in existing_artists:
-                if not (are_artists_entries_similar(art, corrected_spelling)):
-                    slog(f"{art} is not similar to {corrected_spelling}, skipping", priority=1)
-                else:
-                    print(f"Found similar artist [blue]{art.name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
-                    confirmation = questionary.confirm(f"Do you wish to use the artist already in the database?").ask()
-                    if confirmation:
-                        print("Found existing artist")
-                        slog(art)
-                        slog(art.name)
-                        slog(art.id)
-                        return art
-            else:
-                return None
-            
+    if not (similarity_percent > scaled_similarity_threshold(new_artist_name, corrected_spelling, SPELLING_CHECK_THRESHOLD)):
+        return []
+
+    existing_artists = get_artists_from_db_session(artist_categories[0], corrected_spelling)
+    if not existing_artists:
+        return []
+
+    similar_artists = []
+    for art in existing_artists:
+        if are_artists_entries_similar(art, corrected_spelling):
+            slog(art)
+            slog(art.name)
+            slog(art.id)
+            similar_artists.append(art)
+        else:
+            slog(f"{art} is not similar to {corrected_spelling}, skipping", priority=1)
+
+    return similar_artists
+
 def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
     """
     Check if a similar song already exists for the artist and return it.
@@ -145,24 +160,32 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
 
     return None
 
-def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
+def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts: list = None) -> tuple:
     """
     Resolve or create an artist entry with optimized lookup.
-    
+
     Uses a cache to avoid redundant database queries and similarity calculations.
     Implements smart filtering to stop early once a good match is found.
-    
+
     Args:
         metadata: Metadata dict with 'artist_name' and 'origin'
         artist_cache: Optional dict to cache lookups {normalized_name: artist_obj}
-    
+        pending_conflicts: list to queue ambiguous-artist conflicts onto instead
+            of asking immediately (see resolve_song for the same pattern)
+
     Returns:
-        Artist object (existing or newly created)
+        (artist_obj, is_pending):
+        - (artist, False): artist resolved (existing or newly created).
+        - (None, True): an ambiguous MusicBrainz-corrected match was found.
+          The conflict was appended to pending_conflicts and artist_cache
+          remembers the pending state (_PENDING_ARTIST), so the caller should
+          defer this file (and its song) until the batch is reviewed.
     """
     if artist_cache is None:
         artist_cache = {}
+    if pending_conflicts is None:
+        pending_conflicts = []
 
-    added_new_entry = False
     new_artist_name = metadata["artist_name"]
     new_artist_origin = metadata.get("origin")
     normalized_name = normalize(new_artist_name)
@@ -170,9 +193,13 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
     # Check cache first - this is the fastest path for repeated artists
     cache_start = time.time()
     if normalized_name in artist_cache:
+        cached_value = artist_cache[normalized_name]
         cache_hit_time = time.time() - cache_start
+        if cached_value is _PENDING_ARTIST:
+            slog(f"    [CACHE HIT] Artist resolution already deferred: {cache_hit_time:.4f}s", priority=1)
+            return None, True
         slog(f"    [CACHE HIT] Artist found in cache: {cache_hit_time:.4f}s", priority=1)
-        return artist_cache[normalized_name]
+        return cached_value, False
 
     existing_artist = None
     
@@ -236,9 +263,20 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
         else:
             # No matches found, try spell check
             spell_start = time.time()
-            existing_artist = check_artist_spelling(metadata)
+            similar_artists = find_similar_artist(metadata)
             spell_time = time.time() - spell_start
             slog(f"    [SPELL CHECK] Completed in {spell_time:.4f}s", priority=1)
+
+            if similar_artists:
+                print(f"Found similar artist [blue]{similar_artists[0].name}[/blue] but you were trying to add [green]{new_artist_name}[/green] - review deferred until the import finishes")
+                slog(f"    [DEFERRED] Similar artist conflict queued for later resolution", priority=1)
+                pending_conflicts.append({
+                    "metadata": metadata,
+                    "normalized_name": normalized_name,
+                    "candidate_artists": similar_artists,
+                })
+                artist_cache[normalized_name] = _PENDING_ARTIST
+                return None, True
 
     new_artist_obj = None
     if not existing_artist:
@@ -250,15 +288,14 @@ def resolve_artist(metadata: dict, artist_cache: dict = None) -> Artist:
         add_db_entry(new_artist_obj)
         create_time = time.time() - create_start
         slog(f"    [NEW ARTIST] Created and added in {create_time:.4f}s", priority=1)
-        added_new_entry = True
     else:
         new_artist_obj = existing_artist
         print(f"Found existing artist ({new_artist_obj.name})")
 
     # Cache the result for future lookups in this import batch
     artist_cache[normalized_name] = new_artist_obj
-    
-    return new_artist_obj
+
+    return new_artist_obj, False
 
 def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
     new_song_obj = Song()
@@ -323,10 +360,14 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
     reason_for_skipping = []
     new_artists_added = []
 
-    # Similar-song matches aren't resolved during the loop anymore - they're queued
-    # here and asked about in one batch after every file has been processed, so the
-    # import doesn't keep stopping for input.
-    pending_conflicts = []
+    # Similar-song and ambiguous-artist matches aren't resolved during the loop
+    # anymore - they're queued here and asked about in one batch after every file
+    # has been processed, so the import doesn't keep stopping for input.
+    pending_song_conflicts = []
+    pending_artist_conflicts = []
+    # Files whose artist resolution was deferred - their song still needs
+    # resolving once the artist conflicts below are reviewed.
+    deferred_files = []
 
     # OPTIMIZATION: Cache for artists found in this import batch
     # This avoids redundant database queries and similarity calculations
@@ -385,13 +426,30 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
 
         # TIMING: Artist resolution
         artist_start = time.time()
-        new_artist_obj = resolve_artist(metadata, artist_cache)
+        new_artist_obj, artist_is_pending = resolve_artist(metadata, artist_cache, pending_artist_conflicts)
         artist_time = time.time() - artist_start
         mlog(f"  └─ Artist resolution: {artist_time:.3f}s")
 
+        if artist_is_pending:
+            mlog(f"  └─ Artist resolution deferred: similar artist needs review")
+            deferred_files.append(metadata)
+
+            total_time = time.time() - song_start_time
+            file_timings[file_name] = {
+                'total': total_time,
+                'metadata': metadata_time,
+                'artist': artist_time,
+                'song': 0.0
+            }
+            mlog(f"  ⏱️  TOTAL for this file: {total_time:.3f}s")
+
+            print("##########")
+            print()
+            continue
+
         # TIMING: Song resolution
         song_start = time.time()
-        new_song_obj, is_pending = resolve_song(metadata, new_artist_obj, pending_conflicts)
+        new_song_obj, is_pending = resolve_song(metadata, new_artist_obj, pending_song_conflicts)
         song_time = time.time() - song_start
         mlog(f"  └─ Song resolution: {song_time:.3f}s")
 
@@ -420,14 +478,67 @@ def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
 
         # submit_global_database_session()
 
-    # Now that every file has been processed, go through the similar-song matches
-    # that were queued along the way and ask about each one in a single batch,
-    # instead of interrupting the import every time one came up.
-    if pending_conflicts:
+    # Now that every file has been processed, go through the ambiguous-artist
+    # matches that were queued along the way and ask about each one in a single
+    # batch, instead of interrupting the import every time one came up. Each
+    # normalized artist name only appears once here even if several files
+    # shared it (see the artist_cache / _PENDING_ARTIST check in resolve_artist).
+    if pending_artist_conflicts:
         print("\n" + "="*70)
-        print(f"REVIEW: {len(pending_conflicts)} song(s) found a similar match in the database")
+        print(f"REVIEW: {len(pending_artist_conflicts)} artist(s) found a similar match in the database")
         print("="*70)
-        for conflict in pending_conflicts:
+        for conflict in pending_artist_conflicts:
+            conflict_metadata = conflict["metadata"]
+            normalized_name = conflict["normalized_name"]
+            new_artist_name = conflict_metadata["artist_name"]
+
+            resolved_artist = None
+            for candidate in conflict["candidate_artists"]:
+                print(f"Found similar artist [blue]{candidate.name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
+                confirmation = questionary.confirm("Do you wish to use the artist already in the database?").ask()
+                if confirmation:
+                    resolved_artist = candidate
+                    print("Found existing artist")
+                    break
+
+            if resolved_artist is None:
+                resolved_artist = Artist()
+                resolved_artist.name = new_artist_name
+                new_artist_origin = conflict_metadata.get("origin")
+                if new_artist_origin:
+                    resolved_artist.origin = new_artist_origin
+                add_db_entry(resolved_artist)
+
+            # Unblocks every file that shared this artist name (they all hit
+            # the artist_cache fast path in resolve_artist from here on).
+            artist_cache[normalized_name] = resolved_artist
+            print()
+
+    # Every file that got deferred because of an artist conflict can now resolve
+    # its artist from the cache (instant - see above) and its song. A similar
+    # song for one of these still gets queued below rather than asked right away.
+    for deferred_metadata in deferred_files:
+        deferred_artist_obj, _ = resolve_artist(deferred_metadata, artist_cache, pending_artist_conflicts)
+        deferred_song_obj, deferred_is_pending = resolve_song(deferred_metadata, deferred_artist_obj, pending_song_conflicts)
+        if deferred_is_pending:
+            continue
+        elif deferred_song_obj:
+            added_count = added_count + 1
+            added_songs.append(deferred_song_obj)
+        else:
+            skipped_count = skipped_count + 1
+            skipped_songs.append(f"{deferred_metadata['artist_name']} - {deferred_metadata['title']}")
+            reason_for_skipping.append("Song already existss")
+
+    # Finally, go through the similar-song matches that were queued along the
+    # way (both from the main loop and from the deferred files above) and ask
+    # about each one in a single batch, instead of interrupting the import
+    # every time one came up.
+    if pending_song_conflicts:
+        print("\n" + "="*70)
+        print(f"REVIEW: {len(pending_song_conflicts)} song(s) found a similar match in the database")
+        print("="*70)
+        for conflict in pending_song_conflicts:
             conflict_metadata = conflict["metadata"]
             conflict_artist_obj = conflict["artist_obj"]
             existing_song = conflict["existing_song"]

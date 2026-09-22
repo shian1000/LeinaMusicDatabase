@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~172 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~181 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -170,7 +170,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~172 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~181 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
@@ -234,8 +234,9 @@ non-trivial work in that area.
   MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
   cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the
   fielded query gets only one attempt, the `check_spelling()` return shape, the `MBStats` run
-  summary, and why similar-song matches are queued in `pending_conflicts` and asked about in one
-  batch after the whole folder is processed instead of interrupting per file.
+  summary, and why ambiguous-artist and similar-song matches are both queued (`pending_conflicts`,
+  `deferred_files`) and asked about in two end-of-batch passes — artists then songs — instead of
+  interrupting the import per file.
 - [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`
