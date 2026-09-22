@@ -64,6 +64,11 @@ into the backup call.
 
 ### Manual backup
 
+From the app: Settings → "Back up database now" (`backup_database_now()` in
+`src/menu/main_menu/settings/__init__.py`), which just calls `backup_databases(reason="manual")`.
+
+From a shell/script:
+
 ```python
 from utils.database.backup import backup_databases
 backup_databases(reason="manual")

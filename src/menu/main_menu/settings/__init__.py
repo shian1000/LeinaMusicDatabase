@@ -4,6 +4,7 @@ from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_brows
 from utils.discoveries.discoveries_manager import load_all_discovery_modules_metadata
 from utils.discoveries.discovery_settings import load_discovery_config, save_discovery_config
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
+from utils.database.backup import backup_databases
 from settings import settings
 
 
@@ -11,8 +12,20 @@ def settings_menu():
     action_map = {
         "Discovery modules": discovery_modules_menu,
         "Database location": database_location_menu,
+        "Back up database now": backup_database_now,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
+
+
+def backup_database_now():
+    """Manually trigger an immediate snapshot of music.db and tag.db into archive/."""
+    created = backup_databases(reason="manual")
+    if created:
+        print("Backup created:")
+        for path in created:
+            print(f"  {path}")
+    else:
+        print("No database files found to back up.")
 
 
 def discovery_modules_menu():

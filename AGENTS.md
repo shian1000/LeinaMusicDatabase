@@ -140,10 +140,11 @@ non-trivial work in that area.
   `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
   tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
   restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
-- Backups are automatic, not manual: `main.py` takes one at startup (once per calendar day) and
+- Backups mostly happen automatically: `main.py` takes one at startup (once per calendar day) and
   another, unconditionally, immediately before applying any pending migration. Don't skip either
   when changing this code path — a schema change without a fresh backup right before it is exactly
-  the failure mode this mechanism exists to remove.
+  the failure mode this mechanism exists to remove. Settings → "Back up database now" also lets the
+  user trigger `backup_databases()` on demand, for a snapshot right before something risky.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
   `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
   write has already been caught racing a live session mid-edit (title cleanup) and clobbering
