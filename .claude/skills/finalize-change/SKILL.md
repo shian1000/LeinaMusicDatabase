@@ -134,6 +134,16 @@ prefix, no trailer. Follow that shape unless the user's own recent commits have 
 from it — don't impose a different convention (e.g. a multi-paragraph body, a `feat:`/`fix:`
 prefix) just because it's more common elsewhere.
 
+Keep the whole message under 400 characters. If describing everything faithfully would blow past
+that, cut detail rather than let it run long — lead with the most significant behavioral change
+and drop the rest, don't compress into cryptic abbreviations to fit.
+
+Leave documentation-only edits out of the description entirely — don't add a clause like "document
+X in AGENTS.md" or "update docs/agent-notes/…". That's implied by Steps 3/4 already having run and
+by the diff itself; restating it in the commit message is redundant. Describe only the actual code
+change. If a session's *only* change was documentation (no code diff), that's the exception — say
+so plainly (e.g. "Document X in AGENTS.md").
+
 If `git status`/`git diff` shows changes this session didn't make — a real, recurring situation in
 this repo, which the user often works in concurrently with the running app or another session —
 **do not describe those changes as if this session made them.** Either scope the draft message to
