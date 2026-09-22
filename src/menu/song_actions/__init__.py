@@ -6,7 +6,7 @@ from utils.database.database_getter import extract_db_object_info
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu
 from utils.database.datatables import artist_categories, song_categories
 from utils.database.tags_management import remove_tag_from_song
-from utils.youtube.manage_youtube_playlists import create_yt_playlist
+from utils.youtube.manage_youtube_playlists import create_yt_playlist, NO_VIDEO_SENTINEL
 from utils.ui.display_utils import display_songs
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
@@ -30,6 +30,15 @@ def add_tags_menu(song_objects):
     print(f"Added {tag} to songs")
 
 
+def report_no_yt_video(songs_objects):
+    print("About to mark these songs as having no YouTube video:")
+    display_songs(songs_objects)
+    for song in songs_objects:
+        song.youtube_video_id = NO_VIDEO_SENTINEL
+    submit_global_database_session()
+    print(f"Marked {len(songs_objects)} song(s) with \"{NO_VIDEO_SENTINEL}\" (confirmed no YouTube video).")
+
+
 def song_actions(songs_objects):
     slog(songs_objects)
     songs_list = extract_db_object_info(songs_objects, f"{song_categories[1]}, {song_categories[0]}")
@@ -41,7 +50,8 @@ def song_actions(songs_objects):
         "Copy songs from local storage": lambda: copy_songs_from_storage(songs_list),
         "Make YT playlist": lambda: make_yt_playlist_menu(songs_objects),
         "Make TXT file": lambda: print("In progress"),
-        "Remove check protection": lambda: remove_check_protection(songs_objects)
+        "Remove check protection": lambda: remove_check_protection(songs_objects),
+        "Report no YouTube video": lambda: report_no_yt_video(songs_objects)
     }
 
     slog(action_map)

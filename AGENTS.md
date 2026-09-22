@@ -246,8 +246,9 @@ non-trivial work in that area.
   `save_video_id_to_song()` after every fresh search hit, re-validated by `is_video_id_valid()`
   before reuse, and cleared back to `None` if a stale link fails both validation and a fallback
   re-search, both logged to `youtube_link_cache.log`; see also `NO_VIDEO_SENTINEL`, the separate
-  `"N/A"` human annotation for "confirmed no video exists at all," currently data-only with no
-  dedicated skip behavior), `transliteration.py`'s alternate-script
+  `"N/A"` human annotation for "confirmed no video exists at all," settable via the songs menu's
+  "Report no YouTube video" but still consumed as data-only with no dedicated skip behavior),
+  `transliteration.py`'s alternate-script
   retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
   when the winning pick isn't a confirmed official release, not by a relevance floor), why a collab
   track credited in the DB solely to a featured/guest artist defeats matching entirely (no scoring

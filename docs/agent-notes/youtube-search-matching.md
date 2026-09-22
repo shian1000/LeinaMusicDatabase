@@ -625,17 +625,18 @@ stops working.
 A separate, human-only annotation — `manage_youtube_playlists.NO_VIDEO_SENTINEL` (the literal
 string `"N/A"`) — can also be written to `Song.youtube_video_id` to record "checked, this song has
 no video on YouTube in any form" (as opposed to the above, where a real video exists but is
-unreachable by search). It's currently data-only: nothing writes it automatically (set it by hand,
-directly in the DB — no menu option exists), and `create_yt_playlist()` doesn't skip on it — it
-normalizes `"N/A"` to "no stored link" and runs a normal search every time, exactly as if the field
-were empty, because *is_video_id_valid()* would just fail on a non-id string and there's no
-mechanism yet to have the sentinel actually short-circuit the search. If a future change adds that
-skip behavior, this is the place both to add it and to update.
+unreachable by search). Writing it is a menu action (`report_no_yt_video()` in
+`menu/song_actions/__init__.py`, "Report no YouTube video" in the songs action menu), but
+*consuming* it is still data-only: `create_yt_playlist()` doesn't skip on it — it normalizes
+`"N/A"` to "no stored link" and runs a normal search every time, exactly as if the field were
+empty, because *is_video_id_valid()* would just fail on a non-id string and there's no mechanism
+yet to have the sentinel actually short-circuit the search. If a future change adds that skip
+behavior, this is the place both to add it and to update.
 
-The song edit menu (`edit_entry_menu` in `edit_songs.py`) does have a "remove links" option, but it
-clears `youtube_video_id` back to `None` (plain "not searched yet"), **not** the `"N/A"` sentinel
-above — those mean different things (retry on the next playlist run vs. "confirmed no video,
-don't bother"), and the menu currently has no way to write the sentinel.
+The song edit menu (`edit_entry_menu` in `edit_songs.py`) separately has a "remove links" option,
+but it clears `youtube_video_id` back to `None` (plain "not searched yet"), **not** the `"N/A"`
+sentinel above — those mean different things (retry on the next playlist run vs. "confirmed no
+video, don't bother"), so use the right one for the intent.
 
 ## YouTube Data API quota budget, and why `add_video_to_playlist()` must propagate `quotaExceeded`
 
