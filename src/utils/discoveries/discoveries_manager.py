@@ -153,15 +153,27 @@ def _call_module(module, module_id: str, module_name: str, artist: str, title: s
 
 
 def discover_album_name(song, modules):
-    art, son, alb = song.artist.name, song.title, song.album
-    slog(f"{art} - {son} ({alb})")
-    art_cln_full = art.split("(")[0].strip()
-    son_cln_full = son.split("(")[0].strip()
-    art = truncate_at_word(art)
-    son = truncate_at_word(son)
+    art_full, son_full, alb = song.artist.name, song.title, song.album
+    slog(f"{art_full} - {son_full} ({alb})")
+    art_cln_full = art_full.split("(")[0].strip()
+    son_cln_full = son_full.split("(")[0].strip()
+    art = truncate_at_word(art_full)
+    son = truncate_at_word(son_full)
     art_cln = art.split("(")[0].strip()
     son_cln = son.split("(")[0].strip()
     truncated = art_cln != art_cln_full or son_cln != son_cln_full
+
+    # The "_cln" variants above always drop anything in parentheses, on the
+    # assumption it's disposable (a "(feat. X)" credit, a "(Radio Edit)"
+    # annotation). That assumption doesn't hold for a title/artist where the
+    # parenthesised part is the actual name, e.g. "Sad Story (Out of Luck)"
+    # or "Merk & Kremont" being truncated by "&" to just "Merk" — both
+    # "_cln" attempts above end up querying with essential words missing,
+    # and no fetcher can find the song. `raw_differs` catches that: it's
+    # True whenever splitting on "(" (or truncate_at_word) actually removed
+    # something, and triggers one last retry with the fully original,
+    # nothing-stripped artist/title.
+    raw_differs = art_cln_full != art_full or son_cln_full != son_full
 
     slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
@@ -175,6 +187,13 @@ def discover_album_name(song, modules):
         if not album and truncated:
             print(f"Looking in {module_name} using untruncated title/artist")
             album = _call_module(module, module_id, module_name, art_cln_full, son_cln_full)
+
+        # Both attempts above still strip parentheses from title/artist. If
+        # that stripping actually removed something, retry once more with
+        # the fully raw strings before giving up on this module.
+        if not album and raw_differs:
+            print(f"Looking in {module_name} using full title/artist including parentheses")
+            album = _call_module(module, module_id, module_name, art_full, son_full)
 
         #Repeat the searching if there is a synonym for an artist
         if not album and song.artist.synonyms is not None:

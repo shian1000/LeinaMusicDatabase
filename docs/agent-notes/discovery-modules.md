@@ -52,6 +52,19 @@ more with the original, untruncated (but still parenthetical-stripped) artist/ti
 on. This runs before the synonym-retry step. Because it's implemented in the manager rather than
 per-module, every fetcher gets the fallback for free.
 
+A third stage exists for the same reason, one level up: every attempt above — truncated *and*
+"untruncated" — still runs both artist and title through `.split("(")[0]`, which assumes
+parenthesised text is always disposable (a "(feat. X)" credit, a "(Radio Edit)" annotation). That
+assumption breaks when the parenthesised part is the actual title, e.g. Merk & Kremont's
+"Sad Story (Out of Luck)": `.split("(")[0]` reduces it to just "Sad Story", and `truncate_at_word`
+separately reduces the artist "Merk & Kremont" to "Merk" on the bare `&` stop word. Neither the
+first attempt nor the "untruncated" retry ever queries with the real title, so the search comes up
+empty in every fetcher, not just one — confirmed live on music.youtube.com, which has a clean,
+non-blacklisted match for the exact, fully-raw "Merk & Kremont" / "Sad Story (Out of Luck)" query
+and nothing usable for "Merk" / "Sad Story" alone. If splitting on `"("` actually removed something
+from either string, `discover_album_name()` retries once more with the fully raw, nothing-stripped
+artist/title before falling through to the synonym-retry step.
+
 A different, still-open gap in the same stop-word list, found while smoke-testing
 `spotify_fetcher.py` against a real "Artist1 + Artist2" collab (`MRFY + Laibach - Poskočna`): `+`
 isn't a stop word, so a plus-joined artist credit is never truncated and reaches every fetcher's
