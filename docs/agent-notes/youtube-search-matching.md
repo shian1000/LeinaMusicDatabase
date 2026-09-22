@@ -243,9 +243,12 @@ string matching (containment, similarity, diacritic-folding) could ever close th
 
 The `artists` table already has a `synonyms` column (`src/utils/database/datatables.py`'s `Artist`
 model) that was essentially unused before this — read in exactly one unrelated place
-(`discoveries_manager.py`, as an album-lookup fallback name) and never populated by any current
-code path. It's a plain string with no enforced format; comma-separated is now the convention for
-multiple aliases (`_parse_synonyms()`).
+(`discoveries_manager.py`, as an album-lookup fallback name) and, at the time, never populated by
+any current code path (only set once at artist-creation time via mp3-tag import). It's a plain
+string with no enforced format; comma-separated is now the convention for multiple aliases
+(`_parse_synonyms()`). It can now also be appended to after the fact from
+`Enter database -> Fetch artists -> Add synonym` (`src/menu/artist_actions/__init__.py`), which
+dedupes case-insensitively against what's already there rather than overwriting it.
 
 `score_result()` takes an optional `artist_synonyms: str | None` and checks `artist_relevance`
 against the primary DB artist name *and* every parsed synonym, taking the max
