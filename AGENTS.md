@@ -176,9 +176,12 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Three places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Four places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
-  `check_spelling_menu()`, `seek_nonsense_names()` — see
+  `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
+  `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
+  Add/Swap/Don't add once the whole playlist has been scanned — see
+  `docs/agent-notes/youtube-search-matching.md`) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
   candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an

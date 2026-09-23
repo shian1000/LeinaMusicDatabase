@@ -53,6 +53,38 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
    `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is
    apparently common for plain artist-channel uploads, not just auto-generated Topic channels.
 
+### Catching a title/artist parsed in the wrong order
+
+`split_artist_title()` always treats the text before `" - "` as the artist - correct for the
+overwhelming majority of uploads, but some channels display the reverse order, `"<Song title> -
+<Artist>"` (real case: `"The Darkness That You Fear - The Chemical Brothers"`), which parses
+backwards with no way to tell from the title text alone. `import_data_from_youtube_playlist()`
+catches this *after* the whole playlist has been parsed into metadata dicts, not during
+`build_metadata_from_item()` itself, by calling `_review_artist_title_swaps()`:
+
+1. `_find_possible_artist_title_swaps()` checks every entry's parsed `title` against
+   `import_engine.find_matching_artist()` (exact-then-fuzzy local DB lookup, extracted out of
+   `resolve_artist()` - see `docs/agent-notes/import-pipeline.md` - so both call sites share one
+   matching implementation). A hit means the "title" is suspiciously also a known artist name.
+2. Flagged entries are pulled out of `metadata_list` before anything is added to the DB - this
+   follows the same queue-then-batch-ask shape as `run_import_batch()`'s own pending-conflict
+   review (see the Coding conventions entry in `AGENTS.md`), so one bad channel's whole playlist
+   doesn't stop the import per song.
+3. Once every entry has been scanned, each flagged one is asked about individually via
+   `questionary.select()` with three choices - **Add** (keep the parsed artist/title as-is),
+   **Swap title with artist and add** (swap `metadata["artist_name"]`/`metadata["title"]` in
+   place), **Don't add** (drop it, folded into `run_import_batch()`'s `pre_skipped` summary with
+   reason `"Possible artist/title swap - user chose not to add"`).
+4. The swap is a raw field swap - `strip_artist_from_title()`/`strip_junk_suffix()` etc. are *not*
+   re-run against the post-swap title, since by this point junk-bracket cleanup has already
+   happened on the original (pre-swap) title text. If a swapped-in title still carries leftover
+   cruft, that's a sign the cleanup should have caught it before the split, not something this
+   step tries to redo.
+
+This only runs for the YouTube importer, not the shared `run_import_batch()` engine - the ordering
+ambiguity is a YouTube-title-parsing problem, not a general import concern, and mp3 tags don't have
+it (ID3 `artist`/`title` fields are already separate).
+
 ### Title cleanup: three independently-extensible word lists, applied in a fixed order
 
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
@@ -72,7 +104,10 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
 - `YOUTUBE_TITLE_JUNK_MARKER_WORDS` (checked by `strip_junk_suffix()`, same trailing-only scope) -
   a single word appearing anywhere *inside* the trailing bracket condemns the whole thing, for
   content too source-specific to enumerate as exact phrases - currently `"Soundtrack"` (real case:
-  `"(Pes 2009 Soundtrack)"`) and `"Audio"`.
+  `"(Pes 2009 Soundtrack)"`), `"Audio"`, and `"From"` (real case:
+  `"Army of Me (Sucker Punch Remix) [From Sucker Punch]"` -> the `[From ...]` bracket is dropped,
+  the genuine `(Sucker Punch Remix)` subtitle right before it is untouched since it's no longer the
+  trailing bracket once the `[From ...]` one is stripped first).
 - `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE` (checked by `strip_junk_brackets_anywhere()`, run over
   the *whole raw title*, not just its end) - for junk brackets that sit mid-title with real title
   text after them, which the trailing-only checks above can never reach - e.g.
@@ -99,14 +134,19 @@ end of the string - only add a word to the `_ANYWHERE` list once you're sure it 
 that kind of real subtitle anywhere in a title.
 
 `strip_artist_from_title()` runs before the bracket cleanup, for when the video title repeats the
-artist name outside any bracket (real case: channel `"SIAMES"`, video titled
-`'SIAMÉS "Summer Nights" [Official Animated Video]'`). Diacritic-insensitive on both sides via
-`_fold_char()` (NFKD-fold one character at a time, so the folded string stays the same length and
-position-maps 1:1 back onto the original for slicing - a from-scratch position-preserving variant
-of the whole-string `_fold_diacritics()` already used in `manage_youtube_playlists.py`, needed here
-because *removing* a match requires knowing where it was in the un-folded original). Also unwraps a
-now-orphaned quote pair left behind when the artist name was itself quoted (the SIAMES case above),
-and refuses to empty the title out entirely (e.g. a self-titled artist == title stays untouched).
+artist name - whether that's outside any bracket (real case: channel `"SIAMES"`, video titled
+`'SIAMÉS "Summer Nights" [Official Animated Video]'`) or wrapped in one that exists only to enclose
+it (real case: `"Ado - 【Ado】 unravel 歌いました"` - splitting on `" - "` leaves the song title as
+`"【Ado】 unravel 歌いました"`). Diacritic-insensitive on both sides via `_fold_char()` (NFKD-fold one
+character at a time, so the folded string stays the same length and position-maps 1:1 back onto the
+original for slicing - a from-scratch position-preserving variant of the whole-string
+`_fold_diacritics()` already used in `manage_youtube_playlists.py`, needed here because *removing* a
+match requires knowing where it was in the un-folded original). Also unwraps a now-orphaned
+quote/bracket pair left wrapping nothing once the artist name inside it is removed
+(`_ARTIST_WRAPPING_BRACKETS` covers `()`/`[]`/`【】`; quotes are handled separately right after) -
+without this the SIAMES case would leave an orphaned `"` and the Ado case would leave an empty
+`【】` behind instead of being dropped along with the name. Refuses to empty the title out entirely
+(e.g. a self-titled artist == title stays untouched).
 
 ### Album name: investigated, deliberately not implemented
 

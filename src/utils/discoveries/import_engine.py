@@ -151,6 +151,63 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
 
     return None
 
+def find_matching_artist(name: str) -> Artist | None:
+    """
+    Look up whether `name` matches an artist already in the database - exact
+    match (case-insensitive) first, falling back to local fuzzy similarity
+    against candidates of a comparable name length.
+
+    Pure read-only lookup - never calls out to MusicBrainz and never creates
+    anything. Shared by resolve_artist() (deciding whether a parsed artist
+    name already exists) and the YouTube playlist importer's artist/title
+    swap detection (checking whether a parsed *title* is actually an
+    existing artist's name).
+    """
+    artist, _ = _match_artist_locally(name)
+    return artist
+
+
+def _match_artist_locally(name: str) -> tuple:
+    """Does the exact/fuzzy local lookup for find_matching_artist(), also
+    returning whether the broad (pre-similarity-filter) search found any
+    candidates at all.
+
+    resolve_artist() needs that second bit to preserve its original
+    behavior: it only falls back to a MusicBrainz spelling-correction lookup
+    when there were truly zero local candidates for the name, not when there
+    were candidates that just didn't pass the similarity threshold.
+    """
+    if not name:
+        return None, False
+
+    music_session, _ = open_and_set_global_database_sessions()
+    candidates = music_session.query(Artist).filter(
+        func.lower(Artist.name) == name.lower()
+    ).all()
+    if candidates:
+        return candidates[0], True
+
+    existing_artists = get_artists_from_db_session(artist_categories[0], normalize(name))
+    if not existing_artists:
+        return None, False
+
+    # Pre-filter: only check artists that are somewhat similar in length -
+    # avoids expensive similarity calculations on obviously different names.
+    name_length = len(name)
+    filtered_candidates = [
+        a for a in existing_artists
+        if abs(len(a.name) - name_length) <= max(name_length * 0.5, 3)  # Allow 50% length variance
+    ]
+    filtered_candidates = (filtered_candidates or existing_artists)[:50]  # Cap at 50 candidates
+
+    for similar_artist in filtered_candidates:
+        similarity_percent = similarity(name, similar_artist.name)
+        if similarity_percent > scaled_similarity_threshold(name, similar_artist.name, SPELLING_CHECK_THRESHOLD):
+            return similar_artist, True
+
+    return None, True
+
+
 def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts: list = None) -> tuple:
     """
     Resolve or create an artist entry with optimized lookup.
@@ -190,63 +247,26 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
         slog(f"    [CACHE HIT] Artist found in cache", priority=1)
         return cached_value, False
 
-    existing_artist = None
+    # Optimization 1/2/3: exact match, then local fuzzy match against
+    # length-similar candidates (see _match_artist_locally()).
+    existing_artist, had_local_candidates = _match_artist_locally(new_artist_name)
 
-    # Optimization 1: Try exact match first (normalized comparison)
-    music_session, _ = open_and_set_global_database_sessions()
-    candidates = music_session.query(Artist).filter(
-        func.lower(Artist.name) == new_artist_name.lower()
-    ).all()
+    if existing_artist:
+        print(f"Found existing artist match for [blue]{existing_artist.name}[/blue]")
+    elif not had_local_candidates:
+        # No local candidates at all - try spell check
+        similar_artists = find_similar_artist(metadata)
 
-    if candidates:
-        existing_artist = candidates[0]
-        print(f"Found exact match for artist [blue]{existing_artist.name}[/blue]")
-    else:
-        # Optimization 2: Get normalized matches, but LIMIT the results to reduce comparisons
-        # Instead of potentially getting 1000s of artists, we get a reasonable subset
-        existing_artists = get_artists_from_db_session(artist_categories[0], normalize(new_artist_name))
-
-        # Optimization 3: Sort by name similarity to check most likely matches first
-        if existing_artists:
-            # Pre-filter: only check artists that are somewhat similar in length
-            # This avoids expensive similarity calculations on obviously different names
-            name_length = len(new_artist_name)
-            filtered_candidates = [
-                a for a in existing_artists
-                if abs(len(a.name) - name_length) <= max(name_length * 0.5, 3)  # Allow 50% length variance
-            ]
-
-            # If we filtered too much, use all candidates
-            if not filtered_candidates:
-                filtered_candidates = existing_artists[:50]  # Cap at 50 candidates
-            else:
-                filtered_candidates = filtered_candidates[:50]  # Still cap at 50
-
-            print(f"Checking {len(filtered_candidates)} candidate artists (out of {len(existing_artists)} total matches)")
-
-            for similar_artist in filtered_candidates:
-                print("Checking the similarity between the two artists")
-                similarity_percent = similarity(new_artist_name, similar_artist.name)
-                if(similarity_percent > scaled_similarity_threshold(new_artist_name, similar_artist.name, SPELLING_CHECK_THRESHOLD)):
-                    existing_artist = similar_artist
-                    print(f"Artists seem the same (Similarity is {similarity_percent})")
-                    break  # Early exit - we found a good match
-                else:
-                    print(f"Artists are not the same (Similarity is {similarity_percent})")
-        else:
-            # No matches found, try spell check
-            similar_artists = find_similar_artist(metadata)
-
-            if similar_artists:
-                print(f"Found similar artist [blue]{similar_artists[0].name}[/blue] but you were trying to add [green]{new_artist_name}[/green] - review deferred until the import finishes")
-                slog(f"    [DEFERRED] Similar artist conflict queued for later resolution", priority=1)
-                pending_conflicts.append({
-                    "metadata": metadata,
-                    "normalized_name": normalized_name,
-                    "candidate_artists": similar_artists,
-                })
-                artist_cache[normalized_name] = _PENDING_ARTIST
-                return None, True
+        if similar_artists:
+            print(f"Found similar artist [blue]{similar_artists[0].name}[/blue] but you were trying to add [green]{new_artist_name}[/green] - review deferred until the import finishes")
+            slog(f"    [DEFERRED] Similar artist conflict queued for later resolution", priority=1)
+            pending_conflicts.append({
+                "metadata": metadata,
+                "normalized_name": normalized_name,
+                "candidate_artists": similar_artists,
+            })
+            artist_cache[normalized_name] = _PENDING_ARTIST
+            return None, True
 
     new_artist_obj = None
     if not existing_artist:

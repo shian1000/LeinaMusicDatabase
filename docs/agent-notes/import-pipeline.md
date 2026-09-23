@@ -65,7 +65,14 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
 1. **DB-first shortcut** — `resolve_artist()` / `find_similar_song()` only call
    `check_spelling()` when the local database has no good match. This is the
    oldest optimization and still the highest-value one: most files in a re-import
-   never touch the network.
+   never touch the network. `resolve_artist()`'s local-match half (exact, then fuzzy
+   against length-similar candidates) is factored out as `find_matching_artist()` /
+   `_match_artist_locally()` - the latter also returns whether *any* local
+   candidate existed at all (not just whether one passed the similarity bar),
+   which is what `resolve_artist()` uses to decide whether a MusicBrainz
+   fallback is even worth attempting. `find_matching_artist()` is reused outside
+   this module too, by the YouTube importer's artist/title swap detection - see
+   `docs/agent-notes/youtube-search-matching.md`.
 2. **Disk-backed cache** — `utils/common/spellcheck_cache.py`, persisted to
    `data/spellcheck_cache.json` (gitignored under `/data/`). Keyed by
    `(artist.strip().lower(), title.strip().lower())`. Stores **no-match results

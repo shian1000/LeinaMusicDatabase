@@ -3,12 +3,13 @@ import re
 import subprocess
 import unicodedata
 
+import questionary
 from googleapiclient.errors import HttpError
 from rich import print
 
 from utils.youtube.manage_youtube_playlists import get_youtube_service, _is_topic_channel
 from utils.common.normalizer import split_artist_title
-from utils.discoveries.import_engine import run_import_batch
+from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -58,6 +59,7 @@ _YOUTUBE_TITLE_JUNK_PHRASES_LOWER = {p.lower() for p in YOUTUBE_TITLE_JUNK_PHRAS
 YOUTUBE_TITLE_JUNK_MARKER_WORDS = [
     "Soundtrack",
     "Audio",
+    "From",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS) + r")\b",
@@ -174,6 +176,14 @@ def strip_junk_suffix(title: str) -> str:
     return title
 
 
+# Opening->closing bracket characters that strip_artist_from_title() will
+# drop along with an artist-name match they wrap entirely (e.g. the "【】" in
+# "Ado - 【Ado】 unravel 歌いました" exist only to enclose the artist name, so
+# leaving them behind after the name is removed would strand an empty
+# "【】" in the title).
+_ARTIST_WRAPPING_BRACKETS = {"(": ")", "[": "]", "【": "】"}
+
+
 def _fold_char(ch: str) -> str:
     """Strip accents off a single character via NFKD decomposition, falling
     back to the original character when decomposition doesn't yield exactly
@@ -213,7 +223,17 @@ def strip_artist_from_title(title: str, artist: str) -> str:
     if not match:
         return title
 
-    remainder = (title[:match.start()] + title[match.end():]).strip()
+    start, end = match.start(), match.end()
+    if (
+        start > 0
+        and title[start - 1] in _ARTIST_WRAPPING_BRACKETS
+        and end < len(title)
+        and title[end] == _ARTIST_WRAPPING_BRACKETS[title[start - 1]]
+    ):
+        start -= 1
+        end += 1
+
+    remainder = (title[:start] + title[end:]).strip()
 
     # If the artist name was itself quoted (real case: 'SIAMÉS "Summer
     # Nights" [...]' - the quotes wrap the title, not the artist), removing
@@ -425,6 +445,79 @@ def build_metadata_from_item(item: dict) -> dict:
     }
 
 
+# Some channels display a video's title as "<Song title> - <Artist>" rather
+# than the usual "<Artist> - <Song title>" (real case: "The Darkness That
+# You Fear - The Chemical Brothers"), which split_artist_title() has no way
+# to tell apart from the normal order - it always parses the left side as
+# the artist. _review_artist_title_swaps() below catches this after the
+# fact by checking whether the *parsed title* matches an artist already in
+# the database, and lets the user decide what to do with each match.
+_SWAP_CHOICE_ADD = "Add"
+_SWAP_CHOICE_SWAP = "Swap title with artist and add"
+_SWAP_CHOICE_SKIP = "Don't add"
+
+
+def _find_possible_artist_title_swaps(metadata_list: list) -> list:
+    """Flag entries whose parsed *title* matches an artist already in the
+    database - a sign the title and artist were parsed backwards.
+
+    Pure lookup - does NOT ask the user or modify metadata_list. Returns a
+    list of (metadata, matched_artist) pairs for the caller to act on.
+    """
+    flagged = []
+    for metadata in metadata_list:
+        title = metadata.get("title")
+        if not title:
+            continue
+        matched_artist = find_matching_artist(title)
+        if matched_artist:
+            flagged.append((metadata, matched_artist))
+    return flagged
+
+
+def _review_artist_title_swaps(metadata_list: list) -> tuple:
+    """Pull the entries flagged by _find_possible_artist_title_swaps() out
+    of metadata_list and ask the user, one by one, what to do with each:
+    add as parsed, swap artist/title and add, or drop it entirely - instead
+    of silently importing a song under the wrong artist.
+
+    Returns (remaining_metadata_list, pre_skipped): remaining_metadata_list
+    is metadata_list with every flagged entry resolved (added back as-is or
+    swapped) except the ones the user chose to drop, and pre_skipped is a
+    list of (label, reason) tuples ready to pass straight into
+    run_import_batch()'s pre_skipped parameter.
+    """
+    flagged = _find_possible_artist_title_swaps(metadata_list)
+    if not flagged:
+        return metadata_list, []
+
+    flagged_ids = {id(metadata) for metadata, _ in flagged}
+    remaining = [m for m in metadata_list if id(m) not in flagged_ids]
+    pre_skipped = []
+
+    print("\n" + "="*70)
+    print(f"REVIEW: {len(flagged)} song(s) may have their artist and title swapped")
+    print("="*70)
+    for metadata, matched_artist in flagged:
+        label = metadata.get("_label") or f"{metadata['artist_name']} - {metadata['title']}"
+        print(f"\"{label}\" - [green]{metadata['title']}[/green] looks like a title, but [blue]{matched_artist.name}[/blue] is already in the database as an artist")
+        choice = questionary.select(
+            "What do you want to do with this song?",
+            choices=[_SWAP_CHOICE_ADD, _SWAP_CHOICE_SWAP, _SWAP_CHOICE_SKIP],
+        ).ask()
+
+        if choice == _SWAP_CHOICE_SWAP:
+            metadata["artist_name"], metadata["title"] = metadata["title"], metadata["artist_name"]
+            remaining.append(metadata)
+        elif choice == _SWAP_CHOICE_SKIP:
+            pre_skipped.append((label, "Possible artist/title swap - user chose not to add"))
+        else:
+            remaining.append(metadata)
+        print()
+
+    return remaining, pre_skipped
+
+
 def import_data_from_youtube_playlist(playlist_input: str) -> list:
     items = get_playlist_items(playlist_input)
     if not items:
@@ -433,7 +526,8 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
 
     # DEBUG: only process the first video of the playlist, ignore the rest.
     # Remove this line to go back to importing the whole playlist.
-    items = items[:80]
+    # items = items[:94]
 
     metadata_list = [build_metadata_from_item(item) for item in items]
-    return run_import_batch(metadata_list)
+    metadata_list, pre_skipped = _review_artist_title_swaps(metadata_list)
+    return run_import_batch(metadata_list, pre_skipped=pre_skipped)
