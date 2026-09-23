@@ -72,9 +72,11 @@ non-trivial work in that area.
   `docs/agent-notes/database-search.md`. `backup.py` / `migrations.py` / `database_location.py` —
   automatic backups, schema migrations, and the database folder override, all resolved at
   startup: `docs/runbooks/database.md`.
-- `src/utils/discoveries/` — external-metadata fetchers and the MP3-tag import.
-  `docs/agent-notes/discovery-modules.md` (fetcher loading, result validation, shared browser,
-  scraping failure modes) and `docs/agent-notes/import-pipeline.md` (why import is slow).
+- `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
+  now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
+  `utils/youtube/import_from_playlist.py`). `docs/agent-notes/discovery-modules.md` (fetcher
+  loading, result validation, shared browser, scraping failure modes) and
+  `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
   write a second one. `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
@@ -97,8 +99,9 @@ non-trivial work in that area.
 - `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console
   output is gated by a `.debug` file (`verbosity = N`) at the repo root; everything also appends
   to `debug.log` (gitignored) regardless.
-- `src/utils/youtube/` — YouTube playlist/download helpers and `score_result()` match ranking.
-  `docs/agent-notes/youtube-search-matching.md`.
+- `src/utils/youtube/` — YouTube playlist/download helpers, `score_result()` match ranking
+  (DB → YouTube), and `import_from_playlist.py` (YouTube → DB, "Import data from YouTube
+  playlist"). `docs/agent-notes/youtube-search-matching.md`.
 - `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
   it for "search then resolve to one DB row" rather than re-duplicating.
   `docs/agent-notes/database-search.md`.
@@ -173,7 +176,8 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Three places already do this: `import_data_from_mp3_tags()`,
+  interrupt per item. Three places already do this: `run_import_batch()` (shared by every
+  importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()` — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
@@ -233,8 +237,9 @@ non-trivial work in that area.
   why `search_only_categories` must never reach artist search (`KeyError: None`), and the shared
   `search_and_pick_db_object()` flow.
 - [normalization-and-matching.md](docs/agent-notes/normalization-and-matching.md) — the one
-  canonical `normalizer`, the three ordered fallback stages of `extract_unknown_data()` for
-  filename parsing, the three distinct `text_utils` similarity functions (and the `TypeError` from
+  canonical `normalizer`, the three ordered fallback stages of `split_artist_title()` (used for mp3
+  filename parsing via `extract_unknown_data()`, and directly for YouTube video titles), the three
+  distinct `text_utils` similarity functions (and the `TypeError` from
   confusing them), and why artist-name matching uses `scaled_similarity_threshold()` for short
   strings.
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
@@ -245,16 +250,29 @@ non-trivial work in that area.
   try to evade the latter), why `spotify_fetcher.py` and `youtube_fetcher.py` scrape their public
   web players' markup instead of the official (credential-requiring) APIs, and how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu.
-- [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MP3-tag import cost path: why
-  MusicBrainz `check_spelling()` dominates, the layered defenses (DB-first shortcut, disk-backed
-  cache, process-wide rate limiter / timeout / split retry in `musicbrainz_client`), why the
-  fielded query gets only one attempt, the `check_spelling()` return shape, the `MBStats` run
-  summary, and why ambiguous-artist and similar-song matches are both queued (`pending_conflicts`,
-  `deferred_files`) and asked about in two end-of-batch passes — artists then songs — instead of
-  interrupting the import per file. The "Spell check existing data" menu
-  (`check_spelling_menu()`) batches its own artist/title correction prompts the same way, with a
-  `song.artist.id`-keyed dict to dedupe the shared-`Artist`-object rename question.
-- [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — why
+- [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MusicBrainz cost path shared by
+  every importer via `utils/discoveries/import_engine.py`'s `run_import_batch()` (mp3-tag import
+  and YouTube-playlist import are both just metadata builders feeding the same engine now — see
+  youtube-search-matching.md for the YouTube-side builder): why MusicBrainz `check_spelling()`
+  dominates, the layered defenses (DB-first shortcut, disk-backed cache, process-wide rate limiter /
+  timeout / split retry in `musicbrainz_client`), why the fielded query gets only one attempt, the
+  `check_spelling()` return shape, the `MBStats` run summary, why ambiguous-artist and similar-song
+  matches are both queued (`pending_artist_conflicts`, `deferred_entries`) and asked about in two
+  end-of-batch passes — artists then songs — instead of interrupting the import per entry, and the
+  `Song.youtube_video_id` backfill an import can silently apply to an existing (not newly-added) row.
+  The "Spell check existing data" menu (`check_spelling_menu()`) batches its own artist/title
+  correction prompts the same way, with a `song.artist.id`-keyed dict to dedupe the shared-`Artist`-
+  object rename question.
+- [youtube-search-matching.md](docs/agent-notes/youtube-search-matching.md) — covers both
+  directions under `src/utils/youtube/`. **Import FROM a playlist** (`import_from_playlist.py`,
+  "Import data from YouTube playlist" menu item): why playlist fetching must use yt-dlp's
+  `--flat-playlist` (without it, a large playlist blows past the subprocess timeout and looks like
+  a hang), the Topic-channel/channel-name artist-detection fallback, the two extensible title
+  cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`) and
+  diacritic-insensitive `strip_artist_from_title()`, why album-name scraping was investigated but
+  not implemented, and **a debug `items[:1]` limiter still active** that currently makes the
+  feature only ever import a playlist's first video. **Search matching** (DB → YouTube, the older
+  half of the file): why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`
   metadata, popularity/tags signals, typo tolerance, the `artists.synonyms` column for real name

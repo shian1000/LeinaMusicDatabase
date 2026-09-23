@@ -1,9 +1,100 @@
-# YouTube search matching (`src/utils/youtube/manage_youtube_playlists.py`)
+# YouTube search matching & playlist import (`src/utils/youtube/`)
 
-`score_result()` picks the "best match" video for a DB song, searching via yt-dlp first (free)
-then falling back to the YouTube Data API. Several earlier, simpler versions of this function
-caused real wrong-song matches — this file documents why the current logic looks the way it does,
-so it doesn't regress if simplified later.
+Two directions live under `src/utils/youtube/`, covered in the two halves of this file:
+
+- **DB → YouTube** (`manage_youtube_playlists.py`): given a song already in the database, find the
+  matching YouTube video to build a playlist. `score_result()` picks the "best match" video,
+  searching via yt-dlp first (free) then falling back to the YouTube Data API. Several earlier,
+  simpler versions of this function caused real wrong-song matches — most of this file documents
+  why the current logic looks the way it does, so it doesn't regress if simplified later.
+- **YouTube → DB** (`import_from_playlist.py`, see "Importing FROM a YouTube playlist" below): given
+  a playlist URL, pull its videos into the database as new songs — the "Import data from YouTube
+  playlist" menu item, sibling to the mp3-tag importer (see `docs/agent-notes/import-pipeline.md`).
+
+## Importing FROM a YouTube playlist (`import_from_playlist.py`)
+
+**⚠ Debug scaffolding currently left active:** `import_data_from_youtube_playlist()` has a line
+`items = items[:1]` right after fetching the playlist, added mid-session so the user could test
+one song at a time without waiting through the full matching pipeline for an entire playlist.
+Right now the menu option **only ever imports the first video of any playlist**. Remove that line
+(or turn it into a real, deliberate limit setting) before treating full-playlist import as working.
+
+### Fetching: yt-dlp first, Data API (OAuth) fallback
+
+`get_playlist_items()` tries yt-dlp first (no auth, no quota - works for anything reachable
+anonymously, public or unlisted) and only falls back to `get_youtube_service()` +
+`playlistItems().list()` (OAuth, as the signed-in account) when yt-dlp returns `None` - which
+happens on a missing binary, a timeout, or literally empty stdout, the same shape a genuinely
+Private playlist produces. `--ignore-errors` means one bad/deleted video in the middle of an
+otherwise-fetchable playlist doesn't trigger the fallback, just gets skipped.
+
+**Must use `--flat-playlist`.** Plain `--dump-json` (no flag) fetches full metadata for *every*
+video individually - measured at ~1.8s/video on a real playlist. A real 441-video playlist
+projects to ~13 minutes that way, blowing past the subprocess's 180s timeout and looking exactly
+like a hang (this happened during testing - the user reported "nothing happens" after pasting a
+441-song playlist). `--flat-playlist` reads the playlist page itself only and returns the whole
+441-video list in ~4s, while still exposing every field `build_metadata_from_item()` needs
+(`id`, `title`, `channel`/`uploader` - verified directly against a real playlist, these are
+populated the same as the non-flat form). If a future change needs a field `--flat-playlist`
+doesn't provide, don't just drop the flag - it will silently reintroduce this timeout.
+
+### Turning one playlist video into artist/title
+
+`build_metadata_from_item()`:
+1. If the channel is a `"<Artist> - Topic"` auto-generated channel (`_is_topic_channel()`, reused
+   from `manage_youtube_playlists.py`), the artist is the channel name minus the `"- Topic"` suffix
+   and the title is the video title as-is - same reasoning as the DB→YouTube direction's Topic
+   handling (see below): these titles deliberately carry no artist text at all.
+2. Otherwise, try `split_artist_title()` (`normalizer.py` - the same "Artist - Title" splitter
+   `extract_unknown_data()` uses for mp3 filenames, factored out so both callers share it) on the
+   video title.
+3. If that finds no separator at all, fall back to the channel name as the artist anyway - real
+   case found testing this: Culture Beat's own (non-Topic) channel, video titled just
+   `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is
+   apparently common for plain artist-channel uploads, not just auto-generated Topic channels.
+
+### Title cleanup: two independently-extensible word lists
+
+Both only ever touch the **trailing** bracket group (`_TRAILING_BRACKET_RE`) - never one earlier in
+the title, so a genuine subtitle like `"Sad Story (Out of Luck)"` (Merk & Kremont) is left alone:
+
+- `YOUTUBE_TITLE_JUNK_PHRASES` - the bracket's entire content must match one of these exactly
+  (case-insensitive) - e.g. `"Original Radio Edit"`, `"Official Video"`, `"HD"`.
+- `YOUTUBE_TITLE_JUNK_MARKER_WORDS` - a single word appearing *anywhere* in the bracket condemns
+  the whole thing, for content too source-specific to enumerate as exact phrases - currently
+  `"Soundtrack"` (real case: `"(Pes 2009 Soundtrack)"`) and `"Official"` (broader than the exact
+  `"Official ..."` phrases above - catches `"[Official Animated Video]"` too).
+
+Both lists are user-curated and meant to grow by appending new entries as new junk shapes turn up -
+deliberately excluded so far: anything that marks a real alternate version worth keeping
+distinguishable (`Remix`, `Live`, `Acoustic`, `Cover`, `Extended`, `Club Edit`, a named remixer, a
+`feat./ft.` credit).
+
+`strip_artist_from_title()` runs before the bracket cleanup, for when the video title repeats the
+artist name outside any bracket (real case: channel `"SIAMES"`, video titled
+`'SIAMÉS "Summer Nights" [Official Animated Video]'`). Diacritic-insensitive on both sides via
+`_fold_char()` (NFKD-fold one character at a time, so the folded string stays the same length and
+position-maps 1:1 back onto the original for slicing - a from-scratch position-preserving variant
+of the whole-string `_fold_diacritics()` already used in `manage_youtube_playlists.py`, needed here
+because *removing* a match requires knowing where it was in the un-folded original). Also unwraps a
+now-orphaned quote pair left behind when the artist name was itself quoted (the SIAMES case above),
+and refuses to empty the title out entirely (e.g. a self-titled artist == title stays untouched).
+
+### Album name: investigated, deliberately not implemented
+
+YouTube's video-description "Music" info panel (visible in the UI, and in the overflow-menu dialog
+literally labelled `Utwór`/`Wykonawca`/`Album`) *is* real structured data - confirmed by fetching a
+raw watch page and finding `videoAttributeViewModel` (`title`/`subtitle`/`secondarySubtitle`) inside
+a `horizontalCardListRenderer` under `structuredDescriptionContentRenderer` in the page's
+`ytInitialData` - not free-text description scraping. But: yt-dlp doesn't expose it at all (absent
+from `--dump-json`/`--flat-playlist` output entirely - confirmed by walking every key of a real
+video's dump), it's only present when the uploader/label registered the track (no guaranteed
+coverage), the schema is undocumented/internal (no stability guarantee), and reaching it needs
+fetching the full ~1.2MB watch page HTML **per video**, which would reintroduce the exact timeout
+problem `--flat-playlist` above was added to fix if done for every video in a playlist listing.
+Conclusion reached with the user: worth doing later as a one-video-at-a-time "enrich this song"
+step (only for songs actually being added, not the whole playlist scan), not as part of the
+playlist-listing pass. Not implemented.
 
 ## Why title-only, not artist+title combined
 

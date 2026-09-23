@@ -1,11 +1,50 @@
 # Import pipeline — the MusicBrainz cost path
 
-Scope: `import_data_from_mp3_tags.py` and the `check_spelling()` path it (and the
-"Spell check existing data" menu, and `music_brainz_fetcher`) depends on. This
-note is about *why importing MP3 tags is slow and what's been done about it*. The
-mechanics of resolving artists/songs against the local DB are in
-`docs/agent-notes/database-search.md`; string normalization and the fuzzy-match
-helpers are in `docs/agent-notes/normalization-and-matching.md`.
+Scope: `utils/discoveries/import_engine.py` (the shared artist/song resolution +
+batch-conflict-review engine) and the `check_spelling()` path it (and the "Spell
+check existing data" menu, and `music_brainz_fetcher`) depends on. This note is
+about *why resolving artists/songs against MusicBrainz is slow and what's been
+done about it*. The mechanics of resolving artists/songs against the local DB are
+in `docs/agent-notes/database-search.md`; string normalization and the
+fuzzy-match helpers are in `docs/agent-notes/normalization-and-matching.md`.
+
+## Two source-specific builders, one shared engine
+
+`resolve_artist()`, `resolve_song()`, `create_song_entry()`,
+`find_similar_artist()`, `find_similar_song()` and the batch-conflict-review
+loop all live in `import_engine.py`, behind one entry point:
+`run_import_batch(metadata_list, pre_skipped=None)`. It used to be that
+`import_data_from_mp3_tags.py` owned all of this directly; it was split out so
+`utils/youtube/import_from_playlist.py` ("Import data from YouTube playlist")
+could reuse the exact same matching/dedup/conflict-review machinery instead of
+forking it. If you're chasing `resolve_artist`/`resolve_song`/pending-conflict
+logic and it's not in `import_data_from_mp3_tags.py` anymore, it's in
+`import_engine.py` now.
+
+Each source is now just a **metadata builder**: it turns its own input (mp3
+files on disk, or a YouTube playlist's videos - see
+`docs/agent-notes/youtube-search-matching.md` for that side) into a list of
+plain dicts (`artist_name`, `title` required; `album`, `year`, `language`,
+`origin`, `youtube_video_id`, `_label` optional - `_label` is what shows up in
+skip/timing messages instead of the default `"<artist> - <title>"`), then hands
+that list to `run_import_batch()`. `run_import_batch()` itself doesn't know or
+care which source it came from - a metadata dict missing `artist_name`/`title`
+entirely is just skipped with reason `"Missing artist or title"`, which is how
+an mp3 with no usable filename fallback and a YouTube title that failed to
+split both end up handled by the same generic path rather than two different
+skip mechanisms.
+
+**`Song.youtube_video_id` backfill:** `create_song_entry()` sets
+`Song.youtube_video_id` from `metadata.get("youtube_video_id")` whenever it's
+present (a no-op for mp3-sourced metadata, which never sets that key). More
+importantly, when an import matches an *existing* song instead of creating a
+new one, `_backfill_youtube_link()` writes that video id onto the existing
+`Song` row if it doesn't already have one - both at the immediate
+exact-title-match shortcut in `resolve_song()` and in the end-of-batch
+"do you want to use the existing song?" review when the user says yes. This
+means a YouTube playlist import can silently mutate rows it doesn't "add" at
+all; if you're debugging why an old song suddenly has a `youtube_video_id` it
+never had before, this is why.
 
 ## The bottleneck
 
@@ -97,10 +136,11 @@ Neither `find_similar_artist()` (formerly `check_artist_spelling()`, now
 returns a `list[Artist]` instead of asking per-candidate) nor `find_similar_song()`
 (formerly `does_similar_song_exists()`) prompts the user — both are pure lookups.
 All the "do you want to use the one already in the database?" questions are
-asked in two batches at the very end of `import_data_from_mp3_tags()`, after
-every file in the folder has been processed, instead of interrupting the import
-per file. This runs before the function returns — i.e. before the caller's own
-"Do you want to do something with these songs?" prompt in
+asked in two batches at the very end of `run_import_batch()` (see above -
+shared by every import source), after every entry in `metadata_list` has been
+processed, instead of interrupting the import per entry. This runs before the
+function returns — i.e. before the caller's own "Do you want to do something
+with these songs?" prompt in
 `enter_database/manage_database/fetch_database_data/__init__.py`.
 
 **Artist conflicts (asked first):** `resolve_artist()` takes a
@@ -109,19 +149,20 @@ per file. This runs before the function returns — i.e. before the caller's own
 one or more DB matches, it appends
 `{"metadata", "normalized_name", "candidate_artists"}` to that list, stores the
 sentinel `_PENDING_ARTIST` in `artist_cache[normalized_name]`, and returns
-`(None, is_pending=True)`. The main loop records the file in `deferred_files`
-and `continue`s — no song resolution happens for it yet. Because the pending
-state is cached, a second file with the *same* artist name hits the cache-hit
-branch in `resolve_artist()` and also returns pending immediately, without
-re-querying MusicBrainz or queueing a duplicate conflict — one artist name
-produces exactly one question, however many of its songs are in the folder.
+`(None, is_pending=True)`. The main loop in `run_import_batch()` records the
+entry in `deferred_entries` and `continue`s — no song resolution happens for it
+yet. Because the pending state is cached, a second entry with the *same* artist
+name hits the cache-hit branch in `resolve_artist()` and also returns pending
+immediately, without re-querying MusicBrainz or queueing a duplicate conflict —
+one artist name produces exactly one question, however many of its songs are in
+the batch.
 
-After the main loop, `import_data_from_mp3_tags()` walks `pending_conflicts`
+After the main loop, `run_import_batch()` walks `pending_artist_conflicts`
 once, asking about each `candidate_artists` entry in order (first confirmed
 wins; none confirmed creates a new artist) and writes the resolved `Artist`
-back into `artist_cache[normalized_name]`. It then replays `deferred_files`
+back into `artist_cache[normalized_name]`. It then replays `deferred_entries`
 through `resolve_artist()` (now an instant cache hit) and `resolve_song()` —
-which may itself queue a similar-song conflict, same as any other file.
+which may itself queue a similar-song conflict, same as any other entry.
 
 **Song conflicts (asked second, so they include ones surfaced by the artist
 replay above):** `resolve_song()` takes its own `pending_conflicts` list; on a
@@ -131,7 +172,7 @@ you wish to use the song already in the database?` right there. Resolved the
 same way — one final pass over the queue, updating `added_count`/`skipped_count`
 as each is answered.
 
-The point throughout is purely UX: a folder with several ambiguous artists or
+The point throughout is purely UX: a batch with several ambiguous artists or
 near-duplicate songs used to stop the import for input over and over; now it
 runs to completion unattended and both kinds of review happen as two batches at
 the end, artists before songs (since a song's dedup check needs its artist
@@ -174,7 +215,7 @@ menu run would burn another API call re-checking it.
 `MBStats` (in `musicbrainz_client.py`) is a plain class of counters:
 `requests_made`, `cache_hits`, `cache_misses`, `http_429`, `http_503`,
 `other_errors`, `total_wait_seconds`, `total_request_seconds`.
-`import_data_from_mp3_tags()` calls `MBStats.reset()` at the start and prints
+`run_import_batch()` calls `MBStats.reset()` at the start and prints
 `MBStats.format_summary()` in the run summary. If an import is slow, that summary
 tells you immediately whether it's cache misses (genuinely new data), 503s (rate
 limit — is another client running?), or `other_errors` + high

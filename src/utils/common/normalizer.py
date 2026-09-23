@@ -92,9 +92,13 @@ def compare(a: Optional[str], b: Optional[str], *, threshold: int = 100) -> bool
         return False
     return na == nb
 
-def extract_unknown_data(filepath: Path):
+def split_artist_title(name: str):
+    """Split a free-form "Artist - Title" style string into (artist, title).
 
-    name = filepath.stem
+    Used both for mp3 filenames (via extract_unknown_data, given the file's
+    stem) and for YouTube video titles (which follow the same loose
+    convention but aren't backed by a file at all).
+    """
     parts = re.split(r" [–—\-_] ", name, maxsplit=1)
     if len(parts) < 2:
         # Secondary fallback: hyphen/underscore/tilde without surrounding spaces
@@ -120,6 +124,9 @@ def extract_unknown_data(filepath: Path):
     artist, title = parts
 
     return artist, title
+
+def extract_unknown_data(filepath: Path):
+    return split_artist_title(filepath.stem)
 
 def strip_brackets(title: str):
     print("Stripping title")

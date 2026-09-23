@@ -1,8 +1,9 @@
 # String normalization & fuzzy matching (`src/utils/common/`)
 
-Scope: `normalizer.py` (canonicalising messy strings), `extract_unknown_data()`
-in the same file (deriving artist/title from a filename), and the similarity
-helpers in `text_utils.py` (comparing the canonicalised strings).
+Scope: `normalizer.py` (canonicalising messy strings), `split_artist_title()` /
+`extract_unknown_data()` in the same file (splitting "Artist - Title" text -
+from a filename stem, or any other string), and the similarity helpers in
+`text_utils.py` (comparing the canonicalised strings).
 
 ## One normalizer, extended — never a second one
 
@@ -14,12 +15,18 @@ call sites delegate to it.
 Do not write a new ad-hoc normalize/compare function anywhere else — extend this
 one.
 
-## `extract_unknown_data(filepath)` — three ordered fallback stages
+## `split_artist_title(name)` — three ordered fallback stages
 
-Derives artist/title from a filename when ID3 tags are missing or empty. Three
-stages, each tried only if the previous one found no separator. **Keep them in
-this order and don't merge them into one greedier regex** — each is a fallback
-for when the stricter, less error-prone stage before it fails.
+The actual "Artist - Title" splitter — three stages, each tried only if the
+previous one found no separator. **Keep them in this order and don't merge them
+into one greedier regex** — each is a fallback for when the stricter,
+less-error-prone stage before it fails. `extract_unknown_data(filepath)` is a
+thin wrapper around this (`split_artist_title(filepath.stem)`) for deriving
+artist/title from an mp3 filename when ID3 tags are missing or empty; it was
+factored apart so `utils/youtube/import_from_playlist.py` could reuse the same
+splitting logic directly on a YouTube video title (not backed by a file at all)
+— see `docs/agent-notes/youtube-search-matching.md`'s "Importing FROM a YouTube
+playlist" section.
 
 1. **Spaced separator required** — ` - `, ` – ` (en dash, U+2013), ` — ` (em
    dash, U+2014), or ` _ `. En dash and em dash are visually near-identical but

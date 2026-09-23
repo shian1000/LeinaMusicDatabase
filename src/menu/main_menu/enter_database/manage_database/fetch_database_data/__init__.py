@@ -2,6 +2,7 @@ from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
+from utils.youtube.import_from_playlist import import_data_from_youtube_playlist
 from utils.ui.menu_utils import open_file_browser_terminal
 from menu.song_actions.edit_songs import edit_songs_menu
 from settings import settings
@@ -10,13 +11,8 @@ from utils.ui.display_utils import display_songs
 import questionary
 from utils.database.database_sessions import submit_global_database_session
 
-def import_data():
-    import_folder = settings.export_dir
-    songs_path = open_file_browser_terminal(import_folder)
-    if not songs_path:
-        return
-    imported_songs = import_data_from_mp3_tags(songs_path)
-    if(imported_songs):
+def _review_imported_songs(imported_songs):
+    if imported_songs:
         print("displaying")
         display_songs(imported_songs)
         edit_songs_menu(imported_songs)
@@ -25,13 +21,28 @@ def import_data():
             from menu.song_actions import song_actions
             song_actions(imported_songs)
             submit_global_database_session()
-    
+
+def import_data():
+    import_folder = settings.export_dir
+    songs_path = open_file_browser_terminal(import_folder)
+    if not songs_path:
+        return
+    imported_songs = import_data_from_mp3_tags(songs_path)
+    _review_imported_songs(imported_songs)
+
+def import_youtube_playlist():
+    playlist_input = questionary.text("Paste the YouTube playlist URL (or just its ID):").ask()
+    if not playlist_input:
+        return
+    imported_songs = import_data_from_youtube_playlist(playlist_input)
+    _review_imported_songs(imported_songs)
 
 
 def fetch_database_data():
     action_map = {
         "Fill missing data": fill_missing_data,
-        "Import data from mp3 tags": import_data
+        "Import data from mp3 tags": import_data,
+        "Import data from YouTube playlist": import_youtube_playlist,
     }
 
     slog(action_map)
