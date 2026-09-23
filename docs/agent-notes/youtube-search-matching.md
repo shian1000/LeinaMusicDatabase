@@ -85,7 +85,7 @@ This only runs for the YouTube importer, not the shared `run_import_batch()` eng
 ambiguity is a YouTube-title-parsing problem, not a general import concern, and mp3 tags don't have
 it (ID3 `artist`/`title` fields are already separate).
 
-### Title cleanup: three independently-extensible word lists, applied in a fixed order
+### Title cleanup: independently-extensible word lists (plus a year check), applied in a fixed order
 
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
 -> `strip_hashtags()` over the *raw* video title (before any artist/title split), then later runs
@@ -108,6 +108,11 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
   `"Army of Me (Sucker Punch Remix) [From Sucker Punch]"` -> the `[From ...]` bracket is dropped,
   the genuine `(Sucker Punch Remix)` subtitle right before it is untouched since it's no longer the
   trailing bracket once the `[From ...]` one is stripped first).
+- `_YOUTUBE_TITLE_YEAR_RE` (checked by `strip_junk_suffix()`, same trailing-only scope as the two
+  lists above) - not a word list but a bare `\b\d{4}\b` regex: any 4-digit number condemns the
+  trailing bracket, on the assumption it's a release/recording year rather than part of the song's
+  identity - e.g. `"Sierpień (2022)"` -> `"Sierpień"`. Same trailing-only reasoning as the lists
+  above: a non-trailing bracket with a number in it is left alone.
 - `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE` (checked by `strip_junk_brackets_anywhere()`, run over
   the *whole raw title*, not just its end) - for junk brackets that sit mid-title with real title
   text after them, which the trailing-only checks above can never reach - e.g.

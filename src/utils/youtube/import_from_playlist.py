@@ -66,6 +66,13 @@ _YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Same trailing-only scope as YOUTUBE_TITLE_JUNK_MARKER_WORDS above, but for
+# a release/recording year instead of a fixed word list - any bare 4-digit
+# number condemns the whole trailing bracket (e.g. "Sierpień (2022)" ->
+# "Sierpień"), since a year annotation is upload metadata, not part of the
+# song's identity.
+_YOUTUBE_TITLE_YEAR_RE = re.compile(r"\b\d{4}\b")
+
 # Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) at the
 # very end of the string, plus any trailing whitespace. "【】" is the CJK
 # "lenticular bracket" pair, used the same way "[...]" is in Western titles
@@ -155,12 +162,12 @@ def strip_hashtags(title: str) -> str:
 
 def strip_junk_suffix(title: str) -> str:
     """Repeatedly strip a trailing bracket group from `title` as long as it's
-    junk - either its content matches YOUTUBE_TITLE_JUNK_PHRASES exactly, or
-    it contains one of YOUTUBE_TITLE_JUNK_MARKER_WORDS anywhere - handles a
-    title decorated with more than one such annotation (e.g. "Song (Official
-    Video) (HD)"). Only ever touches the trailing bracket, never one earlier
-    in the title (e.g. a genuine subtitle like "Sad Story (Out of Luck)" is
-    left alone).
+    junk - either its content matches YOUTUBE_TITLE_JUNK_PHRASES exactly, it
+    contains one of YOUTUBE_TITLE_JUNK_MARKER_WORDS anywhere, or it contains a
+    bare 4-digit year - handles a title decorated with more than one such
+    annotation (e.g. "Song (Official Video) (HD)"). Only ever touches the
+    trailing bracket, never one earlier in the title (e.g. a genuine subtitle
+    like "Sad Story (Out of Luck)" is left alone).
     """
     title = (title or "").strip()
     while True:
@@ -170,7 +177,8 @@ def strip_junk_suffix(title: str) -> str:
         content = match.group(1).strip()
         is_exact_junk = content.lower() in _YOUTUBE_TITLE_JUNK_PHRASES_LOWER
         has_marker_word = bool(_YOUTUBE_TITLE_JUNK_MARKER_RE.search(content))
-        if not (is_exact_junk or has_marker_word):
+        has_year = bool(_YOUTUBE_TITLE_YEAR_RE.search(content))
+        if not (is_exact_junk or has_marker_word or has_year):
             break
         title = title[:match.start()].strip()
     return title
@@ -499,8 +507,13 @@ def _review_artist_title_swaps(metadata_list: list) -> tuple:
     print(f"REVIEW: {len(flagged)} song(s) may have their artist and title swapped")
     print("="*70)
     for metadata, matched_artist in flagged:
-        label = metadata.get("_label") or f"{metadata['artist_name']} - {metadata['title']}"
-        print(f"\"{label}\" - [green]{metadata['title']}[/green] looks like a title, but [blue]{matched_artist.name}[/blue] is already in the database as an artist")
+        # The parsed (cleaned) "artist - title" is what was actually compared
+        # against the database, so it's shown as the main label; the raw
+        # video title is kept alongside it (a different color, in quotes)
+        # purely as context for which video this came from.
+        label = f"{metadata['artist_name']} - {metadata['title']}"
+        raw_label = metadata.get("_label") or label
+        print(f"[green]{label}[/green] (raw: \"[yellow]{raw_label}[/yellow]\") - the title looks like it could be an artist: [blue]{matched_artist.name}[/blue] is already in the database")
         choice = questionary.select(
             "What do you want to do with this song?",
             choices=[_SWAP_CHOICE_ADD, _SWAP_CHOICE_SWAP, _SWAP_CHOICE_SKIP],
