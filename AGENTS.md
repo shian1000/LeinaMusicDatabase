@@ -189,6 +189,10 @@ non-trivial work in that area.
   whole batch, since there's nothing to discover — but still needs the same
   dedup-by-`song.artist.id` gotcha if it mutates the shared `Artist` row (first song to hit a given
   artist wins, later ones by the same artist are skipped with a message, not silently re-applied).
+  `edit_entry_menu()` (single-song category editor, in `edit_songs.py`) also offers its own "Swap
+  title and artist" choice (`swap_title_and_artist()`) alongside the bulk `swap_artist_with_title()`
+  in `song_actions` — a deliberate second entry point for the single-song case, not leftover
+  duplication to consolidate; being single-song, it needs no artist-id dedup.
 
 ## Testing & verification
 

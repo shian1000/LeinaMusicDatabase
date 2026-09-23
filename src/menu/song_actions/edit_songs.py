@@ -7,6 +7,21 @@ from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_fro
 from utils.database.database_management import edit_db_entry, delete_db_entry, add_db_entry
 import time
 
+def swap_title_and_artist(song: Song):
+    print(f"About to swap title and artist name for \"{song.artist.name} - {song.title}\":")
+    confirmation = questionary.confirm(f"Swap \"{song.title}\" and \"{song.artist.name}\"?").ask()
+    if not confirmation:
+        print("Aborted")
+        return
+
+    artist_name = song.artist.name
+    title = song.title
+    song.artist.name = title
+    song.title = artist_name
+    submit_global_database_session()
+    print(f"Swapped title and artist name. Now: \"{song.artist.name} - {song.title}\".")
+
+
 def edit_entry_menu(mode: str = None, db_object = None):
     if db_object is None:
         if mode not in ("Artist", "Song"):
@@ -27,11 +42,17 @@ def edit_entry_menu(mode: str = None, db_object = None):
 
     properties_list = get_list_of_properties_from_db_object(db_object)
     displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
+    swap_option = "Swap title and artist"
+    if mode == "Song":
+        displayed_list.append(swap_option)
     back_option = "back"
     displayed_list.append(back_option)
 
     choice = questionary.select("What category do you wish to edit?", choices=displayed_list).ask()
     if choice == back_option:
+        return
+    if choice == swap_option:
+        swap_title_and_artist(db_object)
         return
     choosen_index = (displayed_list.index(choice))
     category = action_map[choosen_index]
