@@ -74,3 +74,16 @@ longer names.
 it explicitly at their fuzzy-match checks.
 `discoveries_manager._validate_result()` uses it for its title/artist cross-check
 too.
+
+## A shared bracketed suffix inflates `similarity()` on otherwise-different titles
+
+Two genuinely different song titles that happen to share a `(prod. X)` /
+`(feat. Y)`-style bracketed credit can score above the usual 0.7 threshold on
+the bracket text alone — e.g. `similarity("Adieu (prod. Rumak)", "Nostalgia
+(prod. Rumak)")` is `0.76`, because roughly 15 of the ~20-24 characters being
+compared are the identical `(prod. Rumak)` suffix.
+
+`import_engine.find_similar_song()`'s local-DB duplicate check strips bracketed
+content with `remove_brackets()` from both titles before calling `similarity()`
+for exactly this reason. Any other duplicate-song check comparing raw titles
+should do the same rather than comparing `song.title` strings directly.

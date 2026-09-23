@@ -53,22 +53,50 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
    `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is
    apparently common for plain artist-channel uploads, not just auto-generated Topic channels.
 
-### Title cleanup: two independently-extensible word lists
+### Title cleanup: three independently-extensible word lists, applied in a fixed order
 
-Both only ever touch the **trailing** bracket group (`_TRAILING_BRACKET_RE`) - never one earlier in
-the title, so a genuine subtitle like `"Sad Story (Out of Luck)"` (Merk & Kremont) is left alone:
+`build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
+-> `strip_hashtags()` over the *raw* video title (before any artist/title split), then later runs
+`strip_artist_from_title()` -> `strip_junk_suffix()` -> `strip_quote_marks()` on the resulting song
+title. The order of the first three matters: `strip_pipe_suffix()` runs before the bracket check
+specifically so a junk bracket that only *looks* trailing once channel/label branding after a `|`
+is dropped (e.g. `"OMNIMAR - The Matrix (Official Video) | darkTunes Music Group"`) becomes
+reachable by the trailing-only check below, instead of needing its own "anywhere" rule.
 
-- `YOUTUBE_TITLE_JUNK_PHRASES` - the bracket's entire content must match one of these exactly
-  (case-insensitive) - e.g. `"Original Radio Edit"`, `"Official Video"`, `"HD"`.
-- `YOUTUBE_TITLE_JUNK_MARKER_WORDS` - a single word appearing *anywhere* in the bracket condemns
-  the whole thing, for content too source-specific to enumerate as exact phrases - currently
-  `"Soundtrack"` (real case: `"(Pes 2009 Soundtrack)"`) and `"Official"` (broader than the exact
-  `"Official ..."` phrases above - catches `"[Official Animated Video]"` too).
+Bracket-content matching is split by **scope**, not just by exact-vs-substring:
 
-Both lists are user-curated and meant to grow by appending new entries as new junk shapes turn up -
-deliberately excluded so far: anything that marks a real alternate version worth keeping
+- `YOUTUBE_TITLE_JUNK_PHRASES` (checked by `strip_junk_suffix()`) - the **trailing** bracket's
+  entire content must match one of these exactly (case-insensitive) - e.g. `"Original Radio Edit"`,
+  `"Official Video"`, `"HD"`, `"Edit"` (exact `"Edit"` only - `"Club Edit"`/`"Radio Edit"` are
+  deliberately real alternate versions and must never be caught as a marker word instead).
+- `YOUTUBE_TITLE_JUNK_MARKER_WORDS` (checked by `strip_junk_suffix()`, same trailing-only scope) -
+  a single word appearing anywhere *inside* the trailing bracket condemns the whole thing, for
+  content too source-specific to enumerate as exact phrases - currently `"Soundtrack"` (real case:
+  `"(Pes 2009 Soundtrack)"`) and `"Audio"`.
+- `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE` (checked by `strip_junk_brackets_anywhere()`, run over
+  the *whole raw title*, not just its end) - for junk brackets that sit mid-title with real title
+  text after them, which the trailing-only checks above can never reach - e.g.
+  `"Herr Mannelig (animation) - Żniwa - Polish version"` or
+  `"Voo Voo - Nocą (Official Audio) #Zostańwdomu"`. Currently `"Animation"`, `"Official"`,
+  `"Lyrics"`. Only add a word here when it's safe to assume it never appears inside a genuine
+  subtitle, since - unlike the two lists above - it isn't limited to the trailing bracket, so a
+  false-positive match anywhere in the title is destructive.
+
+`_TRAILING_BRACKET_RE` and `_ANY_BRACKET_RE` both also treat the CJK "lenticular bracket" pair
+`【】` as equivalent to `()`/`[]` (e.g. a trailing `"【Kan/Rom/Eng Lyrics】"` annotation). Separately,
+`strip_quote_marks()` strips double-quote-*like* characters from the song title - ASCII/curly
+double quotes and the CJK "corner bracket" pair `『』` (used to set off a work's title the way
+Western uploads wrap it in `"..."`, e.g. `'『Cinderella by Cidergirl』'`) - but deliberately never
+single quotes/apostrophes, since those routinely appear inside a genuine title (`"Rock 'n' Roll"`,
+`"Don't Stop"`). `strip_hashtags()` drops every `#word` promo-hashtag token, wherever it appears.
+
+All three word lists are user-curated and meant to grow by appending new entries as new junk shapes
+turn up - deliberately excluded so far: anything that marks a real alternate version worth keeping
 distinguishable (`Remix`, `Live`, `Acoustic`, `Cover`, `Extended`, `Club Edit`, a named remixer, a
-`feat./ft.` credit).
+`feat./ft.` credit). A genuine subtitle earlier in the title (e.g. `"Sad Story (Out of Luck)"`,
+Merk & Kremont) is left alone by the trailing-only lists precisely because they never look past the
+end of the string - only add a word to the `_ANYWHERE` list once you're sure it can't collide with
+that kind of real subtitle anywhere in a title.
 
 `strip_artist_from_title()` runs before the bracket cleanup, for when the video title repeats the
 artist name outside any bracket (real case: channel `"SIAMES"`, video titled

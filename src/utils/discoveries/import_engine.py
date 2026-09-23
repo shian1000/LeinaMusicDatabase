@@ -7,7 +7,7 @@ from utils.common.debug import slog, mlog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
@@ -105,9 +105,14 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
     # OPTIMIZATION STEP 1: Check local database for similar songs FIRST (instant)
     existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
 
-    # Try to find similar songs using local similarity comparison (no API call)
+    # Try to find similar songs using local similarity comparison (no API call).
+    # Bracketed annotations like "(prod. X)" or "(feat. Y)" are stripped first
+    # so two different songs that share a producer/feature credit don't score
+    # as similar just because of that shared suffix (e.g. "Adieu (prod. Rumak)"
+    # vs "Nostalgia (prod. Rumak)").
+    new_title_core = remove_brackets(new_title)
     for ex_son in existing_artists_songs:
-        sim_percent = similarity(new_title, ex_son.title)
+        sim_percent = similarity(new_title_core, remove_brackets(ex_son.title))
 
         if sim_percent > SPELLING_CHECK_THRESHOLD:
             slog(f"      [LOCAL MATCH] Similar song found, deferring decision to caller", priority=1)

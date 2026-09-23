@@ -43,6 +43,7 @@ YOUTUBE_TITLE_JUNK_PHRASES = [
     "Original Mix",
     "Explicit",
     "Clean Version",
+    "Edit",
 ]
 _YOUTUBE_TITLE_JUNK_PHRASES_LOWER = {p.lower() for p in YOUTUBE_TITLE_JUNK_PHRASES}
 
@@ -56,16 +57,98 @@ _YOUTUBE_TITLE_JUNK_PHRASES_LOWER = {p.lower() for p in YOUTUBE_TITLE_JUNK_PHRAS
 # words here as they come up; matched as a whole word, case-insensitive.
 YOUTUBE_TITLE_JUNK_MARKER_WORDS = [
     "Soundtrack",
-    "Official",
+    "Audio",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS) + r")\b",
     re.IGNORECASE,
 )
 
-# Matches one "(...)"/"[...]" group (no nested brackets) at the very end of
-# the string, plus any trailing whitespace.
-_TRAILING_BRACKET_RE = re.compile(r"\s*[\(\[]([^()\[\]]*)[\)\]]\s*$")
+# Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) at the
+# very end of the string, plus any trailing whitespace. "【】" is the CJK
+# "lenticular bracket" pair, used the same way "[...]" is in Western titles
+# (e.g. a trailing "【Kan/Rom/Eng Lyrics】" annotation).
+_TRAILING_BRACKET_RE = re.compile(r"\s*[\(\[【]([^()\[\]【】]*)[\)\]】]\s*$")
+
+# Straight and curly double-quote characters, plus the CJK "corner bracket"
+# pair "『』" (used to set off a work's title, the way Western titles use
+# double quotes - e.g. '『Cinderella by Cidergirl』'). Only double-quote-like
+# characters are stripped (never single quotes/apostrophes, which routinely
+# appear inside a title itself - e.g. "Rock 'n' Roll", "Don't Stop") -
+# uploaders wrap the song name in them fairly often (e.g. 'Night Club -
+# "Need You Tonight" (INXS cover)'), and that's never meaningful punctuation
+# worth keeping in the stored title.
+_DOUBLE_QUOTE_RE = re.compile(r'["“”„‟『』]')
+
+
+def strip_quote_marks(title: str) -> str:
+    """Drop any double-quote-like character from `title` and collapse the
+    whitespace that removing them can leave behind.
+    """
+    title = _DOUBLE_QUOTE_RE.sub("", title or "")
+    return re.sub(r"\s+", " ", title).strip()
+
+
+# Unlike YOUTUBE_TITLE_JUNK_MARKER_WORDS above (only checked against the
+# *trailing* bracket, to avoid nuking a genuine subtitle earlier in the
+# title), these condemn a "(...)"/"[...]" group no matter where it sits -
+# e.g. "Herr Mannelig (animation) - Żniwa - Polish version" has real title
+# text (" - Żniwa - Polish version") after the junk bracket, so it would
+# never be reached by the trailing-only check. Only add a word here when
+# it's safe to assume it never appears inside a real subtitle.
+YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
+    "Animation",
+    "Official",
+    "Lyrics",
+]
+_YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE) + r")\b",
+    re.IGNORECASE,
+)
+
+# Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) anywhere
+# in the string, plus any whitespace right before it.
+_ANY_BRACKET_RE = re.compile(r"\s*[\(\[【]([^()\[\]【】]*)[\)\]】]")
+
+
+def strip_junk_brackets_anywhere(title: str) -> str:
+    """Drop any "(...)"/"[...]" group whose content contains one of
+    YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE, wherever in `title` it sits.
+    """
+    def _replace(match: re.Match) -> str:
+        if _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(match.group(1)):
+            return ""
+        return match.group(0)
+
+    title = _ANY_BRACKET_RE.sub(_replace, title or "")
+    return re.sub(r"\s+", " ", title).strip()
+
+
+# A "|" in a YouTube title is routinely used to tack on channel/label
+# branding after the actual song info (e.g. "OMNIMAR - The Matrix (Official
+# Video) | darkTunes Music Group") - never part of the song title itself, so
+# everything from the first one onward is dropped. Doing this before
+# strip_junk_suffix() also lets a junk bracket that only *looks* trailing
+# once the branding is gone (like "(Official Video)" above) get caught by
+# the existing trailing-bracket check.
+_PIPE_SUFFIX_RE = re.compile(r"\s*\|.*$")
+
+
+def strip_pipe_suffix(title: str) -> str:
+    """Drop a trailing "| ..." branding suffix from `title`, if present."""
+    return _PIPE_SUFFIX_RE.sub("", title or "").strip()
+
+
+# Uploaders routinely tack promo hashtags onto the end of a title (e.g.
+# "Nocą (Official Audio) #Zostańwdomu #KulturalnaStrefa") - never part of the
+# song title itself, so every "#word" token is dropped wherever it appears.
+_HASHTAG_RE = re.compile(r"#\S+")
+
+
+def strip_hashtags(title: str) -> str:
+    """Drop every "#word" hashtag token from `title`."""
+    title = _HASHTAG_RE.sub("", title or "")
+    return re.sub(r"\s+", " ", title).strip()
 
 
 def strip_junk_suffix(title: str) -> str:
@@ -309,22 +392,26 @@ def build_metadata_from_item(item: dict) -> dict:
     """
     channel = item.get("channel") or ""
     title = item.get("title") or ""
+    parse_title = strip_pipe_suffix(title)
+    parse_title = strip_junk_brackets_anywhere(parse_title)
+    parse_title = strip_hashtags(parse_title)
 
     if channel and _is_topic_channel(channel):
         artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
-        song_title = title.strip()
+        song_title = parse_title.strip()
     else:
-        artist, song_title = split_artist_title(title)
+        artist, song_title = split_artist_title(parse_title)
         if not artist or not song_title:
             if channel:
                 artist = channel.strip()
-                song_title = title.strip()
+                song_title = parse_title.strip()
 
     if song_title and artist:
         song_title = strip_artist_from_title(song_title, artist)
 
     if song_title:
         song_title = strip_junk_suffix(song_title)
+        song_title = strip_quote_marks(song_title)
 
     return {
         "artist_name": artist,
@@ -346,7 +433,7 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
 
     # DEBUG: only process the first video of the playlist, ignore the rest.
     # Remove this line to go back to importing the whole playlist.
-    items = items[:10]
+    items = items[:80]
 
     metadata_list = [build_metadata_from_item(item) for item in items]
     return run_import_batch(metadata_list)

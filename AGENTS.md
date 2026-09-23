@@ -267,10 +267,11 @@ non-trivial work in that area.
   directions under `src/utils/youtube/`. **Import FROM a playlist** (`import_from_playlist.py`,
   "Import data from YouTube playlist" menu item): why playlist fetching must use yt-dlp's
   `--flat-playlist` (without it, a large playlist blows past the subprocess timeout and looks like
-  a hang), the Topic-channel/channel-name artist-detection fallback, the two extensible title
-  cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`) and
-  diacritic-insensitive `strip_artist_from_title()`, why album-name scraping was investigated but
-  not implemented, and **a debug `items[:1]` limiter still active** that currently makes the
+  a hang), the Topic-channel/channel-name artist-detection fallback, the three extensible title
+  cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`,
+  `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`) and diacritic-insensitive `strip_artist_from_title()`,
+  why album-name scraping was investigated but not implemented, and **a debug `items[:1]` limiter
+  still active** that currently makes the
   feature only ever import a playlist's first video. **Search matching** (DB → YouTube, the older
   half of the file): why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
