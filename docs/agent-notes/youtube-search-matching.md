@@ -423,6 +423,21 @@ actually filled in for that artist; the mechanism alone doesn't do anything for 
 synonyms recorded. Verified all four cases jump to `artist_relevance == 1.0` once the synonym is
 supplied (previously `0.0`–`0.69` depending on how much accidental character overlap there was).
 
+Two more consumers read `synonyms` the same way (`_parse_synonyms()`, comma-separated) but for
+*exact* matches only, not fuzzy relevance scoring — deliberately, since both silently rewrite or
+delete data rather than just tiebreak a search result:
+- `import_from_playlist.py`'s `_resolve_artist_synonyms()` rewrites a playlist entry's parsed
+  artist name to the canonical DB name before anything is shown to the user, whenever the parsed
+  name is an exact case-insensitive match for a known synonym — e.g. a channel handle
+  `akuteofficial` parsed as the artist gets swapped to `Akute`. Runs once per playlist import,
+  right after `build_metadata_from_item()`.
+- `resolve_duplicates.py`'s `remove_duplicate_artists()` (`Manage database -> Resolve duplicates ->
+  Resolve duplicated artists`) treats an artist whose plain name exactly matches a *different*
+  artist's synonym as a duplicate too, alongside its existing same-name check — the synonym-
+  carrying artist is kept, the plain-name match is merged into it (songs reassigned, row deleted).
+  This is how a leftover `akuteofficial` artist row created before the import-side fix existed
+  (above) gets cleaned up after the fact.
+
 **Not fixed by this**: `Stray Kids - 특(S-Class)` stays open — that's a *title*-formatting mismatch
 (Hangul mixed with a Latin parenthetical), not an artist-name problem, so the synonym mechanism
 doesn't apply to it. See the next section for the title-level equivalent of this mechanism — it

@@ -7,9 +7,10 @@ import questionary
 from googleapiclient.errors import HttpError
 from rich import print
 
-from utils.youtube.manage_youtube_playlists import get_youtube_service, _is_topic_channel
+from utils.youtube.manage_youtube_playlists import get_youtube_service, _is_topic_channel, _parse_synonyms
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
+from utils.database.database_getter import get_artists_from_db_session
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -531,6 +532,42 @@ def _review_artist_title_swaps(metadata_list: list) -> tuple:
     return remaining, pre_skipped
 
 
+def _resolve_artist_synonyms(metadata_list: list) -> None:
+    """Replace each entry's parsed artist name with its canonical DB name
+    when the parsed name exactly matches a known synonym (the artists
+    table's `synonyms` column) rather than the artist's own name - e.g. a
+    channel handle like "akuteofficial" stored as a synonym of "Akute" gets
+    swapped to "Akute" before anything is shown to the user.
+
+    Runs before every user-facing display of the parsed entries (the
+    artist/title swap review, and the per-entry prints during the import
+    batch itself) so those already show the real artist name, instead of
+    creating a separate "akuteofficial" artist entry that happens to share
+    all its songs with the real one.
+
+    Matching is an exact, case-insensitive comparison against a known
+    synonym - deliberately not fuzzy, since this silently rewrites what the
+    user sees rather than just flagging it for review like the artist/title
+    swap check does. Mutates metadata_list's entries in place.
+    """
+    synonym_to_canonical = {}
+    for artist in get_artists_from_db_session():
+        for synonym in _parse_synonyms(artist.synonyms):
+            synonym_to_canonical[synonym.strip().lower()] = artist.name
+
+    if not synonym_to_canonical:
+        return
+
+    for metadata in metadata_list:
+        artist_name = metadata.get("artist_name")
+        if not artist_name:
+            continue
+        canonical_name = synonym_to_canonical.get(artist_name.strip().lower())
+        if canonical_name and canonical_name != artist_name:
+            print(f"Artist synonym match: [yellow]{artist_name}[/yellow] is known as [blue]{canonical_name}[/blue]")
+            metadata["artist_name"] = canonical_name
+
+
 def import_data_from_youtube_playlist(playlist_input: str) -> list:
     items = get_playlist_items(playlist_input)
     if not items:
@@ -542,5 +579,6 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
     # items = items[:94]
 
     metadata_list = [build_metadata_from_item(item) for item in items]
+    _resolve_artist_synonyms(metadata_list)
     metadata_list, pre_skipped = _review_artist_title_swaps(metadata_list)
     return run_import_batch(metadata_list, pre_skipped=pre_skipped)

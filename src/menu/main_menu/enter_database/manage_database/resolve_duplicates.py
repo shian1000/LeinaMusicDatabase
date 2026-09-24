@@ -6,6 +6,7 @@ from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 from config.constants import SIMILARITY_THRESHOLD
+from utils.youtube.manage_youtube_playlists import _parse_synonyms
 
 def remove_duplicate_songs():
     """
@@ -56,11 +57,29 @@ def remove_duplicate_artists():
         key_origin = artist.origin
         if key in seen:
             seen_origin = seen[key].origin
-            if (key_origin is None or seen_origin is None or 
+            if (key_origin is None or seen_origin is None or
                     key_origin.lower() == seen_origin.lower()):
                 duplicates.append((seen[key], artist))
         else:
             seen[key] = artist
+
+    # An artist whose plain name exactly matches a *different* artist's known
+    # synonym (the artists table's `synonyms` column) is a duplicate too,
+    # even though the two names don't look alike at all - e.g. a leftover
+    # "akuteofficial" artist row alongside the real "Akute" entry that lists
+    # it as a synonym. The artist carrying the synonym is treated as
+    # canonical (kept); the plain-name match is merged away.
+    already_flagged_ids = {original.id for original, _ in duplicates} | {duplicate.id for _, duplicate in duplicates}
+    for artist in all_artists:
+        if artist.id in already_flagged_ids:
+            continue
+        for synonym in _parse_synonyms(artist.synonyms):
+            match = seen.get(synonym.strip().lower())
+            if match and match.id != artist.id and match.id not in already_flagged_ids:
+                duplicates.append((artist, match))
+                already_flagged_ids.add(artist.id)
+                already_flagged_ids.add(match.id)
+                break
 
     if not duplicates:
         print("No duplicate artists found.")

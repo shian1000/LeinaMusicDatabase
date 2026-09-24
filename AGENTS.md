@@ -110,7 +110,13 @@ non-trivial work in that area.
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
   affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
   excluded from pytest collection (`tests/conftest.py`). Not yet fixed; not a reason to avoid
-  importing `menu.song_actions` normally through `main.py`'s own path.
+  importing `menu.song_actions` normally through `main.py`'s own path. Separately,
+  `manage_database/resolve_duplicates.py` (the submodule) is shadowed by
+  `manage_database/__init__.py`'s own `resolve_duplicates()` *function* of the same name — a plain
+  `from ...manage_database import resolve_duplicates` binds the function, not the submodule; tests
+  that need the submodule (e.g. to monkeypatch its `get_music_session`) must
+  `importlib.import_module("menu.main_menu.enter_database.manage_database.resolve_duplicates")`
+  instead (see `tests/test_resolve_duplicates.py`).
 - `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
   per-field loop. `seek_nonsense_names()` queues blacklisted album/title hits and asks about them
