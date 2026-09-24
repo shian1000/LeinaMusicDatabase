@@ -7,7 +7,13 @@ import questionary
 from googleapiclient.errors import HttpError
 from rich import print
 
-from utils.youtube.manage_youtube_playlists import get_youtube_service, _is_topic_channel, _parse_synonyms
+from utils.youtube.manage_youtube_playlists import (
+    get_youtube_service,
+    _is_topic_channel,
+    _parse_synonyms,
+    _run_ytdlp_search,
+    _is_official_release,
+)
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
@@ -401,7 +407,156 @@ def get_playlist_items(playlist_input: str) -> list:
     return items
 
 
-def build_metadata_from_item(item: dict) -> dict:
+# Channels whose video titles don't follow any "Artist - Title" convention
+# at all - e.g. a TV/film soundtrack-compilation channel that tags each
+# episode's featured song inside a sentence buried in the title text itself
+# (real case: "Sex Education SoundTrack | S02E08 Care by Ezra Furman", where
+# the real artist/title are "Ezra Furman"/"Care"). build_metadata_from_item's
+# usual splitting can't make sense of these at all, so they're resolved
+# separately by resolve_special_channel_metadata() before it ever runs.
+# Matched case-insensitively against the exact channel name.
+SPECIAL_DESCRIPTION_CHANNELS = {"soundtrack series"}
+
+
+def _is_special_description_channel(channel: str) -> bool:
+    return (channel or "").strip().lower() in SPECIAL_DESCRIPTION_CHANNELS
+
+
+# Words marking a genuinely different performance/version of a song - see
+# YOUTUBE_TITLE_JUNK_PHRASES above for why these are deliberately never
+# treated as junk. _find_official_match_via_search() skips its search
+# entirely when one of these appears in the video's own title, since
+# blindly trusting a same-named studio release there would silently swap
+# out the very distinction the title is making.
+_VERSION_MARKER_RE = re.compile(
+    r"\b(?:Live|Cover|Remix|Acoustic|Extended|Club Edit)\b", re.IGNORECASE
+)
+
+
+def _contains_whole_word(folded_haystack: str, needle: str) -> bool:
+    """Diacritic/case-insensitive whole-word containment check - same
+    approach as strip_artist_from_title() above, reused here to confirm a
+    search result's own artist/track genuinely appear in the source title
+    rather than being an unrelated same-named release."""
+    folded_needle = "".join(_fold_char(c) for c in needle).strip()
+    if not folded_needle:
+        return False
+    return bool(re.search(r"\b" + re.escape(folded_needle) + r"\b", folded_haystack, re.IGNORECASE))
+
+
+def _find_official_match_via_search(raw_title: str, max_results: int = 5) -> tuple | None:
+    """Search YouTube for `raw_title` verbatim (yt-dlp's own ranking already
+    surfaces the right official upload near the top even for a messy title
+    like the SPECIAL_DESCRIPTION_CHANNELS case above - verified directly)
+    and, if one of the top results is a confirmed official release (see
+    _is_official_release()), return its clean (artist, title) straight from
+    yt-dlp's own metadata - not anything guessed from the messy source
+    title or its description.
+
+    Guards against a same-named but unrelated official track winning by
+    requiring the candidate's own artist and track to actually appear,
+    whole-word, in `raw_title` (_contains_whole_word()) before trusting it.
+    Returns None if nothing both official and confirmed turns up, or if
+    `raw_title` carries a real-version marker (_VERSION_MARKER_RE) - in that
+    case the caller should fall back to a source that can't overwrite the
+    version distinction the title is making.
+    """
+    if _VERSION_MARKER_RE.search(raw_title or ""):
+        return None
+
+    result = _run_ytdlp_search(raw_title, max_results)
+    if result is None or result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    folded_raw_title = "".join(_fold_char(c) for c in raw_title)
+
+    for line in result.stdout.strip().splitlines():
+        try:
+            info = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        channel = info.get("channel") or info.get("uploader") or ""
+        track = info.get("track")
+        artist = info.get("artist")
+        if not (track and artist and _is_official_release(channel, track)):
+            continue
+        if _contains_whole_word(folded_raw_title, track) and _contains_whole_word(folded_raw_title, artist):
+            return artist, track
+
+    return None
+
+
+def _fetch_video_description(video_id: str, timeout: int = 30) -> str | None:
+    """Fetch one video's full description via yt-dlp - only needed as a
+    fallback for SPECIAL_DESCRIPTION_CHANNELS videos where
+    _find_official_match_via_search() found nothing (e.g. the song was never
+    officially distributed to YouTube under its own upload), since
+    --flat-playlist (the normal playlist fetch) never includes it."""
+    if not video_id:
+        return None
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--dump-json", "--no-warnings", "--skip-download", url],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        info = json.loads(result.stdout.strip().splitlines()[0])
+    except (json.JSONDecodeError, IndexError):
+        return None
+    return info.get("description")
+
+
+# Matches a "Music : <title> by <artist>" line the way SPECIAL_DESCRIPTION_
+# CHANNELS' videos credit a soundtrack cue's real artist/title in their
+# description (real case: "Music : Care by Ezra Furman").
+_MUSIC_DESCRIPTION_LINE_RE = re.compile(r"(?im)^\s*music\s*:\s*(.+?)\s+by\s+(.+?)\s*$")
+
+
+def _parse_music_description_line(description: str) -> tuple | None:
+    """Pull (artist, title) out of a "Music : <title> by <artist>" line in
+    `description` - see _MUSIC_DESCRIPTION_LINE_RE above."""
+    match = _MUSIC_DESCRIPTION_LINE_RE.search(description or "")
+    if not match:
+        return None
+    title, artist = match.group(1).strip(), match.group(2).strip()
+    return (artist, title) if title and artist else None
+
+
+def resolve_special_channel_metadata(item: dict) -> tuple | None:
+    """For a video from a SPECIAL_DESCRIPTION_CHANNELS channel, resolve the
+    real (artist, title), in order:
+
+    1. _find_official_match_via_search() - search YouTube for the raw video
+       title verbatim and take the clean artist/track off a confirmed
+       official release among the top results.
+    2. _parse_music_description_line() - fall back to the video's own
+       description, for a song that was never officially distributed to
+       YouTube under its own upload.
+
+    Returns None if neither works, so the caller falls back to
+    build_metadata_from_item()'s normal channel/title-based parsing.
+    """
+    title = item.get("title") or ""
+    found = _find_official_match_via_search(title)
+    if found:
+        print(f"[green]{item.get('channel')}[/green] special case: matched official release [blue]{found[0]} - {found[1]}[/blue] for \"[yellow]{title}[/yellow]\"")
+        return found
+
+    description = _fetch_video_description(item.get("video_id"))
+    found = _parse_music_description_line(description) if description else None
+    if found:
+        print(f"[green]{item.get('channel')}[/green] special case: parsed [blue]{found[0]} - {found[1]}[/blue] from description for \"[yellow]{title}[/yellow]\"")
+    return found
+
+
+def build_metadata_from_item(item: dict, artist_title_override: tuple | None = None) -> dict:
     """Turn one playlist video into an import_engine metadata dict.
 
     A "<Artist> - Topic" channel's video title is deliberately just the bare
@@ -418,22 +573,30 @@ def build_metadata_from_item(item: dict) -> dict:
     fall back to the channel name as the artist there too - same idea as the
     Topic-channel case, just for channels that don't follow that naming
     convention.
+
+    `artist_title_override` (from resolve_special_channel_metadata()) skips
+    all of the above entirely - for a SPECIAL_DESCRIPTION_CHANNELS video the
+    title text itself carries no "Artist - Title" structure to split at all.
     """
     channel = item.get("channel") or ""
     title = item.get("title") or ""
-    parse_title = strip_pipe_suffix(title)
-    parse_title = strip_junk_brackets_anywhere(parse_title)
-    parse_title = strip_hashtags(parse_title)
 
-    if channel and _is_topic_channel(channel):
-        artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
-        song_title = parse_title.strip()
+    if artist_title_override:
+        artist, song_title = artist_title_override
     else:
-        artist, song_title = split_artist_title(parse_title)
-        if not artist or not song_title:
-            if channel:
-                artist = channel.strip()
-                song_title = parse_title.strip()
+        parse_title = strip_pipe_suffix(title)
+        parse_title = strip_junk_brackets_anywhere(parse_title)
+        parse_title = strip_hashtags(parse_title)
+
+        if channel and _is_topic_channel(channel):
+            artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
+            song_title = parse_title.strip()
+        else:
+            artist, song_title = split_artist_title(parse_title)
+            if not artist or not song_title:
+                if channel:
+                    artist = channel.strip()
+                    song_title = parse_title.strip()
 
     if song_title and artist:
         song_title = strip_artist_from_title(song_title, artist)
@@ -578,7 +741,13 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
     # Remove this line to go back to importing the whole playlist.
     # items = items[:94]
 
-    metadata_list = [build_metadata_from_item(item) for item in items]
+    metadata_list = []
+    for item in items:
+        override = None
+        if _is_special_description_channel(item.get("channel") or ""):
+            override = resolve_special_channel_metadata(item)
+        metadata_list.append(build_metadata_from_item(item, override))
+
     _resolve_artist_synonyms(metadata_list)
     metadata_list, pre_skipped = _review_artist_title_swaps(metadata_list)
     return run_import_batch(metadata_list, pre_skipped=pre_skipped)

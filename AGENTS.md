@@ -283,9 +283,10 @@ non-trivial work in that area.
   a hang), the Topic-channel/channel-name artist-detection fallback, the three extensible title
   cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`,
   `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`) and diacritic-insensitive `strip_artist_from_title()`,
-  why album-name scraping was investigated but not implemented, and **a debug `items[:1]` limiter
-  still active** that currently makes the
-  feature only ever import a playlist's first video. **Search matching** (DB → YouTube, the older
+  why album-name scraping was investigated but not implemented, `SPECIAL_DESCRIPTION_CHANNELS`'
+  reverse-search resolution (`resolve_special_channel_metadata()`) for channels whose titles carry
+  no "Artist - Title" structure at all, and a since-fixed debug video limiter. **Search matching**
+  (DB → YouTube, the older
   half of the file): why
   `manage_youtube_playlists.score_result()` is built the way it is (title-only relevance,
   containment matching, dynamic thresholds, Topic-channel/official-release awareness via `track`

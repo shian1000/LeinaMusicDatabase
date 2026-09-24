@@ -13,11 +13,11 @@ Two directions live under `src/utils/youtube/`, covered in the two halves of thi
 
 ## Importing FROM a YouTube playlist (`import_from_playlist.py`)
 
-**⚠ Debug scaffolding currently left active:** `import_data_from_youtube_playlist()` has a line
-`items = items[:1]` right after fetching the playlist, added mid-session so the user could test
-one song at a time without waiting through the full matching pipeline for an entire playlist.
-Right now the menu option **only ever imports the first video of any playlist**. Remove that line
-(or turn it into a real, deliberate limit setting) before treating full-playlist import as working.
+`import_data_from_youtube_playlist()` carries a commented-out `# items = items[:94]` debug line
+(added mid-session to test one song at a time without waiting through the full matching pipeline
+for an entire playlist) - currently inactive, so the menu option imports the whole playlist. If
+it's ever re-enabled for testing, remember to comment it back out before treating full-playlist
+import as working.
 
 ### Fetching: yt-dlp first, Data API (OAuth) fallback
 
@@ -168,6 +168,48 @@ problem `--flat-playlist` above was added to fix if done for every video in a pl
 Conclusion reached with the user: worth doing later as a one-video-at-a-time "enrich this song"
 step (only for songs actually being added, not the whole playlist scan), not as part of the
 playlist-listing pass. Not implemented.
+
+### Messy-titled channels: resolving artist/title via a reverse search, not by guessing the format
+
+Some channels can't be handled by anything above at all — the video title carries no "Artist -
+Title" structure whatsoever, buried inside unrelated text instead (real case, channel `"SoundTrack
+Series"`: `"Sex Education SoundTrack | S02E08 Care by Ezra Furman"`, real artist/title `"Ezra
+Furman"`/`"Care"`). A bigger junk-word list or a smarter split heuristic can't fix this — there's no
+delimiter to split on that generalizes across channels each using a completely different free-text
+title convention.
+
+`SPECIAL_DESCRIPTION_CHANNELS` is a whitelist (currently just `"soundtrack series"`, matched
+case-insensitively against the exact channel name) of channels that skip
+`build_metadata_from_item()`'s normal parsing entirely and go through
+`resolve_special_channel_metadata()` instead, in two steps:
+
+1. `_find_official_match_via_search()` — search YouTube (`_run_ytdlp_search()`, reused from
+   `manage_youtube_playlists.py`) for the messy video title *verbatim*, with no pre-parsing at all.
+   Verified directly: yt-dlp's own relevance ranking already surfaces the correct official
+   Topic-channel upload at or near the top even for a title this messy — searching the full string
+   above returns the genuine `Ezra Furman` Topic-channel video (`track="Care"`,
+   `artist="Ezra Furman"`) as the #1 result, ahead of the source video itself. A candidate is
+   trusted only when `_is_official_release(channel, track)` is true (see the `track`/`artists`/
+   `album` section above - same signal, reused here in the opposite direction: *confirming* a found
+   release rather than *scoring* a candidate against an already-known artist/title) **and** the
+   candidate's own `artist`/`track` both appear whole-word in the source title
+   (`_contains_whole_word()`, same diacritic-folding approach as `strip_artist_from_title()`'s
+   `_fold_char()`) - this guards against an unrelated same-named official track winning search
+   relevance by coincidence.
+2. If nothing both official and confirmed turns up (the song may never have gotten its own official
+   YouTube distribution), `_fetch_video_description()` fetches that one video's full description (a
+   `--dump-json` call *without* `--flat-playlist`, deliberately scoped to only videos on these
+   whitelisted channels - running it for every video in a playlist would reintroduce the exact
+   timeout problem `--flat-playlist` was added to fix, see above) and
+   `_parse_music_description_line()` regexes out a `"Music : <title> by <artist>"` line - the format
+   this specific channel uses to credit a soundtrack cue in its description text (confirmed present
+   for the real case above). This is free-text scraping, unlike the reliable `track` signal in step
+   1, so it's deliberately the fallback, not the primary path.
+
+Both steps are skipped entirely - falling through to step 2, or to the normal parsing path - when
+the source title carries a real-version marker (`Live`/`Cover`/`Remix`/`Acoustic`/`Extended`/`Club
+Edit`): trusting a same-named studio release found by search would silently overwrite the exact
+version distinction the title-cleanup word lists above are designed to preserve.
 
 ## Why title-only, not artist+title combined
 
