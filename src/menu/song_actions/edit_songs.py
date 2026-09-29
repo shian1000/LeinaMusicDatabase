@@ -45,6 +45,8 @@ def edit_entry_menu(mode: str = None, db_object = None):
     swap_option = "Swap title and artist"
     if mode == "Song":
         displayed_list.append(swap_option)
+    delete_option = "Delete from database"
+    displayed_list.append(delete_option)
     back_option = "back"
     displayed_list.append(back_option)
 
@@ -53,6 +55,15 @@ def edit_entry_menu(mode: str = None, db_object = None):
         return
     if choice == swap_option:
         swap_title_and_artist(db_object)
+        return
+    if choice == delete_option:
+        label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
+        confirmation = questionary.confirm(f"Do you really want to delete {label}?").ask()
+        if confirmation:
+            delete_db_entry(db_object)
+            print(f"Deleted {label}")
+        else:
+            print("Aborted")
         return
     choosen_index = (displayed_list.index(choice))
     category = action_map[choosen_index]
