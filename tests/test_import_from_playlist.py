@@ -119,6 +119,15 @@ def test_parse_quoted_title_by_artist_trims_trailing_album_credit():
     assert m._parse_quoted_title_by_artist(title) == ("Marcin Przybylowicz", "Cyberwildlife Park")
 
 
+def test_parse_quoted_title_by_artist_falls_back_to_unquoted_dash_credit():
+    title = "CYBERPUNK 2077 - KILL THE MESSENGER by Rezodrone (Jason Charles Miller & Jamison Boaz)"
+
+    assert m._parse_quoted_title_by_artist(title) == (
+        "Rezodrone (Jason Charles Miller & Jamison Boaz)",
+        "KILL THE MESSENGER",
+    )
+
+
 # ---------------------------------------------------------
 # resolve_special_channel_metadata()
 # ---------------------------------------------------------
@@ -169,6 +178,22 @@ def test_resolve_special_channel_metadata_falls_back_to_quoted_title_credit_with
     assert m.resolve_special_channel_metadata(item) == ("Marcin Przybylowicz", "Cyberwildlife Park")
 
 
+def test_resolve_special_channel_metadata_falls_back_to_unquoted_dash_credit(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: "should not be called")
+
+    item = {
+        "channel": "lakeshore records",
+        "title": "CYBERPUNK 2077 - KILL THE MESSENGER by Rezodrone (Jason Charles Miller & Jamison Boaz)",
+        "video_id": "abc",
+    }
+
+    assert m.resolve_special_channel_metadata(item) == (
+        "Rezodrone (Jason Charles Miller & Jamison Boaz)",
+        "KILL THE MESSENGER",
+    )
+
+
 def test_resolve_special_channel_metadata_returns_none_when_nothing_matches(monkeypatch):
     monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
     monkeypatch.setattr(m, "_parse_quoted_title_by_artist", lambda title: None)
@@ -177,3 +202,23 @@ def test_resolve_special_channel_metadata_returns_none_when_nothing_matches(monk
     item = {"channel": "aesthetic waves", "title": "no credit here", "video_id": "abc"}
 
     assert m.resolve_special_channel_metadata(item) is None
+
+
+# ---------------------------------------------------------
+# strip_junk_brackets_anywhere()
+# ---------------------------------------------------------
+
+def test_strip_junk_brackets_anywhere_strips_new_marker_words():
+    assert m.strip_junk_brackets_anywhere("Song (Visualiser)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Clip officiel)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Officiel)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Wersja oryginał)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Lyric Video) - Artist") == "Song - Artist"
+    assert m.strip_junk_brackets_anywhere("Song (English Subtitles)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (4K)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Remaster)") == "Song"
+    assert m.strip_junk_brackets_anywhere("Song (Remastered 2023)") == "Song"
+
+
+def test_strip_junk_brackets_anywhere_keeps_non_junk_bracket():
+    assert m.strip_junk_brackets_anywhere("Sad Story (Out of Luck)") == "Sad Story (Out of Luck)"

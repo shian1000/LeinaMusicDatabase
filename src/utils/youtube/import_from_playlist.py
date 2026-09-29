@@ -117,6 +117,16 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
     "Animation",
     "Official",
     "Lyrics",
+    "Lyric",
+    "Visualiser",
+    "Video",
+    "Clip",
+    "Officiel",
+    "Oryginał",
+    "Subtitles",
+    "4K",
+    "Remaster",
+    "Remastered",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE) + r")\b",
@@ -416,7 +426,7 @@ def get_playlist_items(playlist_input: str) -> list:
 # usual splitting can't make sense of these at all, so they're resolved
 # separately by resolve_special_channel_metadata() before it ever runs.
 # Matched case-insensitively against the exact channel name.
-SPECIAL_DESCRIPTION_CHANNELS = {"soundtrack series", "aesthetic waves", "soundtracksost"}
+SPECIAL_DESCRIPTION_CHANNELS = {"soundtrack series", "aesthetic waves", "soundtracksost", "lakeshore records"}
 
 
 def _is_special_description_channel(channel: str) -> bool:
@@ -545,6 +555,14 @@ _TITLE_QUOTED_BY_RE = re.compile(
     r'["“”„‟『』]([^"“”„‟『』]+)["“”„‟『』]\s+by\s+(.+?)\s*$', re.IGNORECASE
 )
 
+# Some channels (real case, "Lakeshore Records": "CYBERPUNK 2077 - KILL THE
+# MESSENGER by Rezodrone (Jason Charles Miller & Jamison Boaz)") credit a
+# track the same "<title> by <artist>" way but without quoting the title at
+# all, instead separating it from a leading game/show name with " - ".
+# Tried only when the quoted form above doesn't match, since a quoted title
+# is the more reliable signal when both are present.
+_DASH_TITLE_BY_RE = re.compile(r"-\s*(.+?)\s+by\s+(.+?)\s*$", re.IGNORECASE)
+
 # Some channels (real case, "SoundtracksOST": '"Cyberwildlife Park" by Marcin
 # Przybylowicz - Cyberpunk: Edgerunners [OST]') tack an album/soundtrack
 # credit onto the artist portion after " by ", separated by " - ", the same
@@ -555,10 +573,11 @@ _ARTIST_ALBUM_SUFFIX_RE = re.compile(r"\s+-\s+.+$")
 
 def _parse_quoted_title_by_artist(title: str) -> tuple | None:
     """Pull (artist, title) out of a '"<title>" by <artist>' credit in a raw
-    video title - see _TITLE_QUOTED_BY_RE above. Also trims a trailing
-    " - <album/soundtrack name>" some channels append after the artist name
-    itself - see _ARTIST_ALBUM_SUFFIX_RE above."""
-    match = _TITLE_QUOTED_BY_RE.search(title or "")
+    video title - see _TITLE_QUOTED_BY_RE above - or, failing that, an
+    unquoted "<prefix> - <title> by <artist>" credit - see _DASH_TITLE_BY_RE
+    above. Also trims a trailing " - <album/soundtrack name>" some channels
+    append after the artist name itself - see _ARTIST_ALBUM_SUFFIX_RE above."""
+    match = _TITLE_QUOTED_BY_RE.search(title or "") or _DASH_TITLE_BY_RE.search(title or "")
     if not match:
         return None
     song_title = match.group(1).strip()
@@ -574,9 +593,10 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
        title verbatim and take the clean artist/track off a confirmed
        official release among the top results.
     2. _parse_quoted_title_by_artist() - fall back to a '"<title>" by
-       <artist>' credit embedded directly in the video's own title, for a
-       channel that credits songs that way (e.g. "aesthetic waves"). Cheap
-       (no extra request) but unverified, unlike step 1.
+       <artist>' or unquoted "<prefix> - <title> by <artist>" credit embedded
+       directly in the video's own title, for a channel that credits songs
+       that way (e.g. "aesthetic waves", "lakeshore records"). Cheap (no
+       extra request) but unverified, unlike step 1.
     3. _parse_music_description_line() - fall back further to the video's
        own description, for a song that was never officially distributed to
        YouTube under its own upload and isn't credited in the title either.

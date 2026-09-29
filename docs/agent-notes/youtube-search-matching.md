@@ -128,9 +128,10 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
   text after them, which the trailing-only checks above can never reach - e.g.
   `"Herr Mannelig (animation) - Żniwa - Polish version"` or
   `"Voo Voo - Nocą (Official Audio) #Zostańwdomu"`. Currently `"Animation"`, `"Official"`,
-  `"Lyrics"`. Only add a word here when it's safe to assume it never appears inside a genuine
-  subtitle, since - unlike the two lists above - it isn't limited to the trailing bracket, so a
-  false-positive match anywhere in the title is destructive.
+  `"Lyrics"`, `"Lyric"`, `"Visualiser"`, `"Video"`, `"Clip"`, `"Officiel"`, `"Oryginał"`,
+  `"Subtitles"`, `"4K"`, `"Remaster"`, `"Remastered"`. Only add a word here when it's safe to
+  assume it never appears inside a genuine subtitle, since - unlike the two lists above - it isn't
+  limited to the trailing bracket, so a false-positive match anywhere in the title is destructive.
 
 `_TRAILING_BRACKET_RE` and `_ANY_BRACKET_RE` both also treat the CJK "lenticular bracket" pair
 `【】` as equivalent to `()`/`[]` (e.g. a trailing `"【Kan/Rom/Eng Lyrics】"` annotation). Separately,
@@ -189,7 +190,8 @@ delimiter to split on that generalizes across channels each using a completely d
 title convention.
 
 `SPECIAL_DESCRIPTION_CHANNELS` is a whitelist (currently `"soundtrack series"`, `"aesthetic
-waves"`, and `"soundtracksost"`, matched case-insensitively against the exact channel name) of
+waves"`, `"soundtracksost"`, and `"lakeshore records"`, matched case-insensitively against the
+exact channel name) of
 channels that skip `build_metadata_from_item()`'s normal parsing entirely and go through
 `resolve_special_channel_metadata()` instead, in three steps:
 
@@ -210,8 +212,11 @@ channels that skip `build_metadata_from_item()`'s normal parsing entirely and go
    credit embedded directly in the video's own title (`_TITLE_QUOTED_BY_RE` - matches a
    double-quote-like-wrapped title, `" by "`, then the rest of the string as the artist; not
    anchored to the string's start since these channels often prefix the credit with an
-   episode/segment label). Cheap (no extra network request, unlike step 3) but unverified, unlike
-   step 1. Two real cases drive its shape:
+   episode/segment label), or - if that doesn't match - the same credit shape but unquoted, with
+   the title instead separated from a leading game/show name by `" - "` (`_DASH_TITLE_BY_RE`,
+   tried second since a quoted title is the more reliable signal when both forms could match).
+   Cheap (no extra network request, unlike step 3) but unverified, unlike step 1. Three real cases
+   drive its shape:
    - `"aesthetic waves"`: `'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha
      Kitt'` -> `("Eartha Kitt", "Santa Baby")`.
    - `"soundtracksost"`: `'"Cyberwildlife Park" by Marcin Przybylowicz - Cyberpunk: Edgerunners
@@ -219,6 +224,11 @@ channels that skip `build_metadata_from_item()`'s normal parsing entirely and go
      `"Artist - <album/soundtrack name>"` (the same convention `split_artist_title()` relies on
      elsewhere), so `_ARTIST_ALBUM_SUFFIX_RE` trims everything from the first `" - "` onward before
      using it -> `("Marcin Przybylowicz", "Cyberwildlife Park")`.
+   - `"lakeshore records"`: `"CYBERPUNK 2077 - KILL THE MESSENGER by Rezodrone (Jason Charles
+     Miller & Jamison Boaz)"` -> no quotes at all around the title, so `_TITLE_QUOTED_BY_RE` can't
+     match; `_DASH_TITLE_BY_RE` instead takes everything between the first `" - "` and `" by "` as
+     the title and the rest as the artist -> `("Rezodrone (Jason Charles Miller & Jamison Boaz)",
+     "KILL THE MESSENGER")`.
 3. If nothing turns up in the title either (the song may never have gotten its own official YouTube
    distribution, and the channel doesn't credit it in the title text), `_fetch_video_description()`
    fetches that one video's full description (a `--dump-json` call *without* `--flat-playlist`,
