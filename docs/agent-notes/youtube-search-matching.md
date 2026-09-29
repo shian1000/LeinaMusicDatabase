@@ -65,21 +65,29 @@ catches this *after* the whole playlist has been parsed into metadata dicts, not
 1. `_find_possible_artist_title_swaps()` checks every entry's parsed `title` against
    `import_engine.find_matching_artist()` (exact-then-fuzzy local DB lookup, extracted out of
    `resolve_artist()` - see `docs/agent-notes/import-pipeline.md` - so both call sites share one
-   matching implementation). A hit means the "title" is suspiciously also a known artist name.
+   matching implementation). A hit means the "title" is suspiciously also a known artist name. But
+   an entry whose parsed **artist** *also* already matches an existing artist (via the same
+   `find_matching_artist()`) is skipped regardless - e.g. `"CHVRCHES - Nightmares"` would otherwise
+   flag because "Nightmares" fuzzy-matches the unrelated artist "Nightmares on Wax", but since
+   "CHVRCHES" is itself a known artist the current parse is already plausible and not worth
+   interrupting the review for.
 2. Flagged entries are pulled out of `metadata_list` before anything is added to the DB - this
    follows the same queue-then-batch-ask shape as `run_import_batch()`'s own pending-conflict
    review (see the Coding conventions entry in `AGENTS.md`), so one bad channel's whole playlist
    doesn't stop the import per song.
 3. Once every entry has been scanned, each flagged one is asked about individually via
-   `questionary.select()` with three choices - **Add** (keep the parsed artist/title as-is),
+   `questionary.select()` with four choices - **Add** (keep the parsed artist/title as-is),
    **Swap title with artist and add** (swap `metadata["artist_name"]`/`metadata["title"]` in
-   place), **Don't add** (drop it, folded into `run_import_batch()`'s `pre_skipped` summary with
-   reason `"Possible artist/title swap - user chose not to add"`).
+   place), **Add manually** (prompts for artist then title via `questionary.text()` and uses those
+   values verbatim, for cases where neither the parsed nor the swapped order is right), **Don't
+   add** (drop it, folded into `run_import_batch()`'s `pre_skipped` summary with reason
+   `"Possible artist/title swap - user chose not to add"`).
 4. The swap is a raw field swap - `strip_artist_from_title()`/`strip_junk_suffix()` etc. are *not*
    re-run against the post-swap title, since by this point junk-bracket cleanup has already
    happened on the original (pre-swap) title text. If a swapped-in title still carries leftover
    cruft, that's a sign the cleanup should have caught it before the split, not something this
-   step tries to redo.
+   step tries to redo. **Add manually** bypasses this entirely since the user types both fields
+   fresh.
 
 This only runs for the YouTube importer, not the shared `run_import_batch()` engine - the ordering
 ambiguity is a YouTube-title-parsing problem, not a general import concern, and mp3 tags don't have

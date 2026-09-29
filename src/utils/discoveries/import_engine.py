@@ -335,7 +335,7 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) ->
     similar_song = find_similar_song(metadata, artist_obj)
 
     if similar_song:
-        print(f"Found similar song [blue]{similar_song.title} by {similar_song.artist.name}[/blue] but you were trying to add [green]{metadata['title']}[/green] - review deferred until the import finishes")
+        print(f"Found similar song [blue]{similar_song.title}[/blue] by [cyan]{similar_song.artist.name}[/cyan] but you were trying to add [green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan] - review deferred until the import finishes")
         slog(f"    [DEFERRED] Similar song conflict queued for later resolution", priority=1)
         pending_conflicts.append({
             "metadata": metadata,
@@ -509,7 +509,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
             conflict_metadata = conflict["metadata"]
             conflict_artist_obj = conflict["artist_obj"]
             existing_song = conflict["existing_song"]
-            print(f"Found similar song [blue]{existing_song.title} by {existing_song.artist.name}[/blue] but you were trying to add [green]{conflict_metadata['title']}[/green]")
+            print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{conflict_metadata['title']}[/green] by [cyan]{conflict_artist_obj.name}[/cyan]")
             confirmation = questionary.confirm("Do you wish to use the song already in the database?").ask()
             if confirmation:
                 skipped_count = skipped_count + 1

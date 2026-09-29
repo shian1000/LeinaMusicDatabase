@@ -626,12 +626,18 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
 # the database, and lets the user decide what to do with each match.
 _SWAP_CHOICE_ADD = "Add"
 _SWAP_CHOICE_SWAP = "Swap title with artist and add"
+_SWAP_CHOICE_MANUAL = "Add manually"
 _SWAP_CHOICE_SKIP = "Don't add"
 
 
 def _find_possible_artist_title_swaps(metadata_list: list) -> list:
     """Flag entries whose parsed *title* matches an artist already in the
     database - a sign the title and artist were parsed backwards.
+
+    An entry is skipped when its parsed *artist* also already matches an
+    existing artist (e.g. "CHVRCHES - Nightmares", where the title happens
+    to fuzzy-match "Nightmares on Wax") - the current parse is already
+    plausible, so it's not worth asking the user about a swap.
 
     Pure lookup - does NOT ask the user or modify metadata_list. Returns a
     list of (metadata, matched_artist) pairs for the caller to act on.
@@ -640,6 +646,9 @@ def _find_possible_artist_title_swaps(metadata_list: list) -> list:
     for metadata in metadata_list:
         title = metadata.get("title")
         if not title:
+            continue
+        artist_name = metadata.get("artist_name")
+        if artist_name and find_matching_artist(artist_name):
             continue
         matched_artist = find_matching_artist(title)
         if matched_artist:
@@ -680,11 +689,15 @@ def _review_artist_title_swaps(metadata_list: list) -> tuple:
         print(f"[green]{label}[/green] (raw: \"[yellow]{raw_label}[/yellow]\") - the title looks like it could be an artist: [blue]{matched_artist.name}[/blue] is already in the database")
         choice = questionary.select(
             "What do you want to do with this song?",
-            choices=[_SWAP_CHOICE_ADD, _SWAP_CHOICE_SWAP, _SWAP_CHOICE_SKIP],
+            choices=[_SWAP_CHOICE_ADD, _SWAP_CHOICE_SWAP, _SWAP_CHOICE_MANUAL, _SWAP_CHOICE_SKIP],
         ).ask()
 
         if choice == _SWAP_CHOICE_SWAP:
             metadata["artist_name"], metadata["title"] = metadata["title"], metadata["artist_name"]
+            remaining.append(metadata)
+        elif choice == _SWAP_CHOICE_MANUAL:
+            metadata["artist_name"] = questionary.text("Artist:").ask()
+            metadata["title"] = questionary.text("Title:").ask()
             remaining.append(metadata)
         elif choice == _SWAP_CHOICE_SKIP:
             pre_skipped.append((label, "Possible artist/title swap - user chose not to add"))
