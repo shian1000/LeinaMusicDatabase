@@ -112,10 +112,12 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
 - `YOUTUBE_TITLE_JUNK_MARKER_WORDS` (checked by `strip_junk_suffix()`, same trailing-only scope) -
   a single word appearing anywhere *inside* the trailing bracket condemns the whole thing, for
   content too source-specific to enumerate as exact phrases - currently `"Soundtrack"` (real case:
-  `"(Pes 2009 Soundtrack)"`), `"Audio"`, and `"From"` (real case:
+  `"(Pes 2009 Soundtrack)"`), `"Audio"`, `"From"` (real case:
   `"Army of Me (Sucker Punch Remix) [From Sucker Punch]"` -> the `[From ...]` bracket is dropped,
   the genuine `(Sucker Punch Remix)` subtitle right before it is untouched since it's no longer the
-  trailing bracket once the `[From ...]` one is stripped first).
+  trailing bracket once the `[From ...]` one is stripped first), and `"Video"` (real case:
+  `"Hideki Naganuma - GET ENUF (music video)"` -> the bracket doesn't match any whole phrase in
+  `YOUTUBE_TITLE_JUNK_PHRASES`, but the word alone condemns it same as `"Audio"` does).
 - `_YOUTUBE_TITLE_YEAR_RE` (checked by `strip_junk_suffix()`, same trailing-only scope as the two
   lists above) - not a word list but a bare `\b\d{4}\b` regex: any 4-digit number condemns the
   trailing bracket, on the assumption it's a release/recording year rather than part of the song's
@@ -186,10 +188,10 @@ Furman"`/`"Care"`). A bigger junk-word list or a smarter split heuristic can't f
 delimiter to split on that generalizes across channels each using a completely different free-text
 title convention.
 
-`SPECIAL_DESCRIPTION_CHANNELS` is a whitelist (currently just `"soundtrack series"`, matched
-case-insensitively against the exact channel name) of channels that skip
-`build_metadata_from_item()`'s normal parsing entirely and go through
-`resolve_special_channel_metadata()` instead, in two steps:
+`SPECIAL_DESCRIPTION_CHANNELS` is a whitelist (currently `"soundtrack series"`, `"aesthetic
+waves"`, and `"soundtracksost"`, matched case-insensitively against the exact channel name) of
+channels that skip `build_metadata_from_item()`'s normal parsing entirely and go through
+`resolve_special_channel_metadata()` instead, in three steps:
 
 1. `_find_official_match_via_search()` — search YouTube (`_run_ytdlp_search()`, reused from
    `manage_youtube_playlists.py`) for the messy video title *verbatim*, with no pre-parsing at all.
@@ -204,20 +206,35 @@ case-insensitively against the exact channel name) of channels that skip
    (`_contains_whole_word()`, same diacritic-folding approach as `strip_artist_from_title()`'s
    `_fold_char()`) - this guards against an unrelated same-named official track winning search
    relevance by coincidence.
-2. If nothing both official and confirmed turns up (the song may never have gotten its own official
-   YouTube distribution), `_fetch_video_description()` fetches that one video's full description (a
-   `--dump-json` call *without* `--flat-playlist`, deliberately scoped to only videos on these
-   whitelisted channels - running it for every video in a playlist would reintroduce the exact
-   timeout problem `--flat-playlist` was added to fix, see above) and
-   `_parse_music_description_line()` regexes out a `"Music : <title> by <artist>"` line - the format
-   this specific channel uses to credit a soundtrack cue in its description text (confirmed present
-   for the real case above). This is free-text scraping, unlike the reliable `track` signal in step
-   1, so it's deliberately the fallback, not the primary path.
+2. If search finds nothing, `_parse_quoted_title_by_artist()` looks for a `'"<title>" by <artist>'`
+   credit embedded directly in the video's own title (`_TITLE_QUOTED_BY_RE` - matches a
+   double-quote-like-wrapped title, `" by "`, then the rest of the string as the artist; not
+   anchored to the string's start since these channels often prefix the credit with an
+   episode/segment label). Cheap (no extra network request, unlike step 3) but unverified, unlike
+   step 1. Two real cases drive its shape:
+   - `"aesthetic waves"`: `'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha
+     Kitt'` -> `("Eartha Kitt", "Santa Baby")`.
+   - `"soundtracksost"`: `'"Cyberwildlife Park" by Marcin Przybylowicz - Cyberpunk: Edgerunners
+     [OST]'` -> here the text after `" by "` isn't just the artist name, it's
+     `"Artist - <album/soundtrack name>"` (the same convention `split_artist_title()` relies on
+     elsewhere), so `_ARTIST_ALBUM_SUFFIX_RE` trims everything from the first `" - "` onward before
+     using it -> `("Marcin Przybylowicz", "Cyberwildlife Park")`.
+3. If nothing turns up in the title either (the song may never have gotten its own official YouTube
+   distribution, and the channel doesn't credit it in the title text), `_fetch_video_description()`
+   fetches that one video's full description (a `--dump-json` call *without* `--flat-playlist`,
+   deliberately scoped to only videos on these whitelisted channels - running it for every video in
+   a playlist would reintroduce the exact timeout problem `--flat-playlist` was added to fix, see
+   above) and `_parse_music_description_line()` regexes out a `"Music : <title> by <artist>"` line -
+   the format `"soundtrack series"` uses to credit a soundtrack cue in its description text
+   (confirmed present for the real case above). This is free-text scraping, unlike the reliable
+   `track` signal in step 1, so it's deliberately the last fallback, not the primary path.
 
-Both steps are skipped entirely - falling through to step 2, or to the normal parsing path - when
-the source title carries a real-version marker (`Live`/`Cover`/`Remix`/`Acoustic`/`Extended`/`Club
-Edit`): trusting a same-named studio release found by search would silently overwrite the exact
-version distinction the title-cleanup word lists above are designed to preserve.
+Step 1 alone is skipped - falling through to step 2 - when the source title carries a real-version
+marker (`Live`/`Cover`/`Remix`/`Acoustic`/`Extended`/`Club Edit`, checked inside
+`_find_official_match_via_search()` itself): trusting a same-named studio release found by search
+would silently overwrite the exact version distinction the title-cleanup word lists above are
+designed to preserve. Steps 2 and 3 don't repeat this check - they trust whatever the channel
+itself credits in the title or description regardless of version markers there.
 
 ## Why title-only, not artist+title combined
 

@@ -67,6 +67,7 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS = [
     "Soundtrack",
     "Audio",
     "From",
+    "Video",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS) + r")\b",
@@ -415,7 +416,7 @@ def get_playlist_items(playlist_input: str) -> list:
 # usual splitting can't make sense of these at all, so they're resolved
 # separately by resolve_special_channel_metadata() before it ever runs.
 # Matched case-insensitively against the exact channel name.
-SPECIAL_DESCRIPTION_CHANNELS = {"soundtrack series"}
+SPECIAL_DESCRIPTION_CHANNELS = {"soundtrack series", "aesthetic waves", "soundtracksost"}
 
 
 def _is_special_description_channel(channel: str) -> bool:
@@ -529,6 +530,42 @@ def _parse_music_description_line(description: str) -> tuple | None:
     return (artist, title) if title and artist else None
 
 
+# Matches a quoted "<title>" by <artist> credit embedded directly in a
+# video's own title rather than its description (real case, "aesthetic
+# waves": 'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha
+# Kitt' -> title "Santa Baby", artist "Eartha Kitt"). Reuses
+# _DOUBLE_QUOTE_RE's character class so curly/CJK quote variants match too.
+# Not anchored to the start of the string, since these channels routinely
+# prefix the quoted credit with an episode/segment label. The artist is
+# taken as the rest of the string after " by ", so this only fires on the
+# *last* such quoted credit in the title - see _parse_quoted_title_by_artist()
+# for the extra trim this can need when that "rest" carries more than just
+# the artist name.
+_TITLE_QUOTED_BY_RE = re.compile(
+    r'["“”„‟『』]([^"“”„‟『』]+)["“”„‟『』]\s+by\s+(.+?)\s*$', re.IGNORECASE
+)
+
+# Some channels (real case, "SoundtracksOST": '"Cyberwildlife Park" by Marcin
+# Przybylowicz - Cyberpunk: Edgerunners [OST]') tack an album/soundtrack
+# credit onto the artist portion after " by ", separated by " - ", the same
+# "Artist - <something>" convention split_artist_title() relies on elsewhere.
+# Only the part before the first " - " is the actual artist name.
+_ARTIST_ALBUM_SUFFIX_RE = re.compile(r"\s+-\s+.+$")
+
+
+def _parse_quoted_title_by_artist(title: str) -> tuple | None:
+    """Pull (artist, title) out of a '"<title>" by <artist>' credit in a raw
+    video title - see _TITLE_QUOTED_BY_RE above. Also trims a trailing
+    " - <album/soundtrack name>" some channels append after the artist name
+    itself - see _ARTIST_ALBUM_SUFFIX_RE above."""
+    match = _TITLE_QUOTED_BY_RE.search(title or "")
+    if not match:
+        return None
+    song_title = match.group(1).strip()
+    artist = _ARTIST_ALBUM_SUFFIX_RE.sub("", match.group(2).strip()).strip()
+    return (artist, song_title) if song_title and artist else None
+
+
 def resolve_special_channel_metadata(item: dict) -> tuple | None:
     """For a video from a SPECIAL_DESCRIPTION_CHANNELS channel, resolve the
     real (artist, title), in order:
@@ -536,17 +573,26 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
     1. _find_official_match_via_search() - search YouTube for the raw video
        title verbatim and take the clean artist/track off a confirmed
        official release among the top results.
-    2. _parse_music_description_line() - fall back to the video's own
-       description, for a song that was never officially distributed to
-       YouTube under its own upload.
+    2. _parse_quoted_title_by_artist() - fall back to a '"<title>" by
+       <artist>' credit embedded directly in the video's own title, for a
+       channel that credits songs that way (e.g. "aesthetic waves"). Cheap
+       (no extra request) but unverified, unlike step 1.
+    3. _parse_music_description_line() - fall back further to the video's
+       own description, for a song that was never officially distributed to
+       YouTube under its own upload and isn't credited in the title either.
 
-    Returns None if neither works, so the caller falls back to
+    Returns None if none of these work, so the caller falls back to
     build_metadata_from_item()'s normal channel/title-based parsing.
     """
     title = item.get("title") or ""
     found = _find_official_match_via_search(title)
     if found:
         print(f"[green]{item.get('channel')}[/green] special case: matched official release [blue]{found[0]} - {found[1]}[/blue] for \"[yellow]{title}[/yellow]\"")
+        return found
+
+    found = _parse_quoted_title_by_artist(title)
+    if found:
+        print(f"[green]{item.get('channel')}[/green] special case: parsed [blue]{found[0]} - {found[1]}[/blue] from title \"[yellow]{title}[/yellow]\"")
         return found
 
     description = _fetch_video_description(item.get("video_id"))

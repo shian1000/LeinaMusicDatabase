@@ -87,3 +87,93 @@ def test_resolve_artist_synonyms_no_op_when_no_artists_have_synonyms(monkeypatch
     m._resolve_artist_synonyms(metadata_list)
 
     assert metadata_list[0]["artist_name"] == "akuteofficial"
+
+
+# ---------------------------------------------------------
+# _parse_quoted_title_by_artist()
+# ---------------------------------------------------------
+
+def test_parse_quoted_title_by_artist_extracts_credit_after_episode_label():
+    title = 'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha Kitt'
+
+    assert m._parse_quoted_title_by_artist(title) == ("Eartha Kitt", "Santa Baby")
+
+
+def test_parse_quoted_title_by_artist_handles_curly_quotes():
+    title = 'Some Show - OST: “Santa Baby” by Eartha Kitt'
+
+    assert m._parse_quoted_title_by_artist(title) == ("Eartha Kitt", "Santa Baby")
+
+
+def test_parse_quoted_title_by_artist_returns_none_without_quoted_credit():
+    assert m._parse_quoted_title_by_artist("Eartha Kitt - Santa Baby") is None
+
+
+def test_parse_quoted_title_by_artist_returns_none_for_empty_title():
+    assert m._parse_quoted_title_by_artist("") is None
+
+
+def test_parse_quoted_title_by_artist_trims_trailing_album_credit():
+    title = '"Cyberwildlife Park" by Marcin Przybylowicz - Cyberpunk: Edgerunners [OST]'
+
+    assert m._parse_quoted_title_by_artist(title) == ("Marcin Przybylowicz", "Cyberwildlife Park")
+
+
+# ---------------------------------------------------------
+# resolve_special_channel_metadata()
+# ---------------------------------------------------------
+
+def test_resolve_special_channel_metadata_prefers_search_match(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: ("Eartha Kitt", "Santa Baby"))
+    monkeypatch.setattr(m, "_parse_quoted_title_by_artist", lambda title: ("Wrong Artist", "Wrong Title"))
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: "should not be called")
+
+    item = {"channel": "aesthetic waves", "title": '... "Santa Baby" by Eartha Kitt', "video_id": "abc"}
+
+    assert m.resolve_special_channel_metadata(item) == ("Eartha Kitt", "Santa Baby")
+
+
+def test_resolve_special_channel_metadata_falls_back_to_quoted_title_credit(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: "should not be called")
+
+    item = {
+        "channel": "aesthetic waves",
+        "title": 'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha Kitt',
+        "video_id": "abc",
+    }
+
+    assert m.resolve_special_channel_metadata(item) == ("Eartha Kitt", "Santa Baby")
+
+
+def test_resolve_special_channel_metadata_falls_back_to_description(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
+    monkeypatch.setattr(m, "_parse_quoted_title_by_artist", lambda title: None)
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: "Music : Care by Ezra Furman")
+
+    item = {"channel": "soundtrack series", "title": "S02E08", "video_id": "abc"}
+
+    assert m.resolve_special_channel_metadata(item) == ("Ezra Furman", "Care")
+
+
+def test_resolve_special_channel_metadata_falls_back_to_quoted_title_credit_with_album_suffix(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: "should not be called")
+
+    item = {
+        "channel": "soundtracksost",
+        "title": '"Cyberwildlife Park" by Marcin Przybylowicz - Cyberpunk: Edgerunners [OST]',
+        "video_id": "abc",
+    }
+
+    assert m.resolve_special_channel_metadata(item) == ("Marcin Przybylowicz", "Cyberwildlife Park")
+
+
+def test_resolve_special_channel_metadata_returns_none_when_nothing_matches(monkeypatch):
+    monkeypatch.setattr(m, "_find_official_match_via_search", lambda title, **_: None)
+    monkeypatch.setattr(m, "_parse_quoted_title_by_artist", lambda title: None)
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: None)
+
+    item = {"channel": "aesthetic waves", "title": "no credit here", "video_id": "abc"}
+
+    assert m.resolve_special_channel_metadata(item) is None
