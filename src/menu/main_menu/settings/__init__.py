@@ -5,6 +5,7 @@ from utils.discoveries.discoveries_manager import load_all_discovery_modules_met
 from utils.discoveries.discovery_settings import load_discovery_config, save_discovery_config
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
+from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
 from settings import settings
 
 
@@ -12,9 +13,35 @@ def settings_menu():
     action_map = {
         "Discovery modules": discovery_modules_menu,
         "Database location": database_location_menu,
+        "Max songs to process per fetch": set_max_songs_per_fetch,
         "Back up database now": backup_database_now,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
+
+
+def set_max_songs_per_fetch():
+    """Set how many songs a single 'Fetch database data' run (e.g. Fill
+    missing albums) processes at once."""
+    current = load_max_songs_per_fetch()
+    print(f"Current max songs to process per fetch: {current}\n")
+
+    typed = questionary.text("New max songs per fetch:").ask()
+    if not typed:
+        print("Cancelled.")
+        return
+
+    try:
+        value = int(typed)
+    except ValueError:
+        print(f"\033[91m'{typed}' is not a valid number.\033[0m")
+        return
+
+    if value <= 0:
+        print("\033[91mMust be a positive number.\033[0m")
+        return
+
+    save_max_songs_per_fetch(value)
+    print(f"Max songs per fetch set to: {value}")
 
 
 def backup_database_now():

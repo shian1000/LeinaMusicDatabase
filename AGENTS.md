@@ -71,7 +71,9 @@ non-trivial work in that area.
   results, `search_only_categories` is song-only, shared fallback filter):
   `docs/agent-notes/database-search.md`. `backup.py` / `migrations.py` / `database_location.py` —
   automatic backups, schema migrations, and the database folder override, all resolved at
-  startup: `docs/runbooks/database.md`.
+  startup: `docs/runbooks/database.md`. `fetch_data_settings.py` — persisted cap on how many songs
+  a single "Fetch database data" run processes (Settings → Max songs to process per fetch),
+  shared by any future "Fill missing data" category, not just albums.
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `docs/agent-notes/discovery-modules.md` (fetcher
@@ -93,7 +95,9 @@ non-trivial work in that area.
   scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
 - `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):
   shared session, process-wide ~1 req/s limiter, hard timeout, split retry policy. Don't call
-  `requests.get` against `musicbrainz.org` from anywhere else. `docs/agent-notes/import-pipeline.md`.
+  `requests.get` against `musicbrainz.org` from anywhere else. Known unmigrated exception:
+  `music_brainz_fetcher.py` still goes through the raw `musicbrainzngs` library instead — see
+  `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
   `data/spellcheck_cache.json`. `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console

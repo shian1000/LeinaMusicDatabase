@@ -7,6 +7,7 @@ from utils.database.database_sessions import submit_global_database_session
 from utils.common.selenium_sessions import open_global_driver, close_global_driver, ChromeDriverLaunchError
 from utils.discoveries.discoveries_manager import discover_album_name, load_discovery_modules
 from utils.common.text_utils import copy_to_clipboard
+from utils.database.fetch_data_settings import load_max_songs_per_fetch
 
 def fill_missing_albums():
     category = "album"
@@ -14,11 +15,16 @@ def fill_missing_albums():
     songs_objects = get_songs_with_empty_category(category)
     slog(songs_objects)
 
-    songs_list = []
-    
     if not songs_objects:
         print("No songs with missing albums found")
         return
+
+    max_songs = load_max_songs_per_fetch()
+    if len(songs_objects) > max_songs:
+        print(f"Found {len(songs_objects)} songs with missing albums, processing the first {max_songs} (see Settings to change this).")
+        songs_objects = songs_objects[:max_songs]
+
+    songs_list = []
     
     print("Preparing fetch modules . . . ")
     try:

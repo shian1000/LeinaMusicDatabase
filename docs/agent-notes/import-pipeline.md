@@ -93,6 +93,22 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
    import forever (the old code passed no `timeout=` at all). All MusicBrainz
    traffic should route through this — a second call site doing its own
    `requests.get` would defeat the global rate limit.
+
+   **Known exception:** `music_brainz_fetcher.py`'s `get_album_name()` (the
+   "Musicbrainz fetcher" discovery module, used by manual album lookup — not the
+   import batch path above) never migrated to `mb_get()`. It calls
+   `musicbrainzngs.search_recordings()` directly, which issues its own HTTP
+   requests via `urllib` with **no per-call timeout** and no shared rate limiter.
+   Until 2026-10 this meant a stalled MusicBrainz connection could hang that call
+   — and the whole program, since it's synchronous — forever (confirmed live: a
+   process sat blocked for over a week with the TCP socket to MusicBrainz in
+   `CLOSE_WAIT`, unread). The fix applied was a local, scoped
+   `socket.setdefaulttimeout()` around just those two `search_recordings()` calls
+   (`_bounded_socket_timeout()`, 20s) — enough to turn a permanent hang into a
+   handled `musicbrainzngs.WebServiceError`/`NetworkError`, but it still doesn't
+   share `mb_get()`'s session, rate limiter, or `MBStats` counters. Migrating this
+   fetcher onto `mb_get()` properly is still outstanding; if you touch this file
+   again, prefer finishing that migration over patching around the gap further.
 4. **Split retry policy** in `mb_get()` — 429/503 get linear backoff
    (`5 * attempt` seconds) because they mean "cool off". Plain
    connection/timeout errors (`RequestException` that isn't an `HTTPError`) get

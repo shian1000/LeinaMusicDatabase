@@ -1,4 +1,7 @@
+import socket
 import time
+from contextlib import contextmanager
+
 import musicbrainzngs
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
@@ -15,6 +18,22 @@ musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian10
 
 HEADERS = {"User-Agent": MUSICBRAINZ_API_USER_AGENT}
 MODULE_NAME = "Musicbrainz fetcher"
+
+# musicbrainzngs issues its HTTP requests via urllib with no per-call timeout,
+# so a stalled connection (server accepts then never answers) blocks forever
+# instead of raising. It retries internally on socket.timeout, so bounding the
+# socket here turns a permanent hang into a handled NetworkError.
+MUSICBRAINZ_SEARCH_TIMEOUT = 20
+
+
+@contextmanager
+def _bounded_socket_timeout(seconds: float):
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(seconds)
+    try:
+        yield
+    finally:
+        socket.setdefaulttimeout(previous)
 
 def _recording_title_artist(recording) -> tuple[str, str]:
     """Best-effort extraction of what MusicBrainz recording a release came from."""
@@ -47,7 +66,8 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
     query = f'recording:"{song}" AND artist:"{artist}"'
     slog(query, priority=1)
     try:
-        response = musicbrainzngs.search_recordings(query=query, limit=5)
+        with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+            response = musicbrainzngs.search_recordings(query=query, limit=5)
         recordings = response.get("recording-list", [])
 
         album = None
@@ -94,7 +114,8 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             return DiscoveryResult(album=result, matched_title=matched_title, matched_artist=matched_artist)
 
 
-        response = musicbrainzngs.search_recordings(query=query, limit=25)
+        with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+            response = musicbrainzngs.search_recordings(query=query, limit=25)
         recordings = response.get("recording-list", [])
 
         album = None

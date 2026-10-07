@@ -27,6 +27,12 @@ DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
 # DISCOVERY_MODULES_CONFIG_FILE: stable across MODULE_NAME renames.
 DISCOVERY_STATS_FILE = "discovery_fetcher_stats.json"
 
+# Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
+# albums) processes at once, persisted as JSON. Keeps a single run from
+# churning through the whole database when only a quick batch is wanted.
+FETCH_DATA_CONFIG_FILE = "fetch_data_config.json"
+DEFAULT_MAX_SONGS_PER_FETCH = 50
+
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
     "spotify_fetcher",
