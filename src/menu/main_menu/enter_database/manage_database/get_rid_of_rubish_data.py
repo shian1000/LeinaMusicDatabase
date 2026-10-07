@@ -18,6 +18,103 @@ _CLEANUP_FIELDS = [
     ("album",  lambda song: song.album,        lambda song, v: setattr(song, "album", v)),
 ]
 
+# Trailing junk phrases that only describe how the video was uploaded, never
+# part of the song's actual name (e.g. "Smallville - Save Me Music Video" ->
+# "Smallville - Save Me"). Stripped from the end of the title automatically,
+# without asking for confirmation, before falling back to the "seems like
+# rubbish" prompt for anything that's still blacklisted afterwards. Matched
+# case-insensitively against the very end of the title; add new phrases here
+# as they come up. Longer phrases are listed before the shorter phrases they
+# contain (e.g. "official music video" before "music video") so the whole
+# annotation is stripped in one go.
+TITLE_JUNK_SUFFIXES = [
+    "official music video",
+    "official lyric video",
+    "official video",
+    "official audio",
+    "music video",
+    "lyric video",
+    "video clip",
+    "videoclip",
+]
+_TITLE_JUNK_SUFFIX_RE = re.compile(
+    r"\s*(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_trailing_junk_suffix(title: str) -> str:
+    """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
+    end of `title`, handling more than one stacked suffix (e.g. "Song Music
+    Video Official Audio"). Returns `title` unchanged if nothing matches.
+    """
+    title = (title or "").strip()
+    while True:
+        new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
+        if new_title == title:
+            return title
+        title = new_title
+
+
+# Bracket-pair characters seen wrapping a junk annotation at the end of a
+# title, beyond the plain "()"/"[]" pair uploaders sometimes reach for
+# instead - e.g. "Lot 《Official Music Video》" (CJK angle/corner quotation
+# brackets). Add new pairs here as they come up.
+_TITLE_BRACKET_PAIRS = {
+    "(": ")",
+    "[": "]",
+    "{": "}",
+    "【": "】",
+    "〈": "〉",
+    "《": "》",
+    "「": "」",
+    "『": "』",
+}
+# DOTALL so the bracket's content can be matched across a stray newline
+# (e.g. YouTube titles pasted with the closing bracket knocked onto its own
+# line: "《Official Music Video\n》").
+_TITLE_TRAILING_BRACKET_RE = re.compile(
+    r"\s*(?:" + "|".join(
+        re.escape(open_ch) + r"(.*?)" + re.escape(close_ch)
+        for open_ch, close_ch in _TITLE_BRACKET_PAIRS.items()
+    ) + r")\s*$",
+    re.DOTALL,
+)
+
+
+def strip_trailing_junk_bracket(title: str) -> str:
+    """Repeatedly strip a trailing bracket (any pair in _TITLE_BRACKET_PAIRS)
+    off the end of `title` when its content - once whitespace, including a
+    stray newline before the closing bracket, is collapsed - exactly matches
+    one of TITLE_JUNK_SUFFIXES, e.g. "Lot 《Official Music Video\\n》" -> "Lot".
+    Left alone (for manual review) when the bracket holds anything else, so a
+    genuine subtitle in brackets is never touched.
+    """
+    title = (title or "").strip()
+    while True:
+        match = _TITLE_TRAILING_BRACKET_RE.search(title)
+        if not match:
+            return title
+        content = next((g for g in match.groups() if g is not None), "")
+        normalized_content = re.sub(r"\s+", " ", content).strip().lower()
+        if normalized_content not in TITLE_JUNK_SUFFIXES:
+            return title
+        title = title[:match.start()].strip()
+
+
+def strip_trailing_junk(title: str) -> str:
+    """Strip both plain trailing junk phrases and bracket-wrapped ones off
+    the end of `title`, repeating until nothing more changes (handles a
+    bracketed annotation stacked after a plain one, or vice versa).
+    """
+    title = (title or "").strip()
+    while True:
+        new_title = strip_trailing_junk_suffix(title)
+        new_title = strip_trailing_junk_bracket(new_title)
+        if new_title == title:
+            return title
+        title = new_title
+
 def _apply_field_cleanup(songs, needs_transform, transform, action_description):
     """
     Apply `transform` to each song's title/artist name/album whenever
@@ -67,6 +164,7 @@ def seek_nonsense_names(songs):
     # once every song has been scanned - same pattern as the import pipeline and
     # the spell-check menu.
     pending_rubbish_corrections = []
+    auto_fixed_titles = []
     for song in songs:
         if not has_tag_on_song(song, "album_checked"):
             if is_blacklisted_album(song.album):
@@ -75,6 +173,14 @@ def seek_nonsense_names(songs):
                     "field": "album",
                     "old_value": song.album,
                 })
+
+            if song.title:
+                stripped_title = strip_trailing_junk(song.title)
+                if stripped_title and stripped_title != song.title:
+                    old_title = song.title
+                    edit_db_entry(song, "title", stripped_title)
+                    auto_fixed_titles.append(f"'{old_title}' -> \033[93m'{stripped_title}'\033[0m")
+
             if is_blacklisted_album(song.title):
                 pending_rubbish_corrections.append({
                     "song": song,
@@ -82,6 +188,13 @@ def seek_nonsense_names(songs):
                     "old_value": song.title,
                 })
             add_tag_to_song(song, "album_checked")
+
+    if auto_fixed_titles:
+        print("\n" + "="*70)
+        print(f"Auto-stripped junk suffixes from {len(auto_fixed_titles)} title(s):")
+        for change in auto_fixed_titles:
+            print(f"  {change}")
+        print("="*70)
 
     if not pending_rubbish_corrections:
         return
@@ -95,7 +208,20 @@ def seek_nonsense_names(songs):
         old_value = correction["old_value"]
 
         copy_to_clipboard(f"{song.artist.name} - {song.title}")
-        confirmation = questionary.confirm(f"'{old_value}' seems like rubish. Do you wish to edit it? (The song is '{song.artist.name} - {song.title}')").ask()
+
+        # Questionary renders its own prompt text through prompt_toolkit's
+        # formatted-text machinery, which doesn't interpret raw ANSI escape
+        # codes embedded in a plain string (they'd show up as literal
+        # garbage instead of color) - so the field label and the
+        # color-highlighted context are printed as a plain line above the
+        # prompt instead of being folded into questionary's own message.
+        if field == "album":
+            context = f"{song.artist.name} - {song.title} (album: \033[93m{song.album}\033[0m)"
+        else:
+            context = f"{song.artist.name} - \033[93m{song.title}\033[0m"
+        print(f"\n[{field.upper()}] {context}")
+
+        confirmation = questionary.confirm(f"'{old_value}' seems like rubish. Do you wish to edit it?").ask()
         if not confirmation:
             continue
 

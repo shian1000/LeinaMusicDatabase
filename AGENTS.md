@@ -119,10 +119,18 @@ non-trivial work in that area.
   instead (see `tests/test_resolve_duplicates.py`).
 - `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
-  per-field loop. `seek_nonsense_names()` queues blacklisted album/title hits and asks about them
-  in one batch at the end (see the Coding conventions entry above); `resolve_unknown_artist()`
-  still applies its artist/title split unconditionally (no yes/no there) but prints one summary
-  instead of pausing per song.
+  per-field loop. `seek_nonsense_names()` first auto-strips a known trailing junk annotation off the
+  title via `strip_trailing_junk()` (plain suffix and bracket-wrapped, e.g. "Song Music Video" or
+  "Song 《Official Music Video》" -> "Song" — any bracket pair, since uploaders also use CJK ones)
+  with no confirmation, then queues whatever's still blacklisted (album/title) and asks about it in
+  one batch at the end (see the Coding conventions entry above). Its `TITLE_JUNK_SUFFIXES` list is
+  separate from `import_from_playlist.py`'s `YOUTUBE_TITLE_JUNK_PHRASES`/`*_MARKER_WORDS` (see
+  `docs/agent-notes/youtube-search-matching.md`) — deliberately so: this one only auto-fixes an
+  *exact* phrase match (safe to apply without review), while the import-time one also matches on
+  marker words anywhere in a bracket. Add a new junk phrase to both lists if it should be caught in
+  both places; there's no shared code between them. `resolve_unknown_artist()` still applies its
+  artist/title split unconditionally (no yes/no there) but prints one summary instead of pausing
+  per song.
 - `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
   covers — keep it in sync with the tests). `tests/test_scripts.py` is an explicit scratch file
   (its own docstring: "meant to be a mess"), excluded from collection via `tests/conftest.py`.
@@ -179,6 +187,12 @@ non-trivial work in that area.
   redesign is explicitly requested.
 - Reuse the shared helpers listed in the Module map rather than reintroducing local equivalents.
 - Comments for non-obvious constraints, not line-by-line narration.
+- `questionary` prompts (`confirm()`, `select()`, etc.) don't interpret raw ANSI color codes
+  embedded in their `message`/`instruction` strings — it builds its own `(style_class, text)`
+  tokens and renders them through prompt_toolkit's formatted-text machinery, so a literal
+  `\033[93m...\033[0m` shows up as garbage instead of color. To highlight something in a prompt,
+  `print()` a plain colored line above the `questionary` call instead (see `seek_nonsense_names()`
+  in `get_rid_of_rubish_data.py` for the pattern).
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
