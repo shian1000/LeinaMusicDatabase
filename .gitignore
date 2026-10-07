@@ -20,7 +20,9 @@ Thumbs.db
 .debug
 recent_dirs.json
 discovery_modules_config.json
+discovery_modules_config_years.json
 discovery_fetcher_stats.json
+discovery_fetcher_stats_years.json
 database_location_config.json
 /.agents/local.md
 

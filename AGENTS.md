@@ -73,7 +73,7 @@ non-trivial work in that area.
   automatic backups, schema migrations, and the database folder override, all resolved at
   startup: `docs/runbooks/database.md`. `fetch_data_settings.py` — persisted cap on how many songs
   a single "Fetch database data" run processes (Settings → Max songs to process per fetch),
-  shared by any future "Fill missing data" category, not just albums.
+  shared across every "Fill missing data" category (Albums, Years, ...), not just albums.
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `docs/agent-notes/discovery-modules.md` (fetcher
@@ -279,8 +279,10 @@ non-trivial work in that area.
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
   try to evade the latter), why `spotify_fetcher.py` and `youtube_fetcher.py` scrape their public
-  web players' markup instead of the official (credential-requiring) APIs, and how
-  `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu.
+  web players' markup instead of the official (credential-requiring) APIs, how
+  `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the
+  separate `get_release_year()` contract/config/stats for "Fill missing data -> Years" (including
+  why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers).
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MusicBrainz cost path shared by
   every importer via `utils/discoveries/import_engine.py`'s `run_import_batch()` (mp3-tag import
   and YouTube-playlist import are both just metadata builders feeding the same engine now — see

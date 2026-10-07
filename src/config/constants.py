@@ -17,6 +17,12 @@ MAX_RECENT_DIRS = 5
 # that, the JSON file is the source of truth and this is ignored.
 DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
 
+# Same idea as DISCOVERY_MODULES_CONFIG_FILE, but for "Fill missing data ->
+# Years": a separate config because only some modules implement
+# get_release_year(), so the set of available modules (and a sensible order)
+# differs from the album fetchers.
+DISCOVERY_MODULES_YEAR_CONFIG_FILE = "discovery_modules_config_years.json"
+
 # Optional override for Settings.database_dir (the folder holding music.db /
 # tag.db), persisted as JSON. Read once at startup, so a change made through
 # the Settings menu only takes effect after the app is restarted.
@@ -26,6 +32,11 @@ DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
 # as JSON and keyed by module id (filename stem) for the same reason as
 # DISCOVERY_MODULES_CONFIG_FILE: stable across MODULE_NAME renames.
 DISCOVERY_STATS_FILE = "discovery_fetcher_stats.json"
+
+# Same as DISCOVERY_STATS_FILE, but counters for "Fill missing data -> Years"
+# lookups, kept separate so they don't conflate with the album fetchers'
+# invocation/success rates in the Statistics menu.
+DISCOVERY_STATS_YEAR_FILE = "discovery_fetcher_stats_years.json"
 
 # Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
 # albums) processes at once, persisted as JSON. Keeps a single run from
@@ -42,6 +53,20 @@ DEFAULT_DISCOVERY_MODULE_ORDER = [
     "itunes_fetcher",
     "genius_fetcher",
 ]
+
+# Seed order for the subset of modules that implement get_release_year().
+# Like DEFAULT_DISCOVERY_MODULE_ORDER, only used the first time the config
+# file is created; reconcile_year_discovery_config() auto-adds any other
+# module that later gains a get_release_year() of its own.
+DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
+    "music_brainz_fetcher",
+    "google_search_fetcher",
+]
+
+# A fetched release year outside this range is treated as implausible (e.g. a
+# scraper accidentally reading a copyright notice or an unrelated date) and
+# discarded rather than written to the database.
+MIN_PLAUSIBLE_RELEASE_YEAR = 1900
 
 # File browser menu options
 FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"

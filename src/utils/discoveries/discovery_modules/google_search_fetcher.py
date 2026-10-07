@@ -6,7 +6,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.debug import slog
-from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
+import re
 import time
 from utils.database.database_getter import get_songs_from_db_session
 
@@ -53,20 +54,23 @@ def _extract_value(el) -> str:
 
 # -- Public API ----------------------------------------------------------------
 
-def get_album_name(artist: str, song: str) -> dict | None:
+def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
+    """Load a Google search for "artist - query" and parse its music
+    Knowledge Panel (if any) into a {friendly_name: value} dict. Shared by
+    get_album_name() (query = song title) and get_release_year() (query =
+    either a song title or an album title).
 
-    # query = f"{artist} - {song}"
-    # song_obj = (get_songs_from_db_session("name", query))[0]
-    # query = f"{song_obj.artist.name} - {song_obj.title}"
-    # slog(query)
-
+    Accepts both the "music/recording_cluster" panel (seen for a plain
+    song query) and "music/album" (assumed shape for an album-name query,
+    based on Google's recording_cluster attrid naming convention - not yet
+    confirmed against a live album panel, so get_release_year() may need
+    its attrid handling revisited if this doesn't pan out)."""
     driver = get_global_driver()
     if driver is None:
         print("[Error] No driver open. Call open_global_driver() first.")
         return None
 
-    query = f"{artist} - {song}"
-    url = f"https://www.google.com/search?q={quote_plus(query)}&hl=en"
+    url = f"https://www.google.com/search?q={quote_plus(f'{artist} - {query}')}&hl=en"
 
     driver.get(url)
 
@@ -75,10 +79,6 @@ def get_album_name(artist: str, song: str) -> dict | None:
     if "/sorry/" in driver.current_url:
         slog("[Result] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
         return None
-
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-
-    # slog(soup)
 
     try:
         WebDriverWait(driver, 8).until(
@@ -92,12 +92,10 @@ def get_album_name(artist: str, song: str) -> dict | None:
 
     soup = BeautifulSoup(driver.page_source, "html.parser")
 
-    # slog(soup)
-
     info = {}
     for div in soup.find_all("div", attrs={"data-attrid": True}):
         attrid = div.get("data-attrid", "")
-        if "music/recording_cluster" not in attrid:
+        if "music/recording_cluster" not in attrid and "music/album" not in attrid:
             continue
 
         field_raw = attrid.split(":")[-1].lower()
@@ -109,13 +107,35 @@ def get_album_name(artist: str, song: str) -> dict | None:
                 info[friendly_name] = value
 
     if not info:
-        print("[Result] No Knowledge Panel found for this song.")
+        print("[Result] No Knowledge Panel found for this query.")
         return None
 
-    info["_query"] = {"artist": artist, "song": song}
+    info["_query"] = {"artist": artist, "query": query}
     slog(info)
+    return info
+
+
+def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
+    info = _fetch_knowledge_panel_info(artist, song)
+    if not info:
+        return None
 
     album = info.get("album")
     if not album:
         return None
     return DiscoveryResult(album=album, matched_artist=info.get("artists"))
+
+
+def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryResult | None:
+    info = _fetch_knowledge_panel_info(artist, query)
+    if not info:
+        return None
+
+    released = info.get("released")
+    if not released:
+        return None
+
+    match = re.search(r"(\d{4})", released)
+    if not match:
+        return None
+    return YearDiscoveryResult(year=int(match.group(1)), matched_artist=info.get("artists"))

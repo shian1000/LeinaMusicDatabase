@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import musicbrainzngs
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
-from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import requests
 from difflib import SequenceMatcher
@@ -160,4 +160,69 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for '{song}' by '{artist}': {e}")
+        return None
+
+
+def _extract_year(date_str: str | None) -> int | None:
+    """MusicBrainz dates come as 'YYYY', 'YYYY-MM', or 'YYYY-MM-DD' -- pull
+    out just the leading year."""
+    if not date_str:
+        return None
+    match = re.match(r"(\d{4})", date_str)
+    return int(match.group(1)) if match else None
+
+
+def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.0) -> YearDiscoveryResult | None:
+    """Look up a release year.
+
+    is_single=False: query is an album title - searched as a release group,
+    since release groups (not recordings) are what carries an album's
+    first-release-date.
+    is_single=True: query is a song title - searched as a recording (same
+    shape as get_album_name()), reading the date off the chosen release.
+    """
+    try:
+        if is_single:
+            query_str = f'recording:"{query}" AND artist:"{artist}"'
+            with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+                response = musicbrainzngs.search_recordings(query=query_str, limit=10)
+            recordings = response.get("recording-list", [])
+
+            for recording in recordings:
+                for release in recording.get("release-list", []):
+                    release_group = release.get("release-group", {})
+                    secondary_types = release_group.get("secondary-type-list", [])
+                    if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
+                        continue
+                    if is_blacklisted_album(release.get("title", "")):
+                        continue
+                    year = _extract_year(release.get("date") or release_group.get("first-release-date"))
+                    if year:
+                        time.sleep(delay)
+                        matched_title, matched_artist = _recording_title_artist(recording)
+                        return YearDiscoveryResult(year=year, matched_title=matched_title, matched_artist=matched_artist)
+            return None
+
+        query_str = f'releasegroup:"{query}" AND artist:"{artist}"'
+        with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+            response = musicbrainzngs.search_release_groups(query=query_str, limit=10)
+        release_groups = response.get("release-group-list", [])
+
+        for release_group in release_groups:
+            title = release_group.get("title", "")
+            if is_blacklisted_album(title):
+                continue
+            year = _extract_year(release_group.get("first-release-date"))
+            if not year:
+                continue
+            time.sleep(delay)
+            try:
+                matched_artist = release_group["artist-credit"][0]["artist"]["name"]
+            except (KeyError, IndexError, TypeError):
+                matched_artist = ""
+            return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
+        return None
+
+    except musicbrainzngs.WebServiceError as e:
+        print(f"MusicBrainz error for release year of '{query}' by '{artist}': {e}")
         return None

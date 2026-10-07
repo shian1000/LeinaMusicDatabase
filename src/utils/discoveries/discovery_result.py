@@ -14,3 +14,17 @@ class DiscoveryResult:
     album: str
     matched_title: Optional[str] = None
     matched_artist: Optional[str] = None
+
+
+@dataclass
+class YearDiscoveryResult:
+    """Same contract as DiscoveryResult, for a module's get_release_year().
+
+    matched_title is whatever release/recording title the module actually
+    found the year on (an album title when the query was an album, a
+    recording title when the query was a single's song title) - never an
+    echo of the query, for the same reason as DiscoveryResult.
+    """
+    year: int
+    matched_title: Optional[str] = None
+    matched_artist: Optional[str] = None

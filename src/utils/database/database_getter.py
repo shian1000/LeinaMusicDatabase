@@ -277,6 +277,25 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
     return db_query.filter(or_(col == None, col == "")).all()
 
 
+def get_songs_with_album_missing_year() -> list[Song]:
+    """Songs that already have an album recorded (a real album name, or the
+    "Singles" sentinel - see itunes_fetcher.py/wikipedia_fetcher.py) but no
+    year yet. This is the source set for "Fill missing data -> Years": we
+    only look up a year once we know what to search for (an album name, or
+    the song title itself for a single)."""
+
+    music_session, _ = get_global_database_sessions()
+
+    return (
+        music_session.query(Song)
+        .join(Artist)
+        .filter(Song.year == None)
+        .filter(Song.album != None, Song.album != "")
+        .order_by(Artist.name, Song.album, Song.title)
+        .all()
+    )
+
+
 
 def get_songs_from_db_session(category: str = None, query: str = None) -> list[Song]:
 

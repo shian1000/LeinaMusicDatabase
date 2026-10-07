@@ -128,6 +128,72 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
 Plain `str` returns still work (they just skip the similarity cross-check), so an un-upgraded
 module degrades gracefully rather than breaking.
 
+## Release-year lookups ("Fill missing data -> Years") and `get_release_year()`
+
+A second, independent duck-typed contract alongside `get_album_name()`: a module can optionally
+define
+
+```python
+def get_release_year(artist: str, query: str, is_single: bool) -> int | YearDiscoveryResult | None
+```
+
+`query` is an album title (`is_single=False`) or a song title (`is_single=True`) — never a `Song`
+object, since the caller (`fill_missing_years.py`) looks a year up once per *album*, not once per
+song (see below). `YearDiscoveryResult` (`discovery_result.py`) mirrors `DiscoveryResult` exactly
+(`year`, `matched_title`, `matched_artist`), validated by `discoveries_manager._validate_year_result()`
+the same way `_validate_result()` validates albums, plus a plausible-range check
+(`MIN_PLAUSIBLE_RELEASE_YEAR`..current year + 1, in `config/constants.py`) since a bare `int`/wrong
+year can't be caught by a blacklist the way a bad album string can.
+
+Currently implemented by `music_brainz_fetcher.py` and `google_search_fetcher.py` only. A module
+without `get_release_year` is simply never tried for Years — nothing elsewhere needs updating to
+add or drop one.
+
+**Capability is detected statically, like `MODULE_NAME`, for the same reason**: `discoveries_manager._module_defines_function()`
+parses each file's AST looking for a top-level `def get_release_year`, so Settings' Years toggle/
+reorder screens and `load_year_discovery_modules()` never import a module that doesn't have it (or
+a disabled one) just to check. Consequence for anyone adding this to a new fetcher: it must be a
+plain top-level `def`, not something assigned dynamically or wrapped — the static parser won't see it.
+
+**Separate config and stats from the album fetchers.** `discovery_settings.py`'s
+`load/save/reconcile_year_discovery_config()` persist to `discovery_modules_config_years.json`
+(gitignored, like the album one) instead of sharing `discovery_modules_config.json` — deliberate,
+since the set of year-capable modules differs from the album-capable set, and enabling/disabling a
+fetcher for Albums shouldn't silently also toggle it for Years. Same story for stats:
+`record_year_invocation()`/`record_year_success()` write to `discovery_fetcher_stats_years.json`,
+kept apart from `discovery_fetcher_stats.json` so a fetcher's year success rate doesn't blend into
+its album success rate in the Statistics menu.
+
+**`fill_missing_years.py` batch-writes a year to every song sharing an album — unlike
+`fill_missing_albums.py`'s one-write-per-song.** It only looks at songs that already have an
+`album` filled in (a real album, or the `"Singles"` sentinel — see below), groups them by
+`(artist.name, album)`, and calls `discover_release_year()` once per group; every song in that
+group gets `edit_db_entry(song, "year", str(year))`. This is a real asymmetry from the album flow
+worth remembering if you're porting logic between the two: album lookups are inherently per-song
+(each song can have a different album), but a release year is a property of the album, not the
+individual track, so grouping avoids redundant lookups and guarantees every track on the same
+album gets the same year. Songs whose `album == "Singles"` are excluded from grouping and looked
+up individually by their own title (`is_single=True`) — grouping them under the literal string
+`"Singles"` would be wrong, since that sentinel doesn't denote a real shared album.
+
+**MusicBrainz picks a different API call depending on `is_single`.** For an album query it calls
+`musicbrainzngs.search_release_groups()` (release groups carry `first-release-date`, which
+recordings don't expose directly) filtered to `releasegroup:"<query>" AND artist:"<artist>"`. For a
+single it reuses the `search_recordings()` shape `get_album_name()` already uses, reading
+`date`/`first-release-date` off the chosen recording's release. If you add year support to another
+fetcher, decide up front whether it can search by album title at all (some scraped sources' search
+boxes behave differently for an album vs. a song query) — this isn't automatic.
+
+**`google_search_fetcher.py`'s album-query handling is an unverified assumption.** The existing
+code only ever searched `"{artist} - {song}"` and parsed a `music/recording_cluster` Knowledge
+Panel. For `get_release_year()` on an album query, the attrid filter was widened to also accept
+`music/album` (guessing Google's Knowledge Panel uses an analogous attrid namespace for an album
+page, by the same naming convention as `music/recording_cluster`) — this has **not** been confirmed
+against a live album Knowledge Panel. If Years lookups via this fetcher come back empty specifically
+for real albums (but work for `is_single=True` singles, which still hit the already-confirmed
+`recording_cluster` panel), check `debug.html` for the actual `data-attrid` value on an album query
+before assuming the similarity/validation logic is at fault.
+
 ## Which fetchers report matches
 
 - `music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the
