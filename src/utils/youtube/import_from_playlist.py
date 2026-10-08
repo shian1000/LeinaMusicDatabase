@@ -127,6 +127,7 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
     "4K",
     "Remaster",
     "Remastered",
+    "Oficial",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE) + r")\b",
