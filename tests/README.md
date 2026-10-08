@@ -3,7 +3,7 @@
 Run everything: `python -m pytest` (config in `pyproject.toml` — `testpaths = ["tests"]`, so this
 works from the repo root with no extra flags). Run one file: `python -m pytest tests/<file>.py`.
 
-Currently 191 tests, all fully mocked — no live network calls, no scraping, no real MusicBrainz/
+Currently 209 tests, all fully mocked — no live network calls, no scraping, no real MusicBrainz/
 YouTube/Wikipedia/Spotify traffic. Full run takes ~2-3 seconds. (`AGENTS.md` used to say several of
 these hit real network — that was true once, but every test here is mocked as of 2026-09; verified
 by reading each file, not assumed.)
@@ -17,6 +17,7 @@ by reading each file, not assumed.)
 | `test_wikipedia_fetcher.py` | `wikipedia_fetcher.get_album_name()` — returns `None` (not a crash) when Wikipedia's API returns undecodable JSON. |
 | `test_spotify_fetcher.py` | `spotify_fetcher._find_matching_track()` / `_extract_album_from_track_page()` — the search-results row matching and track-page album scraping, against static HTML fixtures (no Selenium, no live `open.spotify.com` traffic). |
 | `test_itunes_fetcher.py` | `itunes_fetcher._find_song_link()` (both known search-results layouts, see `docs/agent-notes/discovery-modules.md`) and `extract_from_itunes_soup()` — artist/title verification, the "(feat. X)" title-credit cleanup, and the `" - Single"` → `"Singles"` album rewrite — against static HTML fixtures (no Selenium, no live `music.apple.com` traffic). |
+| `test_genius_fetcher.py` | `genius_fetcher.title_matches_url()` — a search-result URL is matched on the slug with the artist stripped, so a short title by a long-named artist ("Childish Gambino - Cruisin'") isn't rejected; a different song or the same title by another artist still is. |
 | `test_youtube_fetcher.py` | `youtube_fetcher._find_matching_song()` — matching a filtered "Songs" search-results row (title/artist/album all read from the row itself, no track page to follow), including multi-artist rows and rows missing an album link, against static HTML fixtures (no Selenium, no live `music.youtube.com` traffic). |
 | `test_youtube_download.py` | `enter_database.download_yt_song_menu()` — the prompt-for-a-link download flow, with the actual download and `questionary` prompt mocked out. |
 | `test_manage_youtube_playlists.py` | `manage_youtube_playlists.create_yt_playlist()`'s DB-link reuse/validate/persist/clear flow (`is_video_id_valid()`, `save_video_id_to_song()`, `NO_VIDEO_SENTINEL` ("N/A") handling), plus `add_video_to_playlist()`'s quota-exceeded propagation. |

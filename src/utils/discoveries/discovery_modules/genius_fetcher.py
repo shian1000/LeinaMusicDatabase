@@ -25,13 +25,16 @@ def _title_portion_of_slug(slug: str, artist: str) -> str:
         return norm_slug[len(norm_artist):].strip()
     return norm_slug
 
-def title_matches_url(title: str, url: str, threshold: float = 0.6) -> bool:
-    slog("title_matches_url function", priority=1)
+def title_matches_url(title: str, url: str, artist: str, threshold: float = 0.6) -> bool:
     """Check if a song title roughly matches a Genius lyrics URL."""
+    slog("title_matches_url function", priority=1)
     slug = _url_slug(url)
     slog(slug, priority=1)
     title_slug = normalize(title)
-    url_slug = normalize(slug)
+    # Compare against the slug with the artist stripped: the full "artist title"
+    # slug drags the ratio of a short title under the threshold even on an exact
+    # hit ("cruisin" vs "childish gambino cruisin" = 0.45).
+    url_slug = _title_portion_of_slug(slug, artist)
 
     ratio = similarity(title_slug, url_slug)
     slog(ratio, priority=1)
@@ -61,7 +64,7 @@ def get_album_name(artist: str, title: str) -> str | None:
             slog(link, priority=1)
             href = link.get_attribute("href")
             slog(href, priority=1)
-            if href and title_matches_url(title, href):
+            if href and title_matches_url(title, href, artist):
                 song_url = href
                 slog("match", priority=1)
                 break
@@ -74,12 +77,18 @@ def get_album_name(artist: str, title: str) -> str | None:
         driver.get(song_url)
         time.sleep(2)
         
-        # Find album link
-        album_tag = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='/albums/']"))
+        # Find album link. The page also carries hidden /albums/ links (nav and
+        # recommendation menus, often for other artists) ahead of the real one;
+        # those have no visible text, so take the first link that actually renders.
+        album_tags = WebDriverWait(driver, 10).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[href*='/albums/']"))
         )
+        album_text = next((tag.text.strip() for tag in album_tags if tag.text.strip()), "")
+        if not album_text:
+            slog("No visible album link on the Genius song page")
+            return None
 
-        album_found = remove_brackets(album_tag.text.strip())
+        album_found = remove_brackets(album_text)
         if is_blacklisted_album(album_found):
             return None
         else:

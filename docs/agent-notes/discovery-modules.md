@@ -202,7 +202,14 @@ before assuming the similarity/validation logic is at fault.
   from the song's own page to verify the match internally (see dedicated section below).
 - `genius_fetcher.py` — reports the song-title portion of the matched URL slug (artist prefix
   stripped best-effort by `_title_portion_of_slug()`, since Genius slugs are `artist-title-lyrics`
-  with no clean delimiter).
+  with no clean delimiter). The same stripped slug is what `title_matches_url()` scores the query
+  title against when picking a search result: scoring against the full slug let the artist words
+  dilute SequenceMatcher's ratio, so a short title by a long-named artist failed even on an exact
+  hit ("cruisin" vs "childish gambino cruisin" = 0.45 < 0.6). A slug by a *different* artist isn't
+  stripped, so it still scores low — that's what rejects same-title songs by other artists. On the
+  song page, don't take the first `a[href*='/albums/']`: hidden nav/recommendation links (often
+  other artists' albums) come first and have empty `.text` in Selenium, so the fetcher takes the
+  first one with visible text.
 - `google_search_fetcher.py` — reports the artist field from the Google Knowledge Panel when
   present; no reliably-extractable matched title from that source.
 - `spotify_fetcher.py` — reports the track title/artist scraped from the matched track's own page
