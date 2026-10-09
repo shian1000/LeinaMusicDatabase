@@ -1,4 +1,10 @@
-from utils.common.text_utils import truncate_at_word, is_blacklisted_album, similarity, scaled_similarity_threshold
+from utils.common.text_utils import (
+    truncate_at_word,
+    is_blacklisted_album,
+    is_soundtrack_artist,
+    similarity,
+    scaled_similarity_threshold,
+)
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 from utils.discoveries.discovery_settings import (
     reconcile_discovery_config,
@@ -272,6 +278,15 @@ def discover_album_name(song, modules):
 
         if album:
             return album
+
+    # Game/anime soundtracks are often stored with the album in the artist
+    # field ("Tekken 5 OST") and no fetcher knows the individual track. Only a
+    # last resort - a fetcher may still find the proper album name - and not
+    # recorded as any fetcher's success in the Statistics menu.
+    if is_soundtrack_artist(art_full):
+        print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {art_full}")
+        return art_full
+
     slog("Gave up =)")
     return None
 

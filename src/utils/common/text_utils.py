@@ -17,6 +17,7 @@ from config.constants import (
     MUSICBRAINZ_API_BASE_URL,
     MUSICBRAINZ_API_LIMIT,
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
+    SOUNDTRACK_ARTIST_MARKERS,
 )
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
@@ -103,6 +104,9 @@ def truncate_at_word(text: str) -> str:
         "feat",
         "&",
         "ft.",
+        # Polish guest credit, e.g. "Pochodnia - gościnnie Kasia Sienkiewicz"
+        "gościnnie",
+        "goscinnie",
         " и ",
         " i ",
         ", "
@@ -115,12 +119,15 @@ def truncate_at_word(text: str) -> str:
         if idx != -1 and idx < earliest_index:
             earliest_index = idx
  
-    return text[:earliest_index].rstrip()
+    if earliest_index == len(text):
+        return text.rstrip()
+    # Drop the separator left dangling before the credit ("Pochodnia - gościnnie X" -> "Pochodnia")
+    return text[:earliest_index].rstrip(" -–—")
 
 
 def normalize_japanese_title(text: str) -> str:
     if not text:
-        return text
+        return text.rstrip()
 
     text = re.sub(r'[・･•·\-+]', ' ', text)
     slog(text)
@@ -265,6 +272,20 @@ def is_blacklisted_album(title: str) -> bool:
             return True
         return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
     return False
+
+def is_soundtrack_artist(artist_name: str) -> bool:
+    """True if the artist name carries a soundtrack marker ("Tekken 5 OST").
+
+    Matched as a whole word, so "Ghost" or "Post Malone" don't count. Plain
+    \\b can't be used: it doesn't match after the trailing dot of "O.S.T.".
+    """
+    if not artist_name:
+        return False
+    lowered = artist_name.lower()
+    return any(
+        re.search(r'(?<!\w)' + re.escape(marker) + r'(?!\w)', lowered)
+        for marker in SOUNDTRACK_ARTIST_MARKERS
+    )
 
 def remove_brackets(text):
     return re.sub(r'\s*[\(\[]([^)\]]*)[)\]]', '', text).strip()

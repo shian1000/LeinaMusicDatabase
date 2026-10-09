@@ -68,6 +68,18 @@ DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
 # discarded rather than written to the database.
 MIN_PLAUSIBLE_RELEASE_YEAR = 1900
 
+# Whole-word, case-insensitive markers that flag an artist name as really being
+# a soundtrack ("Tekken 5 OST"). When every album fetcher comes up empty for
+# such an artist, discover_album_name() falls back to using the artist name
+# itself as the album.
+SOUNDTRACK_ARTIST_MARKERS = [
+    "ost",
+    "o.s.t.",
+    "o.s.t",
+    "soundtrack",
+    "soundtracks",
+]
+
 # File browser menu options
 FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"
 FILE_BROWSER_BACK_OPTION = "<= [Go Back]"

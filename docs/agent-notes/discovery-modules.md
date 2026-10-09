@@ -40,7 +40,12 @@ Before calling any module, `discover_album_name()` runs the artist and title thr
 `truncate_at_word()` (`text_utils.py`), which cuts the string off at the first occurrence of a
 stop word (`feat`, `&`, `ft.`, `, `, etc.) — meant to strip trailing collaborator credits like
 "Song Title feat. Other Artist" down to just "Song Title" before searching, since most fetchers
-match better without them.
+match better without them. The list also holds the Polish guest credit "gościnnie"/"goscinnie",
+usually written after a dash ("Pochodnia - gościnnie Kasia Sienkiewicz"), so when truncation cuts
+something it also strips a dangling trailing ` -`/`–`/`—` — otherwise the query becomes
+"Pochodnia -" and every fetcher misses. Real titles that confused this step are pinned in
+`tests/test_album_discovery_queries.py` (`ALBUM_QUERY_REGRESSION_CASES` — the first query sent to
+a fetcher); add a new problematic song there as one more row.
 
 The catch: the bare `", "` stop word matches *any* mid-string comma-space, not just a trailing
 credits list, so it also truncates legitimate titles/artists that happen to contain one — e.g.
@@ -74,6 +79,20 @@ resembles the full `"MRFY + Laibach"` query closely enough to clear `SPELLING_CH
 the album lookup fails across the board, not just on Spotify. This is a `truncate_at_word()` /
 manager-level gap (the same class of problem as the comma case above, just a different separator),
 not something `spotify_fetcher.py` itself can fix — left as-is rather than special-cased locally.
+
+## Soundtrack-artist fallback when every fetcher is empty
+
+Game/anime soundtracks are often stored with the album in the artist field ("Tekken 5 OST -
+Ground Zero Funk"), and no fetcher knows the individual track. If every module (with all its
+retries) comes up empty and `text_utils.is_soundtrack_artist()` matches one of
+`SOUNDTRACK_ARTIST_MARKERS` (`constants.py`) as a whole word in the artist name, `discover_album_name()`
+returns the full artist name as the album. Deliberately only after the loop — a fetcher may still
+know the proper album name ("Tekken 5 Original Soundtrack") — and not recorded as any module's
+success in `discovery_stats`. Whole-word matching uses `(?<!\w)…(?!\w)` rather than `\b`, since
+`\b` fails after the trailing dot of "O.S.T."; and it's what keeps "Ghost" / "Post Malone" out.
+Knock-on effect: "Fill missing data -> Years" groups by album, so all songs of one OST artist then
+share one year lookup. Cases pinned in `tests/test_album_discovery_queries.py`
+(`ALBUM_EMPTY_FETCHERS_CASES`).
 
 ## Why the manager validates results itself instead of trusting modules
 
