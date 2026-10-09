@@ -24,6 +24,9 @@ import importlib.util
 import sys
 from pathlib import Path
 from utils.common.debug import slog
+from utils.common.normalizer import normalize
+from utils.database.song_artists import song_all_artists, song_main_artists
+from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 
 def _discovery_modules_dir() -> Path:
     return Path(__file__).parent / "discovery_modules"
@@ -158,7 +161,28 @@ def load_all_year_discovery_modules_metadata():
     ]
 
 
-def _validate_result(result, queried_artist: str, queried_title: str, module_name: str) -> str | None:
+def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited_artists: list[str] | None = None) -> bool:
+    """Does the artist a module says it matched resemble what we searched for?
+
+    `credited_artists` is only passed for a multi-artist song (all its
+    artists, see song_artists.py). We query with the primary artist alone, but
+    services often credit the whole collab in one field ("Sw@da, Maxim &
+    Niczos") - plain similarity to "Sw@da" then fails, so also accept a
+    matched field that contains any credited artist as whole words."""
+    threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
+    if similarity(queried_artist, matched_artist) >= threshold:
+        return True
+    if credited_artists:
+        matched_padded = f" {normalize(matched_artist)} "
+        return any(
+            normalize(name) and f" {normalize(name)} " in matched_padded
+            for name in credited_artists
+        )
+    return False
+
+
+def _validate_result(result, queried_artist: str, queried_title: str, module_name: str,
+                     credited_artists: list[str] | None = None) -> str | None:
     """Defensively sanity-check what a discovery module handed back.
 
     A module can be crashy, return the wrong type, return a blacklisted
@@ -198,18 +222,16 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
                  f"'{queried_title}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None
 
-    if matched_artist:
-        threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
-        artist_sim = similarity(queried_artist, matched_artist)
-        if artist_sim < threshold:
-            slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
-                 f"'{queried_artist}' (sim={artist_sim:.2f} < {threshold:.2f}), discarding")
-            return None
+    if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
+        slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
+             f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
+        return None
 
     return album
 
 
-def _call_module(module, module_id: str, module_name: str, artist: str, title: str) -> str | None:
+def _call_module(module, module_id: str, module_name: str, artist: str, title: str,
+                 credited_artists: list[str] | None = None) -> str | None:
     """Run a module's get_album_name, isolated from crashes and bad output.
 
     Counts as one invocation for the Statistics menu even if this is a retry
@@ -223,14 +245,28 @@ def _call_module(module, module_id: str, module_name: str, artist: str, title: s
         slog(f"[{module_name}] crashed while looking up '{artist} - {title}': {e}")
         print(f"{module_name} failed unexpectedly, skipping it for this song")
         return None
-    album = _validate_result(result, artist, title, module_name)
+    album = _validate_result(result, artist, title, module_name, credited_artists)
     if album:
         record_success(module_id)
     return album
 
 
+def _multi_artist_query(song) -> tuple[list[str] | None, str | None]:
+    """(credited artist names, "A x B" main-artist label) for a multi-artist
+    song, (None, None) for a single-artist one. Fetchers are still queried with
+    the primary artist first - one clean name finds a collab on most services
+    more reliably than a joined string - the label is only a fallback."""
+    credited = [a.name for a in song_all_artists(song)]
+    if len(credited) < 2:
+        return None, None
+    mains = song_main_artists(song)
+    label = MULTI_ARTIST_MAIN_SEPARATOR.join(a.name for a in mains) if len(mains) > 1 else None
+    return credited, label
+
+
 def discover_album_name(song, modules):
     art_full, son_full, alb = song.artist.name, song.title, song.album
+    credited, multi_label = _multi_artist_query(song)
     slog(f"{art_full} - {son_full} ({alb})")
     art_cln_full = art_full.split("(")[0].strip()
     son_cln_full = son_full.split("(")[0].strip()
@@ -255,7 +291,7 @@ def discover_album_name(song, modules):
     slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
-        album = _call_module(module, module_id, module_name, art_cln, son_cln)
+        album = _call_module(module, module_id, module_name, art_cln, son_cln, credited)
 
         # truncate_at_word() strips trailing "feat. X" / "& X" credits, but it
         # can also cut into a legitimate title/artist (e.g. "Bang, Bang").
@@ -263,19 +299,23 @@ def discover_album_name(song, modules):
         # strings before giving up on this module.
         if not album and truncated:
             print(f"Looking in {module_name} using untruncated title/artist")
-            album = _call_module(module, module_id, module_name, art_cln_full, son_cln_full)
+            album = _call_module(module, module_id, module_name, art_cln_full, son_cln_full, credited)
 
         # Both attempts above still strip parentheses from title/artist. If
         # that stripping actually removed something, retry once more with
         # the fully raw strings before giving up on this module.
         if not album and raw_differs:
             print(f"Looking in {module_name} using full title/artist including parentheses")
-            album = _call_module(module, module_id, module_name, art_full, son_full)
+            album = _call_module(module, module_id, module_name, art_full, son_full, credited)
 
         #Repeat the searching if there is a synonym for an artist
         if not album and song.artist.synonyms is not None:
             print(f"Looking for it in {module_name} using synonyms")
-            album = _call_module(module, module_id, module_name, song.artist.synonyms, son_cln)
+            album = _call_module(module, module_id, module_name, song.artist.synonyms, son_cln, credited)
+
+        if not album and multi_label:
+            print(f"Looking in {module_name} using all main artists")
+            album = _call_module(module, module_id, module_name, multi_label, son_cln, credited)
 
         if album:
             return album
@@ -299,7 +339,8 @@ def discover_album_name(song, modules):
     return None
 
 
-def _validate_year_result(result, queried_artist: str, queried_query: str, module_name: str) -> int | None:
+def _validate_year_result(result, queried_artist: str, queried_query: str, module_name: str,
+                          credited_artists: list[str] | None = None) -> int | None:
     """Same defensive sanity-checking as _validate_result(), adapted for a
     release year: rejects crashy/wrong-typed/implausible years, and
     independently re-checks any reported matched_title/matched_artist
@@ -328,18 +369,16 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
                  f"'{queried_query}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None
 
-    if matched_artist:
-        threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
-        artist_sim = similarity(queried_artist, matched_artist)
-        if artist_sim < threshold:
-            slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
-                 f"'{queried_artist}' (sim={artist_sim:.2f} < {threshold:.2f}), discarding")
-            return None
+    if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
+        slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
+             f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
+        return None
 
     return year
 
 
-def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool) -> int | None:
+def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool,
+                      credited_artists: list[str] | None = None) -> int | None:
     """Run a module's get_release_year(), isolated from crashes and bad output.
     Mirrors _call_module(), but counted in the separate year stats file."""
     record_year_invocation(module_id)
@@ -349,13 +388,14 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
         slog(f"[{module_name}] crashed while looking up release year for '{artist} - {query}': {e}")
         print(f"{module_name} failed unexpectedly, skipping it for this lookup")
         return None
-    year = _validate_year_result(result, artist, query, module_name)
+    year = _validate_year_result(result, artist, query, module_name, credited_artists)
     if year:
         record_year_success(module_id)
     return year
 
 
-def discover_release_year(artist: str, query: str, is_single: bool, modules, artist_synonyms: str | None = None) -> int | None:
+def discover_release_year(artist: str, query: str, is_single: bool, modules, artist_synonyms: str | None = None,
+                          song=None) -> int | None:
     """Look up a release year for either an album (query = album title,
     is_single=False) or a standalone single (query = song title,
     is_single=True), trying each enabled year-capable module in order until
@@ -365,7 +405,13 @@ def discover_release_year(artist: str, query: str, is_single: bool, modules, art
     directly on an (artist, query) pair rather than a Song object, since the
     caller may be querying once on behalf of several songs that share an
     album.
+
+    `song` is passed only for a single (is_single=True), so a multi-artist
+    single gets the same credited-artist validation and "A x B" fallback
+    query as discover_album_name(). An album lookup is keyed on the primary
+    artist alone - a guest on one track isn't the album's artist.
     """
+    credited, multi_label = _multi_artist_query(song) if song is not None else (None, None)
     art_full, qry_full = artist, query
     art_cln_full = art_full.split("(")[0].strip()
     qry_cln_full = qry_full.split("(")[0].strip()
@@ -378,19 +424,23 @@ def discover_release_year(artist: str, query: str, is_single: bool, modules, art
 
     for module_id, module_name, module in modules:
         print(f"Looking for release year in {module_name} module")
-        year = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single)
+        year = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited)
 
         if not year and truncated:
             print(f"Looking for release year in {module_name} using untruncated artist/query")
-            year = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single)
+            year = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited)
 
         if not year and raw_differs:
             print(f"Looking for release year in {module_name} using full artist/query including parentheses")
-            year = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single)
+            year = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited)
 
         if not year and artist_synonyms:
             print(f"Looking for release year in {module_name} using synonyms")
-            year = _call_year_module(module, module_id, module_name, artist_synonyms, qry_cln, is_single)
+            year = _call_year_module(module, module_id, module_name, artist_synonyms, qry_cln, is_single, credited)
+
+        if not year and multi_label:
+            print(f"Looking for release year in {module_name} using all main artists")
+            year = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited)
 
         if year:
             return year

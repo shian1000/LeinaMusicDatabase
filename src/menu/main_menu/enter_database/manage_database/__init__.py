@@ -9,6 +9,7 @@ from menu.main_menu.enter_database.manage_database.get_rid_of_rubish_data import
 from utils.common.text_utils import check_spelling, similarity
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
+from utils.ui.artist_split_review import review_artist_splits
 import questionary
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
@@ -169,6 +170,7 @@ def manage_database():
         "Resolve duplicates": resolve_duplicates,
         "Merge artists": merge_artists_menu,
         "Divide artists": divide_artists_menu,
+        "Split joined artist names": review_artist_splits,
         "Spell check existing data": check_spelling_menu,
         "Get rid of rubish data": get_rid_of_rubish_data
     }

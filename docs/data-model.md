@@ -25,6 +25,12 @@ synonyms                        year
                                  melancholic
                                  party
                                  youtube_video_id
+
+AdditionalSongArtist  (table additional_song_artists, migration 0003)
+--------------------
+song_id       PK, FK -> Song.id
+artist_id     PK, FK -> Artist.id
+role          NOT NULL, 'main' | 'feat'
 ```
 
 - `Artist.name` has **no uniqueness constraint** — the DB will happily hold two rows with the same
@@ -37,6 +43,18 @@ synonyms                        year
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 - `Song.nostalgic` / `melancholic` / `party` — integer mood flags, set through the terminal UI.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.
+- Multi-artist songs: `Song.artist_id` is always the **primary** artist; each extra one is a row in
+  `additional_song_artists` (`role` `'main'` = co-headliner "A x B", `'feat'` = guest "A feat. B").
+  Single-artist songs have no rows there. No ordering column on purpose — labels sort extra artists
+  by name. Read/query it only through `src/utils/database/song_artists.py` (`song_artist_label()`,
+  `song_all_artists()`, `song_has_artist_id()`, ...), and when merging artists call
+  `reassign_additional_artist_links()` after reassigning `songs.artist_id`. Older collabs are still
+  stored as one joined `Artist` row ("Sw@da x Maxim x Niczos") until split via Manage database →
+  "Split joined artist names" (`utils/database/artist_splitting.py`): the first main name becomes
+  `songs.artist_id`, an existing artist is reused per part (exact `normalize()`d name or synonym),
+  missing parts are created with the joined row's origin, and the joined row is deleted.
+  Splitting is always a user decision in one batch review — "&"/"," can't tell "Sw@da & Maxim"
+  from "Simon & Garfunkel".
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
   content — confirmed true even for an authenticated Data API request, not just anonymous

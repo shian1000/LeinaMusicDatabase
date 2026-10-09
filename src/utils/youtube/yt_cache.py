@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from utils.database.song_artists import song_artist_credits, song_main_artist_label
+
 
 CACHE_FILE = Path("yt_playlist_cache.json")
 
@@ -31,15 +33,19 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
     }
 
     for song in songs:
-        artist = song.artist.name
         title = song.title
-        key = make_song_key(artist, title)
+        # Keyed on the primary artist alone - create_yt_playlist() maps keys
+        # back to Song rows the same way
+        key = make_song_key(song.artist.name, title)
 
         cache["songs"][key] = {
-            "artist": artist,
+            # "A x B" for a multi-artist song - what YouTube gets queried with
+            "artist": song_main_artist_label(song),
             "title": title,
             "synonyms": song.artist.synonyms,
             "language": song.language,
+            # None for a single-artist song; see song_artist_credits()
+            "credits": song_artist_credits(song),
             # A manually-confirmed video, set once and reused forever — for
             # songs no automated search will ever find (e.g. a video
             # YouTube's own search excludes from results for being

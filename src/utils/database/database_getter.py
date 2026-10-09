@@ -2,12 +2,19 @@ from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Song, Artist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, inspect, or_, select
+from sqlalchemy.orm import selectinload
 import os
-from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist
+from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist
 import time
 from utils.common.debug import mlog, slog
 from utils.common.text_utils import normalize_text
 from utils.database.database_sessions import get_global_database_sessions
+from utils.database.song_artists import (
+    additional_artist_name_contains,
+    song_all_artists,
+    song_artist_label,
+    song_has_artist_id,
+)
 
 
 class SongSearchFilters:
@@ -20,8 +27,11 @@ class SongSearchFilters:
 
     @staticmethod
     def artist_name(query: str):
-        """Filter songs by artist name containing the query."""
-        return func.lower(Artist.name).contains(query.lower())
+        """Filter songs by artist name (primary or additional) containing the query."""
+        return or_(
+            func.lower(Artist.name).contains(query.lower()),
+            additional_artist_name_contains(query),
+        )
 
     @staticmethod
     def album(query: str):
@@ -45,8 +55,8 @@ class SongSearchFilters:
 
     @staticmethod
     def artist_id(query: str):
-        """Filter songs by exact artist ID."""
-        return Song.artist_id == int(query)
+        """Filter songs by exact artist ID (primary or additional)."""
+        return song_has_artist_id(int(query))
 
     @staticmethod
     def general_search(query: str):
@@ -54,6 +64,7 @@ class SongSearchFilters:
         return or_(
             func.lower(Song.title).contains(query.lower()),
             func.lower(Artist.name).contains(query.lower()),
+            additional_artist_name_contains(query),
         )
 
 
@@ -70,6 +81,15 @@ CATEGORY_DB_FILTERS = {
 }
 
 
+# The Python fallback and every display path read each song's additional
+# artists; without this that's one lazy query per song over the whole DB.
+_EAGER_ADDITIONAL_ARTISTS = selectinload(Song.additional_artist_links).selectinload(AdditionalSongArtist.artist)
+
+
+def _all_artist_names(song: Song) -> str:
+    return " ".join(normalize_text(a.name or "") for a in song_all_artists(song))
+
+
 class SongNormalizedFields:
     """Encapsulates field extraction functions for normalized text search."""
 
@@ -80,8 +100,8 @@ class SongNormalizedFields:
 
     @staticmethod
     def artist_name(song: Song) -> str:
-        """Extract and normalize artist name."""
-        return normalize_text(song.artist.name or "")
+        """Extract and normalize all artist names (primary and additional)."""
+        return _all_artist_names(song)
 
     @staticmethod
     def album(song: Song) -> str:
@@ -113,7 +133,7 @@ class SongNormalizedFields:
         """Combine title and artist name for general search."""
         return (
             f"{normalize_text(song.title or '')} "
-            f"{normalize_text(song.artist.name or '')}"
+            f"{_all_artist_names(song)}"
         )
 
 
@@ -215,7 +235,7 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
     if type(songs[0]) == Song:
         field_map = {
             song_categories[0]: lambda s: s.title,
-            song_categories[1]: lambda s: s.artist.name,
+            song_categories[1]: lambda s: song_artist_label(s),
             song_categories[2]: lambda s: s.album,
             song_categories[3]: lambda s: str(s.year),
             song_categories[4]: lambda s: s.language,
@@ -306,7 +326,12 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
         
     slog(query)
     music_session, tag_session = get_global_database_sessions()
-    base_query = music_session.query(Song).join(Artist).order_by(Artist.name, Song.title)
+    base_query = (
+        music_session.query(Song)
+        .join(Artist)
+        .options(_EAGER_ADDITIONAL_ARTISTS)
+        .order_by(Artist.name, Song.title)
+    )
 
     if category is None:
         return base_query.all()

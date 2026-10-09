@@ -8,12 +8,13 @@ from typing import Optional, List, Tuple, Any, Dict
 from rich.console import Console
 from rich.table import Table
 from utils.database.music_db_manager import get_music_session
-from utils.database.datatables import Song, Artist
+from utils.database.datatables import Song, Artist, AdditionalSongArtist
 from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from utils.common.debug import slog
 from utils.database.database_sessions import get_global_database_sessions
+from utils.database.song_artists import count_artist_songs, song_artist_label
 
 
 def _create_table(title: str, columns: List[Tuple[str, Optional[str], Optional[str]]]) -> Table:
@@ -66,7 +67,7 @@ def display_songs(songs: Optional[List[Song]]) -> None:
 
     for song in songs:
         table.add_row(
-            song.artist.name,
+            song_artist_label(song),
             song.title,
             song.album or "—",
             str(song.year) if song.year else "—",
@@ -105,10 +106,7 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     music_session, _ = get_global_database_sessions()
 
     for artist in artists:
-        songs_count: int = music_session.execute(
-            text("SELECT COUNT(*) FROM songs WHERE artist_id = :artist_id"),
-            {"artist_id": artist.id}
-        ).scalar()
+        songs_count: int = count_artist_songs(music_session, artist.id)
         
         table.add_row(
             artist.name,
@@ -194,14 +192,20 @@ def display_songs_with_tags(songs: List[Song]) -> None:
     ])
 
     # Query all songs ordered by artist name and year
-    all_songs = music_session.query(Song).join(Artist).order_by(Artist.name, Song.year).all()
+    all_songs = (
+        music_session.query(Song)
+        .join(Artist)
+        .options(selectinload(Song.additional_artist_links).selectinload(AdditionalSongArtist.artist))
+        .order_by(Artist.name, Song.year)
+        .all()
+    )
 
     for song in all_songs:
         tag_list = song_tag_map.get(song.id, [])
         tag_str = ", ".join(sorted(tag_list)) if tag_list else "—"
         table.add_row(
             song.title,
-            song.artist.name,
+            song_artist_label(song),
             song.album or "—",
             str(song.year) if song.year else "—",
             tag_str,

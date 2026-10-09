@@ -19,10 +19,12 @@ One edge per line so both directions are `grep`-able.
 - Terminal UI -> Catalog/DB search — resolves and displays `Song`/`Artist` rows for every menu flow
 - Terminal UI -> Discovery — drives "Fill missing data", MP3 import, spell-check, and Statistics menus
 - Terminal UI -> YouTube — drives playlist creation, video matching, and download menus
-- Discovery -> Catalog/DB search — resolves existing rows and creates new `Artist`/`Song` rows during import
+- Discovery -> Catalog/DB search — resolves existing rows and creates new `Artist`/`Song` rows during import; reads a song's artist credits (`song_artists.py`) for album/year lookups
+- Discovery -> Terminal UI — `run_import_batch()` ends with the shared `review_artist_splits()` batch review (`utils/ui/artist_split_review.py`)
 - Discovery -> Normalization & matching — normalizes and scores fetched values against the query
 - Catalog/DB search -> Normalization & matching — Python-side fallback filter, category/similarity matching
 - YouTube -> Normalization & matching — scores candidate videos via `similarity()` / `scaled_similarity_threshold()`
+- YouTube -> Catalog/DB search — `yt_cache.init_cache()` reads a song's artist credits (`song_artists.song_artist_credits()`) for matching, not for search
 - Everything -> Config & settings — constants, thresholds, env-based paths/secrets
 
 ## Boundaries

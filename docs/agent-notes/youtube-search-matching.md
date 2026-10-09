@@ -1078,6 +1078,30 @@ candidates lost this way (stayed at `0.51`), though the overall pick was unaffec
 different real upload already won cleanly. Only worth revisiting if a future real case actually
 needs that specific candidate to win.
 
+## Explicit multi-artist credits (`additional_song_artists`) replace guessing by regex
+
+A song with additional artists (see `docs/data-model.md`) reaches `score_result()` with
+`main_artists` / `feat_artists` ((name, synonyms) pairs, built by
+`song_artists.song_artist_credits()` and stored as-is in the playlist cache's `"credits"`), and
+with `artist` = the main-artist label "A x B" (feats left out of the query). Then:
+
+- **Every main artist is required** for the full 1.0 artist_relevance, in any order, each under its
+  name or a synonym (`_credited_artists_all_present()`), checked against the *raw* title + channel —
+  a co-artist is often credited only inside "(ft. X)", which `_relevance_text()` strips. A solo
+  upload by just one of them can still score via the label's similarity, but not 1.0.
+- `artist_synonyms` (the primary's) only counts with a single main artist — one artist's synonym
+  can't stand in for a whole collab.
+- **Feat artists are never required**: uploads drop "(feat. X)" all the time. Each one found in
+  title/tags/channel adds `FEAT_ARTIST_BONUS` to quality — a tiebreak after artist_relevance.
+- The regex split (`_multi_artist_names_all_present()`) is turned off whenever credits are given:
+  it can only guess, and guesses wrong for single names containing a separator word
+  ("Final Fantasy X OST" -> "Final Fantasy" + "OST").
+
+Songs without credits (including old collabs still stored as one joined `Artist` row) take the
+unchanged path, regex split included — the regression suites run entirely on that path.
+The cache key stays `make_song_key(primary name, title)`, since `create_yt_playlist()` maps keys
+back to `Song` rows by the primary name.
+
 ## Known regressions this logic exists to prevent
 
 Concrete cases hit during development — useful as a regression checklist if this scoring is ever

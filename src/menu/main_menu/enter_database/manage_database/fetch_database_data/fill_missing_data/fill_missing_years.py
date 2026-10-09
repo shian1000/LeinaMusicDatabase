@@ -66,7 +66,7 @@ def fill_missing_years():
         for song in singles:
             print()
             print(f"Checking release year for single \033[93m{song.artist.name} - {song.title}\033[0m")
-            year = discover_release_year(song.artist.name, song.title, True, modules, song.artist.synonyms)
+            year = discover_release_year(song.artist.name, song.title, True, modules, song.artist.synonyms, song=song)
             if year is None:
                 print(f"Couldn't find release year for \033[93m{song.artist.name} - {song.title}\033[0m")
             else:

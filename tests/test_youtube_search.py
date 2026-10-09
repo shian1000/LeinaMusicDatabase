@@ -60,7 +60,7 @@ def test_search_video_disables_safe_search_on_api_fallback(monkeypatch):
     # yt-dlp exhausted first and (per the real bug) came back empty.
     monkeypatch.setattr(
         m, "search_video_ytdlp",
-        lambda artist, title, max_results=8, artist_synonyms=None, language=None: None,
+        lambda artist, title, max_results=8, artist_synonyms=None, language=None, artist_credits=None: None,
     )
 
     items = [

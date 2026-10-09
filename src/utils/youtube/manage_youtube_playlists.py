@@ -173,6 +173,10 @@ _SELECTOR_STOPWORDS = {
     for word in phrase.split()
 } | {"remix", "mix", "edit", "extended", "radio", "club", "vip", "feat", "ft", "featuring", "prod", "the", "and", "of", "with", "by"}
 SELECTOR_MATCH_BONUS = 3
+# Quality bonus per featured artist (additional_song_artists role 'feat')
+# whose name shows up in a candidate's title/tags/channel. Only a tiebreak,
+# never required: uploads routinely drop the "(feat. X)" credit entirely.
+FEAT_ARTIST_BONUS = 1
 
 # Baseline minimum title relevance a candidate must have to be accepted at
 # all (see _min_relevance_for — short titles require a much higher bar than
@@ -761,7 +765,7 @@ def _multi_artist_names_all_present(expected: str, haystack: str) -> float:
     return 0.0
 
 
-def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -> float:
+def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str, split_multi_artist: bool = True) -> float:
     """artist_relevance for one candidate name against one artist name —
     factored out so score_result() can take the max across the DB artist
     name and any known synonyms without duplicating this logic per name.
@@ -816,11 +820,51 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str) -
             _text_containment(expected_folded, channel_folded),
             _artist_channel_handle_match(expected, channel_clean),
         )
-    relevance = max(
-        relevance,
-        _multi_artist_names_all_present(expected, f"{candidate_clean} {channel_clean}".lower()),
-    )
+    # split_multi_artist=False when the song's artists are known explicitly
+    # (score_result()'s main_artists) - the regex split would only guess at
+    # them, and wrongly ("Final Fantasy X OST" -> "Final Fantasy" + "OST").
+    if split_multi_artist:
+        relevance = max(
+            relevance,
+            _multi_artist_names_all_present(expected, f"{candidate_clean} {channel_clean}".lower()),
+        )
     return relevance
+
+
+def _artist_name_present(name: str, haystack: str) -> bool:
+    """`name` appears as a whole word/phrase in `haystack` (already
+    lowercased), directly or with diacritics folded on both sides."""
+    expected = _relevance_text(name).lower()
+    if not expected:
+        return False
+    return (
+        _text_containment(expected, haystack) >= 1.0
+        or _text_containment(_fold_diacritics(expected), _fold_diacritics(haystack)) >= 1.0
+    )
+
+
+def _credited_artists_all_present(artists: list[list[str]], haystack: str) -> float:
+    """1.0 when every credited artist shows up in `haystack` under at least
+    one of its names (name or a synonym) - the explicit-credits counterpart
+    of `_multi_artist_names_all_present()`, which has to guess the names by
+    splitting one joined string. Order-free, like that function."""
+    if not artists:
+        return 0.0
+    if all(any(_artist_name_present(n, haystack) for n in names) for names in artists):
+        return 1.0
+    return 0.0
+
+
+def _credit_kwargs(artist_credits: dict | None) -> dict:
+    """score_result() kwargs from a song's artist credits
+    (`song_artists.song_artist_credits()`, also stored as-is in the playlist
+    cache): {"main": [[name, synonyms], ...], "feat": [[name, synonyms], ...]}."""
+    if not artist_credits:
+        return {}
+    return {
+        "main_artists": [tuple(a) for a in artist_credits.get("main", [])],
+        "feat_artists": [tuple(a) for a in artist_credits.get("feat", [])],
+    }
 
 
 def _min_relevance_for(title: str) -> float:
@@ -908,6 +952,8 @@ def score_result(
     tags: list[str] | None = None,
     artist_synonyms: str | None = None,
     track: str | None = None,
+    main_artists: list[tuple[str, str | None]] | None = None,
+    feat_artists: list[tuple[str, str | None]] | None = None,
 ) -> tuple[float, float, float]:
     """Score a candidate video: (title relevance, artist relevance, quality).
 
@@ -959,6 +1005,16 @@ def score_result(
     quality bonus, since yt-dlp's `channel` field doesn't reliably carry the
     "- Topic" suffix even for a real Topic channel (see that function's
     docstring), and `track` catches exactly the cases it misses.
+
+    `main_artists` / `feat_artists` ((name, synonyms) pairs) are only passed
+    for a song with additional artists (additional_song_artists), with
+    `artist` then being the joined "A x B" label. Every main artist must
+    appear - under its name or a synonym, in any order - for the full 1.0
+    artist_relevance (a solo upload by just one of them shouldn't win), and
+    `artist_synonyms` then counts only when there's a single main artist,
+    since one artist's synonym alone can't stand for the whole collab. Each
+    featured artist found adds FEAT_ARTIST_BONUS to quality, never required.
+    Without them, a joined artist name is still split by regex as before.
     """
     expected_title = _relevance_text(title)
     candidate_clean = _relevance_text(candidate_title)
@@ -984,10 +1040,22 @@ def score_result(
         relevance = 0.0
 
     channel_clean = _relevance_text(channel)
+    multi_main = bool(main_artists) and len(main_artists) > 1
+    names = [artist] if multi_main else [artist, *_parse_synonyms(artist_synonyms)]
     artist_relevance = max(
-        _artist_relevance_for(name, candidate_clean, channel_clean)
-        for name in [artist, *_parse_synonyms(artist_synonyms)]
+        _artist_relevance_for(name, candidate_clean, channel_clean, split_multi_artist=not main_artists)
+        for name in names
     )
+    # Raw (bracket-keeping) title: a co-artist or guest is often credited
+    # only inside "(feat. X)", which _relevance_text() strips
+    credit_haystack = f"{candidate_title} {channel}".lower()
+    if multi_main:
+        artist_relevance = max(
+            artist_relevance,
+            _credited_artists_all_present(
+                [[name, *_parse_synonyms(syn)] for name, syn in main_artists], credit_haystack
+            ),
+        )
 
     # Title-only text for most keyword scanning. Uploader-supplied `tags`
     # are much noisier than they first looked: real case, "Elvis Crespo -
@@ -1059,6 +1127,12 @@ def score_result(
         if tokens and all(re.search(r"\b" + re.escape(tok) + r"\b", keyword_text) for tok in tokens):
             quality += SELECTOR_MATCH_BONUS
             break
+    if feat_artists:
+        feat_haystack = f"{credit_haystack} {' '.join(tags or [])}".lower()
+        quality += FEAT_ARTIST_BONUS * sum(
+            any(_artist_name_present(n, feat_haystack) for n in [name, *_parse_synonyms(syn)])
+            for name, syn in feat_artists
+        )
     quality += _popularity_bonus(view_count)
     return relevance, artist_relevance, quality
 
@@ -1122,7 +1196,8 @@ def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
 
 
 def _search_video_ytdlp_once(
-    artist: str, title: str, max_results: int, artist_synonyms: str | None, max_attempts: int
+    artist: str, title: str, max_results: int, artist_synonyms: str | None, max_attempts: int,
+    artist_credits: dict | None = None,
 ) -> tuple[str | None, float, bool]:
     """One yt-dlp search-and-score attempt for one exact title string.
 
@@ -1190,7 +1265,10 @@ def _search_video_ytdlp_once(
             if video_id:
                 candidates.append(
                     (
-                        score_result(video_title, artist, title, channel, view_count, tags, artist_synonyms, track),
+                        score_result(
+                            video_title, artist, title, channel, view_count, tags, artist_synonyms, track,
+                            **_credit_kwargs(artist_credits),
+                        ),
                         video_id,
                         video_title,
                         _is_official_release(channel, track),
@@ -1212,6 +1290,7 @@ def search_video_ytdlp(
     artist_synonyms: str | None = None,
     max_attempts: int = 2,
     language: str | None = None,
+    artist_credits: dict | None = None,
 ) -> str | None:
     """Search YouTube using yt-dlp (no API quota used). See
     _search_video_ytdlp_once() for the actual search-and-score logic.
@@ -1229,7 +1308,7 @@ def search_video_ytdlp(
     (if any) is kept — it's still better than nothing.
     """
     video_id, best_relevance, is_official = _search_video_ytdlp_once(
-        artist, title, max_results, artist_synonyms, max_attempts
+        artist, title, max_results, artist_synonyms, max_attempts, artist_credits
     )
     if video_id and is_official:
         return video_id
@@ -1239,7 +1318,7 @@ def search_video_ytdlp(
         if alt_title and alt_title != title:
             print(f"  ↩ Retrying yt-dlp with transliterated title: {alt_title}")
             alt_video_id, _, alt_official = _search_video_ytdlp_once(
-                artist, alt_title, max_results, artist_synonyms, max_attempts
+                artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits
             )
             if alt_video_id and (alt_official or not video_id):
                 return alt_video_id
@@ -1248,7 +1327,7 @@ def search_video_ytdlp(
 
 
 def _search_video_api_once(
-    youtube, artist: str, title: str, artist_synonyms: str | None
+    youtube, artist: str, title: str, artist_synonyms: str | None, artist_credits: dict | None = None
 ) -> tuple[str | None, float, bool]:
     """One YouTube Data API search-and-score attempt for one exact title
     string. Returns (video_id, best_relevance, is_official) — see
@@ -1287,6 +1366,7 @@ def _search_video_api_once(
                 title,
                 item["snippet"].get("channelTitle", ""),
                 artist_synonyms=artist_synonyms,
+                **_credit_kwargs(artist_credits),
             ),
             item["id"]["videoId"],
             item["snippet"]["title"],
@@ -1298,7 +1378,8 @@ def _search_video_api_once(
 
 
 def search_video(
-    youtube, artist: str, title: str, artist_synonyms: str | None = None, language: str | None = None
+    youtube, artist: str, title: str, artist_synonyms: str | None = None, language: str | None = None,
+    artist_credits: dict | None = None,
 ) -> str | None:
     """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback.
 
@@ -1310,13 +1391,15 @@ def search_video(
     """
 
     # Try yt-dlp first — free, no quota
-    video_id = search_video_ytdlp(artist, title, artist_synonyms=artist_synonyms, language=language)
+    video_id = search_video_ytdlp(
+        artist, title, artist_synonyms=artist_synonyms, language=language, artist_credits=artist_credits
+    )
     if video_id:
         return video_id
 
     # Fallback: YouTube Data API
     print("  ↩ Falling back to YouTube API...")
-    video_id, best_relevance, is_official = _search_video_api_once(youtube, artist, title, artist_synonyms)
+    video_id, best_relevance, is_official = _search_video_api_once(youtube, artist, title, artist_synonyms, artist_credits)
     if video_id and is_official:
         return video_id
 
@@ -1324,7 +1407,7 @@ def search_video(
         alt_title = transliterate(title, language)
         if alt_title and alt_title != title:
             print(f"  ↩ Retrying YouTube API with transliterated title: {alt_title}")
-            alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms)
+            alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms, artist_credits)
             if alt_video_id and (alt_official or not video_id):
                 return alt_video_id
 
@@ -1506,6 +1589,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             title = entry["title"]
             artist_synonyms = entry.get("synonyms")
             language = entry.get("language")
+            artist_credits = entry.get("credits")
 
             # Step 1: a video_id already on the cache entry (pre-filled from
             # Song.youtube_video_id at init_cache() time, or left over from a
@@ -1533,7 +1617,10 @@ def create_yt_playlist(song_list, playlist_name: str):
 
             # Step 2: no usable stored link — search as before.
             if not video_id:
-                video_id = search_video(youtube, artist, title, artist_synonyms=artist_synonyms, language=language)
+                video_id = search_video(
+                    youtube, artist, title, artist_synonyms=artist_synonyms, language=language,
+                    artist_credits=artist_credits,
+                )
                 if not video_id:
                     _logger.info(f"No video found for {artist} - {title}")
                     print("  ❌ No video found")

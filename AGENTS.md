@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~227 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~273 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -76,6 +76,13 @@ non-trivial work in that area.
   startup: `docs/runbooks/database.md`. `fetch_data_settings.py` — persisted cap on how many songs
   a single "Fetch database data" run processes (Settings → Max songs to process per fetch),
   shared across every "Fill missing data" category (Albums, Years, ...), not just albums.
+  `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
+  `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
+  `reassign_additional_artist_links()`, which every artist merge must call. `artist_splitting.py` —
+  splitting a joined name ("A feat. B", "A x B") into separate artists, always behind the
+  `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
+  end of every `run_import_batch()` for the artists it created); rejected names persist in
+  `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `docs/agent-notes/discovery-modules.md` (fetcher
@@ -159,7 +166,9 @@ non-trivial work in that area.
 ## Database safety
 
 - Two SQLite DBs under `src/database/` (gitignored): `music.db` (catalog: `artists`, `songs`) and
-  `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). `datatables.py` /
+  `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). `music.db` also has
+  `additional_song_artists` (extra artists of multi-artist songs; `songs.artist_id` stays the
+  primary one) — see the `src/utils/database/` Module map entry. `datatables.py` /
   `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
   tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
   restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
@@ -202,12 +211,13 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Four places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Five places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
   Add/Swap/Don't add once the whole playlist has been scanned — see
-  `docs/agent-notes/youtube-search-matching.md`) — see
+  `docs/agent-notes/youtube-search-matching.md`), and `review_artist_splits()`
+  (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
   candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an
@@ -218,11 +228,13 @@ non-trivial work in that area.
   `edit_entry_menu()` (single-song category editor, in `edit_songs.py`) also offers its own "Swap
   title and artist" choice (`swap_title_and_artist()`) alongside the bulk `swap_artist_with_title()`
   in `song_actions` — a deliberate second entry point for the single-song case, not leftover
-  duplication to consolidate; being single-song, it needs no artist-id dedup.
+  duplication to consolidate; being single-song, it needs no artist-id dedup. The same editor's "additional
+  artists" entry (`edit_additional_artists_menu()`) is the only UI for multi-artist credits so
+  far; the "artist name" entry still edits only the primary `songs.artist_id` artist.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~227 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~273 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

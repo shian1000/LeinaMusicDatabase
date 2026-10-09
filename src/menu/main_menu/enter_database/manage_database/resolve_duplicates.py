@@ -5,6 +5,7 @@ from utils.database.database_management import edit_db_entry
 from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
+from utils.database.song_artists import reassign_additional_artist_links
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 
@@ -95,6 +96,7 @@ def remove_duplicate_artists():
             text("UPDATE songs SET artist_id = :original_id WHERE artist_id = :duplicate_id"),
             {"original_id": original.id, "duplicate_id": duplicate.id}
         )
+        reassign_additional_artist_links(session, duplicate.id, original.id)
 
         songs = session.query(Song).filter(Song.artist_id == original.id).all()
         for song in songs:

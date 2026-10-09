@@ -7,6 +7,7 @@ from utils.common.debug import slog
 from sqlalchemy import text
 from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
+from utils.database.song_artists import count_artist_songs, reassign_additional_artist_links
 from rich import print
 
 
@@ -130,11 +131,9 @@ def merge_artists_in_db(merge_from, merge_to):
         text("UPDATE songs SET artist_id = :to_id WHERE artist_id = :from_id"),
         {"to_id": to_id, "from_id": from_id}
     )
+    reassign_additional_artist_links(session, from_id, to_id)
 
-    remaining = session.execute(
-        text("SELECT COUNT(1) FROM songs WHERE artist_id = :from_id"),
-        {"from_id": from_id}
-    ).scalar()
+    remaining = count_artist_songs(session, from_id)
 
     if not remaining:
         session.execute(text("DELETE FROM artists WHERE id = :id"), {"id": from_id})

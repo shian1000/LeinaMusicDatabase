@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import func
+from sqlalchemy import func, select
 from settings import Settings
-from utils.database.datatables import Base, Song, Artist
+from utils.database.datatables import Base, Song, Artist, AdditionalSongArtist
 import time
 from utils.common.debug import slog, mlog
 
@@ -124,7 +124,13 @@ def delete_artist_and_songs(artist_name: str) -> int:
         if not artist:
             raise ArtistNotFoundError(f"Artist '{artist_name}' not found in database.")
 
-        # Delete songs first
+        # Delete songs first. Bulk delete skips ORM cascades, so their
+        # additional-artist links go explicitly; the artist's own links on
+        # other artists' songs go with session.delete(artist) below.
+        song_ids = select(Song.id).where(Song.artist_id == artist.id)
+        session.query(AdditionalSongArtist).filter(
+            AdditionalSongArtist.song_id.in_(song_ids)
+        ).delete(synchronize_session=False)
         deleted_songs = (
             session.query(Song)
             .filter(Song.artist_id == artist.id)

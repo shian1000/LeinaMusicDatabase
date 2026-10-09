@@ -13,6 +13,7 @@ import json
 from utils.database.database_getter import extract_db_object_info
 from utils.database.datatables import Artist, Song, artist_categories, song_categories, search_only_categories
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
+from utils.database.song_artists import song_artist_label
 from config.constants import (
     RECENT_DIRS_FILE,
     MAX_RECENT_DIRS,
@@ -311,7 +312,7 @@ def search_and_pick_db_object(
 
     if len(entries_objects) == 1:
         db_object = entries_objects[0]
-        label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
+        label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
         print(f"Found '{label}'")
         return db_object
 

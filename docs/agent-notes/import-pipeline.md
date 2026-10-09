@@ -201,6 +201,16 @@ runs to completion unattended and both kinds of review happen as two batches at
 the end, artists before songs (since a song's dedup check needs its artist
 resolved first).
 
+## New joined artists are offered for splitting at the end of the batch
+
+`run_import_batch()` snapshots `max(Artist.id)` up front and, after the artist and song reviews,
+hands every artist the batch *created* to `review_artist_splits()` (see `docs/data-model.md` and
+`utils/database/artist_splitting.py`) — so "A feat. B" arriving from mp3 tags or a playlist title
+becomes A + guest B in the same sitting. Only new artists: an artist that already existed was
+matched as a whole name, which is the "it's already one artist in the DB" signal. Splitting isn't
+done inline because the review has to be one batch, and the resolve/dedup machinery above works on
+whole names. The id snapshot is the hook — no flag is threaded through `resolve_artist()`.
+
 ## The "Spell check existing data" menu batches the same way
 
 `check_spelling_menu()` (`manage_database/__init__.py`) runs the same

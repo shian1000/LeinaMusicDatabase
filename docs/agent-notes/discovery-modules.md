@@ -223,6 +223,19 @@ for real albums (but work for `is_single=True` singles, which still hit the alre
 `recording_cluster` panel), check `debug.html` for the actual `data-attrid` value on an album query
 before assuming the similarity/validation logic is at fault.
 
+## Multi-artist songs (`additional_song_artists`)
+
+Fetchers still get one artist string; nothing in a module changed. `discover_album_name()` (and
+`discover_release_year()` for a single, via its `song=` kwarg) query the **primary artist first** —
+one clean name finds a collab on most services better than a joined string — and only as a last
+per-module retry the main-artist label "A x B" (feats excluded). Album lookups in Years stay keyed
+on the primary artist alone: a guest on one track isn't the album's artist.
+
+Validation had to change with it: querying "Sw@da" while the service credits "Sw@da, Maxim &
+Niczos" fails plain similarity, so `_matched_artist_resembles()` also accepts a matched field that
+contains any of the song's credited artists as whole words (after `normalize()`). Only for
+multi-artist songs — single-artist validation is unchanged.
+
 ## Which fetchers report matches
 
 - `music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the

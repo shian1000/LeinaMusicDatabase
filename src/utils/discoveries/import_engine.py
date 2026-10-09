@@ -11,6 +11,7 @@ from utils.common.text_utils import normalize, check_spelling, similarity, are_a
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
+from utils.ui.artist_split_review import review_artist_splits
 from rich import print
 import questionary
 from sqlalchemy import func
@@ -388,6 +389,12 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
     # OPTIMIZATION: Cache for artists found in this import batch
     artist_cache = {}
 
+    # Artists created by this batch are the only ones offered for splitting
+    # at the end ("A feat. B" arriving as one new artist); anything that
+    # already existed was matched as-is, so its name is a known artist.
+    music_session, _ = open_and_set_global_database_sessions()
+    max_artist_id_before = music_session.query(func.max(Artist.id)).scalar() or 0
+
     # Reset MusicBrainz counters so the summary at the end reflects this run only.
     MBStats.reset()
 
@@ -521,6 +528,10 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
                 added_count = added_count + 1
                 added_songs.append(new_song_obj)
             print()
+
+    new_artists = music_session.query(Artist).filter(Artist.id > max_artist_id_before).all()
+    if new_artists:
+        review_artist_splits(new_artists)
 
     # Print timing summary
     print("\n" + "="*70)

@@ -134,6 +134,16 @@ ARTIST_CATEGORY_ID = "artist id"
 
 SEARCH_CATEGORY_NAME = "name"
 
+# additional_song_artists.role - the song's own songs.artist_id is always the
+# primary artist; extra rows are either co-headliners ("A x B") or guests
+# ("A feat. B").
+ADDITIONAL_ARTIST_ROLE_MAIN = "main"
+ADDITIONAL_ARTIST_ROLE_FEAT = "feat"
+ADDITIONAL_ARTIST_ROLES = (ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT)
+# How song_artist_label() joins a multi-artist song back into one string
+MULTI_ARTIST_MAIN_SEPARATOR = " x "
+MULTI_ARTIST_FEAT_SEPARATOR = " feat. "
+
 # ==================== API Constants ====================
 
 # MusicBrainz API
@@ -158,6 +168,10 @@ MUSICBRAINZ_SPELLCHECK_USE_FALLBACK = True
 # Disk-backed cache of check_spelling() results, path relative to the project
 # root. Delete this file to force fresh lookups of everything.
 SPELLCHECK_CACHE_FILE = "data/spellcheck_cache.json"
+# Joined artist names ("Simon & Garfunkel") the user said are one artist, so
+# "Split joined artist names" stops proposing them. Relative to the project
+# root; delete it (or a line in it) to be asked again.
+ARTIST_SPLIT_IGNORE_FILE = "data/artist_split_ignore.json"
 
 # ==================== System Constants ====================
 
