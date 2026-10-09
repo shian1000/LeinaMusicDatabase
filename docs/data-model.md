@@ -54,7 +54,8 @@ role          NOT NULL, 'main' | 'feat'
   `songs.artist_id`, an existing artist is reused per part (exact `normalize()`d name or synonym),
   missing parts are created with the joined row's origin, and the joined row is deleted.
   Splitting is always a user decision in one batch review — "&"/"," can't tell "Sw@da & Maxim"
-  from "Simon & Garfunkel".
+  from "Simon & Garfunkel". Why this shape and not extra columns:
+  [ADR-0002](decisions/0002-multiple-artists-per-song.md).
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
   content — confirmed true even for an authenticated Data API request, not just anonymous

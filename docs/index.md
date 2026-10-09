@@ -23,10 +23,12 @@ this index is the map of everything else.
 - [`runbooks/`](runbooks/) — step-by-step operational procedures (backup/restore, adding a
   migration). How to *do* something safely, as opposed to `agent-notes/`'s *why it works this way*.
 - [`decisions/`](decisions/) — architectural decision records (ADRs), for choices that affect
-  several systems or would be expensive to reverse. One so far:
+  several systems or would be expensive to reverse:
   [ADR-0001](decisions/0001-ui-independent-business-logic.md) (keep business logic out of
-  `src/menu/`; add a future API as a sibling, not a rewrite of it). Don't write one for an
-  ordinary refactor.
+  `src/menu/`; add a future API as a sibling, not a rewrite of it) and
+  [ADR-0002](decisions/0002-multiple-artists-per-song.md) (multiple artists per song via the
+  `additional_song_artists` link table, `songs.artist_id` kept as the primary; why not extra
+  columns or comma-separated ids). Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records
 
