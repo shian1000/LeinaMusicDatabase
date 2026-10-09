@@ -5,7 +5,7 @@ from utils.common.debug import slog
 from urllib.parse import quote
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
-from config.constants import SPELLING_CHECK_THRESHOLD
+from config.constants import SPELLING_CHECK_THRESHOLD, SINGLES_ALBUM
 
 MODULE_NAME = "Itunes Fetches"
 
@@ -58,10 +58,10 @@ def extract_from_itunes_soup(song_soup, artist, song):
         return None
 
     # 3. A single-only release reports no real album -- use the same
-    # "Singles" sentinel wikipedia_fetcher already uses for this case, so
+    # SINGLES_ALBUM sentinel wikipedia_fetcher already uses for this case, so
     # discoveries_manager and the rest of the pipeline need no changes.
     if album.lower().endswith(SINGLE_TITLE_SUFFIX):
-        album = "Singles"
+        album = SINGLES_ALBUM
 
     if not album:
         return None

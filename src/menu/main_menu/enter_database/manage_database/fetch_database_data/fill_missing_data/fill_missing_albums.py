@@ -8,6 +8,7 @@ from utils.common.selenium_sessions import open_global_driver, close_global_driv
 from utils.discoveries.discoveries_manager import discover_album_name, load_discovery_modules
 from utils.common.text_utils import copy_to_clipboard
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
+from config.constants import SINGLES_ALBUM
 
 def fill_missing_albums():
     category = "album"
@@ -53,7 +54,7 @@ def fill_missing_albums():
                 if new_album == None:
                     print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")
                 else:
-                    if (new_album) == "Singles":
+                    if new_album == SINGLES_ALBUM:
                         print(f"\033[93m{song.artist.name} - {song.title}\033[0m is a single. Added to \033[93m{new_album}\033[0m")
                     else:
                         print(f"Found album: \033[93m{new_album}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")

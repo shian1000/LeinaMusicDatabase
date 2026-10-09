@@ -80,7 +80,7 @@ the album lookup fails across the board, not just on Spotify. This is a `truncat
 manager-level gap (the same class of problem as the comma case above, just a different separator),
 not something `spotify_fetcher.py` itself can fix — left as-is rather than special-cased locally.
 
-## Soundtrack-artist fallback when every fetcher is empty
+## Fallbacks when every fetcher is empty (soundtrack artist, singles markers)
 
 Game/anime soundtracks are often stored with the album in the artist field ("Tekken 5 OST -
 Ground Zero Funk"), and no fetcher knows the individual track. If every module (with all its
@@ -91,8 +91,18 @@ know the proper album name ("Tekken 5 Original Soundtrack") — and not recorded
 success in `discovery_stats`. Whole-word matching uses `(?<!\w)…(?!\w)` rather than `\b`, since
 `\b` fails after the trailing dot of "O.S.T."; and it's what keeps "Ghost" / "Post Malone" out.
 Knock-on effect: "Fill missing data -> Years" groups by album, so all songs of one OST artist then
-share one year lookup. Cases pinned in `tests/test_album_discovery_queries.py`
-(`ALBUM_EMPTY_FETCHERS_CASES`).
+share one year lookup.
+
+Next, if `text_utils.has_singles_marker()` finds a `SINGLES_MARKER` word ("cover", "covered",
+"unplugged", ...) as a whole word in the title *or* the artist, the song is filed under
+`SINGLES_ALBUM` — a cover/unplugged version no fetcher knows is almost always a standalone upload.
+Both fields are checked because such songs often land with artist/title swapped ("serial
+heartbreaker" / "fletcher loop cover"). The soundtrack fallback runs first because it names a more
+specific album. Known, accepted false positive: a real title containing the word ("Twinz (Deep
+Cover '98)") — the user decided it doesn't matter, since this path only ever runs for songs that
+have no album at all and that every fetcher has already missed. Same last-resort / no-stats rules
+as the soundtrack fallback. Cases for both fallbacks are pinned in
+`tests/test_album_discovery_queries.py` (`ALBUM_EMPTY_FETCHERS_CASES`).
 
 ## Why the manager validates results itself instead of trusting modules
 
@@ -185,7 +195,7 @@ its album success rate in the Statistics menu.
 
 **`fill_missing_years.py` batch-writes a year to every song sharing an album — unlike
 `fill_missing_albums.py`'s one-write-per-song.** It only looks at songs that already have an
-`album` filled in (a real album, or the `"Singles"` sentinel — see below), groups them by
+`album` filled in (a real album, or the `"Singles"` sentinel, `constants.SINGLES_ALBUM` — see below), groups them by
 `(artist.name, album)`, and calls `discover_release_year()` once per group; every song in that
 group gets `edit_db_entry(song, "year", str(year))`. This is a real asymmetry from the album flow
 worth remembering if you're porting logic between the two: album lookups are inherently per-song
@@ -391,7 +401,7 @@ Minaj)".
 a release that never had a parent album (e.g. "Say So (feat. Nicki Minaj) - Single"). Rather than
 inventing a new field to carry that fact through `DiscoveryResult`/`discoveries_manager`/the DB
 (which would need a schema change), `extract_from_itunes_soup()` reports the album as the literal
-string `"Singles"` — the same sentinel `wikipedia_fetcher.py` already returns when a song is found
+string `"Singles"` (`constants.SINGLES_ALBUM`) — the same sentinel `wikipedia_fetcher.py` already returns when a song is found
 under a Wikipedia discography's "Singles" heading (see `_find_song_under_heading()`). This needed
 no changes anywhere else: `"Singles"` isn't on the album blacklist, and `matched_title`/
 `matched_artist` are unaffected, so `discoveries_manager._validate_result()`'s cross-check still

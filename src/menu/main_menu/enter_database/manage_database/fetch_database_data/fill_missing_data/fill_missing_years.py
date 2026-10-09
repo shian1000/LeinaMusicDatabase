@@ -9,11 +9,7 @@ from utils.common.selenium_sessions import open_global_driver, close_global_driv
 from utils.discoveries.discoveries_manager import discover_release_year, load_year_discovery_modules
 from utils.common.text_utils import copy_to_clipboard
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
-
-# Sentinel album value meaning "no real parent album" - see
-# itunes_fetcher.py/wikipedia_fetcher.py. These songs are looked up and
-# written individually by their own title rather than grouped together.
-SINGLES_ALBUM_SENTINEL = "Singles"
+from config.constants import SINGLES_ALBUM
 
 
 def fill_missing_years():
@@ -34,7 +30,7 @@ def fill_missing_years():
     groups = defaultdict(list)
     singles = []
     for song in songs_objects:
-        if song.album == SINGLES_ALBUM_SENTINEL:
+        if song.album == SINGLES_ALBUM:
             singles.append(song)
         else:
             groups[(song.artist.name, song.album)].append(song)

@@ -279,7 +279,7 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
 
 def get_songs_with_album_missing_year() -> list[Song]:
     """Songs that already have an album recorded (a real album name, or the
-    "Singles" sentinel - see itunes_fetcher.py/wikipedia_fetcher.py) but no
+    SINGLES_ALBUM sentinel from constants.py) but no
     year yet. This is the source set for "Fill missing data -> Years": we
     only look up a year once we know what to search for (an album name, or
     the song title itself for a single)."""

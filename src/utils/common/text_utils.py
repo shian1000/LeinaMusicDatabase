@@ -18,6 +18,7 @@ from config.constants import (
     MUSICBRAINZ_API_LIMIT,
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
     SOUNDTRACK_ARTIST_MARKERS,
+    SINGLES_MARKER,
 )
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
@@ -273,19 +274,30 @@ def is_blacklisted_album(title: str) -> bool:
         return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
     return False
 
-def is_soundtrack_artist(artist_name: str) -> bool:
-    """True if the artist name carries a soundtrack marker ("Tekken 5 OST").
+def _contains_marker_word(text: str, markers) -> bool:
+    """True if any marker appears in text as a whole word, case-insensitively.
 
-    Matched as a whole word, so "Ghost" or "Post Malone" don't count. Plain
-    \\b can't be used: it doesn't match after the trailing dot of "O.S.T.".
+    Plain \\b can't be used: it doesn't match after a trailing dot ("O.S.T.").
     """
-    if not artist_name:
+    if not text:
         return False
-    lowered = artist_name.lower()
+    lowered = text.lower()
     return any(
         re.search(r'(?<!\w)' + re.escape(marker) + r'(?!\w)', lowered)
-        for marker in SOUNDTRACK_ARTIST_MARKERS
+        for marker in markers
     )
+
+def is_soundtrack_artist(artist_name: str) -> bool:
+    """True if the artist name carries a soundtrack marker ("Tekken 5 OST").
+    Whole word, so "Ghost" or "Post Malone" don't count."""
+    return _contains_marker_word(artist_name, SOUNDTRACK_ARTIST_MARKERS)
+
+def has_singles_marker(artist_name: str, title: str) -> bool:
+    """True if the title or artist name marks the song as a standalone release
+    (a cover, an unplugged version). Checks both, since such songs often land
+    with artist/title swapped ("serial heartbreaker - fletcher loop cover").
+    Whole word, so "Recover" doesn't count."""
+    return _contains_marker_word(title, SINGLES_MARKER) or _contains_marker_word(artist_name, SINGLES_MARKER)
 
 def remove_brackets(text):
     return re.sub(r'\s*[\(\[]([^)\]]*)[)\]]', '', text).strip()

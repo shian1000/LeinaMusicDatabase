@@ -80,6 +80,22 @@ SOUNDTRACK_ARTIST_MARKERS = [
     "soundtracks",
 ]
 
+# Whole-word, case-insensitive markers that flag a song as a standalone release
+# (a cover, an unplugged version) when found in its title or artist name
+# ("serial heartbreaker - fletcher loop cover"). When every album fetcher comes
+# up empty for such a song, discover_album_name() files it under SINGLES_ALBUM.
+SINGLES_MARKER = [
+    "cover",
+    "covers",
+    "covered",
+    "unplugged",
+]
+
+# Sentinel album value meaning "no real parent album". Fetchers return it for
+# single-only releases, and "Fill missing data -> Years" looks these songs up
+# one by one by title instead of grouping them like an album.
+SINGLES_ALBUM = "Singles"
+
 # File browser menu options
 FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"
 FILE_BROWSER_BACK_OPTION = "<= [Go Back]"

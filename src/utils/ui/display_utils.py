@@ -98,6 +98,7 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
         ("Name", "cyan", None),
         ("Songs", None, None),
         ("Origin", None, None),
+        ("Synonyms", None, None),
     ])
 
     music_session: Session
@@ -113,6 +114,7 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
             artist.name,
             str(songs_count),
             artist.origin,
+            artist.synonyms or "—",
         )
 
     console.print(table)

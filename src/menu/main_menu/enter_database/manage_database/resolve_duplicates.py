@@ -5,7 +5,7 @@ from utils.database.database_management import edit_db_entry
 from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
-from config.constants import SIMILARITY_THRESHOLD
+from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 
 def remove_duplicate_songs():
@@ -137,7 +137,7 @@ def resolve_duplicated_albums():
     clusters = []  # each cluster: {'key': representative_album, 'songs': [Song,...], 'albums': set()}
     for s in all_songs:
         album = (s.album or "").strip()
-        if not album or album == "Singles":
+        if not album or album == SINGLES_ALBUM:
             continue
         placed = False
         for cl in clusters:

@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup, GuessedAtParserWarning
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
 from utils.common.file_management import save_string_to_file
+from config.constants import SINGLES_ALBUM
 
 # The wikipedia package parses HTML internally without picking a parser,
 # which triggers this warning on every call — silence it here since our
@@ -160,7 +161,7 @@ def _extract_from_track_listing(
     for heading_text, anchor in _iter_heading_anchors(soup):
         slog(f"Checking heading: {heading_text}")
 
-        if is_blacklisted_album(heading_text) and heading_text != "Singles":
+        if is_blacklisted_album(heading_text) and heading_text != SINGLES_ALBUM:
             slog("Skipping blacklisted heading")
             continue
 

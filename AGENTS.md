@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~219 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~227 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -65,7 +65,9 @@ non-trivial work in that area.
   (persisted by `utils/database/database_location.py`); takes effect after a restart, not
   immediately — why: `docs/runbooks/database.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
-  don't inline them.
+  don't inline them. In particular the `"Singles"` album sentinel ("no real parent album" — the
+  fetchers, the singles-marker fallback, Years' per-title lookup and duplicate resolution all
+  agree on it) is `SINGLES_ALBUM`; never write the literal.
 - `src/utils/database/` — DB access, sessions, and the search/getter layer + song/artist
   **category** system. Non-obvious ordering and category gotchas (alphabetical-not-best-match
   results, `search_only_categories` is song-only, shared fallback filter):
@@ -220,7 +222,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~219 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~227 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
@@ -277,8 +279,8 @@ non-trivial work in that area.
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
-  the soundtrack-artist fallback (artist name used as the album when every fetcher is empty and the
-  artist looks like "Tekken 5 OST"), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
+  the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
+  artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
   try to evade the latter), why `spotify_fetcher.py` and `youtube_fetcher.py` scrape their public
   web players' markup instead of the official (credential-requiring) APIs, how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the

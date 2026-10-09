@@ -2,6 +2,7 @@ from utils.common.text_utils import (
     truncate_at_word,
     is_blacklisted_album,
     is_soundtrack_artist,
+    has_singles_marker,
     similarity,
     scaled_similarity_threshold,
 )
@@ -16,7 +17,7 @@ from utils.discoveries.discovery_stats import (
     record_year_invocation,
     record_year_success,
 )
-from config.constants import SPELLING_CHECK_THRESHOLD, MIN_PLAUSIBLE_RELEASE_YEAR
+from config.constants import SPELLING_CHECK_THRESHOLD, MIN_PLAUSIBLE_RELEASE_YEAR, SINGLES_ALBUM
 from datetime import datetime
 import ast
 import importlib.util
@@ -286,6 +287,13 @@ def discover_album_name(song, modules):
     if is_soundtrack_artist(art_full):
         print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {art_full}")
         return art_full
+
+    # A cover/unplugged version no fetcher knows is almost always a standalone
+    # upload, not part of an album. Checked after the soundtrack fallback,
+    # which names a more specific album. Same last-resort / no-stats rules as above.
+    if has_singles_marker(art_full, son_full):
+        print(f"No fetcher found an album; song looks like a cover/unplugged version, filing it under {SINGLES_ALBUM}")
+        return SINGLES_ALBUM
 
     slog("Gave up =)")
     return None

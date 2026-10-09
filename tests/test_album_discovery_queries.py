@@ -9,7 +9,8 @@ more row in ALBUM_QUERY_REGRESSION_CASES.
 
 ALBUM_EMPTY_FETCHERS_CASES pins what discover_album_name() returns when every
 fetcher comes up empty - None, except for a soundtrack-like artist ("Tekken 5
-OST"), whose name is used as the album.
+OST"), whose name is used as the album, and a cover/unplugged version (any
+SINGLES_MARKER word), filed under "Singles".
 """
 import sys
 from pathlib import Path
@@ -76,6 +77,16 @@ ALBUM_EMPTY_FETCHERS_CASES = [
     # "ost" inside a word isn't a soundtrack marker.
     ("ghost_is_not_ost", "Ghost", "Mary on a Cross", None),
     ("post_malone_is_not_ost", "Post Malone", "Circles", None),
+    # Covers/unplugged versions no fetcher knows are filed under Singles; the
+    # marker may sit in the title or (artist/title swapped) the artist.
+    ("serial_heartbreaker_fletcher_loop_cover", "serial heartbreaker", "fletcher loop cover", "Singles"),
+    ("cover_in_parentheses", "AURORA", "Believer (Imagine Dragons cover)", "Singles"),
+    ("cover_marker_in_artist", "Stampede violin cover", "Alexander Jean ft. Lindsey Stirling", "Singles"),
+    ("covered_by", "なんでもないや", "Nandemonaiya ( covered by Rina Aoi )", "Singles"),
+    ("unplugged_version", "Nirvana", "About a Girl (Unplugged)", "Singles"),
+    ("recover_is_not_cover", "CHVRCHES", "Recover", None),
+    # Soundtrack fallback names a more specific album, so it wins over the cover one.
+    ("soundtrack_cover_keeps_soundtrack_album", "Tekken 5 OST", "Ground Zero Funk (piano cover)", "Tekken 5 OST"),
 ]
 
 
@@ -105,3 +116,12 @@ def test_fetcher_album_wins_over_soundtrack_artist_fallback():
     album = discoveries_manager.discover_album_name(_song("Tekken 5 OST", "Ground Zero Funk"), modules)
 
     assert album == "Tekken 5 Original Soundtrack"
+
+
+def test_fetcher_album_wins_over_cover_fallback():
+    modules = [("fake_fetcher", "Fake Fetcher",
+                SimpleNamespace(get_album_name=lambda artist, title: "Surfer Rosa"))]
+
+    album = discoveries_manager.discover_album_name(_song("Alicia Widar", "Where is my Mind (Pixies cover)"), modules)
+
+    assert album == "Surfer Rosa"
