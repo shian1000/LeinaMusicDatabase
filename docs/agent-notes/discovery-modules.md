@@ -416,10 +416,16 @@ Flow:
    (not truncated by CSS ellipsis, unlike its rendered text), artist(s) from every
    `a[href^="channel/"]`, album from `a[href^="browse/"]` — YouTube Music always orders a row's
    links as artist(s) first, then album, so the href prefix alone (not position) is what
-   distinguishes them; this also handles multi-artist rows (e.g. "NIGHTMARE" by "Cody Ko &
-   Young Nut", which renders as two separate `channel/` links) without extra-casing them. Pick the
-   best-scoring row whose title *and* artist both clear `SPELLING_CHECK_THRESHOLD` against the
-   query, same scoring approach as `spotify_fetcher.py`'s `_find_matching_track()`.
+   distinguishes them. A multi-artist row (e.g. "NIGHTMARE" by "Cody Ko & Young Nut") renders as
+   separate `channel/` links, one per artist, so the query artist is compared against each of them
+   *and* against them joined back together (`" x "`, `", "`, `" & "`). The joined form is what makes
+   a collab stored in the DB as one artist string match: "Sw@da x Maxim x Niczos" scores only
+   ~0.4 against any single linked artist, far under the threshold, so before the joined candidates
+   existed every such collab silently came back `None`. Joining also tolerates YouTube crediting
+   fewer artists than the DB does ("Sw@da, Niczos" still clears the threshold against
+   "Sw@da x Maxim x Niczos"). Pick the best-scoring row whose title *and* artist both clear
+   `SPELLING_CHECK_THRESHOLD` against the query, same scoring approach as `spotify_fetcher.py`'s
+   `_find_matching_track()`.
 
 If this fetcher starts returning `None` for everything, check that `ytmusic-responsive-list-item-
 renderer` and the `channel/` / `browse/` href prefixes still exist in `driver.page_source` before

@@ -91,3 +91,24 @@ def test_find_matching_song_skips_row_without_album_link():
     soup = BeautifulSoup(html, "html.parser")
 
     assert module._find_matching_song(soup, "Queen", "Bohemian Rhapsody") is None
+
+
+def test_find_matching_song_matches_collab_stored_as_one_joined_artist():
+    # The DB stores a collab as one joined artist ("A x B x C") while YouTube
+    # Music lists each artist separately; no single artist clears the
+    # threshold on its own, so the row's artists must be joined back together.
+    module = load_youtube_fetcher_module()
+    html = """
+    <ytmusic-responsive-list-item-renderer>
+      <yt-formatted-string class="title" title="Bahato">Bahato</yt-formatted-string>
+      <a href="channel/UCswada">Sw@da</a>
+      <a href="channel/UCmaxim">MAXIM</a>
+      <a href="channel/UCniczos">Niczos</a>
+      <a href="browse/MPREb_bahato">Bahato</a>
+    </ytmusic-responsive-list-item-renderer>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    match = module._find_matching_song(soup, "Sw@da x Maxim x Niczos", "Bahato")
+
+    assert match == ("Bahato", "Sw@da", "Bahato")

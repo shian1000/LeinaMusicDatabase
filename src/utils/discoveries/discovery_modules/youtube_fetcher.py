@@ -67,8 +67,15 @@ def _find_matching_song(soup: BeautifulSoup, artist: str, title: str):
             continue
         album = album_link.get_text(strip=True)
 
+        # A collab is usually stored in the DB as one joined artist
+        # ("A x B x C"), while YouTube Music lists each artist separately, so
+        # also compare against the row's artists joined back together.
+        artist_candidates = row_artists + [
+            sep.join(row_artists) for sep in (" x ", ", ", " & ")
+        ] if len(row_artists) > 1 else row_artists
+
         title_sim = similarity(title, row_title)
-        artist_sim = max(similarity(artist, a) for a in row_artists)
+        artist_sim = max(similarity(artist, a) for a in artist_candidates)
         if title_sim < SPELLING_CHECK_THRESHOLD or artist_sim < SPELLING_CHECK_THRESHOLD:
             continue
 
