@@ -34,6 +34,13 @@ def _save_snapshot(driver) -> None:
         pass
 
 
+def _search_url(text: str, kind: str) -> str:
+    # The query is a *path* segment here, so "/" must be escaped too (quote()
+    # leaves it alone by default): "Jidyszland / Yiddishland" otherwise splits
+    # the path and the search page never loads.
+    return f"https://open.spotify.com/search/{quote(text, safe='')}/{kind}"
+
+
 def _find_matching_track(soup: BeautifulSoup, artist: str, title: str):
     """Scan the '/tracks' search results grid and return (href, matched_title,
     matched_artist) for the best-matching row, or None if nothing clears the
@@ -90,8 +97,7 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
         slog("[Spotify] No driver open. Call open_global_driver() first.")
         return None
 
-    query = quote(f"{artist} {title}")
-    search_url = f"https://open.spotify.com/search/{query}/tracks"
+    search_url = _search_url(f"{artist} {title}", "tracks")
     slog(search_url, priority=1)
     driver.get(search_url)
     time.sleep(2)
@@ -215,7 +221,7 @@ def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryR
         return None
 
     kind, row_selector = ("tracks", '[data-testid="tracklist-row"]') if is_single else ("albums", '[data-encore-id="card"]')
-    search_url = f"https://open.spotify.com/search/{quote(f'{artist} {query}')}/{kind}"
+    search_url = _search_url(f"{artist} {query}", kind)
     slog(search_url, priority=1)
     soup = _load(driver, search_url, row_selector)
     if soup is None:

@@ -246,14 +246,15 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
             if not year:
                 continue
             time.sleep(delay)
-            # The name the release is credited to ("Freeland"), not the artist
-            # entity's own name ("Adam Freeland") - it's what the DB holds
-            matched_artist = release_group.get("artist-credit-phrase")
-            if not matched_artist:
-                try:
-                    matched_artist = release_group["artist-credit"][0]["artist"]["name"]
-                except (KeyError, IndexError, TypeError):
-                    matched_artist = ""
+            # The main artist's credited-as name ("Freeland"), not the artist
+            # entity's own name ("Adam Freeland") - it's what the DB holds - and
+            # not the whole credit phrase, whose guests ("Latto feat. LU KALA")
+            # would fail the artist check
+            try:
+                credit = release_group["artist-credit"][0]
+                matched_artist = credit.get("name") or credit["artist"]["name"]
+            except (KeyError, IndexError, TypeError, AttributeError):
+                matched_artist = ""
             return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
 
         return _release_year_from_artist_recordings(artist, query, delay)

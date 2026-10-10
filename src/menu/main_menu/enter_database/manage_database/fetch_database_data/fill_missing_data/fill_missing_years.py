@@ -1,3 +1,4 @@
+import re
 import random
 from collections import defaultdict
 import questionary
@@ -54,7 +55,9 @@ def fill_missing_years():
     # single released under its own title - look it up as one, so it gets
     # the single-only lookups (YouTube, the "A x B" collab retry).
     for key, songs in list(groups.items()):
-        if len(songs) == 1 and compare(songs[0].album, songs[0].title):
+        # "Lottery ft. LU KALA" is still the "Lottery" single
+        if len(songs) == 1 and (compare(songs[0].album, songs[0].title)
+                                or compare(songs[0].album, _strip_guest_credit(songs[0].title))):
             singles.append(songs[0])
             del groups[key]
 
@@ -142,6 +145,15 @@ def _sample_titles(label: str, songs) -> str:
     if not titles:
         return ""
     return f" ({', '.join(random.sample(titles, min(MANUAL_YEAR_SAMPLE_SONGS, len(titles))))})"
+
+
+# Only a guest credit - unlike truncate_at_word(), which also cuts at a comma
+# ("Dziękuję, że jesteś" isn't a single from the album "Dziękuję")
+_GUEST_CREDIT = re.compile(r"\s*[(\[]?\s*\b(?:feat\.?|ft\.?|featuring)\s.*$", re.IGNORECASE)
+
+
+def _strip_guest_credit(title: str) -> str:
+    return _GUEST_CREDIT.sub("", title)
 
 
 def _finish(touched_songs) -> None:

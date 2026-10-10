@@ -179,7 +179,9 @@ and `youtube_fetcher.py` (singles only, see below). `spotify_fetcher.py` searche
 single and `/albums` for an album (cards matched on `cardTitle` + artist links), then opens the
 track/album page. Either page's header (`entity-header`) has a `data-testid="release-date"` span,
 with `entityTitle`/`creator-link` reported back as the match. On a track page that date is the
-release date of the track's album. `genius_fetcher.py` deliberately has no `get_release_year()`.
+release date of the track's album. Its search query is a URL *path* segment, so `_search_url()` escapes "/" too:
+`quote()` leaves it alone by default, and a title like "Jidyszland / Yiddishland" split the path,
+so the search page never loaded. `genius_fetcher.py` deliberately has no `get_release_year()`.
 Genius album pages are user-made and include unreleased ones: Geezer's "G1*" page (an
 unreviewed bio saying "will come out sometime in 2026", leaked or snippet tracks, no release date)
 is the only source that knows that album at all. A Genius year lookup would have to tell released
@@ -215,7 +217,9 @@ album gets the same year. Songs whose `album == "Singles"` are excluded from gro
 up individually by their own title (`is_single=True`) — grouping them under the literal string
 `"Singles"` would be wrong, since that sentinel doesn't denote a real shared album. A group of one
 song whose album equals its own title (`normalizer.compare()`, e.g. "Venture" / "Venture") is moved
-to the singles too. That's how a single released under its own title is usually stored (~300 such
+to the singles too (also when they match only once a "ft./feat." guest credit is cut off the title: "Lottery" /
+"Lottery ft. LU KALA". That's only the guest credit, not `truncate_at_word()`, which would also
+cut at a comma and make "Dziękuję, że jesteś" a single from the album "Dziękuję"). That's how a single released under its own title is usually stored (~300 such
 songs lacked a year when this was added), and it would otherwise miss the single-only lookups:
 `youtube_fetcher.py` and the "A x B" collab retry.
 
@@ -256,9 +260,10 @@ matches, `_release_year_from_artist_recordings()` searches the artist's recordin
 that name (`release:"…" AND artist:"…"`). That finds various-artists compilations such as
 DakhaBrakha on the festival CD "TFF Rudolstadt 2011", which is credited to "Various Artists" and
 so never shows up keyed on the artist. The album
-path reports the release group's `artist-credit-phrase` (the name the release is credited to,
-"Freeland") as the matched artist, not the credited artist entity's own name ("Adam Freeland"),
-because the credited name is what the DB holds. It also proves the artist is on the release, which simply
+path reports the *main* artist's credited-as name (`artist-credit[0]["name"]`, e.g. "Freeland") as
+the matched artist. It doesn't use the artist entity's own name ("Adam Freeland"), because the
+credited name is what the DB holds. It doesn't use the whole `artist-credit-phrase` either: its
+guests ("Latto feat. LU KALA") failed the artist check. It also proves the artist is on the release, which simply
 accepting any same-named "Various Artists" release group wouldn't.
 
 **`google_search_fetcher.py`'s album-query handling is an unverified assumption.** The existing
