@@ -61,12 +61,19 @@ DEFAULT_DISCOVERY_MODULE_ORDER = [
 DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
     "music_brainz_fetcher",
     "google_search_fetcher",
+    "spotify_fetcher",
+    # Last on purpose: its upload-date years need the user's review.
+    "youtube_fetcher",
 ]
 
 # A fetched release year outside this range is treated as implausible (e.g. a
 # scraper accidentally reading a copyright notice or an unrelated date) and
 # discarded rather than written to the database.
 MIN_PLAUSIBLE_RELEASE_YEAR = 1900
+
+# How many (random) song titles "Fill missing data -> Years" shows next to an
+# album it asks the user to fill in manually, as a hint which album it is.
+MANUAL_YEAR_SAMPLE_SONGS = 3
 
 # Whole-word, case-insensitive markers that flag an artist name as really being
 # a soundtrack ("Tekken 5 OST"). When every album fetcher comes up empty for

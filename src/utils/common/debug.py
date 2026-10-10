@@ -186,3 +186,17 @@ def mlog(message: str, priority: int = 0) -> None:
         return
     
     print(f"***Debug*** {message}")
+
+
+def flog(message: str) -> None:
+    """Log why a lookup (fetcher, YouTube search, scrape) came up empty.
+
+    Unlike slog()/mlog() this ignores verbosity: it's always appended to
+    debug.log with a timestamp (and printed only when a .debug file exists),
+    so an intermittent failure - a page that didn't load in time, a yt-dlp
+    error - can still be diagnosed after the fact."""
+    line = f"***Lookup*** [{datetime.now():%Y-%m-%d %H:%M:%S}] {message}"
+    if DEBUG_ENABLED:
+        print(line)
+    if DEBUG_TO_FILE_ENABLED:
+        _write_to_log(line)

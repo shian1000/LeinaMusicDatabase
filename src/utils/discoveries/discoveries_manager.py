@@ -20,10 +20,11 @@ from utils.discoveries.discovery_stats import (
 from config.constants import SPELLING_CHECK_THRESHOLD, MIN_PLAUSIBLE_RELEASE_YEAR, SINGLES_ALBUM
 from datetime import datetime
 import ast
+import inspect
 import importlib.util
 import sys
 from pathlib import Path
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from utils.common.normalizer import normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
@@ -172,6 +173,11 @@ def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited
     threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
     if similarity(queried_artist, matched_artist) >= threshold:
         return True
+    # Same name once punctuation and a bracketed native-script name are
+    # dropped: "Cody・Lee(李)" is "Cody Lee", though plain similarity says 0.74.
+    queried_norm = normalize(queried_artist)
+    if queried_norm and queried_norm == normalize(matched_artist.split("(")[0]):
+        return True
     if credited_artists:
         matched_padded = f" {normalize(matched_artist)} "
         return any(
@@ -199,16 +205,16 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
     elif isinstance(result, str):
         album, matched_title, matched_artist = result, None, None
     else:
-        slog(f"[{module_name}] returned unexpected type {type(result).__name__}, discarding")
+        flog(f"[{module_name}] returned unexpected type {type(result).__name__}, discarding")
         return None
 
     if not isinstance(album, str) or not album.strip():
-        slog(f"[{module_name}] returned an empty/non-string album, discarding")
+        flog(f"[{module_name}] returned an empty/non-string album, discarding")
         return None
     album = album.strip()
 
     if is_blacklisted_album(album):
-        slog(f"[{module_name}] returned blacklisted album '{album}', discarding")
+        flog(f"[{module_name}] returned blacklisted album '{album}', discarding")
         return None
 
     # If the module told us what it actually matched, independently verify
@@ -218,12 +224,12 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
         threshold = scaled_similarity_threshold(queried_title, matched_title, SPELLING_CHECK_THRESHOLD)
         title_sim = similarity(queried_title, matched_title)
         if title_sim < threshold:
-            slog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
+            flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
                  f"'{queried_title}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None
 
     if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
-        slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
+        flog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
              f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
         return None
 
@@ -242,9 +248,11 @@ def _call_module(module, module_id: str, module_name: str, artist: str, title: s
     try:
         result = module.get_album_name(artist, title)
     except Exception as e:
-        slog(f"[{module_name}] crashed while looking up '{artist} - {title}': {e}")
+        flog(f"[{module_name}] crashed while looking up '{artist} - {title}': {e}")
         print(f"{module_name} failed unexpectedly, skipping it for this song")
         return None
+    if result is None:
+        flog(f"[{module_name}] found no album for '{artist} - {title}'")
     album = _validate_result(result, artist, title, module_name, credited_artists)
     if album:
         record_success(module_id)
@@ -340,62 +348,80 @@ def discover_album_name(song, modules):
 
 
 def _validate_year_result(result, queried_artist: str, queried_query: str, module_name: str,
-                          credited_artists: list[str] | None = None) -> int | None:
+                          credited_artists: list[str] | None = None) -> YearDiscoveryResult | None:
     """Same defensive sanity-checking as _validate_result(), adapted for a
     release year: rejects crashy/wrong-typed/implausible years, and
     independently re-checks any reported matched_title/matched_artist
-    against what was actually searched for before trusting the year."""
+    against what was actually searched for before trusting the year.
+    A bare int is wrapped, so callers always get a YearDiscoveryResult."""
     if result is None:
         return None
 
+    if isinstance(result, int) and not isinstance(result, bool):
+        result = YearDiscoveryResult(year=result)
     if isinstance(result, YearDiscoveryResult):
         year, matched_title, matched_artist = result.year, result.matched_title, result.matched_artist
-    elif isinstance(result, int):
-        year, matched_title, matched_artist = result, None, None
     else:
-        slog(f"[{module_name}] returned unexpected type {type(result).__name__} for a release year, discarding")
+        flog(f"[{module_name}] returned unexpected type {type(result).__name__} for a release year, discarding")
         return None
 
     current_year = datetime.now().year
     if not isinstance(year, int) or not (MIN_PLAUSIBLE_RELEASE_YEAR <= year <= current_year + 1):
-        slog(f"[{module_name}] returned implausible release year '{year}', discarding")
+        flog(f"[{module_name}] returned implausible release year '{year}', discarding")
         return None
 
     if matched_title:
         threshold = scaled_similarity_threshold(queried_query, matched_title, SPELLING_CHECK_THRESHOLD)
         title_sim = similarity(queried_query, matched_title)
         if title_sim < threshold:
-            slog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
+            flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
                  f"'{queried_query}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None
 
     if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
-        slog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
+        flog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
              f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
         return None
 
-    return year
+    return result
 
 
 def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool,
-                      credited_artists: list[str] | None = None) -> int | None:
+                      credited_artists: list[str] | None = None, song=None) -> YearDiscoveryResult | None:
     """Run a module's get_release_year(), isolated from crashes and bad output.
-    Mirrors _call_module(), but counted in the separate year stats file."""
+    Mirrors _call_module(), but counted in the separate year stats file.
+
+    A module whose get_release_year() takes a `song` keyword also gets the
+    Song row (singles only - an album lookup has no single song), e.g. to
+    reuse its stored youtube_video_id. Everything else keeps the plain
+    (artist, query, is_single) contract."""
     record_year_invocation(module_id)
     try:
-        result = module.get_release_year(artist, query, is_single)
+        if song is not None and "song" in inspect.signature(module.get_release_year).parameters:
+            result = module.get_release_year(artist, query, is_single, song=song)
+        else:
+            result = module.get_release_year(artist, query, is_single)
     except Exception as e:
-        slog(f"[{module_name}] crashed while looking up release year for '{artist} - {query}': {e}")
+        flog(f"[{module_name}] crashed while looking up release year for '{artist} - {query}': {e}")
         print(f"{module_name} failed unexpectedly, skipping it for this lookup")
         return None
-    year = _validate_year_result(result, artist, query, module_name, credited_artists)
-    if year:
+    if result is None:
+        flog(f"[{module_name}] found no release year for '{artist} - {query}' (is_single={is_single})")
+    result = _validate_year_result(result, artist, query, module_name, credited_artists)
+    if result:
         record_year_success(module_id)
-    return year
+    return result
 
 
 def discover_release_year(artist: str, query: str, is_single: bool, modules, artist_synonyms: str | None = None,
                           song=None) -> int | None:
+    """discover_release_year_result(), reduced to just the year."""
+    result = discover_release_year_result(artist, query, is_single, modules, artist_synonyms, song)
+    return result.year if result else None
+
+
+def discover_release_year_result(artist: str, query: str, is_single: bool, modules,
+                                 artist_synonyms: str | None = None, song=None) -> YearDiscoveryResult | None:
     """Look up a release year for either an album (query = album title,
     is_single=False) or a standalone single (query = song title,
     is_single=True), trying each enabled year-capable module in order until
@@ -424,25 +450,44 @@ def discover_release_year(artist: str, query: str, is_single: bool, modules, art
 
     for module_id, module_name, module in modules:
         print(f"Looking for release year in {module_name} module")
-        year = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited)
+        result = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited, song)
 
-        if not year and truncated:
+        if not result and truncated:
             print(f"Looking for release year in {module_name} using untruncated artist/query")
-            year = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited)
+            result = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited, song)
 
-        if not year and raw_differs:
+        if not result and raw_differs:
             print(f"Looking for release year in {module_name} using full artist/query including parentheses")
-            year = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited)
+            result = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited, song)
 
-        if not year and artist_synonyms:
+        if not result and artist_synonyms:
             print(f"Looking for release year in {module_name} using synonyms")
-            year = _call_year_module(module, module_id, module_name, artist_synonyms, qry_cln, is_single, credited)
+            result = _call_year_module(module, module_id, module_name, artist_synonyms, qry_cln, is_single, credited, song)
 
-        if not year and multi_label:
+        if not result and multi_label:
             print(f"Looking for release year in {module_name} using all main artists")
-            year = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited)
+            result = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited, song)
 
-        if year:
-            return year
+        if result:
+            return result
     slog("Gave up looking for a release year =)")
+    return None
+
+
+def release_year_from_stored_link(songs) -> YearDiscoveryResult | None:
+    """Year read off a Spotify page the user stored on one of these songs
+    (Song.spotify_url) - for a release no fetcher's search finds. Tried
+    before any module and trusted as is (the user picked the page), apart
+    from the plausible-range check."""
+    # Imported here: the fetchers are otherwise only ever loaded by path
+    # (see _import_module), and selenium shouldn't load just for this module.
+    from utils.discoveries.discovery_modules import spotify_fetcher
+
+    for song in songs:
+        if not song.spotify_url:
+            continue
+        result = spotify_fetcher.get_release_year_from_url(song.spotify_url)
+        if result and MIN_PLAUSIBLE_RELEASE_YEAR <= result.year <= datetime.now().year + 1:
+            return result
+        flog(f"[Spotify link] no release year on {song.spotify_url} stored for '{song.artist.name} - {song.title}'")
     return None

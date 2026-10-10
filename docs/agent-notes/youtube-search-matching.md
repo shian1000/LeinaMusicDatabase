@@ -753,6 +753,15 @@ match regardless of the `quality` gap (the acoustic cover is also LQ_KEYWORDS-pe
 match — safe because it only ever adds a match for a channel that starts with the *exact* artist
 name, never loosens an existing one.
 
+## A yt-dlp search "fails" with good results in it
+
+`_search_video_ytdlp_once()` judges a search by whether stdout has any results, not by the exit
+code. yt-dlp exits 1 as soon as any single hit fails to extract ("This video is not available")
+but still prints every other hit. Real case: `Conrado Tornado - Nim wstanie dzień` came back with
+the right video plus three others and one unavailable hit, and the whole search used to be
+discarded as "no results" (also on the retry, since the same dead hit comes back every time). Part
+of what looked like yt-dlp search being "non-deterministic" may have been this.
+
 ## Comma vs. slash vs. plain spaces for a multi-artist DB field
 
 A DB `artist` field for a collaboration and a candidate's own title/channel name often list the
@@ -887,7 +896,9 @@ unreachable by search). Writing it is a menu action (`report_no_yt_video()` in
 `"N/A"` to "no stored link" and runs a normal search every time, exactly as if the field were
 empty, because *is_video_id_valid()* would just fail on a non-id string and there's no mechanism
 yet to have the sentinel actually short-circuit the search. If a future change adds that skip
-behavior, this is the place both to add it and to update.
+behavior, this is the place both to add it and to update. (One consumer outside playlists does
+skip on it: "Fill missing data -> Years"' `youtube_fetcher.get_release_year()` returns no year for
+a song marked `"N/A"` instead of searching. See `discovery-modules.md`.)
 
 The songs action menu separately has a "Remove links" option (`remove_links_from_songs()` in
 `menu/song_actions/__init__.py`), but it clears `youtube_video_id` back to `None` (plain "not

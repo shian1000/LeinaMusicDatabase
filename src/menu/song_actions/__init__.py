@@ -12,6 +12,7 @@ from utils.ui.display_utils import display_songs
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
+from utils.discoveries.discovery_modules.spotify_fetcher import normalize_spotify_url
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -41,6 +42,26 @@ def report_no_yt_video(songs_objects):
     print(f"Marked {len(songs_objects)} song(s) with \"{NO_VIDEO_SENTINEL}\" (confirmed no YouTube video).")
 
 
+def set_spotify_link(songs_objects):
+    """Store a Spotify album/track page on the selected songs, for a release
+    Spotify's search never surfaces - "Fill missing data -> Years" then reads
+    the year straight off it."""
+    print("About to set a Spotify link for these songs:")
+    display_songs(songs_objects)
+    url = input("Spotify album or track link (put nothing to cancel): ").strip()
+    if not url:
+        print("Aborted")
+        return
+    normalized = normalize_spotify_url(url)
+    if normalized is None:
+        print(f"'{url}' isn't a Spotify album or track link, nothing changed.")
+        return
+    for song in songs_objects:
+        song.spotify_url = normalized
+    submit_global_database_session()
+    print(f"Set {normalized} on {len(songs_objects)} song(s).")
+
+
 def swap_artist_with_title(songs_objects):
     print("About to swap artist name and title for these songs:")
     display_songs(songs_objects)
@@ -66,22 +87,41 @@ def swap_artist_with_title(songs_objects):
     print(f"Swapped artist name and title for {swapped_count} song(s).")
 
 
+# Link kind -> the Song attribute holding it, for "Remove links".
+_SONG_LINK_FIELDS = {
+    "YouTube": "youtube_video_id",
+    "Spotify": "spotify_url",
+}
+
+
 def remove_links_from_songs(songs_objects):
-    print("About to remove the YouTube link from these songs:")
+    choice = questionary.select(
+        "Which links do you want to remove?",
+        choices=["All links", *_SONG_LINK_FIELDS, "Cancel"],
+    ).ask()
+    if choice in (None, "Cancel"):
+        print("Aborted")
+        return
+    kinds = list(_SONG_LINK_FIELDS) if choice == "All links" else [choice]
+    label = " and ".join(kinds)
+
+    print(f"About to remove the {label} link(s) from these songs:")
     display_songs(songs_objects)
-    confirmation = questionary.confirm(f"Remove the YouTube link from {len(songs_objects)} song(s)?").ask()
+    confirmation = questionary.confirm(f"Remove the {label} link(s) from {len(songs_objects)} song(s)?").ask()
     if not confirmation:
         print("Aborted")
         return
 
-    removed_count = 0
-    for song in songs_objects:
-        if song.youtube_video_id:
-            song.youtube_video_id = None
-            removed_count += 1
+    for kind in kinds:
+        field = _SONG_LINK_FIELDS[kind]
+        removed_count = 0
+        for song in songs_objects:
+            if getattr(song, field):
+                setattr(song, field, None)
+                removed_count += 1
+        print(f"Removed the {kind} link from {removed_count} song(s).")
 
     submit_global_database_session()
-    print(f"Removed the YouTube link from {removed_count} song(s).")
 
 
 def remove_songs_from_database(songs_objects):
@@ -112,6 +152,7 @@ def song_actions(songs_objects):
         "Make TXT file": lambda: print("In progress"),
         "Remove check protection": lambda: remove_check_protection(songs_objects),
         "Report no YouTube video": lambda: report_no_yt_video(songs_objects),
+        "Set Spotify link": lambda: set_spotify_link(songs_objects),
         "Swap artist with title": lambda: swap_artist_with_title(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),
         "Remove from the database": lambda: remove_songs_from_database(songs_objects)

@@ -5,7 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from utils.common.selenium_sessions import get_global_driver
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import time
@@ -77,7 +77,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     time.sleep(4)
 
     if "/sorry/" in driver.current_url:
-        slog("[Result] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
+        flog("[Result] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
         return None
 
     try:
@@ -87,7 +87,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     except Exception:
         with open("debug.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        slog("[Result] Page loaded but no Knowledge Panel detected.")
+        flog("[Result] Page loaded but no Knowledge Panel detected.")
         return None
 
     soup = BeautifulSoup(driver.page_source, "html.parser")

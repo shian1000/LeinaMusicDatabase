@@ -33,6 +33,9 @@ _MAIN_SEPARATOR = re.compile(r",\s+|\s+&\s+|\s+x\s+|\s+/\s+|\s+\+\s+|\s+vs\.?\s+
 # Strong enough to pre-select a proposal on its own; "&" and "," aren't
 # ("Simon & Garfunkel", "Earth, Wind & Fire").
 _CONFIDENT_SEPARATOR = re.compile(r"\s+x\s+")
+# The uppercase " X " left out above - accepted only when every part already
+# exists as an artist ("Coldplay X BTS" yes, "Final Fantasy X OST" no).
+_UPPERCASE_X_SEPARATOR = re.compile(r"\s+X\s+")
 
 
 @dataclass
@@ -133,6 +136,22 @@ class SplitCandidate:
         return self.proposal.confident or len(self.existing) == len(self.proposal.names)
 
 
+def _propose_uppercase_x_split(artist: Artist, by_name: dict[str, Artist]) -> SplitProposal | None:
+    """A " X "-joined name, as a split proposal only when every part is
+    already a different artist in the DB - see _UPPERCASE_X_SEPARATOR."""
+    if not _UPPERCASE_X_SEPARATOR.search(artist.name):
+        return None
+    proposal = propose_artist_split(_UPPERCASE_X_SEPARATOR.sub(" x ", artist.name))
+    if proposal is None:
+        return None
+    for name in proposal.names:
+        match = by_name.get(normalize(name))
+        if match is None or match.id == artist.id:
+            return None
+    proposal.original = artist.name
+    return proposal
+
+
 def find_split_candidates(session, artists: list[Artist] | None = None) -> list[SplitCandidate]:
     """Joined-looking artists (all of them, or just `artists`), minus the
     ignore list and anything without songs to move."""
@@ -144,7 +163,7 @@ def find_split_candidates(session, artists: list[Artist] | None = None) -> list[
     for artist in pool:
         if normalize(artist.name) in ignored:
             continue
-        proposal = propose_artist_split(artist.name)
+        proposal = propose_artist_split(artist.name) or _propose_uppercase_x_split(artist, by_name)
         if proposal is None:
             continue
         song_count = len(artist.songs) + len(artist.additional_song_links)

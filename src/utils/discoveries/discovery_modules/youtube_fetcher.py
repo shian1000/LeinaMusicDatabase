@@ -7,10 +7,11 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from config.constants import SPELLING_CHECK_THRESHOLD
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.text_utils import is_blacklisted_album, similarity
-from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
+from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, get_video_release_year, search_video_ytdlp
 
 # Scrapes the public music.youtube.com web player instead of calling the
 # official YouTube Data API, so no app registration / API key is needed.
@@ -37,7 +38,7 @@ def _reject_consent_if_present(driver) -> None:
         )
         reject_button.click()
     except Exception:
-        slog("[YouTube] Couldn't find/click the consent 'Reject all' button")
+        flog("[YouTube] Couldn't find/click the consent 'Reject all' button")
         return
 
     WebDriverWait(driver, 8).until(
@@ -108,7 +109,7 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
         )
         songs_tab.click()
     except Exception:
-        slog("[YouTube] No 'Songs' filter chip found")
+        flog("[YouTube] No 'Songs' filter chip found")
         return None
 
     try:
@@ -118,13 +119,13 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
             )
         )
     except Exception:
-        slog("[YouTube] No song results found")
+        flog("[YouTube] No song results found")
         return None
 
     soup = BeautifulSoup(driver.page_source, "html.parser")
     match = _find_matching_song(soup, artist, title)
     if not match:
-        slog("[YouTube] No matching song in search results")
+        flog("[YouTube] No matching song in search results")
         return None
 
     matched_title, matched_artist, album = match
@@ -136,3 +137,38 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
         matched_title=matched_title,
         matched_artist=matched_artist,
     )
+
+
+def get_release_year(artist: str, query: str, is_single: bool, song=None) -> YearDiscoveryResult | None:
+    """A single's year from its YouTube video, found with the same DB ->
+    YouTube matching as playlists (yt-dlp, no Selenium, no API quota).
+
+    Unlike get_album_name() this doesn't scrape music.youtube.com.
+    get_video_release_year() prefers YouTube Music's "Released on" date and
+    otherwise takes the upload date, which is often not the release date (a
+    live session, a reupload), so the year is flagged needs_review and
+    fill_missing_years.py asks the user about it. Albums return None: one
+    track's video date says little about the album.
+
+    `song` (passed by discoveries_manager for a single) lets a stored
+    Song.youtube_video_id win over a fresh search - it may be a manually set
+    video no search finds. A song marked NO_VIDEO_SENTINEL ("no video
+    exists") is skipped; a stored link that no longer resolves falls back
+    to searching.
+    """
+    if not is_single:
+        return None
+
+    stored = song.youtube_video_id if song is not None else None
+    if stored == NO_VIDEO_SENTINEL:
+        return None
+    year = get_video_release_year(stored) if stored else None
+    if year:
+        print(f"  Using the YouTube video stored for this song [{stored}]")
+        video_id = stored
+    else:
+        video_id = search_video_ytdlp(artist, query)
+        year = get_video_release_year(video_id)
+    if not year:
+        return None
+    return YearDiscoveryResult(year=year, needs_review=True, source_url=f"https://youtu.be/{video_id}")

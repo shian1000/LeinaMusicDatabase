@@ -37,6 +37,7 @@ class Song(Base):
     year = Column(Integer)
     language = Column(String)
     youtube_video_id = Column(String)  # NEW — manual override, see search_video()
+    spotify_url = Column(String)  # album/track page set by hand, read by Years - see spotify_fetcher
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
 

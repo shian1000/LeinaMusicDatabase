@@ -8,6 +8,8 @@ from utils.database.datatables import artist_categories, song_categories, search
 import time
 from utils.common.debug import mlog, slog
 from utils.common.text_utils import normalize_text
+from utils.common.normalizer import normalize
+from collections import Counter
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.song_artists import (
     additional_artist_name_contains,
@@ -314,6 +316,30 @@ def get_songs_with_album_missing_year() -> list[Song]:
         .order_by(Artist.name, Song.album, Song.title)
         .all()
     )
+
+
+def get_known_album_year(artist_id: int, album: str) -> int | None:
+    """Year already recorded on another song of the same album: same primary
+    artist, album name equal after normalize(). Several different years
+    (a reissue, a stray import) -> the most common one, the earliest on a
+    tie. None if no song of that album has a year yet.
+
+    The caller keeps SINGLES_ALBUM away from here - it isn't a real shared
+    album, so one single's year says nothing about another's."""
+    target = normalize(album)
+    if not target:
+        return None
+
+    music_session, _ = get_global_database_sessions()
+    rows = (
+        music_session.query(Song.album, Song.year)
+        .filter(Song.artist_id == artist_id, Song.year != None, Song.album != None)
+        .all()
+    )
+    counts = Counter(year for row_album, year in rows if normalize(row_album) == target)
+    if not counts:
+        return None
+    return max(counts, key=lambda year: (counts[year], -year))
 
 
 

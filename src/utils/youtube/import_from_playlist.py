@@ -43,6 +43,7 @@ YOUTUBE_TITLE_JUNK_PHRASES = [
     "HD",
     "HQ",
     "Videoclip",
+    "MusicVideo",
     "Video Clip",
     "Original Radio Edit",
     "Radio Edit",

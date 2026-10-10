@@ -22,6 +22,7 @@ One edge per line so both directions are `grep`-able.
 - Discovery -> Catalog/DB search — resolves existing rows and creates new `Artist`/`Song` rows during import; reads a song's artist credits (`song_artists.py`) for album/year lookups
 - Discovery -> Terminal UI — `run_import_batch()` ends with the shared `review_artist_splits()` batch review (`utils/ui/artist_split_review.py`)
 - Discovery -> Normalization & matching — normalizes and scores fetched values against the query
+- Discovery -> YouTube — `youtube_fetcher.get_release_year()` (Years) reuses `search_video_ytdlp()` and `get_video_release_year()` rather than a second YouTube matcher
 - Catalog/DB search -> Normalization & matching — Python-side fallback filter, category/similarity matching
 - YouTube -> Normalization & matching — scores candidate videos via `similarity()` / `scaled_similarity_threshold()`
 - YouTube -> Catalog/DB search — `yt_cache.init_cache()` reads a song's artist credits (`song_artists.song_artist_credits()`) for matching, not for search
@@ -30,7 +31,8 @@ One edge per line so both directions are `grep`-able.
 ## Boundaries
 
 - Terminal UI must not execute SQL directly — it goes through Catalog/DB search.
-- YouTube and Discovery don't import each other or the database layer for search purposes;
+- YouTube never imports Discovery. Discovery imports YouTube only for that shared DB → YouTube
+  matching (one implementation, see the edge above), and neither uses the other for DB search;
   Discovery is the one system besides Catalog/DB search that writes to the database, because
   import *is* a database-writing workflow.
 - Full enforced rules: `AGENTS.md` → Architecture boundaries.

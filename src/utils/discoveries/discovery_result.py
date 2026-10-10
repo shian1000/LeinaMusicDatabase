@@ -24,7 +24,13 @@ class YearDiscoveryResult:
     found the year on (an album title when the query was an album, a
     recording title when the query was a single's song title) - never an
     echo of the query, for the same reason as DiscoveryResult.
+
+    needs_review marks a year that's only a guess (e.g. a YouTube upload
+    date) - the caller shows it to the user instead of writing it straight
+    away. source_url is what to show them alongside it.
     """
     year: int
     matched_title: Optional[str] = None
     matched_artist: Optional[str] = None
+    needs_review: bool = False
+    source_url: Optional[str] = None

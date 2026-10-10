@@ -110,8 +110,13 @@ non-trivial work in that area.
 - `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
   `data/spellcheck_cache.json`. `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console
-  output is gated by a `.debug` file (`verbosity = N`) at the repo root; everything also appends
-  to `debug.log` (gitignored) regardless.
+  output is gated by a `.debug` file (`verbosity = N`) at the repo root, and so is what reaches
+  `debug.log` (gitignored): without `.debug`, only `slog(..., priority=3)` gets there. Exception:
+  `flog(message)` - *why a lookup came up empty* (a fetcher returning nothing, a result the manager
+  discarded, a yt-dlp ERROR line, a Spotify page that didn't load, which is then saved to
+  `debug_spotify.html`) - is always appended with a timestamp, so an intermittent failure can be
+  diagnosed afterwards. Grep `debug.log` for `***Lookup***`. Use `flog()` for new failure paths
+  in fetchers/searches, not `slog()`.
 - `src/utils/youtube/` — YouTube playlist/download helpers, `score_result()` match ranking
   (DB → YouTube), and `import_from_playlist.py` (YouTube → DB, "Import data from YouTube
   playlist"). `docs/agent-notes/youtube-search-matching.md`.
@@ -211,13 +216,15 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Five places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Six places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
   Add/Swap/Don't add once the whole playlist has been scanned — see
   `docs/agent-notes/youtube-search-matching.md`), and `review_artist_splits()`
-  (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split) — see
+  (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
+  `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
+  `needs_review`, e.g. YouTube upload dates; tick the ones to change) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
   candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an
@@ -297,7 +304,9 @@ non-trivial work in that area.
   web players' markup instead of the official (credential-requiring) APIs, how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the
   separate `get_release_year()` contract/config/stats for "Fill missing data -> Years" (including
-  why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers).
+  why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers,
+  why a hand-set `Song.spotify_url` is read before any module,
+  and why `youtube_fetcher.py`'s YouTube-date years are flagged `needs_review` and reviewed by the user).
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MusicBrainz cost path shared by
   every importer via `utils/discoveries/import_engine.py`'s `run_import_batch()` (mp3-tag import
   and YouTube-playlist import are both just metadata builders feeding the same engine now — see
@@ -332,7 +341,8 @@ non-trivial work in that area.
   before reuse, and cleared back to `None` if a stale link fails both validation and a fallback
   re-search, both logged to `youtube_link_cache.log`; see also `NO_VIDEO_SENTINEL`, the separate
   `"N/A"` human annotation for "confirmed no video exists at all," settable via the songs menu's
-  "Report no YouTube video" but still consumed as data-only with no dedicated skip behavior),
+  "Report no YouTube video"; playlists still treat it as an empty field, only Years' YouTube
+  date lookup skips the song),
   `transliteration.py`'s alternate-script
   retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
   when the winning pick isn't a confirmed official release, not by a relevance floor), why a collab

@@ -8,6 +8,7 @@ from utils.database.tags_management import has_tag_on_song
 from utils.database.song_artists import reassign_additional_artist_links
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
+from utils.common.normalizer import normalize
 
 def remove_duplicate_songs():
     """
@@ -58,8 +59,10 @@ def remove_duplicate_artists():
         key_origin = artist.origin
         if key in seen:
             seen_origin = seen[key].origin
+            # normalize(), not .lower(): the same place gets spelled with and
+            # without diacritics ("Ukraine - Kyïv" / "Ukraine - Kyiv").
             if (key_origin is None or seen_origin is None or
-                    key_origin.lower() == seen_origin.lower()):
+                    normalize(key_origin) == normalize(seen_origin)):
                 duplicates.append((seen[key], artist))
         else:
             seen[key] = artist

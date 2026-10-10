@@ -3,14 +3,14 @@ import time
 from contextlib import contextmanager
 
 import musicbrainzngs
-from utils.common.debug import slog
-from utils.common.text_utils import is_blacklisted_album
+from utils.common.debug import flog, slog
+from utils.common.text_utils import is_blacklisted_album, similarity, scaled_similarity_threshold
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import requests
 from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
-from config.constants import MUSICBRAINZ_API_USER_AGENT
+from config.constants import MUSICBRAINZ_API_USER_AGENT, SPELLING_CHECK_THRESHOLD
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
@@ -210,7 +210,12 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
 
         for release_group in release_groups:
             title = release_group.get("title", "")
-            if is_blacklisted_album(title):
+            # Skip anything that isn't the album we already have stored - a
+            # compilation ranked first would otherwise be returned, rejected by
+            # the manager's title check, and hide the real album further down.
+            # No album blacklist here: the name is already in the DB, so a word
+            # like "pop" in it ("SODA POP FANCLUB 4") says nothing.
+            if similarity(query, title) < scaled_similarity_threshold(query, title, SPELLING_CHECK_THRESHOLD):
                 continue
             year = _extract_year(release_group.get("first-release-date"))
             if not year:
@@ -225,4 +230,5 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for release year of '{query}' by '{artist}': {e}")
+        flog(f"[MusicBrainz] error for release year of '{artist} - {query}': {e}")
         return None

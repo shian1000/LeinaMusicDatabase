@@ -174,7 +174,12 @@ the same way `_validate_result()` validates albums, plus a plausible-range check
 (`MIN_PLAUSIBLE_RELEASE_YEAR`..current year + 1, in `config/constants.py`) since a bare `int`/wrong
 year can't be caught by a blacklist the way a bad album string can.
 
-Currently implemented by `music_brainz_fetcher.py` and `google_search_fetcher.py` only. A module
+Currently implemented by `music_brainz_fetcher.py`, `google_search_fetcher.py`, `spotify_fetcher.py`
+and `youtube_fetcher.py` (singles only, see below). `spotify_fetcher.py` searches `/tracks` for a
+single and `/albums` for an album (cards matched on `cardTitle` + artist links), then opens the
+track/album page. Either page's header (`entity-header`) has a `data-testid="release-date"` span,
+with `entityTitle`/`creator-link` reported back as the match. On a track page that date is the
+release date of the track's album. A module
 without `get_release_year` is simply never tried for Years — nothing elsewhere needs updating to
 add or drop one.
 
@@ -203,7 +208,20 @@ worth remembering if you're porting logic between the two: album lookups are inh
 individual track, so grouping avoids redundant lookups and guarantees every track on the same
 album gets the same year. Songs whose `album == "Singles"` are excluded from grouping and looked
 up individually by their own title (`is_single=True`) — grouping them under the literal string
-`"Singles"` would be wrong, since that sentinel doesn't denote a real shared album.
+`"Singles"` would be wrong, since that sentinel doesn't denote a real shared album. A group of one
+song whose album equals its own title (`normalizer.compare()`, e.g. "Venture" / "Venture") is moved
+to the singles too. That's how a single released under its own title is usually stored (~300 such
+songs lacked a year when this was added), and it would otherwise miss the single-only lookups:
+`youtube_fetcher.py` and the "A x B" collab retry.
+
+**Before any module runs, years already in the DB are reused.** `_fill_years_known_in_database()`
+groups the missing-year songs by `(artist_id, normalize(album))`, skipping `SINGLES_ALBUM`, and asks
+`database_getter.get_known_album_year()` for a year recorded on another song of the same album. If
+the album has several different years, the most common one wins, and the earliest on a tie. Those
+years are written without review. This runs before the per-fetch cap, so it never uses up a slot
+meant for a network lookup, and it's committed even if Chrome fails to start. Later, the manual
+fill-in prompt prints up to `MANUAL_YEAR_SAMPLE_SONGS` random titles next to an album's label as a
+hint which album it is.
 
 **MusicBrainz picks a different API call depending on `is_single`.** For an album query it calls
 `musicbrainzngs.search_release_groups()` (release groups carry `first-release-date`, which
@@ -212,6 +230,23 @@ single it reuses the `search_recordings()` shape `get_album_name()` already uses
 `date`/`first-release-date` off the chosen recording's release. If you add year support to another
 fetcher, decide up front whether it can search by album title at all (some scraped sources' search
 boxes behave differently for an album vs. a song query) — this isn't automatic.
+
+**A stored `Song.spotify_url` beats every module.** `fill_missing_years.py` first calls
+`release_year_from_stored_link(songs)` for each album group or single. It opens the stored page
+via `spotify_fetcher.get_release_year_from_url()` and trusts it apart from the plausible-range
+check, because the user picked the page. Why it exists: Spotify's search sometimes never shows a
+release at all, and walking the artist's discography instead was tried and dropped. That page
+lazy-loads as you scroll, has no grid view, and for a prolific artist (Cypis) still hadn't reached
+2016 after 60–70 s of scrolling. The `artist:`/`album:` field filters in Spotify search returned
+nothing.
+
+**The album-mode year lookup in MusicBrainz skips by title, not by blacklist.** It walks the
+release groups and skips any whose title doesn't resemble the queried album, using the same
+`scaled_similarity_threshold()` check as `_validate_year_result()`. Without this, a compilation
+ranked first would be returned, rejected by the manager, and hide the real album further down the
+list. The album blacklist isn't applied here: the album name is already stored, so a blacklisted
+word in it ("pop" in "SODA POP FANCLUB 4") says nothing. The single (recording) path still uses
+the blacklist, to skip compilations and live albums the track also appears on.
 
 **`google_search_fetcher.py`'s album-query handling is an unverified assumption.** The existing
 code only ever searched `"{artist} - {song}"` and parsed a `music/recording_cluster` Knowledge
@@ -222,6 +257,24 @@ against a live album Knowledge Panel. If Years lookups via this fetcher come bac
 for real albums (but work for `is_single=True` singles, which still hit the already-confirmed
 `recording_cluster` panel), check `debug.html` for the actual `data-attrid` value on an album query
 before assuming the similarity/validation logic is at fault.
+
+**`youtube_fetcher.py`'s years are only guesses, so the user reviews them.** Its
+`get_release_year()` doesn't scrape music.youtube.com like `get_album_name()` does. It runs the
+normal DB → YouTube `search_video_ytdlp()` matching (yt-dlp, no Selenium, no API quota) and reads
+the date with `get_video_release_year()`, which prefers yt-dlp's `release_date`/`release_year`
+(YouTube Music's "Released on") over `upload_date`. An upload date is often not the release date (a
+live session, a reupload), so it returns `YearDiscoveryResult(needs_review=True, source_url=...)`.
+`discover_release_year_result()` passes that flag through (`discover_release_year()` is the same
+call reduced to just the int). `fill_missing_years.py` doesn't write flagged years straight away:
+`_review_unsure_years()` lists them all at the end in one checkbox prompt, and the user ticks the
+ones to change. Unticked years are written. A ticked one asks for a year, and an empty answer
+leaves the song without one. It returns None for albums, because one track's video date says
+little about the album. It's last in `DEFAULT_DISCOVERY_MODULE_YEAR_ORDER`, and an existing config
+gets it appended at the end by `_reconcile_config()`. It reuses a stored `Song.youtube_video_id`
+first: `_call_year_module()` passes the `Song` (singles only) to any `get_release_year()` that
+declares a `song` keyword, checked with `inspect.signature`, so the other modules keep the plain
+3-argument contract. A stored link that no longer resolves falls back to a search, and a song
+marked `NO_VIDEO_SENTINEL` is skipped.
 
 ## Multi-artist songs (`additional_song_artists`)
 
@@ -235,6 +288,13 @@ Validation had to change with it: querying "Sw@da" while the service credits "Sw
 Niczos" fails plain similarity, so `_matched_artist_resembles()` also accepts a matched field that
 contains any of the song's credited artists as whole words (after `normalize()`). Only for
 multi-artist songs — single-artist validation is unchanged.
+
+One more rule in `_matched_artist_resembles()`, for every song: a matched artist that is *equal*
+to the query after `normalize()`, with anything from the first `(` on dropped, is accepted.
+Services write Japanese/Chinese acts with punctuation and a native-script name in brackets
+("Cody・Lee(李)" for "Cody Lee"), and plain similarity rates that 0.74, below the threshold, so
+correct matches from MusicBrainz and Spotify were discarded. It's an exact match after
+normalization, so "Lee" or "Cody Lee Band" still don't pass.
 
 ## Which fetchers report matches
 

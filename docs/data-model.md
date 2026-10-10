@@ -54,8 +54,15 @@ role          NOT NULL, 'main' | 'feat'
   `songs.artist_id`, an existing artist is reused per part (exact `normalize()`d name or synonym),
   missing parts are created with the joined row's origin, and the joined row is deleted.
   Splitting is always a user decision in one batch review — "&"/"," can't tell "Sw@da & Maxim"
-  from "Simon & Garfunkel". Why this shape and not extra columns:
+  from "Simon & Garfunkel". The " x " separator is lowercase only, because an uppercase X is
+  usually part of a name ("Final Fantasy X OST"). An uppercase " X " splits only when every part
+  is already an artist in the DB ("Coldplay X BTS"). Why this shape and not extra columns:
   [ADR-0002](decisions/0002-multiple-artists-per-song.md).
+- `Song.spotify_url` — a Spotify album or track page set by hand (Song actions → "Set Spotify
+  link", stored normalized by `spotify_fetcher.normalize_spotify_url()`), for a release Spotify's
+  own search never surfaces (Cypis' 2016 "Sprawdzian Z Chemii", buried under dozens of newer
+  singles). "Fill missing data -> Years" reads the release date straight off it before trying any
+  module: `discoveries_manager.release_year_from_stored_link()`. Migration `0004`.
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
   content — confirmed true even for an authenticated Data API request, not just anonymous
@@ -66,10 +73,10 @@ role          NOT NULL, 'main' | 'feat'
   comes up empty, the dead link is cleared from the DB (`save_video_id_to_song(song, None)`) rather
   than left to fail validation again on every future run. Can also be set to the literal string
   `"N/A"` (`manage_youtube_playlists.NO_VIDEO_SENTINEL`) — a human's record that no video for this
-  song exists on YouTube at all (as opposed to existing but excluded from search). For now this is
-  data-only: `create_yt_playlist()` normalizes it to "no stored link" and searches normally, same
-  as an empty field — there's no dedicated runtime behavior (e.g. skipping the search) for it yet.
-  Currently set by hand (direct DB write) only, no menu option. See
+  song exists on YouTube at all (as opposed to existing but excluded from search).
+  `create_yt_playlist()` normalizes it to "no stored link" and searches normally, same as an empty
+  field. The only code that skips on it is Years' `youtube_fetcher.get_release_year()`. Set via the
+  songs menu's "Report no YouTube video". See
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
 
 ## `tag.db`

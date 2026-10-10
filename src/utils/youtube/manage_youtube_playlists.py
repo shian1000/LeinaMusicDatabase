@@ -25,6 +25,7 @@ from utils.common.text_utils import remove_brackets, similarity, scaled_similari
 from utils.common.normalizer import APOSTROPHES
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
+from utils.common.debug import flog
 import json
 
 
@@ -1195,6 +1196,15 @@ def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
         return None
 
 
+def _log_ytdlp_errors(query: str, result) -> None:
+    """Keep yt-dlp's ERROR lines (an unavailable hit, a throttled request) in
+    debug.log even when the search still returned something - otherwise a
+    flaky search leaves no trace of why it failed."""
+    errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
+    if errors or not result.stdout.strip():
+        flog(f"[yt-dlp] search '{query}' exit={result.returncode}: " + (" | ".join(errors) or "no output, no error"))
+
+
 def _search_video_ytdlp_once(
     artist: str, title: str, max_results: int, artist_synonyms: str | None, max_attempts: int,
     artist_credits: dict | None = None,
@@ -1208,8 +1218,13 @@ def _search_video_ytdlp_once(
     confirmed official release, so it can decide whether a transliterated
     retry (see search_video_ytdlp) is worth attempting.
 
-    `max_attempts` retries a returncode!=0/empty-stdout response once before
-    giving up. This is a transient-failure retry, not a wider net: yt-dlp's
+    Success is judged by stdout alone, not the exit code: yt-dlp exits 1 when
+    any single search hit fails to extract (a removed/unavailable video) yet
+    still prints every other hit - real case, "Conrado Tornado - Nim wstanie
+    dzień" returned the right video plus three others alongside one
+    "This video is not available" error, and all of it used to be discarded.
+
+    `max_attempts` retries an empty-stdout response once before giving up. This is a transient-failure retry, not a wider net: yt-dlp's
     anonymous scraping search is confirmed non-deterministic run-to-run for
     the exact same query — real case, "Waglewski, Fisz, Emade - Bóg" returned
     zero results in one production run (forcing a fallback to the API, which
@@ -1243,12 +1258,13 @@ def _search_video_ytdlp_once(
         result = _run_ytdlp_search(query, max_results)
         if result is None:
             return None, 0.0, False  # timeout/missing binary — not a transient case, don't retry
-        if result.returncode == 0 and result.stdout.strip():
+        if result.stdout.strip():
             break
         if attempt + 1 < max_attempts:
             print("  ⚠ yt-dlp returned no results, retrying once...")
 
-    if result.returncode != 0 or not result.stdout.strip():
+    _log_ytdlp_errors(query, result)
+    if not result.stdout.strip():
         print("  ✖ yt-dlp returned no results")
         return None, 0.0, False
 
@@ -1445,6 +1461,42 @@ def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
         return False
 
     return True
+
+
+def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | None:
+    """Year a video was released, read via yt-dlp (no download, no API quota).
+
+    Prefers `release_date`/`release_year` - YouTube Music's "Released on" for
+    an official upload, the real release date - over `upload_date`, which for
+    anything else (a live session, a reupload) is only when the video went up.
+    None if the video doesn't resolve or carries no date at all.
+    """
+    if not video_id or video_id == NO_VIDEO_SENTINEL:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "yt-dlp", "--skip-download", "--no-warnings",
+                "--print", "%(release_date)s|%(release_year)s|%(upload_date)s",
+                f"https://www.youtube.com/watch?v={video_id}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"  ✖ yt-dlp unavailable: {e}")
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
+        flog(f"[yt-dlp] no date for video {video_id}: {' | '.join(errors) or 'no output'}")
+        return None
+
+    for value in result.stdout.strip().splitlines()[-1].split("|"):
+        match = re.match(r"(\d{4})", value)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def save_video_id_to_song(song, video_id: str | None) -> None:

@@ -36,6 +36,8 @@ TITLE_JUNK_SUFFIXES = [
     "lyric video",
     "video clip",
     "videoclip",
+    # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
+    "musicvideo",
 ]
 _TITLE_JUNK_SUFFIX_RE = re.compile(
     r"\s*(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
