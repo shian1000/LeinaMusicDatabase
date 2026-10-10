@@ -38,6 +38,15 @@ not a restructuring.
    lint rule. There is currently nothing that mechanically stops `src/menu/` from importing
    SQLAlchemy directly.
 
+### Note (2026-10-10)
+
+The first mobile client (MusicDatabaseApp) does not go through `src/utils/*` at all: it downloads
+`music.db` / `tag.db` from the sharing server and reads the SQLite files directly, and fills some
+gaps (YouTube links) with its own simplified logic. That doesn't change this decision. The intended
+next step — the phone submitting data here for review — is where point 2 applies: that intake
+should be a sibling package calling `src/utils/*`. See
+[ADR-0003](0003-phone-client-fills-gaps.md).
+
 ## Consequences
 
 - Mobile/API work later doesn't require first untangling SQL out of menu prompt handlers — the

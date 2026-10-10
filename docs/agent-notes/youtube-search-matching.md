@@ -11,6 +11,14 @@ Two directions live under `src/utils/youtube/`, covered in the two halves of thi
   a playlist URL, pull its videos into the database as new songs — the "Import data from YouTube
   playlist" menu item, sibling to the mp3-tag importer (see `docs/agent-notes/import-pipeline.md`).
 
+**A lite counterpart exists outside this repo.** The MusicDatabaseApp phone client searches
+YouTube itself for songs whose `youtube_video_id` is NULL/empty, with its own matcher loosely
+inspired by `score_result()` ([ADR-0003](../decisions/0003-phone-client-fills-gaps.md)). It is
+intentionally simpler (no yt-dlp `track`/tags metadata) and not kept in sync: don't port fixes from
+here to there or vice versa as a matter of course. What *is* shared is the stored value: the app
+treats a video id as linked, `"N/A"` (`NO_VIDEO_SENTINEL`, see below) as "don't search", and
+NULL/`""` as unknown. Changing those semantics affects the app.
+
 ## Importing FROM a YouTube playlist (`import_from_playlist.py`)
 
 `import_data_from_youtube_playlist()` carries a commented-out `# items = items[:94]` debug line

@@ -96,6 +96,14 @@ The user enters a **folder URL** (`http://<tailscale ip>:8002/`) and the app fet
 contract (port `SHARING_HTTP_PORT` = 8002, both file names) is relied on by the app, so agree any
 change with the app side first. Port 8001 is taken by the APK share.
 
+The app also reads the files' contents directly: the `songs` / `artists` /
+`additional_song_artists` tables and `songs.youtube_video_id` (video id = linked, `"N/A"` =
+confirmed no video, NULL or `""` = unknown). For songs with no value it may find a YouTube link
+itself; that stays on the phone and is dropped once a downloaded `music.db` has its own value. So
+when adding a migration that touches those tables, or changing what `youtube_video_id` can hold,
+check the app side too. Sending phone-found data back for review is planned, not built — the
+server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gaps.md).
+
 **Copying** (`utils/database/sharing.py`) puts both files in `Settings.sharing_dir`
 (`/media/owner/T7/Shared/Music/Database` by default):
 

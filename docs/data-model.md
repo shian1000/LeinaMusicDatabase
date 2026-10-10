@@ -79,6 +79,10 @@ role          NOT NULL, 'main' | 'feat'
   field. The only code that skips on it is Years' `youtube_fetcher.get_release_year()`. Set via the
   songs menu's "Report no YouTube video". See
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
+  The MusicDatabaseApp phone client reads this column too: an id = linked, `"N/A"` = confirmed no
+  video (the app won't search), NULL or `""` = unknown (the phone may search YouTube itself and
+  keep its answer locally). Changing those meanings affects the app —
+  [ADR-0003](decisions/0003-phone-client-fills-gaps.md).
 
 ## `tag.db`
 

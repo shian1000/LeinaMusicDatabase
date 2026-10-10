@@ -15,8 +15,13 @@ Durable content that used to sprawl across root-level session reports (`OPTIMIZA
 - Purpose: manage and enrich a local music database from local files and external metadata sources.
 - Primary implementation: Python, SQLite via SQLAlchemy, an interactive terminal menu UI. Not a
   server — `main.py` is a desktop app the user runs and clicks through.
-- Mobile clients may come later. Keep SQL and matching/domain logic in `src/utils/*`, not in the
-  `src/menu/` handlers, so it stays reusable.
+- A mobile client exists: MusicDatabaseApp (separate Flutter repo, `../MusicDatabaseApp`). It
+  downloads `music.db` / `tag.db` from the sharing server and reads them directly, may work out
+  missing data (so far: YouTube links) with its own simplified logic kept only on the phone, and
+  will later submit phone-found data here for review (not designed yet) —
+  [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md). MusicDatabase's values always win.
+  Keep SQL and matching/domain logic in `src/utils/*`, not in the `src/menu/` handlers, so a
+  future review intake can reuse it.
 
 ## Read order
 
@@ -83,8 +88,12 @@ non-trivial work in that area.
   `tag.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally. The service also lives outside the repo, so record changes
-  to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
+  the port or file names unilaterally. It also depends on the `songs` / `artists` /
+  `additional_song_artists` schema and on `songs.youtube_video_id`'s values (video id = linked,
+  `"N/A"` = confirmed no video, NULL/`""` = unknown, which the phone may search for itself) —
+  coordinate schema or sentinel changes with the app
+  ([ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md)). The service also lives outside
+  the repo, so record changes to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()`, which every artist merge must call. `artist_splitting.py` —
@@ -167,9 +176,14 @@ non-trivial work in that area.
 ## Architecture boundaries
 
 - `src/menu/` drives workflow and presentation. Keep SQL and matching logic in `src/utils/*`, not
-  in menu handlers — a future API/mobile client would call the same `src/utils/*` layer rather
-  than repurposing `src/menu/`. Why this is a recorded decision, not just a convention:
-  [ADR-0001](docs/decisions/0001-ui-independent-business-logic.md).
+  in menu handlers — a future API (e.g. the intake for phone-submitted data) would call the same
+  `src/utils/*` layer rather than repurposing `src/menu/`. Why this is a recorded decision, not
+  just a convention: [ADR-0001](docs/decisions/0001-ui-independent-business-logic.md).
+- The MusicDatabaseApp phone client reads the shared SQLite files directly, so `music.db`'s schema
+  and stored values are an interface too: migrations touching `songs` / `artists` /
+  `additional_song_artists`, or a change to what `youtube_video_id` may hold (especially
+  `NO_VIDEO_SENTINEL`), need coordinating with the app.
+  [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →
   `debug.py`. Don't add a parallel local version of any of these.
@@ -363,4 +377,5 @@ non-trivial work in that area.
   `test_regression_suite_resolves_via_fresh_search` (no DB involved at all) and
   `test_regression_suite_resolves_via_db_reference` (resolving via `Song.youtube_video_id`
   instead) — so a resolution change in either path is a test failure to review, not a silent
-  update.
+  update. Also: the MusicDatabaseApp phone app has its own, intentionally simpler matcher for
+  songs with no link here — not a port, not kept in sync.

@@ -38,7 +38,12 @@ about what's not allowed to move.
 
 ## Where a future API would sit
 
-No HTTP API or mobile client exists yet. If one is built, it should be a new sibling of
+No HTTP API exists yet. The one mobile client, MusicDatabaseApp, doesn't need one today: it
+downloads the SQLite files from the sharing server (`src/utils/database/sharing_server.py`,
+[runbooks/database.md](runbooks/database.md)) and reads them directly, filling some missing values
+(YouTube links) with its own simplified logic kept on the phone. It is meant to send phone-found
+data back here for review later ([ADR-0003](decisions/0003-phone-client-fills-gaps.md)), and that
+intake is the likely first API. When it is built, it should be a new sibling of
 `src/menu/` — calling into the same `src/utils/*` orchestration layer rather than the menu layer
 being repurposed as a backend. `src/menu/`'s job is terminal presentation and prompt flow; an API
 adapter's job would be request/response and serialization. Neither should own business rules that
@@ -49,7 +54,8 @@ a full `domain/`/`application/` layer split isn't happening now.
 Before building that adapter, decide and document (a decision record under `docs/decisions/` is
 the right place once this becomes real):
 
-- whether the database stays local-per-device, becomes centrally hosted, or gets synchronized;
+- how phone-submitted data reaches this machine and how it is reviewed before acceptance (the
+  database itself stays here; the phone gets read-only copies);
 - authentication and data ownership;
 - offline behavior and conflict resolution;
 - pagination/search response contracts (the existing category system in
