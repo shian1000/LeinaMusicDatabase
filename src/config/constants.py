@@ -44,6 +44,17 @@ DISCOVERY_STATS_YEAR_FILE = "discovery_fetcher_stats_years.json"
 FETCH_DATA_CONFIG_FILE = "fetch_data_config.json"
 DEFAULT_MAX_SONGS_PER_FETCH = 50
 
+# Database sharing for the MusicDatabaseApp mobile client (see
+# docs/runbooks/database.md -> "Sharing with the mobile app"). The phone
+# downloads <folder URL>/music.db and <folder URL>/tag.db from this port over
+# Tailscale; 8001 is already taken by the APK share. Changing the port or the
+# file names breaks the app's contract - agree it with the app side first.
+SHARING_HTTP_PORT = 8002
+SHARING_SERVICE_NAME = "musicdatabase-share"
+# Delay after the user's systemd manager starts (= after login, without linger)
+# before the sharing server is started.
+SHARING_STARTUP_DELAY = "1min"
+
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
     "spotify_fetcher",

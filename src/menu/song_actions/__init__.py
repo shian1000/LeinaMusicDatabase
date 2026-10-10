@@ -7,7 +7,7 @@ from utils.database.database_getter import extract_db_object_info
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu
 from utils.database.datatables import artist_categories, song_categories
 from utils.database.tags_management import remove_tag_from_song
-from utils.youtube.manage_youtube_playlists import create_yt_playlist, NO_VIDEO_SENTINEL
+from utils.youtube.manage_youtube_playlists import create_yt_playlist, extract_video_id, NO_VIDEO_SENTINEL
 from utils.ui.display_utils import display_songs
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
@@ -40,6 +40,27 @@ def report_no_yt_video(songs_objects):
         song.youtube_video_id = NO_VIDEO_SENTINEL
     submit_global_database_session()
     print(f"Marked {len(songs_objects)} song(s) with \"{NO_VIDEO_SENTINEL}\" (confirmed no YouTube video).")
+
+
+def set_youtube_link(songs_objects):
+    """Store a YouTube video on the selected songs by hand - for a video
+    YouTube's anonymous search never returns (age-restricted, or a title
+    like "3some" its filter hides). Playlists and Years' YouTube date lookup
+    use a stored video instead of searching."""
+    print("About to set a YouTube link for these songs:")
+    display_songs(songs_objects)
+    url = input("YouTube video link (put nothing to cancel): ").strip()
+    if not url:
+        print("Aborted")
+        return
+    video_id = extract_video_id(url)
+    if video_id is None:
+        print(f"'{url}' isn't a YouTube video link, nothing changed.")
+        return
+    for song in songs_objects:
+        song.youtube_video_id = video_id
+    submit_global_database_session()
+    print(f"Set YouTube video {video_id} on {len(songs_objects)} song(s).")
 
 
 def set_spotify_link(songs_objects):
@@ -152,6 +173,7 @@ def song_actions(songs_objects):
         "Make TXT file": lambda: print("In progress"),
         "Remove check protection": lambda: remove_check_protection(songs_objects),
         "Report no YouTube video": lambda: report_no_yt_video(songs_objects),
+        "Set YouTube link": lambda: set_youtube_link(songs_objects),
         "Set Spotify link": lambda: set_spotify_link(songs_objects),
         "Swap artist with title": lambda: swap_artist_with_title(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),

@@ -5,6 +5,7 @@ from utils.common.text_utils import (
     has_singles_marker,
     similarity,
     scaled_similarity_threshold,
+    title_resembles,
 )
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 from utils.discoveries.discovery_settings import (
@@ -223,7 +224,7 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
     if matched_title:
         threshold = scaled_similarity_threshold(queried_title, matched_title, SPELLING_CHECK_THRESHOLD)
         title_sim = similarity(queried_title, matched_title)
-        if title_sim < threshold:
+        if not title_resembles(queried_title, matched_title):
             flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
                  f"'{queried_title}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None
@@ -373,7 +374,7 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
     if matched_title:
         threshold = scaled_similarity_threshold(queried_query, matched_title, SPELLING_CHECK_THRESHOLD)
         title_sim = similarity(queried_query, matched_title)
-        if title_sim < threshold:
+        if not title_resembles(queried_query, matched_title):
             flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
                  f"'{queried_query}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
             return None

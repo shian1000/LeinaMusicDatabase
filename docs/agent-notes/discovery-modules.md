@@ -179,7 +179,12 @@ and `youtube_fetcher.py` (singles only, see below). `spotify_fetcher.py` searche
 single and `/albums` for an album (cards matched on `cardTitle` + artist links), then opens the
 track/album page. Either page's header (`entity-header`) has a `data-testid="release-date"` span,
 with `entityTitle`/`creator-link` reported back as the match. On a track page that date is the
-release date of the track's album. A module
+release date of the track's album. `genius_fetcher.py` deliberately has no `get_release_year()`.
+Genius album pages are user-made and include unreleased ones: Geezer's "G1*" page (an
+unreviewed bio saying "will come out sometime in 2026", leaked or snippet tracks, no release date)
+is the only source that knows that album at all. A Genius year lookup would have to tell released
+from announced. Add one only if real released cases turn up that only Genius dates, and then flag
+it `needs_review` like the YouTube one. A module
 without `get_release_year` is simply never tried for Years — nothing elsewhere needs updating to
 add or drop one.
 
@@ -246,7 +251,15 @@ release groups and skips any whose title doesn't resemble the queried album, usi
 ranked first would be returned, rejected by the manager, and hide the real album further down the
 list. The album blacklist isn't applied here: the album name is already stored, so a blacklisted
 word in it ("pop" in "SODA POP FANCLUB 4") says nothing. The single (recording) path still uses
-the blacklist, to skip compilations and live albums the track also appears on.
+the blacklist, to skip compilations and live albums the track also appears on. If no release group under the artist
+matches, `_release_year_from_artist_recordings()` searches the artist's recordings on a release of
+that name (`release:"…" AND artist:"…"`). That finds various-artists compilations such as
+DakhaBrakha on the festival CD "TFF Rudolstadt 2011", which is credited to "Various Artists" and
+so never shows up keyed on the artist. The album
+path reports the release group's `artist-credit-phrase` (the name the release is credited to,
+"Freeland") as the matched artist, not the credited artist entity's own name ("Adam Freeland"),
+because the credited name is what the DB holds. It also proves the artist is on the release, which simply
+accepting any same-named "Various Artists" release group wouldn't.
 
 **`google_search_fetcher.py`'s album-query handling is an unverified assumption.** The existing
 code only ever searched `"{artist} - {song}"` and parsed a `music/recording_cluster` Knowledge

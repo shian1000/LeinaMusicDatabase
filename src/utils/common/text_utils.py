@@ -19,6 +19,7 @@ from config.constants import (
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
     SOUNDTRACK_ARTIST_MARKERS,
     SINGLES_MARKER,
+    SPELLING_CHECK_THRESHOLD,
 )
 
 def _is_word_substring(needle: str, haystack: str) -> bool:
@@ -310,6 +311,16 @@ def similarity(a: str, b: str) -> float:
     result = SequenceMatcher(None, a.lower(), b.lower()).ratio()
     slog(result, priority=1)
     return result
+
+
+def title_resembles(query: str, candidate: str) -> bool:
+    """Is `candidate` (a title a fetcher matched) the `query` we searched for?
+    Equal after normalize() always counts - a short title with a stray mark
+    ("Cope" vs "Cope™", similarity 0.89) would otherwise miss the raised
+    short-string threshold - then the usual similarity check."""
+    if normalize(query) and normalize(query) == normalize(candidate):
+        return True
+    return similarity(query, candidate) >= scaled_similarity_threshold(query, candidate, SPELLING_CHECK_THRESHOLD)
 
 
 def scaled_similarity_threshold(a: str, b: str, base_threshold: float) -> float:

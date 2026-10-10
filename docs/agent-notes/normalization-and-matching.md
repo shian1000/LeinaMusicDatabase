@@ -15,6 +15,26 @@ call sites delegate to it.
 Do not write a new ad-hoc normalize/compare function anywhere else — extend this
 one.
 
+Invisible format characters (Unicode category `Cf`: zero-width space U+200B,
+soft hyphen, joiners, direction marks) are *dropped*, not turned into a space
+like other punctuation. Text copied from Bandcamp carries U+200B inside words
+("Cz\u200bô\u200brny Ritm Z\u200bł\u200boté Serce"). As spaces, that
+normalized to "cz o rny ritm z l ote serce", so two copies of one album never
+compared equal and Years' "year already in the DB" step missed it. The same removal is
+`strip_format_characters()`. "Get rid of rubbish data" uses it
+(`remove_invisible_characters()`) to clean stored titles, albums and artist
+names, with `keep_joiner=True` so the zero-width joiner inside emoji sequences
+survives.
+
+The marks ™ ® ℠ © ℗ are removed before NFKD, which would otherwise expand "™"
+into the letters "TM" ("Cope™" -> "copetm"). Fetched album titles do carry them
+(Freeland's "Cope™" on both MusicBrainz and Spotify). Relatedly,
+`text_utils.title_resembles(query, candidate)` is the title check the fetch
+manager and MusicBrainz's year lookup share. Equality after `normalize()`
+always passes, and otherwise it's the usual `similarity()` against
+`scaled_similarity_threshold()`. Without that first step, a short title with
+one stray mark scored 0.89 and missed the 0.92 short-string threshold.
+
 ## `split_artist_title(name)` — three ordered fallback stages
 
 The actual "Artist - Title" splitter — three stages, each tried only if the

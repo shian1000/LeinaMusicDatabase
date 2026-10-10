@@ -63,7 +63,8 @@ role          NOT NULL, 'main' | 'feat'
   own search never surfaces (Cypis' 2016 "Sprawdzian Z Chemii", buried under dozens of newer
   singles). "Fill missing data -> Years" reads the release date straight off it before trying any
   module: `discoveries_manager.release_year_from_stored_link()`. Migration `0004`.
-- `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually for a song
+- `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually (Song
+  actions → "Set YouTube link", id parsed by `manage_youtube_playlists.extract_video_id()`) for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
   content — confirmed true even for an authenticated Data API request, not just anonymous
   scraping), or automatically by `create_yt_playlist()` itself the moment a fresh search succeeds,

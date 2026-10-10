@@ -23,6 +23,24 @@ APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵"
 ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on", "as", "a", "and", "remix", "by"}
 
 
+# Zero-width joiner: glues emoji sequences into one glyph, so stored text keeps
+# it (keep_joiner=True); comparisons drop it with everything else.
+_ZERO_WIDTH_JOINER = "\u200d"
+
+
+# ™ ® ℠ © ℗
+_MARK_SYMBOLS = {ord(c): None for c in "\u2122\u00ae\u2120\u00a9\u2117"}
+
+
+def strip_format_characters(s: str, keep_joiner: bool = False) -> str:
+    """Drop invisible Unicode format characters (category Cf): zero-width
+    space, soft hyphen, joiners, direction marks."""
+    return "".join(
+        c for c in s
+        if unicodedata.category(c) != "Cf" or (keep_joiner and c == _ZERO_WIDTH_JOINER)
+    )
+
+
 def normalize(
     s: Optional[str],
     *,
@@ -35,7 +53,8 @@ def normalize(
 
     Steps:
     - None -> empty string
-    - Unicode normalization (NFKD) and removal of combining marks
+    - Unicode normalization (NFKD) and removal of combining marks and
+      invisible format characters (zero-width space etc.)
     - Replace a handful of special letters which don't decompose as desired
     - Optionally strip or replace apostrophes
     - Optionally remove punctuation (keep word chars and whitespace)
@@ -47,11 +66,19 @@ def normalize(
     if s is None:
         return ""
 
+    # Trademark/copyright marks are never part of a name ("Cope™"), and NFKD
+    # would otherwise expand "™" into the letters "TM" ("copetm")
+    s = s.translate(_MARK_SYMBOLS)
+
     # Normalize unicode to decompose accents
     s = unicodedata.normalize("NFKD", s)
 
-    # Remove combining diacritics
-    s = "".join(c for c in s if not unicodedata.combining(c))
+    # Remove combining diacritics, and invisible format characters (Unicode
+    # category Cf: zero-width space, soft hyphen, joiners, direction marks).
+    # Dropped rather than turned into a space below: Bandcamp-style text puts
+    # U+200B *inside* words ("Cz\u200bô\u200brny"), which would otherwise
+    # normalize to "cz o rny" and stop matching "Czôrny".
+    s = strip_format_characters("".join(c for c in s if not unicodedata.combining(c)))
 
     # Apply special replacements
     for src, dst in _SPECIAL_REPLACEMENTS.items():

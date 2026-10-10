@@ -47,7 +47,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~273 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~312 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -76,6 +76,15 @@ non-trivial work in that area.
   startup: `docs/runbooks/database.md`. `fetch_data_settings.py` — persisted cap on how many songs
   a single "Fetch database data" run processes (Settings → Max songs to process per fetch),
   shared across every "Fill missing data" category (Albums, Years, ...), not just albums.
+  `sharing.py` / `sharing_server.py` copy the DBs for the MusicDatabaseApp phone client and serve
+  them. The copy runs after each daily backup and from Settings → "Submit database for sharing";
+  it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
+  installed from Settings → "Setup this PC for database sharing". It serves only `music.db` /
+  `tag.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
+  `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
+  name because docker bridges also have private IPs. The app depends on that contract, so don't change
+  the port or file names unilaterally. The service also lives outside the repo, so record changes
+  to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()`, which every artist merge must call. `artist_splitting.py` —
@@ -241,7 +250,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~273 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~312 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

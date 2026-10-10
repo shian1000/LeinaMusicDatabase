@@ -9,7 +9,7 @@ from utils.common.text_utils import copy_to_clipboard
 from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
 import re
-from utils.common.normalizer import strip_brackets
+from utils.common.normalizer import strip_brackets, strip_format_characters
 
 
 _CLEANUP_FIELDS = [
@@ -159,6 +159,16 @@ def replace_double_spaces(songs):
         action_description="Replaced double spaces in",
     )
 
+def remove_invisible_characters(songs):
+    # Zero-width spaces etc. copied in from Bandcamp-style pages
+    # ("Cz\u200bô\u200brny Ritm ..."); the emoji joiner is kept
+    _apply_field_cleanup(
+        songs,
+        needs_transform=lambda v: strip_format_characters(v, keep_joiner=True) != v,
+        transform=lambda v: strip_format_characters(v, keep_joiner=True),
+        action_description="Removed invisible characters in",
+    )
+
 def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
     # away, per song. Now the scan just tags and queues them, and the questions
@@ -284,6 +294,7 @@ def get_rid_of_rubish_data():
     print("Looking for sus album titles . . . . . ")
     songs = get_songs_from_db_session()
     convert_characters_encoding(songs)
+    remove_invisible_characters(songs)
     strip_leading_spaces(songs)
     replace_double_spaces(songs)
     resolve_unknown_artist(songs)

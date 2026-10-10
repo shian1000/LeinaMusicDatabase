@@ -5,7 +5,7 @@ One row per subsystem. "Docs" links to where the *depth* lives — a system with
 
 | System | Owns | Docs |
 | --- | --- | --- |
-| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags, the search/getter API, the category system | [agent-notes/database-search.md](../agent-notes/database-search.md) |
+| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags, the search/getter API, the category system, backups/migrations, and copying + serving the DBs to the MusicDatabaseApp phone client (`sharing.py`, `sharing_server.py`) | [agent-notes/database-search.md](../agent-notes/database-search.md), [runbooks/database.md](../runbooks/database.md) |
 | Discovery | `src/utils/discoveries/` — external metadata fetchers (MusicBrainz, Wikipedia, iTunes, Genius, Google, Spotify, YouTube), MP3-tag import | [agent-notes/discovery-modules.md](../agent-notes/discovery-modules.md), [agent-notes/import-pipeline.md](../agent-notes/import-pipeline.md) |
 | Normalization & matching | `src/utils/common/normalizer.py`, `text_utils.py` — canonical string normalization and fuzzy-match helpers | [agent-notes/normalization-and-matching.md](../agent-notes/normalization-and-matching.md) |
 | YouTube | `src/utils/youtube/` — matching songs to YouTube videos, downloads, playlist management | [agent-notes/youtube-search-matching.md](../agent-notes/youtube-search-matching.md) |

@@ -27,6 +27,15 @@ class Settings:
     smb_password: str = os.getenv("SMB_PASSWORD")
     smb_local_library_dir: UPath = UPath(f"smb://{smb_username}:{smb_password}@server.local/Shared/Music/")
     export_dir: UPath = UPath(__file__).parent.parent / "import"
+    # Where music.db / tag.db are copied for the mobile app to download
+    # (utils/database/sharing.py). Lives on the external T7 drive, which is
+    # only there while mounted - sharing_drive_mount is checked before writing.
+    sharing_drive_mount: UPath = UPath("/media/owner/T7")
+    sharing_dir: UPath = sharing_drive_mount / "Shared/Music/Database"
+    # Network interface the sharing server also listens on, for the phone on
+    # the home Wi-Fi (named, not "first private address": docker0/br-* are
+    # private too). Empty = Tailscale only.
+    sharing_lan_interface: str = "enp2s0"
 
 
 settings = Settings()  # single instance

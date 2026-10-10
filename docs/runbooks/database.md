@@ -1,4 +1,4 @@
-# Database: backup, restore, and migrations
+# Database: backup, restore, migrations, and sharing
 
 Engine: SQLite via SQLAlchemy, two separate database files under `src/database/` (gitignored —
 see `AGENTS.md` → Database safety before writing to either directly). Why two files and their
@@ -85,6 +85,73 @@ deliberately, not a script). To restore an archived snapshot:
 3. If the snapshot predates a migration that's since landed, the next `python main.py` run will
    detect and apply the pending migration(s) automatically (and back up again first) — you don't
    need to replay them by hand.
+
+## Sharing with the mobile app
+
+The MusicDatabaseApp phone client (separate Flutter repo, `../MusicDatabaseApp`, its
+`docs/decisions/0002-database-download.md`) downloads the databases once a day over Tailscale.
+The user enters a **folder URL** (`http://<tailscale ip>:8002/`) and the app fetches exactly
+`<url>/music.db` and `<url>/tag.db`. It rejects anything that doesn't start with the
+`SQLite format 3` header (keeping its previous copy) and swaps the two files as a pair. That
+contract (port `SHARING_HTTP_PORT` = 8002, both file names) is relied on by the app, so agree any
+change with the app side first. Port 8001 is taken by the APK share.
+
+**Copying** (`utils/database/sharing.py`) puts both files in `Settings.sharing_dir`
+(`/media/owner/T7/Shared/Music/Database` by default):
+
+- Automatically, right after a *successful* daily backup in `main.py` (`share_databases_quietly()`,
+  which logs and swallows every failure). The pre-migration backup does not trigger it.
+- On demand: Settings → "Submit database for sharing" (`share_databases()`), which prints where
+  and when, or the error.
+- It uses the online backup API into `music.db.tmp` / `tag.db.tmp` in the same folder. Both temp
+  copies are made first, then both are `os.replace()`d in, so a download in progress never gets
+  half a file and the pair comes from one moment. Temp names must never be `music.db`/`tag.db`.
+- T7 is an exFAT external drive, automounted at login and not in fstab. If
+  `Settings.sharing_drive_mount` isn't a mount point, the copy raises `SharingUnavailableError`
+  and never `mkdir`s. Creating the folder under an empty mount point would fill the system disk
+  instead of T7.
+
+**Serving** (`utils/database/sharing_server.py`) is a stdlib-only script run on the system
+`python3` by the systemd user units `musicdatabase-share.service` + `.timer` in
+`~/.config/systemd/user/`. Settings → "Setup this PC for database sharing"
+(`install_sharing_service()`) writes them; re-running it overwrites the units and restarts the
+server. Tests: `tests/test_database_sharing.py`.
+
+- Only `GET`/`HEAD /music.db` and `/tag.db` are served. Everything else is a 404 with no
+  directory listing; this is why plain `python -m http.server` is not used. `Cache-Control:
+  no-store` is set.
+- It listens on at most two addresses, one socket each, with the same handler and port 8002:
+  - **Tailscale:** the address from `tailscale ip -4`. The phone uses this one away from home.
+  - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`
+    (`enp2s0`, passed as `--lan-interface`). The phone uses it on the home Wi-Fi and silently falls
+    back to Tailscale when it doesn't answer. An empty setting means Tailscale only.
+  - The server was Tailscale-only at first. Adding the LAN address on 2026-10-10 was a deliberate
+    widening, not a workaround: anyone on the home network can now download the two files
+    (read-only, nothing else).
+  - The interface is chosen by *name*, not as "the first private address", because `docker0` /
+    `br-*` bridges also have private addresses and must never be exposed. A public or
+    Tailscale-range address on that interface is rejected.
+  - Each socket waits and retries every 10 s in its own thread until its address exists. A
+    missing LAN address never delays the Tailscale socket, or the other way round.
+  - It never binds to `0.0.0.0`.
+  - The phone has the LAN address typed in (`192.0.2.13`, from DHCP). If the router hands out a
+    different one, local access quietly stops working; the fix is a DHCP reservation on the router.
+  - `ufw` is installed but disabled (`ENABLED=no`). If it is ever enabled, open 8002 to
+    `192.0.2.0/24` only.
+- If T7 is unmounted it keeps running and answers 503, so the phone retries the next day.
+- `Restart=always`, not `on-failure`: on 2026-10-10 a stray SIGTERM (something killing whatever
+  was on port 8002) stopped it for good, because `on-failure` treats a clean SIGTERM as success.
+  `systemctl --user stop` still stops it normally.
+- The timer uses `OnStartupSec=1min`, counted from the user's systemd manager start. With
+  `Linger=no` (the owner chose this on 2026-10-10) that means one minute after login, not after
+  boot. That's fine here because the machine logs into GNOME, and T7 is only mounted after login
+  anyway.
+
+Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
+(200), `/` and any other path (404), the same for `http://192.0.2.13:8002/`, and
+`ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
+Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
+then delete the two unit files and run `systemctl --user daemon-reload`.
 
 ## Migrations
 

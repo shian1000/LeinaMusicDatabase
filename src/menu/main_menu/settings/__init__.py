@@ -1,3 +1,6 @@
+import subprocess
+from datetime import datetime
+
 import questionary
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
@@ -13,7 +16,15 @@ from utils.discoveries.discovery_settings import (
 )
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
+from utils.database.sharing import (
+    SharingUnavailableError,
+    install_sharing_service,
+    share_databases,
+    sharing_service_disable_hint,
+)
+from utils.database.sharing_server import interface_ipv4, tailscale_ipv4
 from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
+from config.constants import SHARING_HTTP_PORT
 from settings import settings
 
 
@@ -23,6 +34,8 @@ def settings_menu():
         "Database location": database_location_menu,
         "Max songs to process per fetch": set_max_songs_per_fetch,
         "Back up database now": backup_database_now,
+        "Submit database for sharing": submit_database_for_sharing,
+        "Setup this PC for database sharing": setup_database_sharing,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
 
@@ -61,6 +74,53 @@ def backup_database_now():
             print(f"  {path}")
     else:
         print("No database files found to back up.")
+
+
+def submit_database_for_sharing():
+    """Copy music.db and tag.db to the folder the mobile app downloads from,
+    right now instead of waiting for the next daily backup."""
+    try:
+        published = share_databases()
+    except SharingUnavailableError as exc:
+        print(f"\033[91mNot shared: {exc}\033[0m")
+        return
+    except Exception as exc:
+        print(f"\033[91mSharing failed: {exc}\033[0m")
+        return
+    if not published:
+        print("No database files found to share.")
+        return
+    print(f"Shared at {datetime.now():%Y-%m-%d %H:%M}:")
+    for path in published:
+        print(f"  {path}")
+
+
+def setup_database_sharing():
+    """Install the systemd user service that serves the shared databases to
+    the mobile app over Tailscale, starting shortly after every login."""
+    lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
+    print("This installs a systemd user service that serves only music.db and tag.db")
+    print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
+    if not questionary.confirm("Install (or reinstall) it now?").ask():
+        print("Cancelled.")
+        return
+    try:
+        steps = install_sharing_service()
+    except subprocess.CalledProcessError as exc:
+        print(f"\033[91mSetup failed: {' '.join(exc.cmd)}\n{exc.stderr.strip()}\033[0m")
+        return
+    except OSError as exc:
+        print(f"\033[91mSetup failed: {exc}\033[0m")
+        return
+    for step in steps:
+        print(f"  {step}")
+    address = tailscale_ipv4() or "<this PC's Tailscale IP>"
+    print(f"\nRemote address for the phone app: http://{address}:{SHARING_HTTP_PORT}/")
+    if settings.sharing_lan_interface:
+        lan_address = interface_ipv4(settings.sharing_lan_interface) or f"<{settings.sharing_lan_interface} address>"
+        print(f"Local network address for the phone app: http://{lan_address}:{SHARING_HTTP_PORT}/")
+    print("To turn it off:")
+    print(sharing_service_disable_hint())
 
 
 def discovery_modules_menu():

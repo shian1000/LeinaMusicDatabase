@@ -4,13 +4,13 @@ from contextlib import contextmanager
 
 import musicbrainzngs
 from utils.common.debug import flog, slog
-from utils.common.text_utils import is_blacklisted_album, similarity, scaled_similarity_threshold
+from utils.common.text_utils import is_blacklisted_album, title_resembles
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import requests
 from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
-from config.constants import MUSICBRAINZ_API_USER_AGENT, SPELLING_CHECK_THRESHOLD
+from config.constants import MUSICBRAINZ_API_USER_AGENT
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
@@ -172,6 +172,31 @@ def _extract_year(date_str: str | None) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _release_year_from_artist_recordings(artist: str, album: str, delay: float) -> YearDiscoveryResult | None:
+    """Album-mode fallback: a release this artist has a recording on.
+
+    A various-artists compilation ("TFF Rudolstadt 2011", a festival CD) is
+    credited to "Various Artists", so the release-group search above, keyed on
+    the artist, never sees it. Searching the artist's recordings on a release
+    of that name does, and also proves the artist really is on it - unlike
+    accepting any same-named "Various Artists" release."""
+    query_str = f'release:"{album}" AND artist:"{artist}"'
+    with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+        response = musicbrainzngs.search_recordings(query=query_str, limit=10)
+
+    for recording in response.get("recording-list", []):
+        for release in recording.get("release-list", []):
+            title = release.get("title", "")
+            if not title_resembles(album, title):
+                continue
+            year = _extract_year(release.get("date") or release.get("release-group", {}).get("first-release-date"))
+            if year:
+                time.sleep(delay)
+                _, matched_artist = _recording_title_artist(recording)
+                return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
+    return None
+
+
 def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.0) -> YearDiscoveryResult | None:
     """Look up a release year.
 
@@ -215,18 +240,23 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
             # the manager's title check, and hide the real album further down.
             # No album blacklist here: the name is already in the DB, so a word
             # like "pop" in it ("SODA POP FANCLUB 4") says nothing.
-            if similarity(query, title) < scaled_similarity_threshold(query, title, SPELLING_CHECK_THRESHOLD):
+            if not title_resembles(query, title):
                 continue
             year = _extract_year(release_group.get("first-release-date"))
             if not year:
                 continue
             time.sleep(delay)
-            try:
-                matched_artist = release_group["artist-credit"][0]["artist"]["name"]
-            except (KeyError, IndexError, TypeError):
-                matched_artist = ""
+            # The name the release is credited to ("Freeland"), not the artist
+            # entity's own name ("Adam Freeland") - it's what the DB holds
+            matched_artist = release_group.get("artist-credit-phrase")
+            if not matched_artist:
+                try:
+                    matched_artist = release_group["artist-credit"][0]["artist"]["name"]
+                except (KeyError, IndexError, TypeError):
+                    matched_artist = ""
             return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
-        return None
+
+        return _release_year_from_artist_recordings(artist, query, delay)
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for release year of '{query}' by '{artist}': {e}")

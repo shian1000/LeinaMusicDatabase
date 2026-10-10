@@ -12,7 +12,7 @@ this index is the map of everything else.
 - [System registry](systems/index.md) — which subsystem owns which feature, and how they depend on
   each other.
 - [Runbooks](runbooks/) — operational procedures. Currently just
-  [database backup, restore, and migrations](runbooks/database.md).
+  [database backup, restore, migrations, and sharing with the mobile app](runbooks/database.md).
 
 ## Durable records
 

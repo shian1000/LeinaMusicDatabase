@@ -1499,6 +1499,24 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
     return None
 
 
+# watch?v=<id> (any youtube.com host incl. music./m.), youtu.be/<id>,
+# /shorts/<id>, /embed/<id>, /live/<id>, or a bare 11-character id
+_VIDEO_URL_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})"
+)
+_BARE_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def extract_video_id(url: str) -> str | None:
+    """The 11-character video id from a YouTube link the user pasted, or
+    None if it isn't one."""
+    text = (url or "").strip()
+    if _BARE_VIDEO_ID_RE.match(text):
+        return text
+    match = _VIDEO_URL_RE.search(text)
+    return match.group(1) if match else None
+
+
 def save_video_id_to_song(song, video_id: str | None) -> None:
     """Persist a resolved YouTube video ID onto the song's DB record, or
     clear a stale one when `video_id` is `None`.
