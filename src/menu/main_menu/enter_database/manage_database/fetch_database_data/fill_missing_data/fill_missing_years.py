@@ -17,6 +17,7 @@ from utils.common.text_utils import copy_to_clipboard
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM, MANUAL_YEAR_SAMPLE_SONGS
 from utils.common.normalizer import compare, normalize
+from utils.common.script_utils import cyrillic_search_variant
 
 
 def fill_missing_years():
@@ -90,7 +91,10 @@ def fill_missing_years():
             label = f"{artist_name} - {album_name}"
             print(f"Checking release year for \033[93m{label}\033[0m")
             result = (release_year_from_stored_link(songs)
-                      or discover_release_year_result(artist_name, album_name, False, modules, songs[0].artist.synonyms))
+                      or discover_release_year_result(
+                          artist_name, album_name, False, modules, songs[0].artist.synonyms,
+                          alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
+                      ))
             _collect(label, result, songs, results, review_results)
 
         for song in singles:
@@ -98,7 +102,10 @@ def fill_missing_years():
             label = f"{song.artist.name} - {song.title}"
             print(f"Checking release year for single \033[93m{label}\033[0m")
             result = (release_year_from_stored_link([song])
-                      or discover_release_year_result(song.artist.name, song.title, True, modules, song.artist.synonyms, song=song))
+                      or discover_release_year_result(
+                          song.artist.name, song.title, True, modules, song.artist.synonyms, song=song,
+                          alt_script_query=cyrillic_search_variant(song.title, [song.artist.name, song.album]),
+                      ))
             _collect(label, result, [song], results, review_results)
     finally:
         close_global_driver()

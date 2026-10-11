@@ -96,7 +96,8 @@ non-trivial work in that area.
   the repo, so record changes to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
-  `reassign_additional_artist_links()`, which every artist merge must call. `artist_splitting.py` —
+  `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
+  call (the latter keeps the deleted row's synonyms and name, otherwise lost with it). `artist_splitting.py` —
   splitting a joined name ("A feat. B", "A x B") into separate artists, always behind the
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
@@ -118,6 +119,13 @@ non-trivial work in that area.
   itself to set the clipboard, so it works headless; the plain "Clipboard unavailable" warning
   only prints if that also fails (e.g. non-interactive stdout, or a terminal that doesn't support
   OSC 52 writes).
+- `src/utils/common/script_utils.py` — matching across alphabets: `matching_key()` romanizes both
+  sides of a comparison (Cyrillic incl. uk/be letters, Greek, Georgian, Hangul, kana; no
+  kanji/hanzi/Arabic yet, which would need new dependencies), used by `text_utils.title_resembles()`
+  and the fetch manager's artist check. `cyrillic_search_variant()` gives a Latin-transliterated
+  query a Cyrillic spelling for one more search when the rest of the entry is Cyrillic. Separate
+  from `utils/youtube/transliteration.py`, the precise Belarusian Lacinka used for YouTube search.
+  `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
   scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
 - `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):

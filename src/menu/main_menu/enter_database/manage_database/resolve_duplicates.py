@@ -5,7 +5,7 @@ from utils.database.database_management import edit_db_entry
 from utils.common.text_utils import compare_strings, similarity
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
-from utils.database.song_artists import reassign_additional_artist_links
+from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize
@@ -100,6 +100,7 @@ def remove_duplicate_artists():
             {"original_id": original.id, "duplicate_id": duplicate.id}
         )
         reassign_additional_artist_links(session, duplicate.id, original.id)
+        merge_artist_synonyms(original, duplicate)
 
         songs = session.query(Song).filter(Song.artist_id == original.id).all()
         for song in songs:

@@ -4,7 +4,8 @@ from contextlib import contextmanager
 
 import musicbrainzngs
 from utils.common.debug import flog, slog
-from utils.common.text_utils import is_blacklisted_album, title_resembles
+from utils.common.text_utils import is_blacklisted_album, title_resembles, similarity
+from utils.common.normalizer import normalize
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import requests
@@ -184,17 +185,37 @@ def _release_year_from_artist_recordings(artist: str, album: str, delay: float) 
     with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
         response = musicbrainzngs.search_recordings(query=query_str, limit=10)
 
-    for recording in response.get("recording-list", []):
-        for release in recording.get("release-list", []):
+    pairs = [
+        (recording, release)
+        for recording in response.get("recording-list", [])
+        for release in recording.get("release-list", [])
+    ]
+    # Plain title first, then one that only adds a subtitle - the studio album
+    # before its "(live at Cavatina Hall)" edition a year later
+    for allow_subtitle in (False, True):
+        for recording, release in pairs:
             title = release.get("title", "")
-            if not title_resembles(album, title):
+            if not title_resembles(album, title, allow_subtitle=allow_subtitle):
                 continue
             year = _extract_year(release.get("date") or release.get("release-group", {}).get("first-release-date"))
             if year:
                 time.sleep(delay)
-                _, matched_artist = _recording_title_artist(recording)
-                return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
+                return YearDiscoveryResult(year=year, matched_title=title,
+                                           matched_artist=_credited_name_like(recording, artist))
     return None
+
+
+def _credited_name_like(recording, artist: str) -> str:
+    """The recording's credited name closest to `artist`. The search already
+    proved the artist is on it, but maybe only as a guest ("Miuosh x Zespół
+    Śląsk feat. Ralph Kamiński") - reporting the first credit (Miuosh) would
+    fail the manager's artist check."""
+    names = [c["name"] if c.get("name") else c.get("artist", {}).get("name", "")
+             for c in recording.get("artist-credit", []) if isinstance(c, dict)]
+    names = [n for n in names if n]
+    if not names:
+        return ""
+    return max(names, key=lambda n: similarity(normalize(artist), normalize(n)))
 
 
 def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.0) -> YearDiscoveryResult | None:
@@ -233,15 +254,20 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
             response = musicbrainzngs.search_release_groups(query=query_str, limit=10)
         release_groups = response.get("release-group-list", [])
 
-        for release_group in release_groups:
+        # Skip anything that isn't the album we already have stored - a
+        # compilation ranked first would otherwise be returned, rejected by the
+        # manager's title check, and hide the real album further down. No album
+        # blacklist here: the name is already in the DB, so a word like "pop" in
+        # it ("SODA POP FANCLUB 4") says nothing. The plain title first, then
+        # one that only adds a bracketed subtitle ("Berjozkele (Kołysanki ...)")
+        # - so "AM" isn't dated by an "AM (Live)" ranked above it.
+        ordered = (
+            [g for g in release_groups if title_resembles(query, g.get("title", ""), allow_subtitle=False)]
+            + [g for g in release_groups if not title_resembles(query, g.get("title", ""), allow_subtitle=False)
+               and title_resembles(query, g.get("title", ""))]
+        )
+        for release_group in ordered:
             title = release_group.get("title", "")
-            # Skip anything that isn't the album we already have stored - a
-            # compilation ranked first would otherwise be returned, rejected by
-            # the manager's title check, and hide the real album further down.
-            # No album blacklist here: the name is already in the DB, so a word
-            # like "pop" in it ("SODA POP FANCLUB 4") says nothing.
-            if not title_resembles(query, title):
-                continue
             year = _extract_year(release_group.get("first-release-date"))
             if not year:
                 continue

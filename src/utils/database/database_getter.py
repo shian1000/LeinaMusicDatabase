@@ -7,12 +7,13 @@ import os
 from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist
 import time
 from utils.common.debug import mlog, slog
-from utils.common.text_utils import normalize_text
+from utils.common.text_utils import is_soundtrack_artist, normalize_text
 from utils.common.normalizer import normalize
 from collections import Counter
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.song_artists import (
     additional_artist_name_contains,
+    artist_name_or_synonym_contains,
     song_all_artists,
     song_artist_label,
     song_has_artist_id,
@@ -29,9 +30,9 @@ class SongSearchFilters:
 
     @staticmethod
     def artist_name(query: str):
-        """Filter songs by artist name (primary or additional) containing the query."""
+        """Filter songs by artist name or synonym (primary or additional) containing the query."""
         return or_(
-            func.lower(Artist.name).contains(query.lower()),
+            artist_name_or_synonym_contains(Artist, query),
             additional_artist_name_contains(query),
         )
 
@@ -62,10 +63,10 @@ class SongSearchFilters:
 
     @staticmethod
     def general_search(query: str):
-        """Search in title and artist name (general search)."""
+        """Search in title and artist name or synonym (general search)."""
         return or_(
             func.lower(Song.title).contains(query.lower()),
-            func.lower(Artist.name).contains(query.lower()),
+            artist_name_or_synonym_contains(Artist, query),
             additional_artist_name_contains(query),
         )
 
@@ -88,8 +89,13 @@ CATEGORY_DB_FILTERS = {
 _EAGER_ADDITIONAL_ARTISTS = selectinload(Song.additional_artist_links).selectinload(AdditionalSongArtist.artist)
 
 
+def _artist_name_and_synonyms(artist: Artist) -> str:
+    return normalize_text(f"{artist.name or ''} {artist.synonyms or ''}")
+
+
 def _all_artist_names(song: Song) -> str:
-    return " ".join(normalize_text(a.name or "") for a in song_all_artists(song))
+    """Every artist's name and synonyms, for the Python-side fallback filter."""
+    return " ".join(_artist_name_and_synonyms(a) for a in song_all_artists(song))
 
 
 class SongNormalizedFields:
@@ -324,6 +330,13 @@ def get_known_album_year(artist_id: int, album: str) -> int | None:
     (a reissue, a stray import) -> the most common one, the earliest on a
     tie. None if no song of that album has a year yet.
 
+    A soundtrack album ("Persona 5 Strikers OST" - a SOUNDTRACK_ARTIST_MARKERS
+    word in the album name) matches across all artists: its tracks are
+    usually stored under a different "artist" each (composer, game title,
+    uploader), while the album name itself is specific. Any other album
+    keeps the same-artist rule - "Greatest Hits" or "Live" by two artists
+    aren't one album.
+
     The caller keeps SINGLES_ALBUM away from here - it isn't a real shared
     album, so one single's year says nothing about another's."""
     target = normalize(album)
@@ -331,11 +344,10 @@ def get_known_album_year(artist_id: int, album: str) -> int | None:
         return None
 
     music_session, _ = get_global_database_sessions()
-    rows = (
-        music_session.query(Song.album, Song.year)
-        .filter(Song.artist_id == artist_id, Song.year != None, Song.album != None)
-        .all()
-    )
+    query = music_session.query(Song.album, Song.year).filter(Song.year != None, Song.album != None)
+    if not is_soundtrack_artist(album):
+        query = query.filter(Song.artist_id == artist_id)
+    rows = query.all()
     counts = Counter(year for row_album, year in rows if normalize(row_album) == target)
     if not counts:
         return None
@@ -431,12 +443,12 @@ def get_artists_from_db_session(
         query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in query)
 
         CATEGORY_DB_FILTERS = {
-            artist_categories[0]: lambda w: func.lower(Artist.name).contains(w.lower()),
+            artist_categories[0]: lambda w: artist_name_or_synonym_contains(Artist, w),
             artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
         }
 
         CATEGORY_NORMALIZED_FIELDS = {
-            artist_categories[0]: lambda artist: normalize_text(artist.name),
+            artist_categories[0]: _artist_name_and_synonyms,
             artist_categories[1]: lambda artist: normalize_text(artist.origin),
         }
 

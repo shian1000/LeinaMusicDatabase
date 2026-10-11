@@ -116,3 +116,15 @@ def record_year_invocation(module_id: str) -> None:
 def record_year_success(module_id: str) -> None:
     """Call each time a module's release-year result survives validation."""
     _bump_year(module_id, "successes")
+
+
+def reset_discovery_stats() -> None:
+    """Zero the album and year counters of every module, so the Statistics
+    menu starts counting from scratch. The in-memory caches are replaced too
+    -- otherwise the next bump in this process would write the old counts
+    straight back to disk."""
+    global _cache, _year_cache
+    _cache = {}
+    _year_cache = {}
+    save_discovery_stats(_cache)
+    save_year_discovery_stats(_year_cache)

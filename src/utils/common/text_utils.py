@@ -313,14 +313,40 @@ def similarity(a: str, b: str) -> float:
     return result
 
 
-def title_resembles(query: str, candidate: str) -> bool:
+def title_resembles(query: str, candidate: str, allow_subtitle: bool = True) -> bool:
     """Is `candidate` (a title a fetcher matched) the `query` we searched for?
     Equal after normalize() always counts - a short title with a stray mark
     ("Cope" vs "Cope™", similarity 0.89) would otherwise miss the raised
-    short-string threshold - then the usual similarity check."""
-    if normalize(query) and normalize(query) == normalize(candidate):
+    short-string threshold - then the usual similarity check.
+
+    `allow_subtitle` also accepts a candidate that only adds a bracketed
+    subtitle: "Berjozkele (Kołysanki Jidysz – Yiddish Lullabies)" is the
+    stored "Berjozkele" (similarity 0.34). A caller choosing among several
+    candidates should try allow_subtitle=False first, so the plain title
+    beats a "(Live)"/"(Deluxe)" edition of it."""
+    query_norm = normalize(query)
+    if query_norm and query_norm == normalize(candidate):
         return True
-    return similarity(query, candidate) >= scaled_similarity_threshold(query, candidate, SPELLING_CHECK_THRESHOLD)
+    if allow_subtitle and query_norm and query_norm == normalize(candidate.split("(")[0]):
+        return True
+    if similarity(query, candidate) >= scaled_similarity_threshold(query, candidate, SPELLING_CHECK_THRESHOLD):
+        return True
+    return resembles_across_scripts(query, candidate)
+
+
+def resembles_across_scripts(a: str, b: str) -> bool:
+    """Similar once both are romanized with script_utils.matching_key() -
+    "Tam, de ty ye" vs "Там де ти є", "Neformat" vs "НєФормат". Only tried
+    when either side has non-Latin letters; Latin-only pairs never get this
+    looser path."""
+    from utils.common.script_utils import has_non_latin, matching_key
+
+    if not (has_non_latin(a) or has_non_latin(b)):
+        return False
+    key_a, key_b = matching_key(a), matching_key(b)
+    if not key_a or not key_b:
+        return False
+    return similarity(key_a, key_b) >= scaled_similarity_threshold(key_a, key_b, SPELLING_CHECK_THRESHOLD)
 
 
 def scaled_similarity_threshold(a: str, b: str, base_threshold: float) -> float:

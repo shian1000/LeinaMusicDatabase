@@ -7,7 +7,7 @@ from utils.common.debug import slog
 from sqlalchemy import text
 from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
-from utils.database.song_artists import count_artist_songs, reassign_additional_artist_links
+from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
 from rich import print
 
 
@@ -136,6 +136,8 @@ def merge_artists_in_db(merge_from, merge_to):
     remaining = count_artist_songs(session, from_id)
 
     if not remaining:
+        if isinstance(merge_to, Artist) and isinstance(merge_from, Artist):
+            merge_artist_synonyms(merge_to, merge_from)
         session.execute(text("DELETE FROM artists WHERE id = :id"), {"id": from_id})
         print(f"Artist {merge_from_name} (id {from_id}) has been merged to {merge_to_name} (id {to_id}).")
     else:

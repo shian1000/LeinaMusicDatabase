@@ -55,7 +55,15 @@ part of the title), `discover_album_name()` compensates with a fallback: if a mo
 query comes up empty *and* truncation actually changed something, it retries that same module once
 more with the original, untruncated (but still parenthetical-stripped) artist/title before moving
 on. This runs before the synonym-retry step. Because it's implemented in the manager rather than
-per-module, every fetcher gets the fallback for free.
+per-module, every fetcher gets the fallback for free. The synonym retry needs the same pair. It
+tries the truncated title first and then the untruncated one, once per synonym (`split_synonyms()`:
+the column is a comma-separated list, and sending it whole, "Taras Chubai, Тарас Чубай", matched
+nothing). Before, it only ever sent the stub,
+so Ani Lorak's album "Там, де ти є" went to Spotify as "Ani Lorak" + "Там" and never matched,
+though the synonym is the only name Spotify knows her by. The last stage of
+`discover_release_year_result()` retries with `alt_script_query`, the query in its own script (see
+normalization-and-matching.md → "Matching across alphabets"), first with the artist and then with
+its synonyms.
 
 A third stage exists for the same reason, one level up: every attempt above — truncated *and*
 "untruncated" — still runs both artist and title through `.split("(")[0]`, which assumes
@@ -226,7 +234,13 @@ songs lacked a year when this was added), and it would otherwise miss the single
 **Before any module runs, years already in the DB are reused.** `_fill_years_known_in_database()`
 groups the missing-year songs by `(artist_id, normalize(album))`, skipping `SINGLES_ALBUM`, and asks
 `database_getter.get_known_album_year()` for a year recorded on another song of the same album. If
-the album has several different years, the most common one wins, and the earliest on a tie. Those
+the album has several different years, the most common one wins, and the earliest on a tie.
+A soundtrack album (a `SOUNDTRACK_ARTIST_MARKERS` word in the *album* name, e.g. "Persona 5 Strikers
+OST") matches across all artists, because each of its tracks tends to sit under a different
+"artist" (composer, game title, YouTube uploader) while the album name is specific. Every other
+album keeps the same-artist rule, since "Greatest Hits" or "Persona" (Selah Sue) by two artists
+aren't one album. Accepted side effect: a cover filed under the original OST's album name gets the
+OST's year. Those
 years are written without review. This runs before the per-fetch cap, so it never uses up a slot
 meant for a network lookup, and it's committed even if Chrome fails to start. Later, the manual
 fill-in prompt prints up to `MANUAL_YEAR_SAMPLE_SONGS` random titles next to an album's label as a
@@ -251,7 +265,8 @@ nothing.
 
 **The album-mode year lookup in MusicBrainz skips by title, not by blacklist.** It walks the
 release groups and skips any whose title doesn't resemble the queried album, using the same
-`scaled_similarity_threshold()` check as `_validate_year_result()`. Without this, a compilation
+`title_resembles()` check as `_validate_year_result()`. Exact titles are tried before ones that
+only add a bracketed subtitle. Without this, a compilation
 ranked first would be returned, rejected by the manager, and hide the real album further down the
 list. The album blacklist isn't applied here: the album name is already stored, so a blacklisted
 word in it ("pop" in "SODA POP FANCLUB 4") says nothing. The single (recording) path still uses
@@ -264,7 +279,11 @@ path reports the *main* artist's credited-as name (`artist-credit[0]["name"]`, e
 the matched artist. It doesn't use the artist entity's own name ("Adam Freeland"), because the
 credited name is what the DB holds. It doesn't use the whole `artist-credit-phrase` either: its
 guests ("Latto feat. LU KALA") failed the artist check. It also proves the artist is on the release, which simply
-accepting any same-named "Various Artists" release group wouldn't.
+accepting any same-named "Various Artists" release group wouldn't. The artist may only be a guest there
+("Miuosh x Zespół Śląsk feat. Ralph Kamiński" on Miuosh's "Pieśni Współczesne"). So
+`_credited_name_like()` reports the credited name closest to the queried artist, not the first
+credit, which would fail the manager's artist check. The plain title is again tried before a
+subtitled edition ("… (live at Cavatina Hall)", a year later).
 
 **`google_search_fetcher.py`'s album-query handling is an unverified assumption.** The existing
 code only ever searched `"{artist} - {song}"` and parsed a `music/recording_cluster` Knowledge
@@ -307,12 +326,13 @@ Niczos" fails plain similarity, so `_matched_artist_resembles()` also accepts a 
 contains any of the song's credited artists as whole words (after `normalize()`). Only for
 multi-artist songs — single-artist validation is unchanged.
 
-One more rule in `_matched_artist_resembles()`, for every song: a matched artist that is *equal*
-to the query after `normalize()`, with anything from the first `(` on dropped, is accepted.
-Services write Japanese/Chinese acts with punctuation and a native-script name in brackets
-("Cody・Lee(李)" for "Cody Lee"), and plain similarity rates that 0.74, below the threshold, so
-correct matches from MusicBrainz and Spotify were discarded. It's an exact match after
-normalization, so "Lee" or "Cody Lee Band" still don't pass.
+One more rule in `_matched_artist_resembles()`, for every song: a matched artist with the same
+`normalizer.name_key()` as the query is accepted. That key is `normalize()` with anything from the
+first `(` on, a leading "the" and all spaces dropped. Services write Japanese/Chinese acts with
+punctuation and a native-script name in brackets ("Cody・Lee(李)" for "Cody Lee"), and acronym bands
+with dots and an article ("The S.O.S. Band" for "SOS Band"). Plain similarity rates those
+0.70–0.74, below the threshold, so correct matches from MusicBrainz, Spotify and Google were
+discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass.
 
 ## Which fetchers report matches
 
@@ -568,7 +588,10 @@ call.
 
 Counters are loaded into an in-memory cache on first use per process (avoids re-reading the file on
 every single invocation during a large "Fill missing data" run) but written straight back to disk
-on every mutation, so nothing is lost if the process is killed mid-run.
+on every mutation, so nothing is lost if the process is killed mid-run. The flip side: never clear
+the stats by just deleting/emptying the JSON files while the app runs. The next bump would write
+the stale cached counts straight back. Use `reset_discovery_stats()` instead (Settings → "Reset
+statistics records"). It replaces both the album and the year caches and files together.
 
 The main menu's "Statistics" option (`src/menu/main_menu/statistics/__init__.py`) reads the
 counters plus `load_all_discovery_modules_metadata()` (same source the Settings enable/disable

@@ -108,6 +108,16 @@ def normalize(
     return s
 
 
+def name_key(s: Optional[str]) -> str:
+    """normalize() of an artist name with a bracketed part, a leading "the"
+    and all spaces dropped: "The S.O.S. Band" and "SOS Band" both give
+    "sosband", "Cody・Lee(李)" gives "codylee". Only for an exact-equality
+    check - two different names never collide in practice, while plain
+    similarity rates those pairs 0.70-0.74."""
+    key = normalize((s or "").split("(")[0])
+    return re.sub(r"^the ", "", key).replace(" ", "")
+
+
 def compare(a: Optional[str], b: Optional[str], *, threshold: int = 100) -> bool:
     """Simple equality-based comparator after normalization.
 

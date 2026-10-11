@@ -15,6 +15,24 @@ call sites delegate to it.
 Do not write a new ad-hoc normalize/compare function anywhere else — extend this
 one.
 
+## Matching across alphabets (`script_utils.py`)
+
+The DB sometimes holds a Latin transliteration of a title the sources only know
+in its own script: "Tam, de ty ye" for Ani Lorak's "Там, де ти є", "Neformat"
+for TNMK's "НєФормат". `title_resembles()` and the fetch manager's artist check
+fall back to `resembles_across_scripts()` when either side has non-Latin
+letters. It runs both sides through `script_utils.matching_key()`, a lossy,
+language-agnostic romanization with y/j -> i, kh -> h and ts -> c folds, because
+transliteration schemes disagree exactly there. Latin-only pairs never take
+this looser path. Years also gets one extra search stage with
+`cyrillic_search_variant()`, a rough Russian-style Latin -> Cyrillic spelling
+("Neformat" -> "Неформат"). It's only used when the query is Latin-only but the
+rest of the entry (artist, other titles) has Cyrillic, and search engines
+tolerate the rest ("НєФормат"). The scope was deliberately narrowed: Cyrillic,
+Greek, Georgian, Hangul and kana are covered without new dependencies.
+Kanji/hanzi (pykakasi/pypinyin) and Arabic wait for a first real case. `name_key()` is one such extension: an artist-name key for exact-equality
+checks ("The S.O.S. Band" == "SOS Band"), see `discovery-modules.md`.
+
 Invisible format characters (Unicode category `Cf`: zero-width space U+200B,
 soft hyphen, joiners, direction marks) are *dropped*, not turned into a space
 like other punctuation. Text copied from Bandcamp carries U+200B inside words
@@ -33,7 +51,12 @@ into the letters "TM" ("Cope™" -> "copetm"). Fetched album titles do carry the
 manager and MusicBrainz's year lookup share. Equality after `normalize()`
 always passes, and otherwise it's the usual `similarity()` against
 `scaled_similarity_threshold()`. Without that first step, a short title with
-one stray mark scored 0.89 and missed the 0.92 short-string threshold.
+one stray mark scored 0.89 and missed the 0.92 short-string threshold. With the
+default `allow_subtitle=True` it also accepts a candidate that only adds a
+bracketed subtitle ("Berjozkele (Kołysanki Jidysz – Yiddish Lullabies)" for the
+stored "Berjozkele", similarity 0.34). A caller choosing among several candidates
+should prefer `allow_subtitle=False` matches first, as MusicBrainz's album loop
+does, so that "AM (Live)" can't date "AM".
 
 ## `split_artist_title(name)` — three ordered fallback stages
 

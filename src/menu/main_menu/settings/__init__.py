@@ -23,6 +23,7 @@ from utils.database.sharing import (
     sharing_service_disable_hint,
 )
 from utils.database.sharing_server import interface_ipv4, tailscale_ipv4
+from utils.discoveries.discovery_stats import reset_discovery_stats
 from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
 from config.constants import SHARING_HTTP_PORT
 from settings import settings
@@ -36,6 +37,7 @@ def settings_menu():
         "Back up database now": backup_database_now,
         "Submit database for sharing": submit_database_for_sharing,
         "Setup this PC for database sharing": setup_database_sharing,
+        "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
 
@@ -63,6 +65,19 @@ def set_max_songs_per_fetch():
 
     save_max_songs_per_fetch(value)
     print(f"Max songs per fetch set to: {value}")
+
+
+def reset_statistics_records():
+    """Zero the fetchers' invocation/success counters shown in the Statistics
+    menu (album and year lookups), so they start being collected anew."""
+    if not questionary.confirm(
+        "Reset all fetcher statistics (albums and years) to zero? This can't be undone.",
+        default=False,
+    ).ask():
+        print("Cancelled.")
+        return
+    reset_discovery_stats()
+    print("Fetcher statistics reset.")
 
 
 def backup_database_now():

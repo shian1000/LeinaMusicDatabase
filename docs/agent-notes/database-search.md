@@ -35,6 +35,17 @@ That logic lives in exactly one place: `database_getter._normalized_python_filte
 candidates, words, get_field)`. Any new fallback-filtering call site in this file
 should call it, not re-inline the word/casefold loop.
 
+## "artist name" and "name" searches also match synonyms
+
+An artist stored in its own script ("Океан Ельзи") is only findable by its Latin
+spelling through `artists.synonyms`, so artist search, the song "artist name"
+category and the combined "name" search all match a word in the name *or* the
+synonyms (`song_artists.artist_name_or_synonym_contains()`, also inside
+`additional_artist_name_contains()` and the Python fallback's
+`_all_artist_names()`). Import's artist resolution is unaffected in practice:
+it uses this search only to gather candidates and then compares similarity
+against `Artist.name`, so a synonym-only hit is filtered out there.
+
 ## `search_only_categories` is song-only — passing it to artist search crashes
 
 Categories are split three ways in `datatables.py`:

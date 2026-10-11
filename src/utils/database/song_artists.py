@@ -19,6 +19,7 @@ from config.constants import (
     MULTI_ARTIST_MAIN_SEPARATOR,
 )
 from utils.database.datatables import AdditionalSongArtist, Artist, Song
+from utils.common.normalizer import normalize
 
 
 def additional_artists(song: Song, role: str | None = None) -> list[Artist]:
@@ -71,15 +72,26 @@ def song_main_artist_label(song: Song) -> str:
     return MULTI_ARTIST_MAIN_SEPARATOR.join(a.name for a in song_main_artists(song))
 
 
+def artist_name_or_synonym_contains(artist, word: str):
+    """SQL filter: `artist`'s (an Artist or an aliased one) name or synonyms
+    contain `word`. Searching "Okean Elzy" has to find "Океан Ельзи", whose
+    synonyms hold the Latin spelling."""
+    return or_(
+        func.lower(artist.name).contains(word.lower()),
+        func.lower(func.coalesce(artist.synonyms, "")).contains(word.lower()),
+    )
+
+
 def additional_artist_name_contains(word: str):
-    """SQL filter: song has an additional artist whose name contains `word`.
-    Uses an aliased Artist because song searches already join the primary
-    Artist - an unaliased subquery would correlate to that outer row instead."""
+    """SQL filter: song has an additional artist whose name or synonyms
+    contain `word`. Uses an aliased Artist because song searches already join
+    the primary Artist - an unaliased subquery would correlate to that outer
+    row instead."""
     extra = aliased(Artist)
     return Song.id.in_(
         select(AdditionalSongArtist.song_id)
         .join(extra, extra.id == AdditionalSongArtist.artist_id)
-        .where(func.lower(extra.name).contains(word.lower()))
+        .where(artist_name_or_synonym_contains(extra, word))
     )
 
 
@@ -96,6 +108,25 @@ def song_has_artist_id(artist_id: int):
 def count_artist_songs(session, artist_id: int) -> int:
     """Songs credited to the artist in any way (primary or additional)."""
     return session.query(Song).filter(song_has_artist_id(artist_id)).count()
+
+
+def merge_artist_synonyms(merge_to: Artist, merge_from: Artist) -> None:
+    """Carry `merge_from`'s synonyms - and its own name, if it differs - over
+    to `merge_to` when merging two artists, so a Latin spelling or a channel
+    name isn't lost with the deleted row (Бумбокс lost "familyboombox,
+    Bumboks" this way). Duplicates are dropped after normalize(). Caller
+    commits."""
+    def split(value):
+        return [s.strip() for s in (value or "").split(",") if s.strip()]
+
+    target_key = normalize(merge_to.name)
+    merged, seen = [], {target_key}
+    for name in split(merge_to.synonyms) + split(merge_from.synonyms) + [merge_from.name or ""]:
+        key = normalize(name)
+        if key and key not in seen:
+            seen.add(key)
+            merged.append(name.strip())
+    merge_to.synonyms = ", ".join(merged) or None
 
 
 def reassign_additional_artist_links(session, from_id: int, to_id: int) -> None:

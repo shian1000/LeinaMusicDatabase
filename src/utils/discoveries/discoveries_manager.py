@@ -6,6 +6,7 @@ from utils.common.text_utils import (
     similarity,
     scaled_similarity_threshold,
     title_resembles,
+    resembles_across_scripts,
 )
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 from utils.discoveries.discovery_settings import (
@@ -26,9 +27,14 @@ import importlib.util
 import sys
 from pathlib import Path
 from utils.common.debug import flog, slog
-from utils.common.normalizer import normalize
+from utils.common.normalizer import name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
+
+def split_synonyms(synonyms: str | None) -> list[str]:
+    """The artists.synonyms column is a plain comma-separated list."""
+    return [s.strip() for s in (synonyms or "").split(",") if s.strip()]
+
 
 def _discovery_modules_dir() -> Path:
     return Path(__file__).parent / "discovery_modules"
@@ -174,10 +180,14 @@ def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited
     threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
     if similarity(queried_artist, matched_artist) >= threshold:
         return True
-    # Same name once punctuation and a bracketed native-script name are
-    # dropped: "Cody・Lee(李)" is "Cody Lee", though plain similarity says 0.74.
-    queried_norm = normalize(queried_artist)
-    if queried_norm and queried_norm == normalize(matched_artist.split("(")[0]):
+    # Same name once punctuation, a bracketed native-script name, a leading
+    # "The" and spacing are dropped: "Cody・Lee(李)" is "Cody Lee", "The S.O.S.
+    # Band" is "SOS Band", though plain similarity says 0.70-0.74.
+    queried_key = name_key(queried_artist)
+    if queried_key and queried_key == name_key(matched_artist):
+        return True
+    # "Ani Lorak" vs "Ани Лорак", "Ані Лорак" vs "Ани Лорак"
+    if resembles_across_scripts(queried_artist, matched_artist):
         return True
     if credited_artists:
         matched_padded = f" {normalize(matched_artist)} "
@@ -317,10 +327,16 @@ def discover_album_name(song, modules):
             print(f"Looking in {module_name} using full title/artist including parentheses")
             album = _call_module(module, module_id, module_name, art_full, son_full, credited)
 
-        #Repeat the searching if there is a synonym for an artist
-        if not album and song.artist.synonyms is not None:
-            print(f"Looking for it in {module_name} using synonyms")
-            album = _call_module(module, module_id, module_name, song.artist.synonyms, son_cln, credited)
+        #Repeat the searching with each of the artist's synonyms
+        for synonym in ([] if album else split_synonyms(song.artist.synonyms)):
+            print(f"Looking for it in {module_name} using synonym {synonym}")
+            album = _call_module(module, module_id, module_name, synonym, son_cln, credited)
+            # The truncated title alone, as in the first attempt, may be a stub
+            # ("Bang, Bang" -> "Bang"); retry it whole with the synonym too
+            if not album and son_cln != son_cln_full:
+                album = _call_module(module, module_id, module_name, synonym, son_cln_full, credited)
+            if album:
+                break
 
         if not album and multi_label:
             print(f"Looking in {module_name} using all main artists")
@@ -422,7 +438,8 @@ def discover_release_year(artist: str, query: str, is_single: bool, modules, art
 
 
 def discover_release_year_result(artist: str, query: str, is_single: bool, modules,
-                                 artist_synonyms: str | None = None, song=None) -> YearDiscoveryResult | None:
+                                 artist_synonyms: str | None = None, song=None,
+                                 alt_script_query: str | None = None) -> YearDiscoveryResult | None:
     """Look up a release year for either an album (query = album title,
     is_single=False) or a standalone single (query = song title,
     is_single=True), trying each enabled year-capable module in order until
@@ -439,6 +456,7 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
     artist alone - a guest on one track isn't the album's artist.
     """
     credited, multi_label = _multi_artist_query(song) if song is not None else (None, None)
+    synonyms = split_synonyms(artist_synonyms)
     art_full, qry_full = artist, query
     art_cln_full = art_full.split("(")[0].strip()
     qry_cln_full = qry_full.split("(")[0].strip()
@@ -461,13 +479,32 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
             print(f"Looking for release year in {module_name} using full artist/query including parentheses")
             result = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited, song)
 
-        if not result and artist_synonyms:
-            print(f"Looking for release year in {module_name} using synonyms")
-            result = _call_year_module(module, module_id, module_name, artist_synonyms, qry_cln, is_single, credited, song)
+        # Each synonym on its own - the column is a comma-separated list, and
+        # sending it whole ("Taras Chubai, Тарас Чубай") matches nothing
+        for synonym in ([] if result else synonyms):
+            print(f"Looking for release year in {module_name} using synonym {synonym}")
+            result = _call_year_module(module, module_id, module_name, synonym, qry_cln, is_single, credited, song)
+            # The truncated query is only a stub for a title with a comma
+            # ("Там, де ти є" -> "Там"); retry it whole with the synonym too
+            if not result and qry_cln != qry_cln_full:
+                result = _call_year_module(module, module_id, module_name, synonym, qry_cln_full, is_single,
+                                           credited, song)
+            if result:
+                break
 
         if not result and multi_label:
             print(f"Looking for release year in {module_name} using all main artists")
             result = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited, song)
+
+        # A Latin-transliterated query the sources only know in its own script
+        # ("Neformat" -> "Неформат"), see script_utils.cyrillic_search_variant()
+        if not result and alt_script_query:
+            print(f"Looking for release year in {module_name} using the query in its own script")
+            for alt_artist in [art_cln, *synonyms]:
+                result = _call_year_module(module, module_id, module_name, alt_artist, alt_script_query, is_single,
+                                           credited, song)
+                if result:
+                    break
 
         if result:
             return result
