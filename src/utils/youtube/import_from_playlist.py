@@ -466,7 +466,7 @@ def get_playlist_items(playlist_input: str) -> list:
         print(f"  ✖ Failed to fetch playlist via API: {e}")
         return []
 
-    print(f"  ✔ Found {len(items)} video(s) via API")
+    printwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww(f"  ✔ Found {len(items)} video(s) via API")
     return items
 
 
