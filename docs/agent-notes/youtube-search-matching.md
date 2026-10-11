@@ -52,7 +52,15 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
 1. If the channel is a `"<Artist> - Topic"` auto-generated channel (`_is_topic_channel()`, reused
    from `manage_youtube_playlists.py`), the artist is the channel name minus the `"- Topic"` suffix
    and the title is the video title as-is - same reasoning as the DB→YouTube direction's Topic
-   handling (see below): these titles deliberately carry no artist text at all.
+   handling (see below): these titles deliberately carry no artist text at all. Exception:
+   `GENERIC_TOPIC_CHANNELS` (`"Release - Topic"`, `"Various Artists - Topic"`) - YouTube files an
+   auto-generated upload there when it couldn't attach it to a real artist channel, so the channel
+   name is *not* the artist. The artist is left `None`, and `import_data_from_youtube_playlist()`
+   fills it via `resolve_generic_topic_artist()`: one extra yt-dlp call for the description (the
+   flat playlist fetch never has it), then `_parse_topic_description_artist()` reads the
+   `"<Title> · <Artist> · <Artist 2>"` credit line (several artists joined with `", "` for the
+   artist-split review), else the `"Main Artist:"` lines. Real cases: `"Mind Me"` -> Oordaya,
+   `"Slide"` -> Frankie Cosmos.
 2. Otherwise, try `split_artist_title()` (`normalizer.py` - the same "Artist - Title" splitter
    `extract_unknown_data()` uses for mp3 filenames, factored out so both callers share it) on the
    video title.
@@ -60,6 +68,16 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
    case found testing this: Culture Beat's own (non-Topic) channel, video titled just
    `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is
    apparently common for plain artist-channel uploads, not just auto-generated Topic channels.
+   Before that, `split_corner_bracket_credit()` tries the Japanese `"<Artist>「<Title>」"`
+   convention (real case: channel `GOKUMON(UchikubiGokumonDoukoukai)`, title
+   `"打首獄門同好会「なつのうた」"`; the channel fallback had imported it under the channel name
+   with the whole string as title). Only `「」`, never `『』`, which also wraps album/work names; and
+   not when the bracket holds a junk marker word (`"Song「Lyric Video」"`).
+
+Any entry still without an artist after this (and after the generic-Topic description lookup) is
+held back for `_review_missing_artists()`. That runs once the whole playlist is scanned, before the
+synonym/swap steps below: it asks for each artist by `questionary.text()`, with the video link
+shown. An empty answer skips the entry into `run_import_batch()`'s `pre_skipped` summary.
 
 ### Catching a title/artist parsed in the wrong order
 
@@ -104,12 +122,17 @@ it (ID3 `artist`/`title` fields are already separate).
 ### Title cleanup: independently-extensible word lists (plus a year check), applied in a fixed order
 
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
--> `strip_hashtags()` over the *raw* video title (before any artist/title split), then later runs
-`strip_artist_from_title()` -> `strip_junk_suffix()` -> `strip_quote_marks()` on the resulting song
-title. The order of the first three matters: `strip_pipe_suffix()` runs before the bracket check
+-> `strip_hashtags()` -> media-extension strip (`_MEDIA_EXTENSION_RE`) over the *raw* video title
+(before any artist/title split), then later runs `strip_artist_from_title()` -> `strip_junk_suffix()`
+-> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also
+on the artist). `clean_file_name_title()` handles titles that are really an uploaded file name
+(`"pejzaz_bez_ciebie.mpg"` -> `"Pejzaz Bez Ciebie"`). It only splits on `_` when there are no
+spaces, and only capitalises words when the whole thing was lowercase. The order of the first three matters: `strip_pipe_suffix()` runs before the bracket check
 specifically so a junk bracket that only *looks* trailing once channel/label branding after a `|`
 is dropped (e.g. `"OMNIMAR - The Matrix (Official Video) | darkTunes Music Group"`) becomes
-reachable by the trailing-only check below, instead of needing its own "anywhere" rule.
+reachable by the trailing-only check below, instead of needing its own "anywhere" rule. It also
+treats `|` look-alikes as a pipe: `⎮` U+23AE (real case: `"Dizzko Bizkit aka Mejsi - Bál ⎮ 2017"`),
+fullwidth `｜`, `│`, `¦`.
 
 Bracket-content matching is split by **scope**, not just by exact-vs-substring:
 
@@ -137,12 +160,16 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
   `"Herr Mannelig (animation) - Żniwa - Polish version"` or
   `"Voo Voo - Nocą (Official Audio) #Zostańwdomu"`. Currently `"Animation"`, `"Official"`,
   `"Lyrics"`, `"Lyric"`, `"Visualiser"`, `"Video"`, `"Clip"`, `"Officiel"`, `"Oryginał"`,
-  `"Subtitles"`, `"4K"`, `"Remaster"`, `"Remastered"`. Only add a word here when it's safe to
+  `"Subtitles"`, `"4K"`, `"Remaster"`, `"Remastered"`, `"Oficial"`, `"Full Song"` (Bollywood label
+  uploads: `"T-Series - Criminal (Full Song) Ra.One"`. The trailing film name and the label-as-artist
+  are *not* fixed by this, so those still need manual correction). Only add a word here when it's safe to
   assume it never appears inside a genuine subtitle, since - unlike the two lists above - it isn't
   limited to the trailing bracket, so a false-positive match anywhere in the title is destructive.
 
 `_TRAILING_BRACKET_RE` and `_ANY_BRACKET_RE` both also treat the CJK "lenticular bracket" pair
-`【】` as equivalent to `()`/`[]` (e.g. a trailing `"【Kan/Rom/Eng Lyrics】"` annotation). Separately,
+`【】` as equivalent to `()`/`[]` (e.g. a trailing `"【Kan/Rom/Eng Lyrics】"` annotation), and the
+fullwidth `（）`/`［］` pairs from CJK input methods (real case:
+`"Fujii Kaze - Workin’ Hard（Official Video）"`). Separately,
 `strip_quote_marks()` strips double-quote-*like* characters from the song title - ASCII/curly
 double quotes and the CJK "corner bracket" pair `『』` (used to set off a work's title the way
 Western uploads wrap it in `"..."`, e.g. `'『Cinderella by Cidergirl』'`) - but deliberately never

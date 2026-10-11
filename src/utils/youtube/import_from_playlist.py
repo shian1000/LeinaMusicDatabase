@@ -85,8 +85,10 @@ _YOUTUBE_TITLE_YEAR_RE = re.compile(r"\b\d{4}\b")
 # Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) at the
 # very end of the string, plus any trailing whitespace. "【】" is the CJK
 # "lenticular bracket" pair, used the same way "[...]" is in Western titles
-# (e.g. a trailing "【Kan/Rom/Eng Lyrics】" annotation).
-_TRAILING_BRACKET_RE = re.compile(r"\s*[\(\[【]([^()\[\]【】]*)[\)\]】]\s*$")
+# (e.g. a trailing "【Kan/Rom/Eng Lyrics】" annotation). The fullwidth
+# "（）"/"［］" pairs come from CJK input methods (real case: "Fujii Kaze -
+# Workin’ Hard（Official Video）") and are treated exactly like "()"/"[]".
+_TRAILING_BRACKET_RE = re.compile(r"\s*[\(\[【（［]([^()\[\]【】（）［］]*)[\)\]】）］]\s*$")
 
 # Straight and curly double-quote characters, plus the CJK "corner bracket"
 # pair "『』" (used to set off a work's title, the way Western titles use
@@ -129,6 +131,9 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
     "Remaster",
     "Remastered",
     "Oficial",
+    # Bollywood label uploads (real case: "T-Series - Criminal (Full Song)
+    # Ra.One") - the whole track, as opposed to a teaser/promo cut.
+    "Full Song",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE) + r")\b",
@@ -137,7 +142,7 @@ _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
 
 # Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) anywhere
 # in the string, plus any whitespace right before it.
-_ANY_BRACKET_RE = re.compile(r"\s*[\(\[【]([^()\[\]【】]*)[\)\]】]")
+_ANY_BRACKET_RE = re.compile(r"\s*[\(\[【（［]([^()\[\]【】（）［］]*)[\)\]】）］]")
 
 
 def strip_junk_brackets_anywhere(title: str) -> str:
@@ -160,7 +165,9 @@ def strip_junk_brackets_anywhere(title: str) -> str:
 # strip_junk_suffix() also lets a junk bracket that only *looks* trailing
 # once the branding is gone (like "(Official Video)" above) get caught by
 # the existing trailing-bracket check.
-_PIPE_SUFFIX_RE = re.compile(r"\s*\|.*$")
+# Look-alikes of "|" count too (real case: "Dizzko Bizkit aka Mejsi - Bál ⎮
+# 2017", U+23AE): fullwidth "｜", box-drawing "│", broken bar "¦".
+_PIPE_SUFFIX_RE = re.compile(r"\s*[|⎮｜│¦].*$")
 
 
 def strip_pipe_suffix(title: str) -> str:
@@ -178,6 +185,49 @@ def strip_hashtags(title: str) -> str:
     """Drop every "#word" hashtag token from `title`."""
     title = _HASHTAG_RE.sub("", title or "")
     return re.sub(r"\s+", " ", title).strip()
+
+
+# A title that is really an uploaded file name (real case: "Justyna
+# Steczkowska - pejzaz_bez_ciebie.mpg"): a trailing media extension is
+# dropped, and an underscore-joined name is turned back into words.
+_MEDIA_EXTENSION_RE = re.compile(
+    r"\.(?:mpg|mpeg|mp4|m4v|avi|wmv|flv|mkv|webm|mov|3gp|mp3|wav|flac|ogg|m4a|wma)\s*$",
+    re.IGNORECASE,
+)
+
+
+def clean_file_name_title(text: str) -> str:
+    """Undo file-name artefacts in `text`: drop a trailing media extension,
+    and if the rest is words joined by "_" with no spaces, split them back
+    apart - capitalising each word when it was written all lowercase
+    ("pejzaz_bez_ciebie.mpg" -> "Pejzaz Bez Ciebie")."""
+    text = _MEDIA_EXTENSION_RE.sub("", (text or "").strip()).strip()
+    if "_" in text and " " not in text:
+        words = [w for w in text.split("_") if w]
+        if text.islower():
+            words = [w[:1].upper() + w[1:] for w in words]
+        text = " ".join(words)
+    return text
+
+
+# Japanese uploads credit a song as "<Artist>「<Title>」" with no " - " at
+# all (real case, channel "GOKUMON(UchikubiGokumonDoukoukai)": "打首獄門同好会
+# 「なつのうた」" - artist 打首獄門同好会, title なつのうた). Only "「」" - "『』"
+# also sets off album/work names, so it's too ambiguous to split on.
+_CORNER_BRACKET_CREDIT_RE = re.compile(r"^(.+?)\s*「([^「」]+)」$")
+
+
+def split_corner_bracket_credit(title: str) -> tuple | None:
+    """Return (artist, title) from a whole "<Artist>「<Title>」" title, or
+    None if it isn't one - including when the bracket only holds a junk
+    annotation (e.g. "Song「Lyric Video」")."""
+    match = _CORNER_BRACKET_CREDIT_RE.match((title or "").strip())
+    if not match:
+        return None
+    artist, song_title = match.group(1).strip(), match.group(2).strip()
+    if not (artist and song_title) or _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(song_title):
+        return None
+    return artist, song_title
 
 
 def strip_junk_suffix(title: str) -> str:
@@ -209,7 +259,7 @@ def strip_junk_suffix(title: str) -> str:
 # "Ado - 【Ado】 unravel 歌いました" exist only to enclose the artist name, so
 # leaving them behind after the name is removed would strand an empty
 # "【】" in the title).
-_ARTIST_WRAPPING_BRACKETS = {"(": ")", "[": "]", "【": "】"}
+_ARTIST_WRAPPING_BRACKETS = {"(": ")", "[": "]", "【": "】", "（": "）", "［": "］"}
 
 
 def _fold_char(ch: str) -> str:
@@ -624,6 +674,54 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
     return found
 
 
+# "<Name> - Topic" channels whose name is NOT an artist: YouTube files an
+# auto-generated upload under one of these when it couldn't attach the
+# track to a real artist channel (real case: "Release - Topic" carrying
+# "Mind Me" by Oordaya and "Slide" by Frankie Cosmos). The video title is
+# still the bare song title, but the channel name is useless as the artist,
+# so _artist_from_topic_description() reads it off the description instead.
+# Matched case-insensitively against the channel name minus " - Topic".
+GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
+
+
+def _is_generic_topic_channel(channel: str) -> bool:
+    if not (channel and _is_topic_channel(channel)):
+        return False
+    base = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip().lower()
+    return base in GENERIC_TOPIC_CHANNELS
+
+
+# An auto-generated ("Provided to YouTube by ...") description credits the
+# track on one line as "<Title> · <Artist> · <Artist 2> ...", and some also
+# carry a separate "Main Artist: <Artist>" line further down.
+_TOPIC_CREDIT_SEPARATOR = " · "
+_MAIN_ARTIST_LINE_RE = re.compile(r"(?im)^\s*main artist\s*:\s*(.+?)\s*$")
+
+
+def _parse_topic_description_artist(description: str) -> str | None:
+    """Pull the artist out of an auto-generated Topic video description -
+    the artists after the title on the first "<Title> · <Artist>" line
+    (several joined with ", ", left for the artist-split review to break
+    up), else every "Main Artist:" line. None if neither is there."""
+    for line in (description or "").splitlines():
+        parts = [p.strip() for p in line.split(_TOPIC_CREDIT_SEPARATOR)]
+        if len(parts) >= 2 and all(parts):
+            return ", ".join(parts[1:])
+    main_artists = [a for a in _MAIN_ARTIST_LINE_RE.findall(description or "") if a]
+    return ", ".join(main_artists) or None
+
+
+def resolve_generic_topic_artist(item: dict) -> str | None:
+    """For a GENERIC_TOPIC_CHANNELS video, fetch its description and return
+    the real artist credited there, or None if it can't be found - the
+    entry then goes to _review_missing_artists() for the user to fill in."""
+    description = _fetch_video_description(item.get("video_id"))
+    artist = _parse_topic_description_artist(description) if description else None
+    if artist:
+        print(f"[green]{item.get('channel')}[/green] is not an artist: found [blue]{artist}[/blue] in the description of \"[yellow]{item.get('title')}[/yellow]\"")
+    return artist
+
+
 def build_metadata_from_item(item: dict, artist_title_override: tuple | None = None) -> dict:
     """Turn one playlist video into an import_engine metadata dict.
 
@@ -655,14 +753,23 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         parse_title = strip_pipe_suffix(title)
         parse_title = strip_junk_brackets_anywhere(parse_title)
         parse_title = strip_hashtags(parse_title)
+        parse_title = _MEDIA_EXTENSION_RE.sub("", parse_title).strip()
 
-        if channel and _is_topic_channel(channel):
+        if _is_generic_topic_channel(channel):
+            # Channel name isn't an artist - left empty for the description
+            # lookup / _review_missing_artists() to fill in.
+            artist = None
+            song_title = parse_title.strip()
+        elif channel and _is_topic_channel(channel):
             artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
             song_title = parse_title.strip()
         else:
             artist, song_title = split_artist_title(parse_title)
             if not artist or not song_title:
-                if channel:
+                corner_credit = split_corner_bracket_credit(parse_title)
+                if corner_credit:
+                    artist, song_title = corner_credit
+                elif channel:
                     artist = channel.strip()
                     song_title = parse_title.strip()
 
@@ -672,6 +779,9 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     if song_title:
         song_title = strip_junk_suffix(song_title)
         song_title = strip_quote_marks(song_title)
+        song_title = clean_file_name_title(song_title)
+    if artist:
+        artist = clean_file_name_title(artist)
 
     return {
         "artist_name": artist,
@@ -812,6 +922,41 @@ def _resolve_artist_synonyms(metadata_list: list) -> None:
             metadata["artist_name"] = canonical_name
 
 
+def _review_missing_artists(metadata_list: list) -> tuple:
+    """Ask the user, once the whole playlist has been scanned, for the
+    artist of every entry that still has none (e.g. a GENERIC_TOPIC_CHANNELS
+    video whose description credits nobody) - an empty answer skips it.
+
+    Returns (remaining_metadata_list, pre_skipped), same shape as
+    _review_artist_title_swaps().
+    """
+    missing = [m for m in metadata_list if not (m.get("artist_name") or "").strip()]
+    if not missing:
+        return metadata_list, []
+
+    missing_ids = {id(m) for m in missing}
+    remaining = [m for m in metadata_list if id(m) not in missing_ids]
+    pre_skipped = []
+
+    print("\n" + "="*70)
+    print(f"REVIEW: {len(missing)} song(s) have no artist - enter it manually")
+    print("="*70)
+    for metadata in missing:
+        label = metadata.get("_label") or metadata.get("title") or ""
+        video_id = metadata.get("youtube_video_id")
+        link = f" https://youtu.be/{video_id}" if video_id else ""
+        print(f"Title: [green]{metadata.get('title')}[/green] (raw: \"[yellow]{label}[/yellow]\"){link}")
+        artist = (questionary.text("Artist (leave empty to skip this song):").ask() or "").strip()
+        if artist:
+            metadata["artist_name"] = artist
+            remaining.append(metadata)
+        else:
+            pre_skipped.append((label, "No artist found - user didn't enter one"))
+        print()
+
+    return remaining, pre_skipped
+
+
 def import_data_from_youtube_playlist(playlist_input: str) -> list:
     items = get_playlist_items(playlist_input)
     if not items:
@@ -827,8 +972,12 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
         override = None
         if _is_special_description_channel(item.get("channel") or ""):
             override = resolve_special_channel_metadata(item)
-        metadata_list.append(build_metadata_from_item(item, override))
+        metadata = build_metadata_from_item(item, override)
+        if not metadata["artist_name"] and _is_generic_topic_channel(item.get("channel") or ""):
+            metadata["artist_name"] = resolve_generic_topic_artist(item)
+        metadata_list.append(metadata)
 
+    metadata_list, pre_skipped = _review_missing_artists(metadata_list)
     _resolve_artist_synonyms(metadata_list)
-    metadata_list, pre_skipped = _review_artist_title_swaps(metadata_list)
-    return run_import_batch(metadata_list, pre_skipped=pre_skipped)
+    metadata_list, swap_skipped = _review_artist_title_swaps(metadata_list)
+    return run_import_batch(metadata_list, pre_skipped=pre_skipped + swap_skipped)

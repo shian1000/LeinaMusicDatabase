@@ -38,6 +38,7 @@ TITLE_JUNK_SUFFIXES = [
     "videoclip",
     # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
     "musicvideo",
+    "full song",
 ]
 _TITLE_JUNK_SUFFIX_RE = re.compile(
     r"\s*(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
@@ -71,6 +72,8 @@ _TITLE_BRACKET_PAIRS = {
     "《": "》",
     "「": "」",
     "『": "』",
+    "（": "）",
+    "［": "］",
 }
 # DOTALL so the bracket's content can be matched across a stray newline
 # (e.g. YouTube titles pasted with the closing bracket knocked onto its own
