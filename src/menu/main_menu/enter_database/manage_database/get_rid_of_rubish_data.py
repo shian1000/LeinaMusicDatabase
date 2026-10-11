@@ -5,7 +5,8 @@ import questionary
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
-from utils.common.text_utils import copy_to_clipboard
+from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
+from config.constants import TITLE_JUNK_SUFFIXES
 from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
 import re
@@ -17,47 +18,6 @@ _CLEANUP_FIELDS = [
     ("artist", lambda song: song.artist.name,  lambda song, v: setattr(song.artist, "name", v)),
     ("album",  lambda song: song.album,        lambda song, v: setattr(song, "album", v)),
 ]
-
-# Trailing junk phrases that only describe how the video was uploaded, never
-# part of the song's actual name (e.g. "Smallville - Save Me Music Video" ->
-# "Smallville - Save Me"). Stripped from the end of the title automatically,
-# without asking for confirmation, before falling back to the "seems like
-# rubbish" prompt for anything that's still blacklisted afterwards. Matched
-# case-insensitively against the very end of the title; add new phrases here
-# as they come up. Longer phrases are listed before the shorter phrases they
-# contain (e.g. "official music video" before "music video") so the whole
-# annotation is stripped in one go.
-TITLE_JUNK_SUFFIXES = [
-    "official music video",
-    "official lyric video",
-    "official video",
-    "official audio",
-    "music video",
-    "lyric video",
-    "video clip",
-    "videoclip",
-    # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
-    "musicvideo",
-    "full song",
-]
-_TITLE_JUNK_SUFFIX_RE = re.compile(
-    r"\s*(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
-    re.IGNORECASE,
-)
-
-
-def strip_trailing_junk_suffix(title: str) -> str:
-    """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
-    end of `title`, handling more than one stacked suffix (e.g. "Song Music
-    Video Official Audio"). Returns `title` unchanged if nothing matches.
-    """
-    title = (title or "").strip()
-    while True:
-        new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
-        if new_title == title:
-            return title
-        title = new_title
-
 
 # Bracket-pair characters seen wrapping a junk annotation at the end of a
 # title, beyond the plain "()"/"[]" pair uploaders sometimes reach for

@@ -375,3 +375,17 @@ def test_held_back_entries_are_only_asked_about_after_the_main_batch(monkeypatch
     assert events[0][1] == ["Song"]
     assert [md["title"] for md in events[1][1]] == ["Mind Me"]
     assert [md["title"] for md, _ in events[2][1]] == ["Genesis"]
+
+
+def test_unbracketed_trailing_junk_phrase_is_stripped():
+    metadata = _build("“Golden” Official Lyric Video | KPop Demon Hunters | Sony Animation", channel="Sony Pictures Animation")
+    assert metadata["title"] == "Golden"
+    assert _build("Artist - Song Music Video (HD)")["title"] == "Song"
+
+
+def test_unbracketed_junk_phrase_is_kept_when_it_is_the_whole_title():
+    assert _build("Artist - Music Video")["title"] == "Music Video"
+
+
+def test_unbracketed_junk_phrase_needs_a_whole_word_match():
+    assert _build("Artist - Homemusicvideo")["title"] == "Homemusicvideo"

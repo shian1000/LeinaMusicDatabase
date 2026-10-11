@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~328 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~331 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -167,12 +167,14 @@ non-trivial work in that area.
   title via `strip_trailing_junk()` (plain suffix and bracket-wrapped, e.g. "Song Music Video" or
   "Song 《Official Music Video》" -> "Song" — any bracket pair, since uploaders also use CJK ones)
   with no confirmation, then queues whatever's still blacklisted (album/title) and asks about it in
-  one batch at the end (see the Coding conventions entry above). Its `TITLE_JUNK_SUFFIXES` list is
-  separate from `import_from_playlist.py`'s `YOUTUBE_TITLE_JUNK_PHRASES`/`*_MARKER_WORDS` (see
-  `docs/agent-notes/youtube-search-matching.md`) — deliberately so: this one only auto-fixes an
-  *exact* phrase match (safe to apply without review), while the import-time one also matches on
-  marker words anywhere in a bracket. Add a new junk phrase to both lists if it should be caught in
-  both places; there's no shared code between them. `resolve_unknown_artist()` still applies its
+  one batch at the end (see the Coding conventions entry above). Its exact-phrase list,
+  `TITLE_JUNK_SUFFIXES` (`constants.py`, applied by `text_utils.strip_trailing_junk_suffix()`),
+  is shared with the YouTube playlist import, which uses it for *unbracketed* trailing junk
+  ("Golden Official Lyric Video" -> "Golden"). The import's bracket-only lists
+  (`YOUTUBE_TITLE_JUNK_PHRASES`/`*_MARKER_WORDS`, see `docs/agent-notes/youtube-search-matching.md`)
+  stay separate on purpose: they also match marker words anywhere in a bracket, which is too loose
+  to auto-apply to existing data. A new exact phrase goes in `TITLE_JUNK_SUFFIXES` once and is
+  caught in both places. `resolve_unknown_artist()` still applies its
   artist/title split unconditionally (no yes/no there) but prints one summary instead of pausing
   per song.
 - `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
@@ -276,7 +278,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~328 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~331 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

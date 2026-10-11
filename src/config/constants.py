@@ -225,3 +225,28 @@ QUERY_MODE_SONG = "Song"
 
 # Default dialog choices
 DIALOG_NO_RESULT = -1
+
+
+# Trailing junk phrases that only describe how the video was uploaded, never
+# part of the song's actual name (e.g. "Smallville - Save Me Music Video" ->
+# "Smallville - Save Me"). Stripped from the end of the title automatically,
+# without asking for confirmation, by both the YouTube playlist import
+# (import_from_playlist.py) and the rubbish-data cleanup
+# (get_rid_of_rubish_data.py), via text_utils.strip_trailing_junk_suffix().
+# Matched case-insensitively as whole words at the very end of the title,
+# bracketed or not; add new phrases here as they come up. Longer phrases are listed before the shorter phrases they
+# contain (e.g. "official music video" before "music video") so the whole
+# annotation is stripped in one go.
+TITLE_JUNK_SUFFIXES = [
+    "official music video",
+    "official lyric video",
+    "official video",
+    "official audio",
+    "music video",
+    "lyric video",
+    "video clip",
+    "videoclip",
+    # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
+    "musicvideo",
+    "full song",
+]

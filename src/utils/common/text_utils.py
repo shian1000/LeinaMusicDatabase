@@ -14,6 +14,7 @@ from utils.common.normalizer import normalize
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import mb_get, MBStats
 from config.constants import (
+    TITLE_JUNK_SUFFIXES,
     MUSICBRAINZ_API_BASE_URL,
     MUSICBRAINZ_API_LIMIT,
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
@@ -383,3 +384,22 @@ def are_artists_entries_similar(
 ) -> bool:
     artist_score = similarity(artist_query, db_object.name)
     return artist_score >= scaled_similarity_threshold(artist_query, db_object.name, threshold)
+
+
+_TITLE_JUNK_SUFFIX_RE = re.compile(
+    r"\s*\b(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_trailing_junk_suffix(title: str) -> str:
+    """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
+    end of `title`, handling more than one stacked suffix (e.g. "Song Music
+    Video Official Audio"). Returns `title` unchanged if nothing matches.
+    """
+    title = (title or "").strip()
+    while True:
+        new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
+        if new_title == title:
+            return title
+        title = new_title

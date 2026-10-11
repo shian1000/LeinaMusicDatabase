@@ -133,7 +133,10 @@ it (ID3 `artist`/`title` fields are already separate).
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
 -> `strip_hashtags()` -> media-extension strip (`_MEDIA_EXTENSION_RE`) over the *raw* video title
 (before any artist/title split), then later runs `strip_artist_from_title()` -> `strip_junk_suffix()`
--> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also
+-> `text_utils.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
+`TITLE_JUNK_SUFFIXES`, shared with the rubbish-data cleanup - real case: `'“Golden” Official Lyric
+Video | KPop Demon Hunters | Sony Animation'` -> `"Golden"`; skipped if it would empty the title)
+-> `strip_junk_suffix()` again -> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also
 on the artist). `clean_file_name_title()` handles titles that are really an uploaded file name
 (`"pejzaz_bez_ciebie.mpg"` -> `"Pejzaz Bez Ciebie"`). It only splits on `_` when there are no
 spaces, and only capitalises words when the whole thing was lowercase. The order of the first three matters: `strip_pipe_suffix()` runs before the bracket check

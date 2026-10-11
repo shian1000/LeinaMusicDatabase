@@ -17,6 +17,7 @@ from utils.youtube.manage_youtube_playlists import (
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
+from utils.common.text_utils import strip_trailing_junk_suffix
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -777,6 +778,11 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         song_title = strip_artist_from_title(song_title, artist)
 
     if song_title:
+        song_title = strip_junk_suffix(song_title)
+        # Unbracketed trailing junk too (real case: '“Golden” Official Lyric
+        # Video | KPop Demon Hunters | Sony Animation'), unless that would
+        # leave nothing - then the phrase *is* the title.
+        song_title = strip_trailing_junk_suffix(song_title) or song_title
         song_title = strip_junk_suffix(song_title)
         song_title = strip_quote_marks(song_title)
         song_title = clean_file_name_title(song_title)
