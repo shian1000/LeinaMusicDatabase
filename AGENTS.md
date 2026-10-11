@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~327 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~328 tests, ~2s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -251,10 +251,12 @@ non-trivial work in that area.
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
-  Add/Swap/Don't add once the whole playlist has been scanned — see
-  `docs/agent-notes/youtube-search-matching.md`), `_review_missing_artists()` (same file; asks
-  for the artist of every entry the parser left without one, e.g. a `"Release - Topic"` upload
-  whose description credits nobody), and `review_artist_splits()`
+  Add/Swap/Don't add — see `docs/agent-notes/youtube-search-matching.md`),
+  `_review_missing_artists()` (same file; asks for the artist of every entry the parser left
+  without one, e.g. a `"Release - Topic"` upload whose description credits nobody) — these two
+  are held back and asked only after `run_import_batch()`'s slow main loop, through its
+  `late_entries` callback, so the user isn't kept waiting for the import to start; do the same
+  for any new pre-import question — and `review_artist_splits()`
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
   `needs_review`, e.g. YouTube upload dates; tick the ones to change) — see
@@ -274,7 +276,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~327 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~328 tests, ~2 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

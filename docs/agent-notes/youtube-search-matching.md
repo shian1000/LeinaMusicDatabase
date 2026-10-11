@@ -75,9 +75,18 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
    not when the bracket holds a junk marker word (`"Song「Lyric Video」"`).
 
 Any entry still without an artist after this (and after the generic-Topic description lookup) is
-held back for `_review_missing_artists()`. That runs once the whole playlist is scanned, before the
-synonym/swap steps below: it asks for each artist by `questionary.text()`, with the video link
-shown. An empty answer skips the entry into `run_import_batch()`'s `pre_skipped` summary.
+held back for `_review_missing_artists()`. It asks for each artist by `questionary.text()`, with the
+video link shown. An empty answer skips the entry into the batch's skipped summary. A typed artist
+then goes through `_resolve_artist_synonyms()` like everything else did up front.
+
+**Both this review and the swap review below run *after* the slow part of the import, not before
+it.** `import_data_from_youtube_playlist()` holds those entries out of the list it hands to
+`run_import_batch()` and passes a `late_entries` callback instead. The engine calls it once its
+main loop (the MusicBrainz-bound per-entry work) is done, then processes the returned entries the
+same way, before its own artist/song conflict reviews. So every question of the import comes in one
+stretch at the end, and the user doesn't have to wait for the batch to start (user request: answer
+once, after the program has done the long work). The swap *detection* still runs up front against
+the pre-import DB, since it decides which entries to hold back.
 
 ### Catching a title/artist parsed in the wrong order
 
@@ -97,11 +106,11 @@ catches this *after* the whole playlist has been parsed into metadata dicts, not
    flag because "Nightmares" fuzzy-matches the unrelated artist "Nightmares on Wax", but since
    "CHVRCHES" is itself a known artist the current parse is already plausible and not worth
    interrupting the review for.
-2. Flagged entries are pulled out of `metadata_list` before anything is added to the DB - this
+2. Flagged entries are pulled out of the list before anything is added to the DB - this
    follows the same queue-then-batch-ask shape as `run_import_batch()`'s own pending-conflict
    review (see the Coding conventions entry in `AGENTS.md`), so one bad channel's whole playlist
    doesn't stop the import per song.
-3. Once every entry has been scanned, each flagged one is asked about individually via
+3. Once the rest of the playlist has been imported (the `late_entries` callback above), each flagged one is asked about individually via
    `questionary.select()` with four choices - **Add** (keep the parsed artist/title as-is),
    **Swap title with artist and add** (swap `metadata["artist_name"]`/`metadata["title"]` in
    place), **Add manually** (prompts for artist then title via `questionary.text()` and uses those

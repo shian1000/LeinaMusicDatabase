@@ -834,24 +834,20 @@ def _find_possible_artist_title_swaps(metadata_list: list) -> list:
     return flagged
 
 
-def _review_artist_title_swaps(metadata_list: list) -> tuple:
-    """Pull the entries flagged by _find_possible_artist_title_swaps() out
-    of metadata_list and ask the user, one by one, what to do with each:
-    add as parsed, swap artist/title and add, or drop it entirely - instead
-    of silently importing a song under the wrong artist.
+def _review_artist_title_swaps(flagged: list) -> tuple:
+    """Ask the user, one by one, what to do with each entry flagged by
+    _find_possible_artist_title_swaps(): add as parsed, swap artist/title
+    and add, or drop it entirely - instead of silently importing a song
+    under the wrong artist.
 
-    Returns (remaining_metadata_list, pre_skipped): remaining_metadata_list
-    is metadata_list with every flagged entry resolved (added back as-is or
-    swapped) except the ones the user chose to drop, and pre_skipped is a
-    list of (label, reason) tuples ready to pass straight into
-    run_import_batch()'s pre_skipped parameter.
+    Returns (resolved_metadata_list, pre_skipped): the flagged entries the
+    user chose to add (as-is or swapped), and (label, reason) tuples for the
+    ones they dropped - same shape as run_import_batch()'s pre_skipped.
     """
-    flagged = _find_possible_artist_title_swaps(metadata_list)
     if not flagged:
-        return metadata_list, []
+        return [], []
 
-    flagged_ids = {id(metadata) for metadata, _ in flagged}
-    remaining = [m for m in metadata_list if id(m) not in flagged_ids]
+    remaining = []
     pre_skipped = []
 
     print("\n" + "="*70)
@@ -977,7 +973,22 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
             metadata["artist_name"] = resolve_generic_topic_artist(item)
         metadata_list.append(metadata)
 
-    metadata_list, pre_skipped = _review_missing_artists(metadata_list)
     _resolve_artist_synonyms(metadata_list)
-    metadata_list, swap_skipped = _review_artist_title_swaps(metadata_list)
-    return run_import_batch(metadata_list, pre_skipped=pre_skipped + swap_skipped)
+
+    # Entries that need the user (no artist at all, or a possible
+    # artist/title swap) are held back and only asked about once
+    # run_import_batch() has got through the slow part with everything else,
+    # so the user isn't kept waiting for the import to start.
+    missing_artist = [m for m in metadata_list if not (m.get("artist_name") or "").strip()]
+    rest = [m for m in metadata_list if (m.get("artist_name") or "").strip()]
+    flagged = _find_possible_artist_title_swaps(rest)
+    flagged_ids = {id(metadata) for metadata, _ in flagged}
+    rest = [m for m in rest if id(m) not in flagged_ids]
+
+    def review_held_back_entries() -> tuple:
+        filled_in, missing_skipped = _review_missing_artists(missing_artist)
+        _resolve_artist_synonyms(filled_in)
+        swapped, swap_skipped = _review_artist_title_swaps(flagged)
+        return filled_in + swapped, missing_skipped + swap_skipped
+
+    return run_import_batch(rest, late_entries=review_held_back_entries)

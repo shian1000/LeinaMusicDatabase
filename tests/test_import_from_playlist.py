@@ -341,3 +341,37 @@ def test_review_missing_artists_no_op_when_every_entry_has_artist(monkeypatch):
     monkeypatch.setattr(m.questionary, "text", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
     entries = [{"artist_name": "A", "title": "x"}]
     assert m._review_missing_artists(entries) == (entries, [])
+
+
+# ---------------------------------------------------------
+# import_data_from_youtube_playlist() - questions come after the slow import
+# ---------------------------------------------------------
+
+def test_held_back_entries_are_only_asked_about_after_the_main_batch(monkeypatch):
+    items = [
+        {"channel": "X", "title": "Genesis Fan - Song", "video_id": "1"},
+        {"channel": "X", "title": "Am I Very Wrong - Genesis", "video_id": "2"},
+        {"channel": "Release - Topic", "title": "Mind Me", "video_id": "3"},
+    ]
+    monkeypatch.setattr(m, "get_playlist_items", lambda _: items)
+    monkeypatch.setattr(m, "get_artists_from_db_session", lambda: [])
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: None)
+    monkeypatch.setattr(m, "find_matching_artist", lambda name: _fake_artist("Genesis") if name == "Genesis" else None)
+
+    events = []
+    monkeypatch.setattr(m, "_review_missing_artists", lambda entries: (events.append(("missing", entries)) or ([], [])))
+    monkeypatch.setattr(m, "_review_artist_title_swaps", lambda flagged: (events.append(("swaps", flagged)) or ([], [])))
+
+    def fake_run_import_batch(metadata_list, late_entries=None):
+        events.append(("main", [md["title"] for md in metadata_list]))
+        late_entries()
+        return []
+
+    monkeypatch.setattr(m, "run_import_batch", fake_run_import_batch)
+
+    m.import_data_from_youtube_playlist("playlist")
+
+    assert [name for name, _ in events] == ["main", "missing", "swaps"]
+    assert events[0][1] == ["Song"]
+    assert [md["title"] for md in events[1][1]] == ["Mind Me"]
+    assert [md["title"] for md, _ in events[2][1]] == ["Genesis"]

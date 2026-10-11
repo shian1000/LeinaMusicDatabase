@@ -353,7 +353,7 @@ def _entry_label(metadata: dict) -> str:
     return metadata.get("_label") or f"{metadata.get('artist_name')} - {metadata.get('title')}"
 
 
-def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
+def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries=None) -> list:
     """Resolve/create DB entries for a batch of already-extracted metadata
     dicts, shared by every import source (mp3 tags, YouTube playlists, ...).
 
@@ -370,6 +370,13 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
     Ambiguous-artist and similar-song matches aren't resolved during the
     loop - they're queued and asked about in one batch after every entry has
     been processed, so the import doesn't keep stopping for input.
+
+    `late_entries` is an optional callable for a caller that has its own
+    questions to ask about some entries (e.g. the YouTube importer's
+    artist/title swap review): it's called once the slow main loop is done,
+    so the user isn't kept waiting for the batch to start, and returns
+    (extra_metadata_list, extra_skipped) - processed exactly like
+    `metadata_list` / `pre_skipped`, before any of the reviews below.
     """
     added_songs = []
     skipped_songs = []
@@ -403,16 +410,17 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
 
     entry_timings = {}
 
-    for idx, metadata in enumerate(metadata_list, 1):
+    def process_entry(metadata: dict, idx: int, total: int) -> None:
+        nonlocal added_count, skipped_count
         entry_start = time.time()
         label = _entry_label(metadata)
-        mlog(f"\n[{idx}/{len(metadata_list)}] Processing: {label}")
+        mlog(f"\n[{idx}/{total}] Processing: {label}")
 
         if not metadata.get("artist_name") or not metadata.get("title"):
             skipped_count += 1
             skipped_songs.append(label)
             reason_for_skipping.append("Missing artist or title")
-            continue
+            return
 
         print(f"{metadata['artist_name']} - {metadata['title']}")
 
@@ -427,7 +435,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
             entry_timings[label] = {'total': time.time() - entry_start, 'artist': artist_time, 'song': 0.0}
             print("##########")
             print()
-            continue
+            return
 
         song_start = time.time()
         new_song_obj, is_pending = resolve_song(metadata, new_artist_obj, pending_song_conflicts)
@@ -449,6 +457,18 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None) -> list:
 
         print("##########")
         print()
+
+    for idx, metadata in enumerate(metadata_list, 1):
+        process_entry(metadata, idx, len(metadata_list))
+
+    if late_entries:
+        extra_metadata_list, extra_skipped = late_entries()
+        for label, reason in extra_skipped or []:
+            skipped_count += 1
+            skipped_songs.append(label)
+            reason_for_skipping.append(reason)
+        for idx, metadata in enumerate(extra_metadata_list or [], 1):
+            process_entry(metadata, idx, len(extra_metadata_list))
 
     # Now that every entry has been processed, go through the ambiguous-artist
     # matches that were queued along the way and ask about each one in a

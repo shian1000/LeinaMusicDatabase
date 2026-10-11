@@ -13,7 +13,7 @@ fuzzy-match helpers are in `docs/agent-notes/normalization-and-matching.md`.
 `resolve_artist()`, `resolve_song()`, `create_song_entry()`,
 `find_similar_artist()`, `find_similar_song()` and the batch-conflict-review
 loop all live in `import_engine.py`, behind one entry point:
-`run_import_batch(metadata_list, pre_skipped=None)`. It used to be that
+`run_import_batch(metadata_list, pre_skipped=None, late_entries=None)`. It used to be that
 `import_data_from_mp3_tags.py` owned all of this directly; it was split out so
 `utils/youtube/import_from_playlist.py` ("Import data from YouTube playlist")
 could reuse the exact same matching/dedup/conflict-review machinery instead of
@@ -33,6 +33,15 @@ entirely is just skipped with reason `"Missing artist or title"`, which is how
 an mp3 with no usable filename fallback and a YouTube title that failed to
 split both end up handled by the same generic path rather than two different
 skip mechanisms.
+
+A builder with its own questions about some entries (the YouTube importer's
+missing-artist and artist/title-swap reviews) must not ask them before calling
+`run_import_batch()` - the user would then wait through the whole slow loop
+after answering. It holds those entries back and passes `late_entries`, a
+callable returning `(extra_metadata_list, extra_skipped)`. The engine calls it
+right after its main loop and processes the result like the main list, before
+its own artist/song conflict reviews, so every prompt of the import comes in
+one stretch at the end.
 
 **`Song.youtube_video_id` backfill:** `create_song_entry()` sets
 `Song.youtube_video_id` from `metadata.get("youtube_video_id")` whenever it's
