@@ -12,6 +12,7 @@ from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
+from utils.ui.album_resolution_review import offer_album_resolution
 from rich import print
 import questionary
 from sqlalchemy import func
@@ -313,6 +314,18 @@ def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
         existing_song.youtube_video_id = video_id
         print(f"Linked existing song [blue]{existing_song.title}[/blue] to YouTube video [green]{video_id}[/green]")
 
+def find_existing_song(title: str, artist_songs: list) -> Song | None:
+    """The song among one artist's `artist_songs` that `title` already is:
+    same normalized title, else the first whose title contains it ("Song"
+    vs "Song (Remastered)"). Shared by resolve_song() and the cover import
+    (utils/discoveries/mp3_covers.py)."""
+    key = normalize(title)
+    exact = next((s for s in artist_songs if normalize(s.title) == key), None)
+    if exact is not None:
+        return exact
+    return next((s for s in artist_songs if key in normalize(s.title)), None)
+
+
 def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) -> tuple:
     """
     Resolve a song entry for the given artist.
@@ -325,12 +338,12 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) ->
     """
     existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
 
-    for ex_son in existing_artists_songs:
-        if normalize(metadata["title"]) in normalize(ex_son.title):
-            print("Yes, there is a song like this already. Skipping")
-            slog(f"    [SONG EXISTS] Exact match found", priority=1)
-            _backfill_youtube_link(metadata, ex_son)
-            return None, False
+    ex_son = find_existing_song(metadata["title"], existing_artists_songs)
+    if ex_son is not None:
+        print("Yes, there is a song like this already. Skipping")
+        slog(f"    [SONG EXISTS] Exact match found", priority=1)
+        _backfill_youtube_link(metadata, ex_son)
+        return None, False
 
     slog("Couldn't find the song, trying spellchecking")
     similar_song = find_similar_song(metadata, artist_obj)
@@ -552,6 +565,10 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     new_artists = music_session.query(Artist).filter(Artist.id > max_artist_id_before).all()
     if new_artists:
         review_artist_splits(new_artists)
+
+    # A new song whose album title another artist already uses was left
+    # without an album row (utils/database/albums.py) - settle those now
+    offer_album_resolution(added_songs)
 
     # Print timing summary
     print("\n" + "="*70)

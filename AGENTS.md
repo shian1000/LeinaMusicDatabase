@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~333 tests, ~2s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~359 tests, ~3s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -97,14 +97,25 @@ non-trivial work in that area.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
-  call (the latter keeps the deleted row's synonyms and name, otherwise lost with it). `artist_splitting.py` —
+  call (the latter keeps the deleted row's synonyms and name, otherwise lost with it).
+  `albums.py` owns `albums` / `album_covers` and keeps `songs.album_id` in step with the
+  `songs.album` text through a `before_flush` listener on the music session factory. Change the
+  text and the row follows; never set `album_id` by hand. Raw-SQL artist merges bypass the listener,
+  so every artist merge must also call `reassign_artist_albums()`. Titles several main artists
+  share stay NULL for Manage database → "Resolve albums with several artists"
+  (`utils/ui/album_resolution_review.py`). Rules, the "Singles" one-song albums, stable ids:
+  `docs/data-model.md`. `artist_splitting.py` —
   splitting a joined name ("A feat. B", "A x B") into separate artists, always behind the
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
   `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
-  `utils/youtube/import_from_playlist.py`). `docs/agent-notes/discovery-modules.md` (fetcher
+  `utils/youtube/import_from_playlist.py`). `mp3_covers.py` is Fetch database data → "Import
+  covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
+  `<database_dir>/covers/`, matched to songs like the tag import (`read_file_metadata()`,
+  `find_existing_song()`), non-square video frames skipped; see its docstring and
+  `docs/runbooks/database.md`. `docs/agent-notes/discovery-modules.md` (fetcher
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
@@ -192,7 +203,10 @@ non-trivial work in that area.
 - The MusicDatabaseApp phone client reads the shared SQLite files directly, so `music.db`'s schema
   and stored values are an interface too: migrations touching `songs` / `artists` /
   `additional_song_artists`, or a change to what `youtube_video_id` may hold (especially
-  `NO_VIDEO_SENTINEL`), need coordinating with the app.
+  `NO_VIDEO_SENTINEL`), need coordinating with the app. The same goes for `albums`: the app keys
+  its cover cache on album ids, so they must stay stable (merge, never renumber). It also still
+  reads `songs.album`, so that text column stays filled until the user says the app has moved to
+  `album_id`.
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →
@@ -206,7 +220,9 @@ non-trivial work in that area.
 - Two SQLite DBs under `src/database/` (gitignored): `music.db` (catalog: `artists`, `songs`) and
   `tag.db` (`tags`, `song_tags` — a many-to-many onto songs). `music.db` also has
   `additional_song_artists` (extra artists of multi-artist songs; `songs.artist_id` stays the
-  primary one) — see the `src/utils/database/` Module map entry. `datatables.py` /
+  primary one) — see the `src/utils/database/` Module map entry — and `albums` / `album_covers`
+  (migrations 0005–0008). Cover *images* are never stored in a DB file: they're in
+  `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). `datatables.py` /
   `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
   tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
   restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
@@ -249,7 +265,7 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Seven places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Eight places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
@@ -261,7 +277,9 @@ non-trivial work in that area.
   for any new pre-import question — and `review_artist_splits()`
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
-  `needs_review`, e.g. YouTube upload dates; tick the ones to change) — see
+  `needs_review`, e.g. YouTube upload dates; tick the ones to change), and
+  `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
+  the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
   candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an
@@ -278,7 +296,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~333 tests, ~2 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~359 tests, ~3 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

@@ -5,8 +5,8 @@ One row per subsystem. "Docs" links to where the *depth* lives — a system with
 
 | System | Owns | Docs |
 | --- | --- | --- |
-| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags, the search/getter API, the category system, backups/migrations, and copying + serving the DBs to the MusicDatabaseApp phone client (`sharing.py`, `sharing_server.py`) | [agent-notes/database-search.md](../agent-notes/database-search.md), [runbooks/database.md](../runbooks/database.md) |
-| Discovery | `src/utils/discoveries/` — external metadata fetchers (MusicBrainz, Wikipedia, iTunes, Genius, Google, Spotify, YouTube), MP3-tag import | [agent-notes/discovery-modules.md](../agent-notes/discovery-modules.md), [agent-notes/import-pipeline.md](../agent-notes/import-pipeline.md) |
+| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags and albums (`albums.py`: `songs.album_id` kept in step with `songs.album`, cover rows), the search/getter API, the category system, backups/migrations, and copying + serving the DBs to the MusicDatabaseApp phone client (`sharing.py`, `sharing_server.py`) | [agent-notes/database-search.md](../agent-notes/database-search.md), [runbooks/database.md](../runbooks/database.md) |
+| Discovery | `src/utils/discoveries/` — external metadata fetchers (MusicBrainz, Wikipedia, iTunes, Genius, Google, Spotify, YouTube), MP3-tag import, album covers from embedded mp3 pictures (`mp3_covers.py`) | [agent-notes/discovery-modules.md](../agent-notes/discovery-modules.md), [agent-notes/import-pipeline.md](../agent-notes/import-pipeline.md) |
 | Normalization & matching | `src/utils/common/normalizer.py`, `text_utils.py` — canonical string normalization and fuzzy-match helpers | [agent-notes/normalization-and-matching.md](../agent-notes/normalization-and-matching.md) |
 | YouTube | `src/utils/youtube/` — matching songs to YouTube videos, downloads, playlist management | [agent-notes/youtube-search-matching.md](../agent-notes/youtube-search-matching.md) |
 | Terminal UI | `src/menu/`, `src/utils/ui/` — presentation, prompt flow, and wiring the other systems together | `AGENTS.md` → Module map |
@@ -20,7 +20,7 @@ One edge per line so both directions are `grep`-able.
 - Terminal UI -> Discovery — drives "Fill missing data", MP3 import, spell-check, and Statistics menus
 - Terminal UI -> YouTube — drives playlist creation, video matching, and download menus
 - Discovery -> Catalog/DB search — resolves existing rows and creates new `Artist`/`Song` rows during import; reads a song's artist credits (`song_artists.py`) for album/year lookups
-- Discovery -> Terminal UI — `run_import_batch()` ends with the shared `review_artist_splits()` batch review (`utils/ui/artist_split_review.py`)
+- Discovery -> Terminal UI — `run_import_batch()` ends with the shared `review_artist_splits()` batch review (`utils/ui/artist_split_review.py`) and `offer_album_resolution()` (`utils/ui/album_resolution_review.py`)
 - Discovery -> Normalization & matching — normalizes and scores fetched values against the query
 - Discovery -> YouTube — `youtube_fetcher.get_release_year()` (Years) reuses `search_video_ytdlp()` and `get_video_release_year()` rather than a second YouTube matcher
 - Catalog/DB search -> Normalization & matching — Python-side fallback filter, category/similarity matching

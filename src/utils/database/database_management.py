@@ -8,6 +8,7 @@ from sqlalchemy import text
 from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
+from utils.database.albums import reassign_artist_albums
 from rich import print
 
 
@@ -132,6 +133,7 @@ def merge_artists_in_db(merge_from, merge_to):
         {"to_id": to_id, "from_id": from_id}
     )
     reassign_additional_artist_links(session, from_id, to_id)
+    reassign_artist_albums(session, from_id, to_id)
 
     remaining = count_artist_songs(session, from_id)
 

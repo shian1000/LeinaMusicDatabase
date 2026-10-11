@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import func, select
 from settings import Settings
 from utils.database.datatables import Base, Song, Artist, AdditionalSongArtist
+from utils.database.albums import register_album_sync
 import time
 from utils.common.debug import slog, mlog
 
@@ -21,6 +22,8 @@ slog(BASE_DIR)
 
 ENGINE = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=ENGINE)
+# songs.album_id follows songs.album on every flush - see utils/database/albums.py
+register_album_sync(SessionLocal)
 mlog("Music DB Manager")
 slog(SessionLocal)
 

@@ -8,7 +8,7 @@ this index is the map of everything else.
 
 - [Architecture](architecture.md) — module layout, dependency direction, how the phone client
   uses the data today and where a future API would sit.
-- [Data model](data-model.md) — the two SQLite databases, their schemas, and identifier policy.
+- [Data model](data-model.md) — the two SQLite databases, their schemas (including albums and where cover images live), and identifier policy.
 - [System registry](systems/index.md) — which subsystem owns which feature, and how they depend on
   each other.
 - [Runbooks](runbooks/) — operational procedures. Currently just

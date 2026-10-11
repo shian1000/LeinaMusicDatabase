@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index, text
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from utils.common.debug import slog
 import re
@@ -20,6 +20,7 @@ class Artist(Base):
     synonyms = Column(String)
 
     songs = relationship("Song", back_populates="artist")
+    albums = relationship("Album", back_populates="artist")
     additional_song_links = relationship(
         "AdditionalSongArtist", back_populates="artist", cascade="all, delete-orphan"
     )
@@ -40,12 +41,18 @@ class Song(Base):
     spotify_url = Column(String)  # album/track page set by hand, read by Years - see spotify_fetcher
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
+    # Album row of `album` (migrations 0006/0007). Kept in step with `album` by
+    # utils.database.albums - don't set it by hand, change `album` instead.
+    album_id = Column(Integer, ForeignKey("albums.id"), index=True)
+    track_number = Column(Integer)  # position on the album, NULL = unknown
+    disc_number = Column(Integer)   # NULL = 1 / unknown
 
     nostalgic = Column(Integer)
     melancholic = Column(Integer)
     party = Column(Integer)
 
     artist = relationship("Artist", back_populates="songs")
+    album_entry = relationship("Album", back_populates="songs")
     # Only multi-artist songs have rows here - `artist` stays the primary one.
     # Use utils.database.song_artists helpers rather than reading this directly.
     additional_artist_links = relationship(
@@ -69,6 +76,56 @@ class AdditionalSongArtist(Base):
 
     song = relationship("Song", back_populates="additional_artist_links")
     artist = relationship("Artist", back_populates="additional_song_links")
+
+# --------------------
+# Albums (migration 0005) and where their covers come from (0008)
+# --------------------
+class Album(Base):
+    __tablename__ = "albums"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('album', 'ep', 'single', 'compilation', 'soundtrack')",
+            name="ck_albums_type",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String, nullable=False)
+    artist_id = Column(Integer, ForeignKey("artists.id"), index=True)  # NULL = various artists
+    year = Column(Integer)
+    type = Column(String)  # ALBUM_TYPES in constants.py, NULL = not known
+    # External ids, so a later fetcher finds covers / track lists without searching again
+    musicbrainz_release_group_id = Column(String)
+    itunes_collection_id = Column(Integer)
+    deezer_album_id = Column(Integer)
+    spotify_album_id = Column(String)
+
+    artist = relationship("Artist", back_populates="albums")
+    songs = relationship("Song", back_populates="album_entry")
+    covers = relationship("AlbumCover", back_populates="album", cascade="all, delete-orphan")
+
+
+class AlbumCover(Base):
+    __tablename__ = "album_covers"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('file', 'itunes', 'deezer', 'musicbrainz', 'youtube', 'manual')",
+            name="ck_album_covers_source",
+        ),
+        CheckConstraint("status IN ('found', 'missing')", name="ck_album_covers_status"),
+    )
+
+    album_id = Column(Integer, ForeignKey("albums.id"), primary_key=True)
+    source = Column(String, primary_key=True)  # ALBUM_COVER_SOURCES in constants.py
+    url = Column(String)   # remote sources
+    path = Column(String)  # 'file'/'manual': relative to the covers directory
+    width = Column(Integer)
+    height = Column(Integer)
+    bytes = Column(Integer)
+    status = Column(String, nullable=False)
+    checked_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+    album = relationship("Album", back_populates="covers")
 
 song_categories = [
     "title",

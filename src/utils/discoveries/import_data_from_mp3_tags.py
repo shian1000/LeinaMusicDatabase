@@ -6,6 +6,26 @@ from utils.discoveries.import_engine import run_import_batch
 from rich import print
 
 
+def read_file_metadata(file: Path) -> dict:
+    """One mp3's artist/title/album/year/language/origin: ID3 tags, falling
+    back to the filename when the artist or title tag is missing. Shared
+    with the cover import (utils/discoveries/mp3_covers.py), so both match a
+    file to the same song."""
+    metadata = extract_metadata_with_fallback(file)
+
+    if metadata["artist_name"] in {"Unknown Artist", None, ""} or metadata["title"] in {"Unknown Title", None, ""}:
+        print("Warning - title/artist tags missing. Trying to extract data from filename")
+        artist, title = extract_unknown_data(file)
+        if not artist:
+            print("The filename didn't have a proper separator")
+            print(metadata)
+            print(file)
+        else:
+            metadata["artist_name"] = artist
+            metadata["title"] = title
+    return metadata
+
+
 def _build_metadata_list(folder_path: str) -> tuple:
     """Read every mp3 under folder_path and extract artist/title/album/year/
     language metadata from ID3 tags (falling back to the filename when tags
@@ -28,18 +48,7 @@ def _build_metadata_list(folder_path: str) -> tuple:
         file_name = file.name
         mlog(f"\n[{idx}/{len(mp3_files)}] Extracting metadata: {file_name}")
 
-        metadata = extract_metadata_with_fallback(file)
-
-        if metadata["artist_name"] in {"Unknown Artist", None, ""} or metadata["title"] in {"Unknown Title", None, ""}:
-            print("Warning - title/artist tags missing. Trying to extract data from filename")
-            artist, title = extract_unknown_data(file)
-            if not artist:
-                print("The filename didn't have a proper separator")
-                print(metadata)
-                print(file)
-            else:
-                metadata["artist_name"] = artist
-                metadata["title"] = title
+        metadata = read_file_metadata(file)
 
         if metadata["artist_name"] == "Unknown Artist" or not metadata["artist_name"]:
             print("Couldn't establish the artist and title")

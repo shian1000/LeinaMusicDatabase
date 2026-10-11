@@ -9,7 +9,9 @@ from settings import settings
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
 import questionary
-from utils.database.database_sessions import submit_global_database_session
+from utils.database.database_sessions import submit_global_database_session, open_and_set_global_database_sessions
+from utils.discoveries.mp3_covers import import_covers_from_mp3
+from utils.database.albums import covers_dir
 
 def _review_imported_songs(imported_songs):
     if imported_songs:
@@ -38,10 +40,51 @@ def import_youtube_playlist():
     _review_imported_songs(imported_songs)
 
 
+def import_covers():
+    default = settings.local_library_dir_str
+    choice = questionary.select(
+        "Which folder's mp3 files should the covers come from?",
+        choices=[default, "Pick another folder"],
+    ).ask()
+    if choice is None:
+        return
+    folder = default if choice == default else open_file_browser_terminal(default)
+    if not folder:
+        return
+
+    music_session, _ = open_and_set_global_database_sessions()
+    print(f"Reading embedded covers from {folder} ...")
+    report = import_covers_from_mp3(
+        music_session, folder, progress=lambda done, total: print(f"  {done}/{total} files"))
+
+    print(f"\n{report.files} mp3 file(s): {report.no_image} without an image, "
+          f"{report.not_square} with a non-square one (video frames, skipped), "
+          f"{report.unreadable} unreadable.")
+    print(f"{len(report.unmatched)} file(s) matched no song in the database; "
+          f"{report.no_album} matched a song with no album yet.")
+    for name in report.unmatched[:10]:
+        print(f"    {name}")
+    if len(report.unmatched) > 10:
+        print(f"    ... and {len(report.unmatched) - 10} more (all in debug.log)")
+    if report.no_album:
+        print('  (Songs on album titles several artists share get covers once '
+              '"Resolve albums with several artists" has settled them.)')
+    print(f"Covers written for {report.albums_written} album(s), into {covers_dir()}")
+    if report.disagreements:
+        print(f"\n{len(report.disagreements)} album(s) have different pictures on different tracks - "
+              "the one most tracks carry was used:")
+        for album, choice in report.disagreements:
+            pictures = ", ".join(
+                f"{count}x {cover.width}x{cover.height} ({cover.file.name})" for count, cover in choice.pictures)
+            print(f"  #{album.id} {album.artist.name if album.artist else 'Various artists'} - "
+                  f"{album.title}: {pictures}")
+
+
 def fetch_database_data():
     action_map = {
         "Fill missing data": fill_missing_data,
         "Import data from mp3 tags": import_data,
+        "Import covers from mp3 tags": import_covers,
         "Import data from YouTube playlist": import_youtube_playlist,
     }
 

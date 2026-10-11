@@ -25,6 +25,23 @@ synonyms                        year
                                  melancholic
                                  party
                                  youtube_video_id
+                                 spotify_url
+                                 album_id       FK -> Album.id (NULL = see below)
+                                 track_number   NULL = unknown
+                                 disc_number    NULL = 1 / unknown
+
+Album  (table albums, migration 0005)    AlbumCover  (table album_covers, migration 0008)
+-----                                    ----------
+id            PK                         album_id    PK, FK -> Album.id
+title         NOT NULL                   source      PK, 'file'|'itunes'|'deezer'|'musicbrainz'|'youtube'|'manual'
+artist_id     FK -> Artist.id, NULL =    url         remote sources
+              various artists            path        'file'/'manual': relative to <database_dir>/covers/
+year                                     width, height, bytes
+type          NULL | 'album' | 'ep' |    status      NOT NULL, 'found' | 'missing' (checked, none there)
+              'single' | 'compilation'   checked_at  NOT NULL, default datetime('now')
+              | 'soundtrack'
+musicbrainz_release_group_id, itunes_collection_id, deezer_album_id, spotify_album_id
+              (external ids for later fetchers; nothing fills them yet)
 
 AdditionalSongArtist  (table additional_song_artists, migration 0003)
 --------------------
@@ -58,6 +75,44 @@ role          NOT NULL, 'main' | 'feat'
   usually part of a name ("Final Fantasy X OST"). An uppercase " X " splits only when every part
   is already an artist in the DB ("Coldplay X BTS"). Why this shape and not extra columns:
   [ADR-0002](decisions/0002-multiple-artists-per-song.md).
+- Albums (migrations 0005–0008, `src/utils/database/albums.py`). `Song.album` (free text) is
+  kept **and kept filled**: the MusicDatabaseApp phone client reads it, so it can only go once the
+  app has moved to `album_id`. `Song.album_id` follows it automatically. A `before_flush` listener
+  (`register_album_sync()`, installed on `music_db_manager.SessionLocal`) finds or creates the album
+  row whenever a song is added or its `album` text or primary artist changes. No writer of
+  `songs.album` needs to do it itself; never set `album_id` by hand. The rules:
+  - Albums match on `normalize(title)` plus the album artist, so "Ray of Light" and "Ray Of Light"
+    by Madonna are one row.
+  - A title only one main artist uses becomes that artist's album automatically, `year` = the
+    songs' most frequent year, `type` NULL (unknown).
+  - `SINGLES_ALBUM` ("Singles") is a sentinel, not an album. Each such song gets its own one-song
+    album, `type = 'single'`, titled like the song (a single has its own cover) and kept in step
+    with the song's title, year and artist. The song's text stays "Singles".
+  - A title several main artists use (a compilation or soundtrack, or two unrelated albums that
+    share a name) is **not** decided automatically. Those songs keep `album_id` NULL until the user
+    settles them in Manage database → "Resolve albums with several artists"
+    (`utils/ui/album_resolution_review.py`), which is also offered at the end of an import that
+    creates such a case. The exceptions: if a compilation (artist NULL) with that title already
+    exists, a new song joins it, and a song whose own artist already has that album joins that.
+  - Album ids are **stable**, because the phone keys its cover cache on them: rows are never
+    renumbered or rebuilt. Merging two albums (`merge_albums()`: the resolver's compilation choice,
+    or an artist merge where both artists had the album) keeps one id and moves songs, covers and
+    external ids onto it. An album no song points at any more is kept, so a typo fix and back
+    finds the same row and cover.
+  - Artist merges change `songs.artist_id` with raw SQL, which the listener never sees, so they
+    call `reassign_artist_albums()` (both `merge_artists_in_db()` and
+    `resolve_duplicates.remove_duplicate_artists()` do). When only a song's artist changes through
+    the ORM (an artist split), the album row moves with it if none of its other songs stays with
+    the old artist.
+  - Existing songs were linked by `link_unassigned_songs()` right after migration 0006 was applied
+    (`main.py`). It groups every title before deciding, so no artist gets a shared title ahead of
+    the others. Safe to re-run.
+- Cover images are **never stored in `music.db`**, because the phone downloads the whole file. They
+  live in `<database_dir>/covers/` (`albums.covers_dir()`, gitignored like the DBs): `<album_id>.jpg`
+  for source `'file'`, `<album_id>-<source>.jpg` for any other stored source
+  (`albums.cover_filename()`). Each image is at most 600 px, JPEG quality 85. Only the mp3 import
+  writes covers so far (`utils/discoveries/mp3_covers.py`). The sharing server doesn't serve them
+  yet.
 - `Song.spotify_url` — a Spotify album or track page set by hand (Song actions → "Set Spotify
   link", stored normalized by `spotify_fetcher.normalize_spotify_url()`), for a release Spotify's
   own search never surfaces (Cypis' 2016 "Sprawdzian Z Chemii", buried under dozens of newer

@@ -162,6 +162,37 @@ ADDITIONAL_ARTIST_ROLES = (ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_F
 MULTI_ARTIST_MAIN_SEPARATOR = " x "
 MULTI_ARTIST_FEAT_SEPARATOR = " feat. "
 
+# albums.type (migration 0005). NULL = not known. ALBUM_TYPE_SINGLE is only
+# ever given to the one-song album of a song filed under SINGLES_ALBUM.
+ALBUM_TYPE_ALBUM = "album"
+ALBUM_TYPE_EP = "ep"
+ALBUM_TYPE_SINGLE = "single"
+ALBUM_TYPE_COMPILATION = "compilation"
+ALBUM_TYPE_SOUNDTRACK = "soundtrack"
+ALBUM_TYPES = (ALBUM_TYPE_ALBUM, ALBUM_TYPE_EP, ALBUM_TYPE_SINGLE, ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK)
+
+# album_covers (migration 0008)
+ALBUM_COVER_SOURCE_FILE = "file"  # embedded in the user's mp3s (APIC)
+ALBUM_COVER_SOURCES = (ALBUM_COVER_SOURCE_FILE, "itunes", "deezer", "musicbrainz", "youtube", "manual")
+ALBUM_COVER_STATUS_FOUND = "found"
+ALBUM_COVER_STATUS_MISSING = "missing"  # checked, the source has none
+# Covers are stored as <database_dir>/<ALBUM_COVERS_DIRNAME>/<album_id>.jpg,
+# never inside music.db
+ALBUM_COVERS_DIRNAME = "covers"
+# Re-encode size/quality - the phone never shows a cover bigger than this
+ALBUM_COVER_MAX_SIZE = 600
+ALBUM_COVER_JPEG_QUALITY = 85
+# A cover outside this width/height ratio is a video frame (16:9, 4:3 YouTube
+# thumbnails written in by downloaders), not album art - skipped
+ALBUM_COVER_MIN_ASPECT = 0.9
+ALBUM_COVER_MAX_ASPECT = 1.1
+# ID3 APIC picture type 3 = "Cover (front)"
+ID3_PICTURE_TYPE_FRONT_COVER = 3
+# Two embedded images whose 64-bit difference hashes are at most this many
+# bits apart count as the same picture (the same cover re-encoded at another
+# size), so they vote together rather than as a disagreement
+ALBUM_COVER_SAME_IMAGE_MAX_DISTANCE = 6
+
 # ==================== API Constants ====================
 
 # MusicBrainz API
