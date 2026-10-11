@@ -404,18 +404,18 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
 
 
 def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool,
-                      credited_artists: list[str] | None = None, song=None) -> YearDiscoveryResult | None:
+                      credited_artists: list[str] | None = None, songs=None) -> YearDiscoveryResult | None:
     """Run a module's get_release_year(), isolated from crashes and bad output.
     Mirrors _call_module(), but counted in the separate year stats file.
 
-    A module whose get_release_year() takes a `song` keyword also gets the
-    Song row (singles only - an album lookup has no single song), e.g. to
-    reuse its stored youtube_video_id. Everything else keeps the plain
+    A module whose get_release_year() takes a `songs` keyword also gets the
+    Song rows being looked up (the single, or the album's songs), e.g. to
+    reuse a stored youtube_video_id. Everything else keeps the plain
     (artist, query, is_single) contract."""
     record_year_invocation(module_id)
     try:
-        if song is not None and "song" in inspect.signature(module.get_release_year).parameters:
-            result = module.get_release_year(artist, query, is_single, song=song)
+        if songs and "songs" in inspect.signature(module.get_release_year).parameters:
+            result = module.get_release_year(artist, query, is_single, songs=songs)
         else:
             result = module.get_release_year(artist, query, is_single)
     except Exception as e:
@@ -439,7 +439,8 @@ def discover_release_year(artist: str, query: str, is_single: bool, modules, art
 
 def discover_release_year_result(artist: str, query: str, is_single: bool, modules,
                                  artist_synonyms: str | None = None, song=None,
-                                 alt_script_query: str | None = None) -> YearDiscoveryResult | None:
+                                 alt_script_query: str | None = None,
+                                 album_songs=None) -> YearDiscoveryResult | None:
     """Look up a release year for either an album (query = album title,
     is_single=False) or a standalone single (query = song title,
     is_single=True), trying each enabled year-capable module in order until
@@ -454,8 +455,11 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
     single gets the same credited-artist validation and "A x B" fallback
     query as discover_album_name(). An album lookup is keyed on the primary
     artist alone - a guest on one track isn't the album's artist.
+    `album_songs` (an album lookup) are only handed on to modules that read
+    data stored on the songs (see _call_year_module()).
     """
     credited, multi_label = _multi_artist_query(song) if song is not None else (None, None)
+    songs = [song] if song is not None else album_songs
     synonyms = split_synonyms(artist_synonyms)
     art_full, qry_full = artist, query
     art_cln_full = art_full.split("(")[0].strip()
@@ -469,32 +473,32 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
 
     for module_id, module_name, module in modules:
         print(f"Looking for release year in {module_name} module")
-        result = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited, song)
+        result = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited, songs)
 
         if not result and truncated:
             print(f"Looking for release year in {module_name} using untruncated artist/query")
-            result = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited, song)
+            result = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited, songs)
 
         if not result and raw_differs:
             print(f"Looking for release year in {module_name} using full artist/query including parentheses")
-            result = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited, song)
+            result = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited, songs)
 
         # Each synonym on its own - the column is a comma-separated list, and
         # sending it whole ("Taras Chubai, Тарас Чубай") matches nothing
         for synonym in ([] if result else synonyms):
             print(f"Looking for release year in {module_name} using synonym {synonym}")
-            result = _call_year_module(module, module_id, module_name, synonym, qry_cln, is_single, credited, song)
+            result = _call_year_module(module, module_id, module_name, synonym, qry_cln, is_single, credited, songs)
             # The truncated query is only a stub for a title with a comma
             # ("Там, де ти є" -> "Там"); retry it whole with the synonym too
             if not result and qry_cln != qry_cln_full:
                 result = _call_year_module(module, module_id, module_name, synonym, qry_cln_full, is_single,
-                                           credited, song)
+                                           credited, songs)
             if result:
                 break
 
         if not result and multi_label:
             print(f"Looking for release year in {module_name} using all main artists")
-            result = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited, song)
+            result = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited, songs)
 
         # A Latin-transliterated query the sources only know in its own script
         # ("Neformat" -> "Неформат"), see script_utils.cyrillic_search_variant()
@@ -502,7 +506,7 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
             print(f"Looking for release year in {module_name} using the query in its own script")
             for alt_artist in [art_cln, *synonyms]:
                 result = _call_year_module(module, module_id, module_name, alt_artist, alt_script_query, is_single,
-                                           credited, song)
+                                           credited, songs)
                 if result:
                     break
 

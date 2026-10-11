@@ -139,34 +139,36 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     )
 
 
-def get_release_year(artist: str, query: str, is_single: bool, song=None) -> YearDiscoveryResult | None:
-    """A single's year from its YouTube video, found with the same DB ->
+def get_release_year(artist: str, query: str, is_single: bool, songs=None) -> YearDiscoveryResult | None:
+    """A release year from a YouTube video, found with the same DB ->
     YouTube matching as playlists (yt-dlp, no Selenium, no API quota).
 
     Unlike get_album_name() this doesn't scrape music.youtube.com.
     get_video_release_year() prefers YouTube Music's "Released on" date and
     otherwise takes the upload date, which is often not the release date (a
-    live session, a reupload), so the year is flagged needs_review and
-    fill_missing_years.py asks the user about it. Albums return None: one
-    track's video date says little about the album.
+    live session, a reupload, one track standing in for a whole album), so
+    the year is always flagged needs_review and fill_missing_years.py asks
+    the user about it - which is why albums are looked up here too.
 
-    `song` (passed by discoveries_manager for a single) lets a stored
-    Song.youtube_video_id win over a fresh search - it may be a manually set
-    video no search finds. A song marked NO_VIDEO_SENTINEL ("no video
-    exists") is skipped; a stored link that no longer resolves falls back
-    to searching.
+    `songs` (passed by discoveries_manager: the single, or the album's songs)
+    lets a stored Song.youtube_video_id win over a fresh search - it may be a
+    manually set video no search finds. A single marked NO_VIDEO_SENTINEL
+    ("no video exists") is skipped; a stored link that no longer resolves
+    falls back to searching.
     """
-    if not is_single:
+    stored_ids = [song.youtube_video_id for song in (songs or []) if song.youtube_video_id]
+    if is_single and NO_VIDEO_SENTINEL in stored_ids:
         return None
 
-    stored = song.youtube_video_id if song is not None else None
-    if stored == NO_VIDEO_SENTINEL:
-        return None
-    year = get_video_release_year(stored) if stored else None
-    if year:
-        print(f"  Using the YouTube video stored for this song [{stored}]")
-        video_id = stored
-    else:
+    year = None
+    for video_id in stored_ids:
+        if video_id == NO_VIDEO_SENTINEL:
+            continue
+        year = get_video_release_year(video_id)
+        if year:
+            print(f"  Using the YouTube video stored for this song [{video_id}]")
+            break
+    if not year:
         video_id = search_video_ytdlp(artist, query)
         year = get_video_release_year(video_id)
     if not year:

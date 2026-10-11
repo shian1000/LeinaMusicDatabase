@@ -94,6 +94,7 @@ def fill_missing_years():
                       or discover_release_year_result(
                           artist_name, album_name, False, modules, songs[0].artist.synonyms,
                           alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
+                          album_songs=songs,
                       ))
             _collect(label, result, songs, results, review_results)
 

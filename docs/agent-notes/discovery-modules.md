@@ -305,13 +305,15 @@ live session, a reupload), so it returns `YearDiscoveryResult(needs_review=True,
 call reduced to just the int). `fill_missing_years.py` doesn't write flagged years straight away:
 `_review_unsure_years()` lists them all at the end in one checkbox prompt, and the user ticks the
 ones to change. Unticked years are written. A ticked one asks for a year, and an empty answer
-leaves the song without one. It returns None for albums, because one track's video date says
-little about the album. It's last in `DEFAULT_DISCOVERY_MODULE_YEAR_ORDER`, and an existing config
+leaves the song without one. Albums are looked up too (one track's video date says little about
+the album, but the year goes through that same review anyway, so a wrong guess costs one tick). It's last in `DEFAULT_DISCOVERY_MODULE_YEAR_ORDER`, and an existing config
 gets it appended at the end by `_reconcile_config()`. It reuses a stored `Song.youtube_video_id`
-first: `_call_year_module()` passes the `Song` (singles only) to any `get_release_year()` that
-declares a `song` keyword, checked with `inspect.signature`, so the other modules keep the plain
-3-argument contract. A stored link that no longer resolves falls back to a search, and a song
-marked `NO_VIDEO_SENTINEL` is skipped.
+first: `_call_year_module()` passes the songs being looked up (the single, or the album's songs
+via `discover_release_year_result(album_songs=...)`) to any `get_release_year()` that declares a
+`songs` keyword, checked with `inspect.signature`, so the other modules keep the plain 3-argument
+contract. For an album the first stored link that resolves wins. A stored link that no longer
+resolves falls back to a search (for an album: "artist + album name"), and a single marked
+`NO_VIDEO_SENTINEL` is skipped.
 
 ## Multi-artist songs (`additional_song_artists`)
 
