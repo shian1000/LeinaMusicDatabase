@@ -389,3 +389,15 @@ def test_unbracketed_junk_phrase_is_kept_when_it_is_the_whole_title():
 
 def test_unbracketed_junk_phrase_needs_a_whole_word_match():
     assert _build("Artist - Homemusicvideo")["title"] == "Homemusicvideo"
+
+
+def test_trailing_quality_tag_is_stripped_after_other_junk():
+    assert _build("MADUAR - Do It HD")["title"] == "Do It"
+    assert _build("Artist - Do It HD (Official Video)")["title"] == "Do It"
+    assert _build("Artist - Clean Town HQ")["title"] == "Clean Town"
+    assert _build("Artist - Song 4K")["title"] == "Song"
+
+
+def test_quality_tag_needs_a_whole_word():
+    assert _build("Artist - Bad Song Shd")["title"] == "Bad Song Shd"
+    assert _build("Artist - HD")["title"] == "HD"

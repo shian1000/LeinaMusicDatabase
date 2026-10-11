@@ -249,4 +249,9 @@ TITLE_JUNK_SUFFIXES = [
     # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
     "musicvideo",
     "full song",
+    # Upload quality tags, left at the end once everything else is cut
+    # (real case: "MADUAR - Do It HD")
+    "hd",
+    "hq",
+    "4k",
 ]
