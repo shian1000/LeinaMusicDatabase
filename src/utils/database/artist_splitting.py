@@ -19,6 +19,7 @@ from config.constants import (
 )
 from utils.common.normalizer import normalize
 from utils.common.text_utils import is_soundtrack_artist
+from utils.database.albums import link_songs
 from utils.database.datatables import Artist, Song
 from utils.database.song_artists import add_additional_artist
 
@@ -244,7 +245,8 @@ def apply_artist_split(session, candidate: SplitCandidate, created: dict[str, Ar
     feats = [resolve(n) for n in proposal.feat]
     session.flush()
 
-    for song in list(joined.songs):
+    moved = list(joined.songs)
+    for song in moved:
         song.artist = primary
         for a in co_mains:
             _add_quietly(song, a, ADDITIONAL_ARTIST_ROLE_MAIN)
@@ -265,4 +267,7 @@ def apply_artist_split(session, candidate: SplitCandidate, created: dict[str, Ar
     if not joined.songs and not joined.additional_song_links:
         session.delete(joined)
     session.flush()
+    # Songs sharing an album move one by one; the first ones lost their album
+    # row while it still had the joined artist's songs too
+    link_songs(session, moved)
     return [primary, *co_mains, *feats]

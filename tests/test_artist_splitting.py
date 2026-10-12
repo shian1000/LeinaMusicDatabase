@@ -173,3 +173,29 @@ def test_review_applies_ticked_names_and_remembers_the_rest(session, monkeypatch
     assert session.query(Song).filter_by(title="Bahato").one().artist.name == "Sw@da"
     assert session.query(Artist).filter_by(name="Simon & Garfunkel").count() == 1
     assert "simon garfunkel" in split.load_split_ignore_list()
+
+
+def test_apply_keeps_every_song_of_a_shared_album_linked():
+    # "Albo Inaczej, Justyna Święs, Fisz": two songs on "Albo inaczej 2". The songs move one by one,
+    # and while they do the album has two artists - the first moved song was left with no album row
+    from utils.database import albums
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    albums.register_album_sync(factory)
+    session = factory()
+
+    joined = Artist(name="Albo Inaczej, Justyna Święs, Fisz")
+    songs = [Song(title=t, artist=joined, album="Albo inaczej 2") for t in ("Czerwona sukienka", "STOP")]
+    session.add_all(songs)
+    session.commit()
+    album_id = songs[0].album_id
+    assert album_id is not None and songs[1].album_id == album_id
+
+    (candidate,) = split.find_split_candidates(session, [joined])
+    split.apply_artist_split(session, candidate)
+    session.commit()
+
+    assert [s.album_id for s in songs] == [album_id, album_id]
+    assert session.get(albums.Album, album_id).artist.name == "Albo Inaczej"
+    session.close()

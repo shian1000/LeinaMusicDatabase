@@ -129,6 +129,10 @@ FILE_BROWSER_EXIT_OPTION = "Exit file manager"
 FILE_SIMILARITY_THRESHOLD = 90  # Percentage (0-100)
 SPELLING_CHECK_THRESHOLD = 0.7  # Decimal (0-1)
 SIMILARITY_THRESHOLD = 0.77 # Used when resolving duplicates
+# Two artist rows offered for merging as one spelt differently ("Man I Trust" /
+# "Men I Trust" 0.91) - stricter than the lookup threshold, since a merge
+# moves every song: "Persona 5 OST" / "Persona 5 Strikers OST" is 0.74
+SAME_ARTIST_SIMILARITY_THRESHOLD = 0.85
 
 # Search constants
 DEFAULT_SEARCH_MODE = "Song"

@@ -419,3 +419,67 @@ def test_blacklisted_title_passes_only_for_an_artist_that_has_it(monkeypatch):
     assert not is_blacklisted_album("Czerwony album", "Abradab")
     assert is_blacklisted_album("Czerwony album", "Someone Else")
     assert is_blacklisted_album("Greatest Hits", "Abradab")
+
+
+def _review_with(monkeypatch, session, selects, checkboxes=()):
+    from utils.database import database_management
+    from utils.ui import album_resolution_review as review
+    selects, checkboxes = iter(selects), iter(checkboxes)
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review, "submit_global_database_session", session.commit)
+    monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review.questionary, "select", lambda *args, **kwargs: _Answer(next(selects)))
+    monkeypatch.setattr(review.questionary, "checkbox", lambda *args, **kwargs: _Answer(next(checkboxes)))
+    return review
+
+
+def test_review_merging_one_artist_spelt_twice_settles_every_title_it_shared(session, monkeypatch):
+    from utils.ui import album_resolution_review as review
+    bjork, typo = _artists(session, "björk", "Вjörk")
+    post = [_song(session, "Army of Me", bjork, "Post"), _song(session, "Hyperballad", typo, "Post")]
+    debut = [_song(session, "Human Behavior", bjork, "Debut"), _song(session, "Venus as a Boy", typo, "Debut")]
+    session.commit()
+
+    # Shown "Debut" first (alphabetical): merge, keep "björk"; "Post" is then settled too
+    _review_with(monkeypatch, session, [review._MERGE, 'Keep "björk"'])
+
+    assert review.review_multi_artist_albums() == 0
+    assert al.find_unresolved_album_groups(session) == []
+    session.expire_all()
+    for pair in (post, debut):
+        assert pair[0].album_id == pair[1].album_id is not None
+        assert {s.artist.name for s in pair} == {"björk"}
+    assert "Вjörk" in session.get(Artist, bjork.id).synonyms
+
+
+def test_review_fixes_a_swapped_song_then_settles_what_is_left(session, monkeypatch):
+    from utils.ui import album_resolution_review as review
+    metronomy, junk, other = _artists(session, "Metronomy", "Everything Goes My Way", "Someone Else")
+    _song(session, "The Look", metronomy, "The English Riviera")
+    _song(session, "The Bay", metronomy, "The English Riviera")
+    swapped = _song(session, "Metronomy", junk, "The English Riviera")
+    _song(session, "Unrelated", other, "The English Riviera")
+    session.commit()
+
+    label = "Everything Goes My Way - Metronomy  ->  Metronomy - Everything Goes My Way"
+    _review_with(monkeypatch, session, [review._SWAP, review._PER_ARTIST], checkboxes=[[label]])
+
+    assert review.review_multi_artist_albums() == 1
+    assert (swapped.artist.name, swapped.title) == ("Metronomy", "Everything Goes My Way")
+    assert session.get(Artist, junk.id) is None
+    assert al.find_unresolved_album_groups(session) == []
+
+
+def test_review_merges_three_spellings_of_one_artist(session, monkeypatch):
+    from utils.ui import album_resolution_review as review
+    a, b, c = _artists(session, "Molchat Doma", "Molchat Doma / Молчат Дома", "Молчат Дома (Molchat Doma)")
+    for i, artist in enumerate((a, b, c)):
+        _song(session, f"song {i}", artist, "Этажи")
+    session.commit()
+
+    # Pairs (a, b), (a, c), (b, c): keep a twice; the third pair is skipped, b is already gone
+    _review_with(monkeypatch, session, [review._MERGE, 'Keep "Molchat Doma"', 'Keep "Molchat Doma"'])
+
+    review.review_multi_artist_albums()
+    assert session.query(Artist).count() == 1
+    assert al.find_unresolved_album_groups(session) == []

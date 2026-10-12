@@ -116,7 +116,8 @@ non-trivial work in that area.
   text and the row follows; never set `album_id` by hand. Raw-SQL artist merges bypass the listener,
   so every artist merge must also call `reassign_artist_albums()`. Titles several main artists
   share stay NULL for Manage database → "Resolve albums with several artists"
-  (`utils/ui/album_resolution_review.py`). Rules, the "Singles" one-song albums, stable ids:
+  (`utils/ui/album_resolution_review.py`), which first offers to merge one artist spelt twice and
+  to fix swapped artist/title songs (`artist_identity.py`), the usual reason a title looks shared. Rules, the "Singles" one-song albums, stable ids:
   `docs/data-model.md`. `users.py` — users and their private data (main menu → Users): one folder per user under `Settings.users_dir` on T7 holding `user.db` (playlists,
   private tags; schema only from `migrations/user/`) and `account.json` (salted scrypt password
   hash). Those files are originals, so backups and startup migrations cover every user. A drive

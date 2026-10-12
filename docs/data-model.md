@@ -98,7 +98,15 @@ role          NOT NULL, 'main' | 'feat'
     (`utils/ui/album_resolution_review.py`), which is also offered at the end of an import that
     creates such a case. Its "Delete album entry for both artists" choice (`clear_album_text()`)
     is the one that erases data: it sets `songs.album` to NULL for every song of that title, which
-    the phone sees too; any album row it empties is kept. The exceptions: if a compilation (artist NULL) with that title already
+    the phone sees too; any album row it empties is kept. Before those choices it offers to fix
+    what often only makes a title *look* shared (`utils/database/artist_identity.py`): one artist
+    under two spellings ("björk" / "Вjörk", "P.O.D." / "POD", "Aimyon" / "あいみょん") → merge
+    (`merge_artists_in_db()`, the dropped name becomes a synonym), and a song with artist and title
+    swapped ("Renegade - Styx" next to Styx) → `fix_swapped_song()`, which moves the song to the
+    existing artist rather than renaming the junk artist (that would make a second Styx). Each fix
+    can settle several titles at once, so the list is rebuilt after it. Joined names ("sanah i Igor
+    Herbut") and a longer act name ("Fisz Emade Tworzywo" vs "Fisz") are deliberately never offered
+    for merging: a merge moves every song of the artist. The exceptions: if a compilation (artist NULL) with that title already
     exists, a new song joins it, and a song whose own artist already has that album joins that.
   - Album ids are **stable**, because the phone keys its cover cache on them: rows are never
     renumbered or rebuilt. Merging two albums (`merge_albums()`: the resolver's compilation choice,

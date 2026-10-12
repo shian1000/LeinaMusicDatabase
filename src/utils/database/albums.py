@@ -323,6 +323,18 @@ def link_unassigned_songs(session, report_linked: bool = False) -> list[Song] | 
     return len(songs) - len(left) if report_linked else left
 
 
+def link_songs(session, songs: list[Song]) -> list[Song]:
+    """link_unassigned_songs() for just these songs: the ones with album text
+    and no album row get one, if their title has a single artist now. For a
+    change that moves several songs of one album one at a time (an artist
+    split): the album has two artists until the last one moves, which leaves
+    the songs moved first without a row. Returns the songs still left.
+    Caller commits."""
+    session.flush()
+    pending = [s for s in songs if s.album_id is None and (s.album or "").strip()]
+    return _link_songs(session, pending, _AlbumIndex(session)) if pending else []
+
+
 def run_album_backfill() -> None:
     """Startup hook (main.py), run once right after migration 0006 lands."""
     from utils.database.music_db_manager import get_music_session
