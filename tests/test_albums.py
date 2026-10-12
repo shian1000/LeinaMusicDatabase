@@ -364,3 +364,26 @@ def test_review_settles_titles_and_is_resumable(session, monkeypatch):
     # Stopped before "Zzz": still waiting for next time
     assert [g.title for g in al.find_unresolved_album_groups(session)] == ["Zzz"]
     assert later[1].album_id is None
+
+
+def test_review_delete_clears_album_text_of_every_artist(session, monkeypatch):
+    from utils.ui import album_resolution_review as review
+
+    a, b = _artists(session, "A", "B")
+    linked = _song(session, "x", a, "OST")
+    session.commit()
+    album_id = linked.album_id
+    pending = _song(session, "y", b, "OST")
+    session.commit()
+    assert album_id is not None and pending.album_id is None
+
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review, "submit_global_database_session", session.commit)
+    monkeypatch.setattr(review.questionary, "select", lambda *args, **kwargs: _Answer(review._DELETE))
+
+    assert review.review_multi_artist_albums() == 1
+    for song in (linked, pending):
+        assert song.album is None and song.album_id is None
+    assert al.find_unresolved_album_groups(session) == []
+    # The emptied album row is kept, like any album no song points at
+    assert session.get(al.Album, album_id) is not None

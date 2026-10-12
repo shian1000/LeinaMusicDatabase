@@ -96,7 +96,9 @@ role          NOT NULL, 'main' | 'feat'
     share a name) is **not** decided automatically. Those songs keep `album_id` NULL until the user
     settles them in Manage database → "Resolve albums with several artists"
     (`utils/ui/album_resolution_review.py`), which is also offered at the end of an import that
-    creates such a case. The exceptions: if a compilation (artist NULL) with that title already
+    creates such a case. Its "Delete album entry for both artists" choice (`clear_album_text()`)
+    is the one that erases data: it sets `songs.album` to NULL for every song of that title, which
+    the phone sees too; any album row it empties is kept. The exceptions: if a compilation (artist NULL) with that title already
     exists, a new song joins it, and a song whose own artist already has that album joins that.
   - Album ids are **stable**, because the phone keys its cover cache on them: rows are never
     renumbered or rebuilt. Merging two albums (`merge_albums()`: the resolver's compilation choice,

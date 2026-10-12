@@ -418,6 +418,14 @@ def assign_songs_to_album(session, songs: list[Song], title: str, artist: Artist
     return album
 
 
+def clear_album_text(songs: list[Song]) -> None:
+    """Drop the album name from `songs` (album text NULL); the flush listener
+    then takes them off their album rows. Rows left empty are kept, like any
+    album no song points at. Caller commits."""
+    for song in songs:
+        song.album = None
+
+
 def unlink_songs(session, songs: list[Song]) -> None:
     """Take songs back off their album row (album text kept) - the resolver's
     starting point for splitting a title by hand."""

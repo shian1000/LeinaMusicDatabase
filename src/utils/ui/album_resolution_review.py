@@ -12,13 +12,19 @@ from rich import print
 from rich.markup import escape
 
 from config.constants import ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK
-from utils.database.albums import AlbumTitleGroup, assign_songs_to_album, find_unresolved_album_groups
+from utils.database.albums import (
+    AlbumTitleGroup,
+    assign_songs_to_album,
+    clear_album_text,
+    find_unresolved_album_groups,
+)
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 
 _COMPILATION = "One album: a compilation (various artists)"
 _SOUNDTRACK = "One album: a soundtrack (various artists)"
 _PER_ARTIST = "Separate albums, one per artist"
 _BY_HAND = "Split into albums by hand"
+_DELETE = "Delete album entry for both artists"
 _SKIP = "Skip for now"
 _STOP = "Stop here (the rest stays for next time)"
 
@@ -81,6 +87,9 @@ def _resolve_group(session, group: AlbumTitleGroup, choice: str) -> None:
             print(f"{escape(artist.name)}: {len(songs)} song(s) -> album #{album.id}")
     elif choice == _BY_HAND:
         _split_by_hand(session, group)
+    elif choice == _DELETE:
+        clear_album_text(group.songs)
+        print(f"Album name cleared from {len(group.songs)} song(s)")
 
 
 def review_multi_artist_albums(songs: list | None = None) -> int:
@@ -102,7 +111,7 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
         _show_group(group, f"[{i}/{len(groups)}]")
         choice = questionary.select(
             "What is this album?",
-            choices=[_COMPILATION, _SOUNDTRACK, _PER_ARTIST, _BY_HAND, _SKIP, _STOP],
+            choices=[_COMPILATION, _SOUNDTRACK, _PER_ARTIST, _BY_HAND, _DELETE, _SKIP, _STOP],
         ).ask()
         if choice is None or choice == _STOP:
             break
