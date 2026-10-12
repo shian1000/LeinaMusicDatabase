@@ -401,3 +401,26 @@ def test_trailing_quality_tag_is_stripped_after_other_junk():
 def test_quality_tag_needs_a_whole_word():
     assert _build("Artist - Bad Song Shd")["title"] == "Bad Song Shd"
     assert _build("Artist - HD")["title"] == "HD"
+
+
+def test_trailing_dash_year_is_stripped():
+    metadata = _build("Hank Williams Jr. - Mr. Weatherman - 1982", channel="VHS-Goldie")
+    assert (metadata["artist_name"], metadata["title"]) == ("Hank Williams Jr.", "Mr. Weatherman")
+
+
+def test_dash_year_is_kept_when_it_is_the_whole_title_or_not_a_year():
+    assert m.strip_trailing_dash_year("1982") == "1982"
+    assert _build("Artist - Song - 5000")["title"] == "Song - 5000"
+
+
+def test_quoted_title_with_feat_bracket_takes_artists_from_the_credit():
+    metadata = _build(
+        "'City of Stars' (Duet ft. Ryan Gosling, Emma Stone) - La La Land Original Motion Picture Soundtrack",
+        channel="Interscope Records",
+    )
+    assert (metadata["artist_name"], metadata["title"]) == ("Ryan Gosling, Emma Stone", "City of Stars")
+
+
+def test_quoted_title_without_feat_bracket_is_split_as_usual():
+    assert m.split_quoted_title_feat_credit("'Song' (Live) - Artist") is None
+    assert _build("Artist - 'Song' (feat. Guest)")["artist_name"] == "Artist"

@@ -36,6 +36,9 @@ _CONFIDENT_SEPARATOR = re.compile(r"\s+x\s+")
 # The uppercase " X " left out above - accepted only when every part already
 # exists as an artist ("Coldplay X BTS" yes, "Final Fantasy X OST" no).
 _UPPERCASE_X_SEPARATOR = re.compile(r"\s+X\s+")
+# "Group (A, B, C)" - the bracket lists the lineup ("Męskie Granie Orkiestra
+# 2026 (Igor Herbut, Zalia, Vito Bambino)", "Inpatient (Ren x Chris Webby)").
+_LINEUP_BRACKET = re.compile(r"^(?P<group>[^()]+?)\s*\((?P<lineup>[^()]+)\)\s*$")
 
 
 @dataclass
@@ -66,11 +69,36 @@ def _split_names(text: str) -> list[str]:
     return [n.strip(" )") for n in names if n.strip(" )")]
 
 
+def _has_unbalanced_brackets(text: str) -> bool:
+    return text.count("(") != text.count(")")
+
+
+def _propose_lineup_split(name: str) -> SplitProposal | None:
+    """"Group (A, B)" -> Group + A + B, all main. Only for a bracket of two
+    or more names - "Artist (PL)" is one artist - and never pre-selected:
+    whether the lineup is co-performers or guests is the user's call."""
+    match = _LINEUP_BRACKET.match(name)
+    if not match or _FEAT.search(match.group("lineup")):
+        return None
+    lineup = _split_names(match.group("lineup"))
+    if len(lineup) < 2:
+        return None
+    names = []
+    for n in [match.group("group").strip(), *lineup]:
+        if normalize(n) and normalize(n) not in {normalize(m) for m in names}:
+            names.append(n)
+    return SplitProposal(name, names, [], False) if len(names) >= 2 else None
+
+
 def propose_artist_split(name: str) -> SplitProposal | None:
     """Parse a joined artist name, or None when it doesn't look like several
     artists. Purely textual - the caller decides with the user."""
     if not name or is_soundtrack_artist(name):
         return None
+
+    lineup_proposal = _propose_lineup_split(name)
+    if lineup_proposal:
+        return lineup_proposal
 
     feat_match = _FEAT.search(name)
     main_text, feat_text = (name[:feat_match.start()], name[feat_match.end():]) if feat_match else (name, "")
@@ -84,6 +112,9 @@ def propose_artist_split(name: str) -> SplitProposal | None:
                 seen.add(key)
                 out.append(n)
     if not unique_main or len(unique_main) + len(unique_feat) < 2:
+        return None
+    # A split through a bracket ("X (A" + "B)") would create broken names
+    if any(_has_unbalanced_brackets(n) for n in unique_main + unique_feat):
         return None
 
     confident = bool(feat_match or _CONFIDENT_SEPARATOR.search(main_text))

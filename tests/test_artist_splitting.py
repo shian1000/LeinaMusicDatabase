@@ -32,7 +32,14 @@ PARSE_CASES = [
     ("Big Brother & the Holding Company", ["Big Brother", "the Holding Company"], [], False),
     ("Pezet - Małolat feat. Małpa", ["Pezet - Małolat"], ["Małpa"], False),
     ("Lisa Gerrard, Hans Zimmer, Lisa Gerrard", ["Lisa Gerrard", "Hans Zimmer"], [], False),
+    # "Group (lineup)": the group plus its members, never pre-selected
+    ("Męskie Granie Orkiestra 2026 (Igor Herbut, Zalia, Vito Bambino)",
+     ["Męskie Granie Orkiestra 2026", "Igor Herbut", "Zalia", "Vito Bambino"], [], False),
+    ("Inpatient (Ren x Chris Webby)", ["Inpatient", "Ren", "Chris Webby"], [], False),
     # one artist, never split
+    ("Artist (PL)", None, None, None),
+    ("'City of Stars' (Duet ft. Ryan Gosling, Emma Stone)", None, None, None),
+    ("Męskie Granie Orkiestra 2020 (Daria Zawiałow", None, None, None),
     ("Final Fantasy X OST", None, None, None),
     ("Malcolm X", None, None, None),
     ("AC/DC", None, None, None),

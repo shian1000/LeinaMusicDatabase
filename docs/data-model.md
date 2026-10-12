@@ -73,7 +73,11 @@ role          NOT NULL, 'main' | 'feat'
   Splitting is always a user decision in one batch review — "&"/"," can't tell "Sw@da & Maxim"
   from "Simon & Garfunkel". The " x " separator is lowercase only, because an uppercase X is
   usually part of a name ("Final Fantasy X OST"). An uppercase " X " splits only when every part
-  is already an artist in the DB ("Coldplay X BTS"). Why this shape and not extra columns:
+  is already an artist in the DB ("Coldplay X BTS"). "Group (A, B)" is a group plus its lineup
+  ("Męskie Granie Orkiestra 2026 (Igor Herbut, Zalia, Vito Bambino)") and is proposed as all
+  main, never pre-selected, since members are sometimes co-performers and sometimes guests. A
+  split that would cut through a bracket ("X (A" + "B)") is never proposed. Earlier imports
+  stored names like "Męskie Granie Orkiestra 2020 (Daria Zawiałow" that way. Why this shape and not extra columns:
   [ADR-0002](decisions/0002-multiple-artists-per-song.md).
 - Albums (migrations 0005–0008, `src/utils/database/albums.py`). `Song.album` (free text) is
   kept **and kept filled**: the MusicDatabaseApp phone client reads it, so it can only go once the

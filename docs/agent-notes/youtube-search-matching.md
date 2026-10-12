@@ -73,6 +73,12 @@ doesn't provide, don't just drop the flag - it will silently reintroduce this ti
    `"打首獄門同好会「なつのうた」"`; the channel fallback had imported it under the channel name
    with the whole string as title). Only `「」`, never `『』`, which also wraps album/work names; and
    not when the bracket holds a junk marker word (`"Song「Lyric Video」"`).
+   Also tried *before* `split_artist_title()`: `split_quoted_title_feat_credit()` for a quoted
+   title first, performers in a `ft.` bracket, soundtrack after the dash (real case, Interscope
+   Records: `"'City of Stars' (Duet ft. Ryan Gosling, Emma Stone) - La La Land Original Motion
+   Picture Soundtrack"`). The plain split had made the whole left side the artist, and a swap
+   would only have made the soundtrack the artist. The joined performers go to the artist-split
+   review.
 
 Any entry still without an artist after this (and after the generic-Topic description lookup) is
 held back for `_review_missing_artists()`. It asks for each artist by `questionary.text()`, with the
@@ -136,7 +142,8 @@ it (ID3 `artist`/`title` fields are already separate).
 -> `text_utils.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
 `TITLE_JUNK_SUFFIXES`, shared with the rubbish-data cleanup - real case: `'“Golden” Official Lyric
 Video | KPop Demon Hunters | Sony Animation'` -> `"Golden"`; skipped if it would empty the title)
--> `strip_junk_suffix()` again -> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also
+-> `strip_trailing_dash_year()` (an unbracketed `" - 1982"`, real case: `"Hank Williams Jr. -
+Mr. Weatherman - 1982"`) -> `strip_junk_suffix()` again -> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also
 on the artist). `clean_file_name_title()` handles titles that are really an uploaded file name
 (`"pejzaz_bez_ciebie.mpg"` -> `"Pejzaz Bez Ciebie"`). It only splits on `_` when there are no
 spaces, and only capitalises words when the whole thing was lowercase. The order of the first three matters: `strip_pipe_suffix()` runs before the bracket check

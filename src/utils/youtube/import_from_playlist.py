@@ -231,6 +231,40 @@ def split_corner_bracket_credit(title: str) -> tuple | None:
     return artist, song_title
 
 
+# A bare year tacked on after a dash, outside any bracket (real case, channel
+# "VHS-Goldie": "Hank Williams Jr. - Mr. Weatherman - 1982"). Bracketed years
+# are already handled by _YOUTUBE_TITLE_YEAR_RE in strip_junk_suffix().
+_TRAILING_DASH_YEAR_RE = re.compile(r"\s+[-–—]\s+(?:19|20)\d{2}\s*$")
+
+
+def strip_trailing_dash_year(title: str) -> str:
+    """Drop a trailing " - 1982"-style year, unless it's the whole title."""
+    return _TRAILING_DASH_YEAR_RE.sub("", title or "").strip() or (title or "")
+
+
+# A quoted song title first, its performers in a "ft." bracket and the
+# soundtrack/album after the dash (real case, "Interscope Records": "'City of
+# Stars' (Duet ft. Ryan Gosling, Emma Stone) - La La Land Original Motion
+# Picture Soundtrack"). Plain "Artist - Title" splitting would make the whole
+# left side the artist.
+_QUOTED_TITLE_FEAT_CREDIT_RE = re.compile(
+    r"""^\s*['"“‘„](?P<title>[^'"“”‘’„]+)['"”’]\s*"""
+    r"""\([^()]*?\b(?:ft\.?|feat\.?|featuring)\s+(?P<artists>[^()]+)\)"""
+    r"""(?:\s+[-–—]\s+.*)?$""",
+    re.IGNORECASE,
+)
+
+
+def split_quoted_title_feat_credit(title: str) -> tuple | None:
+    """Return (artists, title) from a "'<Title>' (... ft. <Artists>) - ..."
+    video title, or None if it isn't one. Several artists stay joined
+    ("Ryan Gosling, Emma Stone") for the artist-split review."""
+    match = _QUOTED_TITLE_FEAT_CREDIT_RE.match(title or "")
+    if not match:
+        return None
+    return match.group("artists").strip(), match.group("title").strip()
+
+
 def strip_junk_suffix(title: str) -> str:
     """Repeatedly strip a trailing bracket group from `title` as long as it's
     junk - either its content matches YOUTUBE_TITLE_JUNK_PHRASES exactly, it
@@ -764,6 +798,8 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         elif channel and _is_topic_channel(channel):
             artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
             song_title = parse_title.strip()
+        elif quoted_credit := split_quoted_title_feat_credit(parse_title):
+            artist, song_title = quoted_credit
         else:
             artist, song_title = split_artist_title(parse_title)
             if not artist or not song_title:
@@ -783,6 +819,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         # Video | KPop Demon Hunters | Sony Animation'), unless that would
         # leave nothing - then the phrase *is* the title.
         song_title = strip_trailing_junk_suffix(song_title) or song_title
+        song_title = strip_trailing_dash_year(song_title)
         song_title = strip_junk_suffix(song_title)
         song_title = strip_quote_marks(song_title)
         song_title = clean_file_name_title(song_title)
