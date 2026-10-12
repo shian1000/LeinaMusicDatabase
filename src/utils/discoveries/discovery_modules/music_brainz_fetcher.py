@@ -11,7 +11,7 @@ import re
 import requests
 from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
-from config.constants import MUSICBRAINZ_API_USER_AGENT
+from config.constants import MUSICBRAINZ_API_USER_AGENT, MUSICBRAINZ_VARIOUS_ARTISTS_ID
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
@@ -56,17 +56,19 @@ def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, di
 
     The first Album in result order wins. Otherwise the best-ranked other
     release of the first recording that has any, by type then earliest date
-    (undated last). Compilations, live albums, remixes, blacklisted titles and
-    another song's single never count.
+    (undated last). Compilations, live albums, remixes, blacklisted titles,
+    another artist's release and another song's single never count.
     """
     for recording in recordings:
         for release in recording.get("release-list", []):
-            if _release_is_eligible(release, artist) and release.get("release-group", {}).get("primary-type", "") == "Album":
+            if (_release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
+                    and release.get("release-group", {}).get("primary-type", "") == "Album"):
                 return _release_title(release), recording
 
     for recording in recordings:
         candidates = [release for release in recording.get("release-list", [])
-                      if _release_is_eligible(release, artist) and not _is_other_songs_single(release, recording)]
+                      if _release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
+                      and not _is_other_songs_single(release, recording)]
         if candidates:
             best = min(candidates, key=lambda release: (
                 FALLBACK_RELEASE_TYPE_RANK.get(release.get("release-group", {}).get("primary-type", ""),
@@ -82,6 +84,23 @@ def _release_title(release) -> str:
     edition's: one edition of Low Roar's "0" is entered as "O" and was listed
     first. Falls back to the release's own title."""
     return release.get("release-group", {}).get("title") or release.get("title", "")
+
+
+def _artist_ids(credit) -> set:
+    return {c["artist"]["id"] for c in credit or [] if isinstance(c, dict) and c.get("artist", {}).get("id")}
+
+
+def _is_other_artists_release(release, recording) -> bool:
+    """A release credited to someone else entirely: an Australian edition of
+    Dido's "No Angel" has four LeAnn Rimes songs appended, and was picked as
+    "Can't Fight the Moonlight"'s album. Compared by MusicBrainz artist id, so
+    spellings don't matter. "Various Artists" (a soundtrack - "Moulin Rouge"
+    for José Feliciano) and a release by any of the recording's own artists
+    still count, and so does a release with no artist in the results."""
+    release_ids = _artist_ids(release.get("artist-credit"))
+    if not release_ids or MUSICBRAINZ_VARIOUS_ARTISTS_ID in release_ids:
+        return False
+    return not release_ids & _artist_ids(recording.get("artist-credit"))
 
 
 def _is_other_songs_single(release, recording) -> bool:

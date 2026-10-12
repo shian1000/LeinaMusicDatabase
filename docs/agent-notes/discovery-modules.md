@@ -381,7 +381,9 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 
 ## MusicBrainz: which release becomes the album, and what it can't find
 
-`_pick_release()` drops compilations/live/remix releases, takes the first studio Album, and
+`_pick_release()` drops compilations/live/remix releases and releases credited to another artist
+(by MusicBrainz artist id - an Australian edition of Dido's "No Angel" carries four LeAnn Rimes
+songs; "Various Artists" passes), takes the first studio Album, and
 otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
 `tests/test_music_brainz_fetcher.py`). Two known misses are by design, not bugs to chase:
 

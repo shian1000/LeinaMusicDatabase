@@ -237,6 +237,9 @@ MUSICBRAINZ_API_BASE_URL = "https://musicbrainz.org/ws/2/recording/"
 # repo; swap in your own contact if you fork it.
 MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/MusicDatabase )"
 MUSICBRAINZ_API_LIMIT = 20
+# MusicBrainz's special "Various Artists" artist - a compilation's or soundtrack's
+# release artist, so a song on it is never "another artist's album"
+MUSICBRAINZ_VARIOUS_ARTISTS_ID = "89ad4ac3-39f7-470e-963a-56509c546377"
 # (connect, read) timeout in seconds for a single MusicBrainz HTTP request, so a
 # stalled connection can never hang an import forever.
 MUSICBRAINZ_API_TIMEOUT = (5, 12)

@@ -143,3 +143,39 @@ def test_blacklisted_album_the_artist_already_has_is_picked(monkeypatch):
     ])]
     assert _pick_release(recordings, "The Pretty Reckless")[0] == "Death By Rock and Roll"
     assert _pick_release(recordings)[0] is None
+
+
+LEANN_RIMES, DIDO = "a5a8bd8a-leann-rimes", "f3c06d7c-dido"
+from config.constants import MUSICBRAINZ_VARIOUS_ARTISTS_ID as VARIOUS_ARTISTS
+
+
+def _credit(*artists):
+    return [{"artist": {"id": artist_id, "name": name}} for artist_id, name in artists]
+
+
+def _by(release, *artists):
+    release["artist-credit"] = _credit(*artists)
+    return release
+
+
+def test_another_artists_album_is_not_the_songs_album():
+    # An Australian edition of Dido's "No Angel" has four LeAnn Rimes songs appended; it's Dido's album
+    recording = {"title": "Can’t Fight the Moonlight", "artist-credit": _credit((LEANN_RIMES, "LeAnn Rimes")),
+                 "release-list": [
+                     _by(_release("No Angel", "Album"), (DIDO, "Dido")),
+                     _by(_release("Twisted Angel", "Album", "2002"), (LEANN_RIMES, "LeAnn Rimes")),
+                 ]}
+    assert _pick_release([recording])[0] == "Twisted Angel"
+
+
+def test_various_artists_album_and_a_co_artists_album_still_count():
+    feliciano, mcgregor = ("feliciano-id", "José Feliciano"), ("mcgregor-id", "Ewan McGregor")
+    soundtrack = {"title": "El tango de Roxanne", "artist-credit": _credit(mcgregor, feliciano),
+                  "release-list": [_by(_release("Moulin Rouge", "Album", "2001", ["Soundtrack"]),
+                                       (VARIOUS_ARTISTS, "Various Artists"))]}
+    assert _pick_release([soundtrack])[0] == "Moulin Rouge"
+
+    # The release artist is one of the recording's artists, not the queried one
+    duet = {"title": "Duet", "artist-credit": _credit(mcgregor, feliciano),
+            "release-list": [_by(_release("McGregor Sings", "Album", "2003"), mcgregor)]}
+    assert _pick_release([duet])[0] == "McGregor Sings"
