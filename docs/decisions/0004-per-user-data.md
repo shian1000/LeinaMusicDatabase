@@ -57,8 +57,6 @@ anywhere.
 - Nothing sends, receives or serves `user.db`. The sharing server still serves only
   `music.db`/`tag.db` (everything else is a 404, including `Users/`). Uploading, logging in from
   the phone and the inbox each need agreeing with the MusicDatabaseApp side first.
-- What "Create playlist from folder" should do with files that have no song in the database
-  (for now it only shows them and saves nothing).
 
 Since built: song merges and deletions reach users' playlists and private tags, and tag.db, via
 an id-change log in `music.db` replayed by each file

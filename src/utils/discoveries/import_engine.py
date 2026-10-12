@@ -376,6 +376,27 @@ class LocalSongMatcher:
         return song
 
 
+def find_songs_by_title(session, title: str, limit: int = 15) -> list:
+    """Songs of any artist whose title is `title`, for a file that gave no
+    usable artist: same title without brackets/junk first, then titles
+    containing it or contained in it (at least 4 characters, so "Ja" doesn't
+    match half the library). Read-only."""
+    core = _title_core(title)
+    if not core:
+        return []
+    exact, partial = [], []
+    for song in session.query(Song).all():
+        candidate = _title_core(song.title)
+        if not candidate:
+            continue
+        if candidate == core:
+            exact.append(song)
+        elif min(len(candidate), len(core)) >= 4 and (core in candidate or candidate in core):
+            partial.append(song)
+    by_label = lambda s: (s.artist.name.lower(), s.title.lower())
+    return (sorted(exact, key=by_label) + sorted(partial, key=by_label))[:limit]
+
+
 def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) -> tuple:
     """
     Resolve a song entry for the given artist.

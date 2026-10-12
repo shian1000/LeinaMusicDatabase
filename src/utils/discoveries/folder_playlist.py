@@ -3,7 +3,9 @@ under a folder, in alphabetical order of its path within the folder, matched
 to the song already in the database the way the tag import matches files
 (read_file_metadata() + import_engine.LocalSongMatcher - local only, nothing
 created). Nothing is written here; utils/database/user_playlists.py saves
-the result once the user has seen what didn't match."""
+the result once every file has a song (the user picks one for each file
+that didn't match), and mp3_utils.write_song_tags() can then copy the
+database's data into the files' tags."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,15 @@ class FolderPlaylist:
     unmatched: list = field(default_factory=list)  # the FolderTracks with no song in the database
 
 
+def assign_song(track: FolderTrack, song) -> None:
+    """Make `track` that database song (a match, or the user's pick for a
+    file that didn't match), taking the database's spelling."""
+    track.song_id = song.id
+    track.title = song.title
+    track.artist = song_artist_label(song)
+    track.youtube_video_id = song.youtube_video_id or None
+
+
 def folder_mp3_files(folder: Path) -> list[Path]:
     """Every mp3 under `folder`, by path within it, case-insensitively."""
     folder = Path(folder)
@@ -57,8 +68,8 @@ def build_folder_playlist(session, folder: Path) -> FolderPlaylist:
             metadata = {}
         song = matcher.match(metadata)
         if song is not None:
-            track = FolderTrack(file=file, title=song.title, artist=song_artist_label(song),
-                                song_id=song.id, youtube_video_id=song.youtube_video_id or None)
+            track = FolderTrack(file=file, title=song.title, artist=None)
+            assign_song(track, song)
         else:
             track = FolderTrack(file=file, title=metadata.get("title") or file.stem,
                                 artist=metadata.get("artist_name"))

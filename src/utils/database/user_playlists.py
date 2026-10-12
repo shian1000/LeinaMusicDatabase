@@ -5,6 +5,7 @@ deleted (utils/database/song_references.py)."""
 
 import time
 
+from utils.database.datatables import Song
 from utils.database.user_datatables import Playlist, PlaylistTrack, user_db_session
 from config.constants import USER_DB_FILENAME
 from utils.database.users import user_dir
@@ -39,3 +40,23 @@ def list_playlists(username: str) -> list[tuple]:
             (p.id, p.name, len(p.tracks), sum(1 for t in p.tracks if t.song_id is None))
             for p in session.query(Playlist).order_by(Playlist.updated_at.desc()).all()
         ]
+
+
+def playlist_songs(music_session, username: str, playlist_id: int) -> tuple[list, list]:
+    """(songs, missing) for one playlist, in its order: the music.db Song of
+    every track that has one (a song listed twice comes twice), and the
+    PlaylistTrack rows without one - never matched, or their song deleted
+    since - which still carry their own title/artist."""
+    with user_db_session(user_dir(username) / USER_DB_FILENAME) as session:
+        tracks = (
+            session.query(PlaylistTrack)
+            .filter(PlaylistTrack.playlist_id == playlist_id)
+            .order_by(PlaylistTrack.position)
+            .all()
+        )
+        session.expunge_all()
+    ids = {t.song_id for t in tracks if t.song_id is not None}
+    found = {s.id: s for s in music_session.query(Song).filter(Song.id.in_(ids)).all()} if ids else {}
+    songs = [found[t.song_id] for t in tracks if t.song_id in found]
+    missing = [t for t in tracks if t.song_id not in found]
+    return songs, missing

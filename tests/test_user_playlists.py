@@ -3,7 +3,8 @@ utils/database/user_playlists.py) and managing users (users.py rename /
 change password / delete): a folder becomes a playlist in alphabetical path
 order, matched to existing songs by import_engine.LocalSongMatcher (also
 through bracket/junk annotations and "A ft. B" artist names), unmatched files
-reported, and the playlist saved to the user's own user.db. In-memory music
+reported, the playlist saved to the user's own user.db, and read back for
+"Show playlists" (playlist_songs()). In-memory music
 DB, temp user folders."""
 
 import sys
@@ -118,3 +119,148 @@ def test_rename_change_password_and_delete(users_env, tmp_path):
     archived = users.delete_user("anna")
     assert users.list_usernames() == []
     assert (archived / "user.db").exists() and archived.parent == tmp_path / "archive" / "deleted-users"
+
+
+def test_playlist_songs_keeps_order_repeats_and_lists_missing(users_env, music_session):
+    from types import SimpleNamespace
+    from utils.database.user_playlists import playlist_songs
+
+    users.create_user("ania", "secret1")
+    karma, teksanski = (music_session.query(Song).filter(Song.title == t).one() for t in ("Karma", "Teksański"))
+    track = lambda song_id, title: SimpleNamespace(song_id=song_id, title=title, artist="Hey",
+                                                   youtube_video_id=None, duration_s=None)
+    playlist_id = save_playlist("ania", "Mix", [
+        track(teksanski.id, "Teksański"), track(None, "Never matched"), track(karma.id, "Karma"),
+        track(9999, "Deleted since"), track(teksanski.id, "Teksański"),
+    ])
+
+    songs, missing = playlist_songs(music_session, "ania", playlist_id)
+    assert [s.title for s in songs] == ["Teksański", "Karma", "Teksański"]
+    assert [(t.position, t.title) for t in missing] == [(1, "Never matched"), (3, "Deleted since")]
+
+
+def test_find_songs_by_title_across_artists(music_session):
+    from utils.discoveries.import_engine import find_songs_by_title
+
+    assert [s.title for s in find_songs_by_title(music_session, "karma (official video)")] == ["Karma"]
+    # Contained either way, from 4 characters
+    assert [s.title for s in find_songs_by_title(music_session, "Pay Your Respect - live")] == ["Pay Your Respect"]
+    assert find_songs_by_title(music_session, "Ka") == []
+    assert find_songs_by_title(music_session, "") == []
+
+
+def _id3_file(path: Path, **tags) -> Path:
+    from mutagen.easyid3 import EasyID3
+    path.write_bytes(b"")
+    if tags:
+        easy = EasyID3()
+        for key, value in tags.items():
+            easy[key] = value
+        easy.save(path)
+    return path
+
+
+def test_write_song_tags_copies_database_data(tmp_path, music_session):
+    from mutagen.easyid3 import EasyID3
+    from utils.discoveries.mp3_utils import write_song_tags
+
+    karma = music_session.query(Song).filter(Song.title == "Karma").one()
+    karma.album, karma.year = "Karma", 2003
+    bare = _id3_file(tmp_path / "bare.mp3")  # no ID3 header at all
+    assert write_song_tags(bare, karma)
+    assert {k: EasyID3(bare)[k] for k in ("title", "artist", "album", "date")} == {
+        "title": ["Karma"], "artist": ["Hey"], "album": ["Karma"], "date": ["2003"]}
+    assert not write_song_tags(bare, karma)  # nothing differs any more
+
+    single = music_session.query(Song).filter(Song.title == "Teksański").one()
+    single.album = "Singles"
+    tagged = _id3_file(tmp_path / "single.mp3", title="teksanski", album="Real Album")
+    assert write_song_tags(tagged, single)
+    assert EasyID3(tagged)["title"] == ["Teksański"]
+    assert EasyID3(tagged)["album"] == ["Real Album"]  # the "Singles" sentinel isn't written
+
+
+class _Answer:
+    def __init__(self, value):
+        self.value = value
+
+    def ask(self):
+        return self.value
+
+
+def test_unmatched_file_picked_by_title_then_saved_and_tagged(users_env, tmp_path, music_session, monkeypatch):
+    from mutagen.easyid3 import EasyID3
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "1.mp3", artist="Hey", title="Karma")
+    _id3_file(folder / "Smuglanka.mp3")  # no tags, no separator in the name
+    tags = {"1.mp3": {"artist_name": "Hey", "title": "Karma"},
+            "Smuglanka.mp3": {"artist_name": None, "title": None}}
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(tags[f.name]))
+
+    teksanski = music_session.query(Song).filter(Song.title == "Teksański").one()
+    selects = iter([menu._UNMATCHED_BY_TITLE, teksanski, menu._CONFIRM_SONG])
+    monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
+    monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer(
+        "Mix" if message.startswith("Playlist") else "Teksański"))
+    monkeypatch.setattr(menu.questionary, "select", lambda *a, **k: _Answer(next(selects)))
+    monkeypatch.setattr(menu.questionary, "confirm", lambda *a, **k: _Answer(True))
+
+    menu._create_playlist_from_folder("ania")
+
+    ((playlist_id, name, count, missing),) = list_playlists("ania")
+    assert (name, count, missing) == ("Mix", 2, 0)
+    from utils.database.user_playlists import playlist_songs
+    songs, _ = playlist_songs(music_session, "ania", playlist_id)
+    assert [s.title for s in songs] == ["Karma", "Teksański"]
+    assert EasyID3(folder / "Smuglanka.mp3")["title"] == ["Teksański"]
+    assert EasyID3(folder / "Smuglanka.mp3")["artist"] == ["Hey"]
+
+
+def test_playlist_with_a_file_left_unmatched_is_not_saved(users_env, tmp_path, music_session, monkeypatch):
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "x.mp3")
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: {"artist_name": None, "title": None})
+    monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
+    monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer("Mix"))
+    monkeypatch.setattr(menu.questionary, "select", lambda *a, **k: _Answer(menu._UNMATCHED_NEXT))
+
+    menu._create_playlist_from_folder("ania")
+    assert list_playlists("ania") == []
+
+
+def test_title_pick_can_be_rejected_for_a_manual_search(users_env, tmp_path, music_session, monkeypatch):
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "x.mp3")
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: {"artist_name": None, "title": "Karma"})
+
+    karma = music_session.query(Song).filter(Song.title == "Karma").one()
+    teksanski = music_session.query(Song).filter(Song.title == "Teksański").one()
+    # Title search offers Karma, the user says it's wrong and picks Teksański by hand
+    selects = iter([menu._UNMATCHED_BY_TITLE, karma, menu._SEARCH_INSTEAD])
+    confirms = iter([True, False])  # "Use <song>?" yes; then no tag update
+    monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
+    monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    monkeypatch.setattr(menu, "search_and_pick_db_object", lambda *a, **k: teksanski)
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer(
+        "Mix" if message.startswith("Playlist") else default))
+    monkeypatch.setattr(menu.questionary, "select", lambda *a, **k: _Answer(next(selects)))
+    monkeypatch.setattr(menu.questionary, "confirm", lambda *a, **k: _Answer(next(confirms)))
+
+    menu._create_playlist_from_folder("ania")
+
+    ((playlist_id, _, _, _),) = list_playlists("ania")
+    from utils.database.user_playlists import playlist_songs
+    songs, _ = playlist_songs(music_session, "ania", playlist_id)
+    assert [s.title for s in songs] == ["Teksański"]

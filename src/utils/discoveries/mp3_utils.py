@@ -105,3 +105,34 @@ def extract_metadata_with_fallback(file: Path) -> dict:
     except Exception as fallback_error:
         slog(f"[METADATA ERROR] Both ID3 and fallback extraction failed for {file.name}: {fallback_error}")
         raise ValueError(f"Could not extract metadata from {file.name} via ID3 or filename") from fallback_error
+
+
+def write_song_tags(file: Path, song) -> bool:
+    """Copy a database song's data into an mp3's ID3 tags: title, artist (the
+    whole credit, "A x B feat. C"), album and year. A "Singles" song's album
+    tag is left alone - that's a sentinel, not an album name. Only differing
+    fields are written; returns whether the file changed. A file with no ID3
+    tags at all gets them."""
+    from mutagen.id3 import ID3NoHeaderError
+
+    from config.constants import SINGLES_ALBUM
+    from utils.database.song_artists import song_artist_label
+
+    try:
+        tags = EasyID3(file)
+    except ID3NoHeaderError:
+        tags = EasyID3()
+    wanted = {"title": song.title, "artist": song_artist_label(song)}
+    if song.album and song.album.strip() != SINGLES_ALBUM:
+        wanted["album"] = song.album
+    if song.year:
+        wanted["date"] = str(song.year)
+
+    changed = False
+    for key, value in wanted.items():
+        if tags.get(key, [None])[0] != value:
+            tags[key] = value
+            changed = True
+    if changed:
+        tags.save(file)
+    return changed

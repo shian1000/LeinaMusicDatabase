@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~407 tests, ~3s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~459 tests, ~20s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -125,8 +125,11 @@ non-trivial work in that area.
   (`src/menu/main_menu/users/`) creates users, logs into one (`verify_user()`), and lists /
   renames / re-passwords / deletes them. Delete moves the folder to `archive/deleted-users/`, it doesn't erase it.
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
-  `user_playlists.py` saves playlists. Nothing sends or serves them yet:
-  [ADR-0004](docs/decisions/0004-per-user-data.md). `song_references.py` keeps every reference to
+  `user_playlists.py` saves playlists and reads them back (`playlist_songs()`:
+  the music.db `Song` rows in order, plus the tracks with no song). "Show playlists" shows them
+  through the same `display_songs()` / `display_song_links()` tables as Fetch songs, and lists the
+  tracks without a song underneath, since those tables need `Song` rows. Nothing sends or
+  serves them yet: [ADR-0004](docs/decisions/0004-per-user-data.md). `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
   tracks and private tags.
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
@@ -149,9 +152,14 @@ non-trivial work in that area.
   the main artist of "A ft. B", and titles with brackets and trailing junk stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
   `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts
-  every mp3 in alphabetical path order and saves nothing while some file has no song (only
-  "Show" is offered for those so far). `mp3_covers.py` is Fetch database data → "Import
-  covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
+  every mp3 in alphabetical path order. Files with no song are walked through one by one (name,
+  folder, what was read). For each, the user can search by title across all artists
+  (`import_engine.find_songs_by_title()`, for files with no usable artist). Picking a candidate
+  isn't final: the user confirms it or switches to the manual search. They can also search the
+  database (`search_and_pick_db_object()`), or skip. A playlist is only saved once every file has
+  a song. After that it offers to copy the database's title/artist/album/year into the files' tags
+  (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
+  `mp3_covers.py` is Fetch database data → "Import covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
   `<database_dir>/covers/`, matched to songs like the tag import (`read_file_metadata()`,
   `find_existing_song()`), non-square video frames skipped; see its docstring and
   `docs/runbooks/database.md`. `docs/agent-notes/discovery-modules.md` (fetcher
@@ -341,7 +349,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~407 tests, ~3 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~459 tests, ~20 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.
