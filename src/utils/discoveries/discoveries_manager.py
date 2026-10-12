@@ -232,7 +232,7 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
         return None
     album = album.strip()
 
-    if is_blacklisted_album(album):
+    if is_blacklisted_album(album, queried_artist):
         flog(f"[{module_name}] returned blacklisted album '{album}', discarding")
         return None
 

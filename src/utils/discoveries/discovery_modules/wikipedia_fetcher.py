@@ -48,13 +48,13 @@ def get_album_name(artist: str, title: str) -> str | None:
     if title.lower() in page.title.lower():
         album = _extract_from_infobox(soup, title)
     else:
-        album = _extract_from_track_listing(soup, page.title, title)
+        album = _extract_from_track_listing(soup, page.title, title, artist)
 
     if not album:
         return None
 
     album = clean_album_title(album, artist)
-    return None if is_blacklisted_album(album) else album
+    return None if is_blacklisted_album(album, artist) else album
 
 
 # ---------------------------------------------------------------------------
@@ -155,13 +155,13 @@ def _extract_from_infobox(soup: BeautifulSoup, title: str) -> str | None:
 
 
 def _extract_from_track_listing(
-    soup: BeautifulSoup, page_title: str, title: str
+    soup: BeautifulSoup, page_title: str, title: str, artist: str | None = None
 ) -> str | None:
     """Case 2: page is the artist/album — scan track listing sections for the song."""
     for heading_text, anchor in _iter_heading_anchors(soup):
         slog(f"Checking heading: {heading_text}")
 
-        if is_blacklisted_album(heading_text) and heading_text != SINGLES_ALBUM:
+        if is_blacklisted_album(heading_text, artist) and heading_text != SINGLES_ALBUM:
             slog("Skipping blacklisted heading")
             continue
 

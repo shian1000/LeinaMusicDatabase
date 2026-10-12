@@ -17,6 +17,7 @@ from utils.database.albums import (
     assign_songs_to_album,
     clear_album_text,
     find_unresolved_album_groups,
+    link_unassigned_songs,
 )
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 
@@ -97,6 +98,12 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
     or only the titles of `songs` (an import passes the songs it added).
     Returns how many titles were settled."""
     music_session, _ = open_and_set_global_database_sessions()
+    # A title left NULL while two artists shared it stays NULL after the other
+    # artist's songs leave it (artist merge, album edit) - link those first.
+    linked = link_unassigned_songs(music_session, report_linked=True)
+    submit_global_database_session()
+    if linked and songs is None:
+        print(f"Linked {linked} song(s) whose album title only one artist uses now.")
     groups = find_unresolved_album_groups(music_session, songs)
     if not groups:
         if songs is None:

@@ -145,6 +145,6 @@ def get_album_name(artist: str, song: str) -> str | None:
         return None
 
     album_name, matched_title, matched_artist = extracted
-    if is_blacklisted_album(album_name):
+    if is_blacklisted_album(album_name, artist):
         return None
     return DiscoveryResult(album=album_name, matched_title=matched_title, matched_artist=matched_artist)

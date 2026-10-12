@@ -7,3 +7,23 @@
 # pytest try to collect it just fails the whole run for a file that was never
 # meant to assert anything.
 collect_ignore = ["test_scripts.py"]
+
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+for _path in (str(_REPO_ROOT), str(_REPO_ROOT / "src")):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+
+@pytest.fixture(autouse=True)
+def no_real_db_album_lookup(monkeypatch):
+    # is_blacklisted_album(title, artist) asks the real music.db whether the
+    # artist already has that album (albums.artist_has_album()). Tests that
+    # want the exception patch it themselves; none may read the user's DB.
+    from utils.database import albums
+    monkeypatch.setattr(albums, "artist_has_album", lambda artist_name, title: False)

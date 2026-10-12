@@ -51,36 +51,53 @@ def _recording_title_artist(recording, artist: str) -> tuple[str, str]:
 FALLBACK_RELEASE_TYPE_RANK = {"EP": 0, "Single": 1}
 
 
-def _pick_release(recordings) -> tuple[str | None, dict | None]:
+def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, dict | None]:
     """(release title, its recording) for the best release of the search hits.
 
     The first Album in result order wins. Otherwise the best-ranked other
     release of the first recording that has any, by type then earliest date
-    (undated last). Compilations, live albums, remixes and blacklisted titles
-    never count.
+    (undated last). Compilations, live albums, remixes, blacklisted titles and
+    another song's single never count.
     """
     for recording in recordings:
         for release in recording.get("release-list", []):
-            if _release_is_eligible(release) and release.get("release-group", {}).get("primary-type", "") == "Album":
-                return release.get("title", ""), recording
+            if _release_is_eligible(release, artist) and release.get("release-group", {}).get("primary-type", "") == "Album":
+                return _release_title(release), recording
 
     for recording in recordings:
-        candidates = [release for release in recording.get("release-list", []) if _release_is_eligible(release)]
+        candidates = [release for release in recording.get("release-list", [])
+                      if _release_is_eligible(release, artist) and not _is_other_songs_single(release, recording)]
         if candidates:
             best = min(candidates, key=lambda release: (
                 FALLBACK_RELEASE_TYPE_RANK.get(release.get("release-group", {}).get("primary-type", ""),
                                                len(FALLBACK_RELEASE_TYPE_RANK)),
                 release.get("date") or "9999",
             ))
-            return best.get("title", ""), recording
+            return _release_title(best), recording
     return None, None
 
 
-def _release_is_eligible(release) -> bool:
+def _release_title(release) -> str:
+    """The release group's title - the album as a whole - over this one
+    edition's: one edition of Low Roar's "0" is entered as "O" and was listed
+    first. Falls back to the release's own title."""
+    return release.get("release-group", {}).get("title") or release.get("title", "")
+
+
+def _is_other_songs_single(release, recording) -> bool:
+    """A single named after a different song, with this one as its extra track:
+    "Death by Rock and Roll" is also on the single "25". Not this song's album.
+    An EP has its own name, so only singles are checked."""
+    if release.get("release-group", {}).get("primary-type", "") != "Single":
+        return False
+    return not title_resembles(recording.get("title", ""), _release_title(release))
+
+
+def _release_is_eligible(release, artist: str | None = None) -> bool:
     secondary_types = release.get("release-group", {}).get("secondary-type-list", [])
     if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
         return False
-    return not is_blacklisted_album(release.get("title", ""))
+    return not is_blacklisted_album(_release_title(release), artist)
 
 
 def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
@@ -107,10 +124,10 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             response = musicbrainzngs.search_recordings(query=query, limit=5)
         recordings = response.get("recording-list", [])
 
-        result, result_recording = _pick_release(recordings)
+        result, result_recording = _pick_release(recordings, artist)
         slog(result)
 
-        if result and not is_blacklisted_album(result):
+        if result and not is_blacklisted_album(result, artist):
             if not spell_check:
                 return get_album_name(artist, song, spell_check=True)
             time.sleep(delay)
@@ -122,7 +139,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             response = musicbrainzngs.search_recordings(query=query, limit=25)
         recordings = response.get("recording-list", [])
 
-        final, final_recording = _pick_release(recordings)
+        final, final_recording = _pick_release(recordings, artist)
 
         time.sleep(delay)
         if not final:

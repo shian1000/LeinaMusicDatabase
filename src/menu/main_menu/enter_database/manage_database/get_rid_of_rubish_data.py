@@ -11,6 +11,7 @@ from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
+from utils.common.script_utils import fix_mixed_script_words
 
 
 _CLEANUP_FIELDS = [
@@ -131,6 +132,46 @@ def remove_invisible_characters(songs):
         transform=lambda v: strip_format_characters(v, keep_joiner=True),
         action_description="Removed invisible characters in",
     )
+
+def fix_lookalike_letters(songs):
+    """Words mixing Latin and Cyrillic look-alike letters ("Вjörk",
+    "Рiдна") in titles, artist names and albums: every fix in one checkbox
+    list (all ticked), applied after the scan. One entry per artist and per
+    album text, however many songs share it."""
+    proposals = {}  # (field, key) -> [old, new, songs]
+    for song in songs:
+        for field_name, get_value, _ in _CLEANUP_FIELDS:
+            value = get_value(song)
+            fixed = fix_mixed_script_words(value) if value else value
+            if fixed == value:
+                continue
+            key = {"title": song.id, "artist": song.artist.id, "album": value}[field_name]
+            proposals.setdefault((field_name, key), [value, fixed, []])[2].append(song)
+    if not proposals:
+        return
+
+    entries = list(proposals.items())
+    print("\n" + "=" * 70)
+    print(f"REVIEW: {len(entries)} name(s) mix Latin and Cyrillic look-alike letters")
+    print("=" * 70)
+    choices = []
+    for i, ((field_name, _), (old, new, owners)) in enumerate(entries):
+        where = f"{owners[0].artist.name} - {owners[0].title}" if field_name == "title" else f"{len(owners)} song(s)"
+        choices.append(questionary.Choice(title=f"[{field_name}] {old}  ->  {new}  ({where})", value=i, checked=True))
+    selected = questionary.checkbox(
+        "Select the names to fix (space toggles, enter confirms):", choices=choices
+    ).ask()
+    if selected is None:
+        print("Aborted, nothing fixed.")
+        return
+    setters = {name: set_value for name, _, set_value in _CLEANUP_FIELDS}
+    for i in selected:
+        (field_name, _), (old, new, owners) = entries[i]
+        for song in owners:
+            setters[field_name](song, new)
+    print(f"Fixed {len(selected)} name(s).")
+    if any(entries[i][0][0] == "artist" for i in selected):
+        print('An artist may now share its name with another one - run "Resolve duplicated artists" to merge them.')
 
 def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
@@ -261,6 +302,8 @@ def get_rid_of_rubish_data():
     strip_leading_spaces(songs)
     replace_double_spaces(songs)
     resolve_unknown_artist(songs)
+    submit_global_database_session()
+    fix_lookalike_letters(songs)
     submit_global_database_session()
     seek_nonsense_names(songs)
     submit_global_database_session()

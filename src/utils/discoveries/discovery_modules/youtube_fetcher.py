@@ -129,7 +129,7 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
         return None
 
     matched_title, matched_artist, album = match
-    if is_blacklisted_album(album):
+    if is_blacklisted_album(album, artist):
         return None
 
     return DiscoveryResult(

@@ -266,15 +266,24 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     return result
 
 
-def is_blacklisted_album(title: str) -> bool:
+def is_blacklisted_album(title: str, artist: str | None = None) -> bool:
+    """Is `title` a placeholder rather than an album (blacklist.txt)?
+
+    With `artist`, a title the database already has as that artist's album
+    passes anyway: the user entered or kept it, so it's a real album of
+    theirs ("Abradab" - "Czerwony album", though "album" is blacklisted).
+    Only for the same artist - see albums.artist_has_album()."""
     slog(title)
-    if title:
-        lowered = title.lower().strip()
-        if lowered in ALBUM_TITLE_BLACKLIST:
-            slog("True")
-            return True
-        return any(re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
-    return False
+    if not title:
+        return False
+    lowered = title.lower().strip()
+    blacklisted = lowered in ALBUM_TITLE_BLACKLIST or any(
+        re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
+    if blacklisted and artist:
+        # Imported here: the database layer imports text_utils
+        from utils.database.albums import artist_has_album
+        return not artist_has_album(artist, title)
+    return blacklisted
 
 def _contains_marker_word(text: str, markers) -> bool:
     """True if any marker appears in text as a whole word, case-insensitively.

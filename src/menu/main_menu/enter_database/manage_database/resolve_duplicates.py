@@ -10,7 +10,8 @@ from utils.database.albums import reassign_artist_albums
 from utils.database.song_references import apply_song_id_changes, record_song_merge
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
-from utils.common.normalizer import normalize
+from utils.common.normalizer import normalize, normalize_apostrophes
+from utils.common.script_utils import fix_mixed_script_words
 
 def remove_duplicate_songs():
     """
@@ -51,6 +52,10 @@ def remove_duplicate_songs():
     print(f"\nRemoved {len(duplicates)} duplicate(s).")
 
 
+def _artist_key(name: str) -> str:
+    return normalize_apostrophes(fix_mixed_script_words(name)).lower()
+
+
 def remove_duplicate_artists():
     session = get_music_session()
 
@@ -60,7 +65,11 @@ def remove_duplicate_artists():
     duplicates = []
 
     for artist in all_artists:
-        key = artist.name.lower()
+        # Only case, the apostrophe variant ("Carla's" / "Carla’s") and a
+        # look-alike letter from the other alphabet ("Вjörk" / "björk") are
+        # ignored - this merges without asking, and a full normalize() would
+        # also fold real pairs together ("Bôa" / "BoA", "!!!" / "(((())))").
+        key = _artist_key(artist.name)
         key_origin = artist.origin
         if key in seen:
             seen_origin = seen[key].origin
@@ -83,7 +92,7 @@ def remove_duplicate_artists():
         if artist.id in already_flagged_ids:
             continue
         for synonym in _parse_synonyms(artist.synonyms):
-            match = seen.get(synonym.strip().lower())
+            match = seen.get(_artist_key(synonym.strip()))
             if match and match.id != artist.id and match.id not in already_flagged_ids:
                 duplicates.append((artist, match))
                 already_flagged_ids.add(artist.id)

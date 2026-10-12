@@ -405,6 +405,18 @@ a loop over many candidate releases/headings, to filter out bad options while pi
 returned album (a last-resort net). Don't treat the per-candidate calls as redundant with the
 manager's check and remove them — they serve a genuinely different purpose and are still needed.
 
+Every album-lookup call passes the queried artist: `is_blacklisted_album(title, artist)` lets a
+blacklisted title through when the database already has it as that artist's album (name or
+synonym, `albums.artist_has_album()`, reads `songs.album`). The substring list is broad ("rock",
+"music", "dance", "gold", "album" — ~90 real artist/album pairs in the DB trip it, e.g. "Death By
+Rock and Roll", "Confessions on a Dance Floor", "Czerwony album"), and the user preferred this
+exception over editing it. It has to reach the per-candidate checks too, not only the manager's:
+otherwise MusicBrainz skips the album and falls back to another release. Limits: it helps from
+the second song of an album on (the first has nothing in the DB yet), and it also re-admits junk
+already stored for that artist. Rubbish-data cleanup (`get_rid_of_rubish_data.py`) calls it
+*without* an artist on purpose — every stored album trivially exists for its own artist. Tests
+never touch the real DB here: `tests/conftest.py` stubs `artist_has_album()` for every test.
+
 ## The shared headless browser (`src/utils/common/selenium_sessions.py`)
 
 `open_global_driver()` / `close_global_driver()` manage **one** process-wide headless Chrome

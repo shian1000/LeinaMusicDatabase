@@ -103,3 +103,43 @@ def test_get_album_name_reports_the_queried_artist_among_several_credits(monkeyp
 
     assert result.album == "Moulin Rouge"
     assert result.matched_artist == "José Feliciano"
+
+
+def test_album_title_comes_from_the_release_group_not_one_edition():
+    # One edition of Low Roar's "0" is entered as "O" (letter) and comes first in the results
+    edition = _release("O", "Album", "2014-08-05")
+    edition["release-group"]["title"] = "0"
+    recordings = [_recording("I'll Keep Coming", [edition])]
+    assert _pick_release(recordings)[0] == "0"
+
+
+def test_another_songs_single_is_not_this_songs_album():
+    # "rock" is in the user's blacklist, so the album "Death By Rock and Roll" and the singles of
+    # that name drop out; the singles "25" and "And So It Went" carry the song only as an extra track
+    recordings = [_recording("Death by Rock and Roll", [
+        _release("Death By Rock and Roll", "Album", "2021-02-12"),
+        _release("Death by Rock and Roll", "Single", "2020-05-15"),
+        _release("25", "Single", "2020-11-13"),
+        _release("And So It Went", "Single", "2021-01-08"),
+    ])]
+    assert _pick_release(recordings) == (None, None)
+
+
+def test_a_single_named_after_the_song_still_counts():
+    recordings = [_recording("25", [_release("25", "Single", "2020-11-13")])]
+    assert _pick_release(recordings)[0] == "25"
+
+
+def test_blacklisted_album_the_artist_already_has_is_picked(monkeypatch):
+    # "Death By Rock and Roll" trips the user's "rock" blacklist entry; once the database has it
+    # as The Pretty Reckless' album, it's that artist's real album again
+    from utils.database import albums
+    monkeypatch.setattr(albums, "artist_has_album",
+                        lambda artist_name, title: artist_name == "The Pretty Reckless"
+                        and title == "Death By Rock and Roll")
+    recordings = [_recording("Death by Rock and Roll", [
+        _release("Death By Rock and Roll", "Album", "2021-02-12"),
+        _release("25", "Single", "2020-11-13"),
+    ])]
+    assert _pick_release(recordings, "The Pretty Reckless")[0] == "Death By Rock and Roll"
+    assert _pick_release(recordings)[0] is None

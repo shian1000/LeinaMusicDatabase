@@ -306,18 +306,21 @@ def register_album_sync(session_factory) -> None:
 # Bulk linking (backfill) and the multi-artist titles left for the user
 # --------------------
 
-def link_unassigned_songs(session) -> list[Song]:
+def link_unassigned_songs(session, report_linked: bool = False) -> list[Song] | int:
     """Link every song that has album text but no album row yet - the
-    backfill after migration 0006, and safe to re-run. Titles several main
-    artists share are grouped before deciding, so no artist gets that
-    album ahead of the others. Returns the songs left for the user. Caller
-    commits."""
+    backfill after migration 0006, and safe to re-run (the multi-artist
+    review runs it first: a title stays NULL after the other artists' songs
+    leave it). Titles several main artists share are grouped before
+    deciding, so no artist gets that album ahead of the others. Returns the
+    songs left for the user, or with `report_linked` how many got an album.
+    Caller commits."""
     songs = (
         session.query(Song)
         .filter(Song.album_id.is_(None), Song.album.isnot(None), Song.album != "")
         .all()
     )
-    return _link_songs(session, songs, _AlbumIndex(session))
+    left = _link_songs(session, songs, _AlbumIndex(session))
+    return len(songs) - len(left) if report_linked else left
 
 
 def run_album_backfill() -> None:
@@ -494,3 +497,25 @@ def reassign_artist_albums(session, from_id: int, to_id: int) -> None:
             if album.type != ALBUM_TYPE_SINGLE:
                 by_key[album_key(album.title)] = album
     session.flush()
+
+
+def artist_has_album(artist_name: str, title: str) -> bool:
+    """Does any song of the artist (by name or synonym) already have `title`
+    as its album text? Lets a blacklisted-looking title through for that
+    artist only (text_utils.is_blacklisted_album()). Reads songs.album, not
+    the albums table: a title several artists share has no row yet."""
+    # Imported here: music_db_manager imports this module
+    from utils.database.music_db_manager import get_music_session
+
+    artist_norm, key = normalize(artist_name or ""), album_key(title)
+    if not artist_norm or not key:
+        return False
+    with get_music_session() as session:
+        artist_ids = [
+            artist_id for artist_id, name, synonyms in session.execute(select(Artist.id, Artist.name, Artist.synonyms))
+            if artist_norm in {normalize(n) for n in [name, *(synonyms or "").split(",")] if n and n.strip()}
+        ]
+        if not artist_ids:
+            return False
+        albums = session.scalars(select(Song.album).where(Song.artist_id.in_(artist_ids), Song.album.isnot(None)))
+        return any(album_key(album) == key for album in albums)

@@ -89,7 +89,7 @@ def get_album_name(artist: str, title: str) -> str | None:
             return None
 
         album_found = remove_brackets(album_text)
-        if is_blacklisted_album(album_found):
+        if is_blacklisted_album(album_found, artist):
             return None
         else:
             matched_title = _title_portion_of_slug(_url_slug(song_url), artist)

@@ -387,3 +387,35 @@ def test_review_delete_clears_album_text_of_every_artist(session, monkeypatch):
     assert al.find_unresolved_album_groups(session) == []
     # The emptied album row is kept, like any album no song points at
     assert session.get(al.Album, album_id) is not None
+
+
+# Captured at import, before the autouse stub in conftest.py replaces it
+_REAL_ARTIST_HAS_ALBUM = al.artist_has_album
+
+
+def test_artist_has_album_matches_by_name_or_synonym_and_normalized_title(session_factory, monkeypatch):
+    from utils.database import music_db_manager
+    session = session_factory()
+    abradab, other = _artists(session, "Abradab", "Someone Else")
+    abradab.synonyms = "Marcin Marten"
+    _song(session, "Poprawny wokal", abradab, album="Czerwony album")
+    _song(session, "Other", other, album="Steal This Album")
+    session.commit()
+    monkeypatch.setattr(music_db_manager, "get_music_session", session_factory)
+
+    assert _REAL_ARTIST_HAS_ALBUM("Abradab", "Czerwony Album")
+    assert _REAL_ARTIST_HAS_ALBUM("Marcin Marten", "czerwony album")
+    # Only the same artist: another artist's album doesn't count
+    assert not _REAL_ARTIST_HAS_ALBUM("Abradab", "Steal This Album")
+    assert not _REAL_ARTIST_HAS_ALBUM("Nobody", "Czerwony album")
+
+
+def test_blacklisted_title_passes_only_for_an_artist_that_has_it(monkeypatch):
+    from utils.common.text_utils import is_blacklisted_album
+    monkeypatch.setattr(al, "artist_has_album",
+                        lambda artist_name, title: (artist_name, title) == ("Abradab", "Czerwony album"))
+
+    assert is_blacklisted_album("Czerwony album")  # "album" is in blacklist.txt
+    assert not is_blacklisted_album("Czerwony album", "Abradab")
+    assert is_blacklisted_album("Czerwony album", "Someone Else")
+    assert is_blacklisted_album("Greatest Hits", "Abradab")

@@ -217,7 +217,7 @@ def strip_brackets(title: str):
         return None
 
     
-def _normalize_apostrophes(text: str) -> str:
+def normalize_apostrophes(text: str) -> str:
     """Replace all apostrophe-like characters with a single canonical one."""
     return re.sub(f"[{re.escape(APOSTROPHES)}]", "'", text)
 
@@ -234,8 +234,8 @@ def _words_match(old_word: str, new_word: str) -> bool:
 def rule_apostrophe_and_common_word_diff(old_title: str, new_title: str) -> bool:
     """Auto-confirm if, after canonicalizing apostrophes, the only
     remaining differences are casing corrections on ACCEPTED_WORDS."""
-    old_words = _normalize_apostrophes(old_title).split()
-    new_words = _normalize_apostrophes(new_title).split()
+    old_words = normalize_apostrophes(old_title).split()
+    new_words = normalize_apostrophes(new_title).split()
 
     if len(old_words) != len(new_words):
         return False
@@ -246,8 +246,8 @@ def rule_all_caps_correction(old_title: str, new_title: str) -> bool:
     """Auto-confirm if the old title is written in ALL CAPS and the
     correction is purely a casing fix (e.g. "LA TORTURA" -> "La tortura"),
     not a change to the underlying letters or words."""
-    old_norm = _normalize_apostrophes(old_title)
-    new_norm = _normalize_apostrophes(new_title)
+    old_norm = normalize_apostrophes(old_title)
+    new_norm = normalize_apostrophes(new_title)
 
     if not old_norm.isupper():
         return False

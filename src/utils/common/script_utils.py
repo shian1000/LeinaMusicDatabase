@@ -18,6 +18,7 @@ Kanji/hanzi and Arabic are left alone on purpose: they need dictionaries
 The precise Belarusian Cyrillic <-> Lacinka transliteration for YouTube
 search lives separately in utils/youtube/transliteration.py.
 """
+import re
 import unicodedata
 
 from utils.common.normalizer import normalize
@@ -200,3 +201,48 @@ def cyrillic_search_variant(query: str, context_texts) -> str | None:
         return None
     variant = latin_to_cyrillic(query)
     return variant if variant != query else None
+
+
+# ---- look-alike letters from the other alphabet ---------------------------
+
+# Latin and Cyrillic letters drawn the same, so a word typed (or OCR'd) with
+# the wrong keyboard layout for one letter looks right but never matches:
+# "Вjörk" (Cyrillic В), "Рiдна" (Latin i for Ukrainian/Belarusian і).
+_LATIN_TO_CYRILLIC_LOOKALIKE = {
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "I": "І", "K": "К", "M": "М",
+    "O": "О", "P": "Р", "T": "Т", "X": "Х", "Ï": "Ї",
+    "a": "а", "c": "с", "e": "е", "i": "і", "o": "о", "p": "р", "x": "х", "y": "у", "ï": "ї",
+}
+_CYRILLIC_TO_LATIN_LOOKALIKE = {cyr: lat for lat, cyr in _LATIN_TO_CYRILLIC_LOOKALIKE.items()}
+
+
+def _fix_mixed_word(word: str) -> str:
+    """A word mixing Latin and Cyrillic letters, rewritten wholly in the
+    alphabet most of its letters use - only when every letter from the other
+    one has a look-alike there. A tie ("COVERКАВЕР", two words run together)
+    or a third script ("ИΔΤVИ", a stylized name) is left alone."""
+    original, word = word, unicodedata.normalize("NFC", word)
+    scripts = [_char_script(ch) for ch in word]
+    if set(filter(None, scripts)) != {"LATIN", "CYRILLIC"}:
+        return original
+    latin, cyrillic = scripts.count("LATIN"), scripts.count("CYRILLIC")
+    if latin == cyrillic:
+        return original
+    minority, mapping = ("CYRILLIC", _CYRILLIC_TO_LATIN_LOOKALIKE) if latin > cyrillic \
+        else ("LATIN", _LATIN_TO_CYRILLIC_LOOKALIKE)
+    fixed = []
+    for ch, script in zip(word, scripts):
+        if script == minority:
+            if ch not in mapping:
+                return original
+            ch = mapping[ch]
+        fixed.append(ch)
+    return "".join(fixed)
+
+
+def fix_mixed_script_words(text: str | None) -> str | None:
+    """`text` with every word that mixes Latin and Cyrillic look-alike letters
+    written in one alphabet ("Вjörk" -> "Björk", "Рiдна" -> "Рідна")."""
+    if not text:
+        return text
+    return re.sub(r"\w+", lambda m: _fix_mixed_word(m.group()), text)
