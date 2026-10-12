@@ -39,7 +39,8 @@ def folder_mp3_files(folder: Path) -> list[Path]:
     return sorted(folder.rglob("*.mp3"), key=lambda f: str(f.relative_to(folder)).casefold())
 
 
-def _duration(file: Path) -> int | None:
+def audio_duration(file: Path) -> int | None:
+    """Length in whole seconds, or None when mutagen can't read it."""
     try:
         return round(MP3(file).info.length)
     except Exception:
@@ -63,6 +64,6 @@ def build_folder_playlist(session, folder: Path) -> FolderPlaylist:
                                 artist=metadata.get("artist_name"))
             playlist.unmatched.append(track)
             flog(f"Playlist from folder: no song in the database for {file}")
-        track.duration_s = _duration(file)
+        track.duration_s = audio_duration(file)
         playlist.tracks.append(track)
     return playlist

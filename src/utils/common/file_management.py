@@ -65,13 +65,7 @@ def get_proper_uri():
     return uri
 
 
-def create_temp_index():
-    index_file = UPath(
-        "smb://server.local/Shared/Music/.mp3_index.sqlite3",
-        username=settings.smb_username,
-        password=settings.smb_password,
-    )
-
+def create_temp_index(index_file):
     local_index = Path("/tmp/.mp3_index.sqlite3")
     local_index.write_bytes(index_file.read_bytes())
     return local_index
@@ -141,7 +135,7 @@ def copy_songs_using_index(
     if (isinstance(index_path, Path)):
         usable_index_path = index_path
     else:
-        usable_index_path = create_temp_index()
+        usable_index_path = create_temp_index(index_path)
 
     engine = create_engine(f"sqlite:///{usable_index_path}")
 

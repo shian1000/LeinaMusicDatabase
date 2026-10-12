@@ -1,6 +1,7 @@
 """
 Minimal HTTP server for the MusicDatabaseApp mobile client: serves exactly
-<dir>/music.db and <dir>/tag.db, nothing else (no directory listing, any
+<dir>/music.db, <dir>/tag.db and <dir>/files.db (the music library index),
+nothing else (no directory listing, any
 other path is a 404), on this machine's Tailscale address and, optionally,
 on one named LAN interface.
 
@@ -17,7 +18,7 @@ with every path passed on the command line.
 - LAN (only with --lan-interface): the phone uses this address on the home
   Wi-Fi and falls back to Tailscale when it doesn't answer. Widening beyond
   Tailscale-only was a deliberate decision (2026-10-10): anyone on the home
-  network can download the two files. The interface is picked by *name*
+  network can download the shared files. The interface is picked by *name*
   because docker0 / br-* bridges also carry private addresses and must never
   be exposed. Same wait-and-retry loop, in its own thread, so a missing LAN
   never delays or breaks the Tailscale socket (or vice versa).
@@ -40,7 +41,7 @@ from email.utils import formatdate
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SHARED_FILES = ("music.db", "tag.db")
+SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
 TAILSCALE_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
@@ -166,7 +167,7 @@ def address_sources(lan_interface: str | None) -> list[tuple[str, Callable[[], s
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    parser.add_argument("--dir", required=True, help="folder holding music.db and tag.db")
+    parser.add_argument("--dir", required=True, help="folder holding music.db, tag.db and files.db")
     parser.add_argument("--mount", required=True, help="mount point of the drive holding --dir")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--lan-interface", help="also serve on this interface's private IPv4 address")

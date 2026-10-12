@@ -160,12 +160,13 @@ def share_dir(tmp_path):
     d.mkdir()
     _make_db(d / "music.db", 1)
     _make_db(d / "tag.db", 1)
+    _make_db(d / "files.db", 1)
     (d / "secret.txt").write_text("not for the phone")
     (d / "music.db.tmp").write_bytes(b"half a file")
     return d
 
 
-@pytest.mark.parametrize("name", ["music.db", "tag.db"])
+@pytest.mark.parametrize("name", ["music.db", "tag.db", "files.db"])
 def test_server_serves_shared_files(serve, share_dir, name):
     base = serve(share_dir, "/")
 

@@ -16,6 +16,8 @@ from utils.discoveries.discovery_settings import (
 )
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
+from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.database.files_index import FILES_DB_PATH, LibraryUnavailableError, scan_library
 from utils.database.users import users_available
 from utils.database.sharing import (
     SharingUnavailableError,
@@ -46,6 +48,7 @@ def server_menu():
     action_map = {
         "Database location": database_location_menu,
         "Back up database now": backup_database_now,
+        "Index music library": index_music_library,
         "Submit database for sharing": submit_database_for_sharing,
         "Setup this PC for database sharing": setup_database_sharing,
     }
@@ -104,8 +107,30 @@ def backup_database_now():
         print(f"Users' databases skipped: {settings.users_dir} is on a drive that isn't mounted.")
 
 
+def index_music_library():
+    """Scan the music library folder into files.db: new, changed and removed
+    files, and which song each file is. Also runs once a day at startup;
+    the phone gets files.db with the next "Submit database for sharing"."""
+    music_session, _ = open_and_set_global_database_sessions()
+    print(f"Indexing {settings.local_library_dir_str} ...")
+    try:
+        report = scan_library(music_session, progress=lambda done, total: print(f"  {done}/{total} files read"))
+    except LibraryUnavailableError as exc:
+        print(f"\033[91mNot indexed: {exc}\033[0m")
+        return
+    print(f"\n{report.files} audio file(s) in the library: {report.added} new, "
+          f"{report.changed} changed, {report.removed} removed since the last scan.")
+    matched = report.files - len(report.unmatched)
+    print(f"{matched} file(s) have a song in the database ({report.matched_now} matched now), "
+          f"{len(report.unmatched)} don't.")
+    if report.unmatched and questionary.confirm("Show the files without a song?", default=False).ask():
+        for path, artist, title in report.unmatched:
+            print(f"  {path}   ({artist or '?'} - {title})")
+    print(f"Index saved to {FILES_DB_PATH}")
+
+
 def submit_database_for_sharing():
-    """Copy music.db and tag.db to the folder the mobile app downloads from,
+    """Copy music.db, tag.db and files.db to the folder the mobile app downloads from,
     right now instead of waiting for the next daily backup."""
     try:
         published = share_databases()
@@ -127,7 +152,7 @@ def setup_database_sharing():
     """Install the systemd user service that serves the shared databases to
     the mobile app over Tailscale, starting shortly after every login."""
     lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
-    print("This installs a systemd user service that serves only music.db and tag.db")
+    print("This installs a systemd user service that serves only music.db, tag.db and files.db")
     print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
     if not questionary.confirm("Install (or reinstall) it now?").ask():
         print("Cancelled.")
@@ -328,7 +353,7 @@ def database_location_menu():
 
 
 def change_database_location():
-    """Set the folder music.db and tag.db are read from and written to.
+    """Set the folder music.db, tag.db and files.db are read from and written to.
 
     Only updates the persisted override -- the app reads Settings.database_dir
     once at startup, so this takes effect after a restart, not immediately.

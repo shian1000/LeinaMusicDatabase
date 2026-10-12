@@ -1,5 +1,5 @@
 """
-Automatic backup of the SQLite databases (music.db, tag.db, and every
+Automatic backup of the SQLite databases (music.db, tag.db, files.db, and every
 user's user.db when the T7 drive is mounted - archived as
 user-<name>.<timestamp>.db) into src/database/archive/, using SQLite's online backup API so a copy is safe to
 take even while the app holds an open connection.
@@ -17,6 +17,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from config.constants import FILES_DB_FILENAME
 from settings import Settings
 from utils.common.debug import mlog, slog
 from utils.database.users import user_db_files
@@ -25,6 +26,9 @@ ARCHIVE_DIR = Path(str(Settings.database_dir)) / "archive"
 DB_FILES = {
     "music": Path(str(Settings.database_dir)) / "music.db",
     "tag": Path(str(Settings.database_dir)) / "tag.db",
+    # The music library index (utils/database/files_index.py) - rebuildable
+    # by a scan, except for matches set by hand
+    "files": Path(str(Settings.database_dir)) / FILES_DB_FILENAME,
 }
 
 _TIMESTAMP_FORMAT = "%y%m%d-%H%M"

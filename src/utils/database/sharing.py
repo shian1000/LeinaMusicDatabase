@@ -1,19 +1,19 @@
 """
-Copy music.db and tag.db into the sharing folder (Settings.sharing_dir) that
-the MusicDatabaseApp mobile client downloads from, plus installing the
-systemd user service that serves that folder over Tailscale
-(sharing_server.py).
+Copy music.db, tag.db and files.db (the music library index) into the
+sharing folder (Settings.sharing_dir) that the MusicDatabaseApp mobile
+client downloads from, plus installing the systemd user service that serves
+that folder over Tailscale (sharing_server.py).
 
 Contract the app relies on (see docs/runbooks/database.md -> "Sharing with
 the mobile app"):
-- <sharing_dir>/music.db and <sharing_dir>/tag.db are always complete SQLite
+- <sharing_dir>/music.db, tag.db and files.db are always complete SQLite
   files - each is written to a temp file next to it and os.replace()d in, so
   a download in progress never sees half a file;
-- both come from the same moment - both temp copies are made before either
+- all come from the same moment - every temp copy is made before any
   is swapped in.
 
 Two call sites:
-- main.py, right after a successful daily backup (share_databases_quietly()).
+- main.py, once a day after the daily backup and library scan (share_databases_quietly()).
 - Settings -> "Submit database for sharing" (share_databases()).
 """
 
@@ -116,7 +116,7 @@ def _service_unit(python: str) -> str:
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
     return f"""[Unit]
-Description=MusicDatabase - serve music.db/tag.db to the mobile app over Tailscale and the LAN
+Description=MusicDatabase - serve music.db/tag.db/files.db to the mobile app over Tailscale and the LAN
 
 [Service]
 ExecStart={command}

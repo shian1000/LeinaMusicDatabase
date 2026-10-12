@@ -213,6 +213,16 @@ PASSWORD_SALT_BYTES = 16
 USER_PLAYLIST_SOURCE_FOLDER = "folder"
 USER_PLAYLIST_SOURCE_YOUTUBE = "youtube"
 
+# ==================== Music library index (utils/database/files_index.py) ====================
+
+FILES_DB_FILENAME = "files.db"
+# Compared lowercased - the library has ".MP3" and ".Mp3" files too
+LIBRARY_AUDIO_EXTENSIONS = (".mp3",)
+# files.match_source: "auto" rows are rematched by every scan while they have
+# no song; "manual" rows are left alone
+FILE_MATCH_AUTO = "auto"
+FILE_MATCH_MANUAL = "manual"
+
 # ==================== API Constants ====================
 
 # MusicBrainz API

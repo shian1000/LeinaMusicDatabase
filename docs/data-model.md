@@ -163,8 +163,8 @@ name          UNIQUE, NOT NULL  song_id        NOT NULL (references Song.id in m
 
 ## References to `songs.id` from other files
 
-`tag.db`'s `song_tags` and every `user.db`'s `playlist_tracks` / `song_tags` point at `songs.id`
-with plain integers, which SQLite can't enforce across files. `src/utils/database/song_references.py`
+`tag.db`'s `song_tags`, `files.db`'s `files` and every `user.db`'s `playlist_tracks` / `song_tags`
+point at `songs.id` with plain integers, which SQLite can't enforce across files. `src/utils/database/song_references.py`
 keeps them valid:
 
 - **`song_id_changes`** (music.db, migration 0009) is an append-only log of ids that stopped
@@ -173,9 +173,11 @@ keeps them valid:
   (today only `resolve_duplicates.remove_duplicate_songs()`, which keeps the lowest id), and
   bulk `query().delete()` calls `record_song_deletions()`.
 - **Each referencing file replays it** past its own cursor (`applied_song_changes`: tag migration
-  0002, user migration 0003) in `apply_song_id_changes()`. Merged: tags move to the kept song (one
-  it already has is dropped) and playlist tracks point at it. Deleted: tags go, and playlist
-  tracks keep their title/artist/video with `song_id` NULL, so the playlist still shows them.
+  0002, user migration 0003, files migration 0001) in `apply_song_id_changes()`. Merged: tags move
+  to the kept song (one it already has is dropped), playlist tracks and library files point at it.
+  Deleted: tags go, playlist tracks keep their title/artist/video with `song_id` NULL, so the
+  playlist still shows them, and library files get `song_id` NULL (`match_source` back to
+  `auto`) so the next scan can match them again.
   It runs at startup, at user login, and after any commit that logged something
   (`database_sessions` submit/close). A user.db on an unplugged T7 catches up later. A new user
   starts at the end of the log.
@@ -186,6 +188,25 @@ keeps them valid:
 - tag.db before this: deleting a song left its tags behind and merging duplicates dropped the
   deleted copy's tags (143 such rows on 2026-10-12, all `spellchecked`/`album_checked`
   markers). The first replay into tag.db deletes rows whose song no longer exists.
+
+## `files.db` (the music library index)
+
+`<database_dir>/files.db`, built by `src/utils/database/files_index.py` (Settings → Server →
+"Index music library", and once a day at startup). Schema only from `migrations/files/` (created
+by `migrations.initialize_db()`, no bootstrap); `LibraryFile` mirrors it. The phone downloads it
+with `music.db` / `tag.db`.
+
+- `files`: one row per audio file under `Settings.local_library_dir`. `id` is AUTOINCREMENT, never
+  reused (a moved or renamed file is a new row). `path` is relative to the library folder with
+  `/` separators — never an absolute server path. `size` + `mtime` decide whether a scan re-reads
+  the file. `song_id` = `songs.id` or NULL; `artist` / `title` from the ID3 tags (else the
+  filename) as a fallback; `duration_s`; `indexed_at` (UTC). Several files may share a song.
+- `match_source`: `auto` rows without a song are matched again (`LocalSongMatcher`, local only);
+  `manual` rows are never touched by a scan. Nothing sets `manual` yet.
+- `index_state` (key/value): `catalog_fingerprint`, a hash of artist names/synonyms and song
+  titles. Old unmatched files are rematched only when it changes (~45 s for ~700 files, because
+  the shared artist search reloads every artist per lookup); new or changed files always are.
+- `applied_song_changes`: the replay cursor, as in tag.db.
 
 ## `user.db` (one per user)
 

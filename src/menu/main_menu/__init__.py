@@ -1,7 +1,6 @@
 from utils.ui.menu_utils import execute_menu_item
 from menu.main_menu.enter_database import enter_database
 from menu.main_menu.users import users_menu
-from menu.main_menu.manage_local_files import manage_local_files
 from menu.main_menu.statistics import show_discovery_stats
 from menu.main_menu.settings import settings_menu
 from menu.main_menu.youtube import youtube_menu
@@ -15,7 +14,6 @@ def main_menu():
     action_map = {
         "Enter database": enter_database,
         "Users": users_menu,
-        "Manage local files": manage_local_files,
         "Statistics": show_discovery_stats,
         "YouTube": youtube_menu,
         "Settings": settings_menu,

@@ -29,6 +29,7 @@ reassign_artist_albums() instead.
 """
 
 import os
+import weakref
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -289,11 +290,16 @@ def _before_flush(session, flush_context, instances) -> None:
         _link_songs(session, to_link, index)
 
 
+# Not event.contains(): see song_references._registered_factories
+_registered_factories = weakref.WeakSet()
+
+
 def register_album_sync(session_factory) -> None:
     """Keep songs.album_id in step with songs.album on every flush of
     sessions made by `session_factory` (a sessionmaker)."""
-    if not event.contains(session_factory, "before_flush", _before_flush):
+    if session_factory not in _registered_factories:
         event.listen(session_factory, "before_flush", _before_flush)
+        _registered_factories.add(session_factory)
 
 
 # --------------------

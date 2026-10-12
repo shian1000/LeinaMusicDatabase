@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Optional
 from pathlib import Path
 
@@ -42,6 +43,26 @@ def strip_format_characters(s: str, keep_joiner: bool = False) -> str:
 
 
 def normalize(
+    s: Optional[str],
+    *,
+    lower: bool = True,
+    strip_apostrophe: bool = True,
+    collapse_spaces: bool = True,
+    remove_punctuation: bool = True,
+) -> str:
+    """Normalize a string for database lookup and comparisons - see
+    _normalize(). Cached: the database search normalizes every artist name
+    again for each query (database_getter._normalized_python_filter), which
+    made matching a whole music library spend ~85% of its time here."""
+    if type(s) is not str:
+        return _normalize.__wrapped__(s, lower=lower, strip_apostrophe=strip_apostrophe,
+                                      collapse_spaces=collapse_spaces, remove_punctuation=remove_punctuation)
+    return _normalize(s, lower=lower, strip_apostrophe=strip_apostrophe,
+                      collapse_spaces=collapse_spaces, remove_punctuation=remove_punctuation)
+
+
+@lru_cache(maxsize=1 << 16)
+def _normalize(
     s: Optional[str],
     *,
     lower: bool = True,

@@ -41,6 +41,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(users, "USERS_DIR", tmp_path / "Users")
     monkeypatch.setattr(users, "users_available", lambda: True)
     monkeypatch.setattr(sr, "_changes_pending", False)
+    # Never the real src/database/files.db
+    monkeypatch.setattr(sr, "FILES_DB", tmp_path / "files.db")
     return music, tag, tmp_path
 
 

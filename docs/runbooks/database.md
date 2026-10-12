@@ -92,7 +92,8 @@ deliberately, not a script). To restore an archived snapshot:
 The MusicDatabaseApp phone client (separate Flutter repo, `../MusicDatabaseApp`, its
 `docs/decisions/0002-database-download.md`) downloads the databases once a day over Tailscale.
 The user enters a **folder URL** (`http://<tailscale ip>:8002/`) and the app fetches exactly
-`<url>/music.db` and `<url>/tag.db`. It rejects anything that doesn't start with the
+`<url>/music.db` and `<url>/tag.db` (and, from 2026-10-12, `<url>/files.db` — the music library
+index; the app side is being told). It rejects anything that doesn't start with the
 `SQLite format 3` header (keeping its previous copy) and swaps the two files as a pair. That
 contract (port `SHARING_HTTP_PORT` = 8002, both file names) is relied on by the app, so agree any
 change with the app side first. Port 8001 is taken by the APK share.
@@ -105,11 +106,13 @@ when adding a migration that touches those tables, or changing what `youtube_vid
 check the app side too. Sending phone-found data back for review is planned, not built — the
 server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gaps.md).
 
-**Copying** (`utils/database/sharing.py`) puts both files in `Settings.sharing_dir`
+**Copying** (`utils/database/sharing.py`) puts every file in `backup.DB_FILES` (music, tag,
+files) in `Settings.sharing_dir`
 (`/media/owner/T7/Shared/Music/Database` by default):
 
-- Automatically, right after a *successful* daily backup in `main.py` (`share_databases_quietly()`,
-  which logs and swallows every failure). The pre-migration backup does not trigger it.
+- Automatically once a day in `main.py`: after a *successful* daily backup, the startup
+  migrations and the library scan (`scan_library_quietly()`, then `share_databases_quietly()`;
+  both log and swallow every failure). The pre-migration backup does not trigger it.
 - On demand: Settings → Server → "Submit database for sharing" (`share_databases()`), which prints where
   and when, or the error.
 - It uses the online backup API into `music.db.tmp` / `tag.db.tmp` in the same folder. Both temp
@@ -126,7 +129,9 @@ server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gap
 (`install_sharing_service()`) writes them; re-running it overwrites the units and restarts the
 server. Tests: `tests/test_database_sharing.py`.
 
-- Only `GET`/`HEAD /music.db` and `/tag.db` are served. Everything else is a 404 with no
+- Only `GET`/`HEAD /music.db`, `/tag.db` and `/files.db` are served (`SHARED_FILES`). A change
+  to that list needs `systemctl --user restart musicdatabase-share` — the running server read
+  the script at start. Everything else is a 404 with no
   directory listing; this is why plain `python -m http.server` is not used. `Cache-Control:
   no-store` is set.
 - It listens on at most two addresses, one socket each, with the same handler and port 8002:
@@ -181,8 +186,25 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
   with T7 unplugged at startup has no user backup.
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
-- **Not served.** The sharing server's whitelist is `music.db` / `tag.db`, so `Users/` and
+- **Not served.** The sharing server's whitelist is `music.db` / `tag.db` / `files.db`, so `Users/` and
   everything in it is a 404.
+
+## Music library index (`files.db`)
+
+The mp3 collection is at `Settings.local_library_dir` (`/media/owner/T7/Shared/Music/Library/`
+since 2026-10-12). `files.db` (beside `music.db`, schema in [data-model.md](../data-model.md))
+maps each file in it to its song:
+
+- **Scanning:** Settings → Server → "Index music library", and once a day at startup after the
+  backup. Only new or changed files (size/mtime) are read; an unchanged library takes ~3 s, the
+  first scan of ~4300 files ~3 min. Files without a song are listed on request and in
+  `debug.log` (`flog`).
+- **Backed up and migrated** like tag.db (`backup.DB_FILES`, `migrations.DB_FILES`); everything
+  but a future hand-set match can be rebuilt by deleting the file and scanning again.
+- T7 not mounted → the library folder is missing → the scan is skipped
+  (`LibraryUnavailableError`), the index is left as it was.
+- Audio files themselves are **not served** yet; the phone only learns which songs have a file
+  and its relative path. Serving them is a separate step that widens the server's contract.
 
 ## Album covers directory
 
@@ -193,7 +215,7 @@ mp3 tags" (`utils/discoveries/mp3_covers.py`). That defaults to
 `Settings.local_library_dir_str` and re-encodes to ≤600 px JPEG (~60–80 MB for the whole
 library rather than ~300 MB of originals). Notes:
 
-- **Backups don't include it.** `backup_databases()` copies only the two DB files. Every image
+- **Backups don't include it.** `backup_databases()` copies only the DB files. Every image
   can be regenerated by re-running the import.
 - **Sharing doesn't include it yet.** The sharing copy and server only handle `music.db` /
   `tag.db`. Serving covers to the phone (e.g. `GET /covers/<album_id>.jpg`) is a separate,

@@ -1,5 +1,6 @@
 """
-Minimal forward-only schema migration runner for music.db and tag.db.
+Minimal forward-only schema migration runner for music.db, tag.db, files.db
+and every user's user.db.
 
 Each database gets its own numbered migration track under
 `migrations/<db_name>/` (repo root), tracked by a `schema_version` table
@@ -32,16 +33,20 @@ from pathlib import Path
 
 from settings import Settings
 from utils.common.debug import mlog, slog
-from utils.database.backup import backup_databases
+from utils.database.backup import DB_FILES as BACKED_UP_DB_FILES, backup_databases
 from utils.database.users import user_db_files
 
 # migrations/user/ - applied to every user's own user.db (utils/database/users.py)
 USER_TRACK = "user"
+# migrations/files/ - the music library index (utils/database/files_index.py)
+FILES_TRACK = "files"
 
 MIGRATIONS_ROOT = Path(__file__).resolve().parents[3] / "migrations"
 DB_FILES = {
     "music": Path(str(Settings.database_dir)) / "music.db",
     "tag": Path(str(Settings.database_dir)) / "tag.db",
+    # Created by initialize_db(), never adopted: it has schema_version from the start
+    FILES_TRACK: BACKED_UP_DB_FILES[FILES_TRACK],
 }
 
 
@@ -77,8 +82,8 @@ def _applied_filenames(conn: sqlite3.Connection) -> set:
 
 def run_pending_migrations(db_name: str) -> list:
     """
-    Apply any not-yet-applied migrations for one database ("music" or
-    "tag"). Returns the filenames actually executed -- empty on a no-op run,
+    Apply any not-yet-applied migrations for one database ("music", "tag"
+    or "files"). Returns the filenames actually executed -- empty on a no-op run,
     which is the common case (this is cheap to call on every startup).
     """
     db_path = DB_FILES[db_name]
@@ -139,17 +144,22 @@ def _apply_pending(conn: sqlite3.Connection, files: list[Path], label: str, back
     return executed
 
 
-def initialize_user_db(db_path: Path) -> list:
-    """Create a new user's user.db with every migrations/user/ file applied.
-    Unlike music.db/tag.db there is no bootstrap: a user.db always starts
-    empty and gets its whole schema from the files. No backup - there's
-    nothing in it yet."""
+def initialize_db(db_path: Path, track: str, label: str) -> list:
+    """Create a new database with every migrations/<track>/ file applied.
+    Unlike music.db/tag.db there is no bootstrap: a user.db or files.db
+    always starts empty and gets its whole schema from the files. No backup -
+    there's nothing in it yet."""
     conn = sqlite3.connect(str(db_path))
     try:
         _ensure_schema_version_table(conn)
-        return _apply_pending(conn, _migration_files(USER_TRACK), db_path.parent.name, backup_first=False)
+        return _apply_pending(conn, _migration_files(track), label, backup_first=False)
     finally:
         conn.close()
+
+
+def initialize_user_db(db_path: Path) -> list:
+    """Create a new user's user.db with every migrations/user/ file applied."""
+    return initialize_db(db_path, USER_TRACK, db_path.parent.name)
 
 
 def run_pending_user_migrations() -> dict:
@@ -184,7 +194,7 @@ def run_pending_user_migrations() -> dict:
 
 
 def run_all_pending_migrations() -> dict:
-    """Runs every DB's pending migrations - music.db, tag.db and each
+    """Runs every DB's pending migrations - music.db, tag.db, files.db and each
     user's user.db (under "users": {username: [files]}). Called once at app
     startup."""
     applied = {name: run_pending_migrations(name) for name in DB_FILES}

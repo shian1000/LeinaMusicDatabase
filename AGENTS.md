@@ -16,7 +16,7 @@ Durable content that used to sprawl across root-level session reports (`OPTIMIZA
 - Primary implementation: Python, SQLite via SQLAlchemy, an interactive terminal menu UI. Not a
   server — `main.py` is a desktop app the user runs and clicks through.
 - A mobile client exists: MusicDatabaseApp (separate Flutter repo, `../MusicDatabaseApp`). It
-  downloads `music.db` / `tag.db` from the sharing server and reads them directly, may work out
+  downloads `music.db` / `tag.db` / `files.db` from the sharing server and reads them directly, may work out
   missing data (so far: YouTube links) with its own simplified logic kept only on the phone, and
   will later submit phone-found data here for review (not designed yet) —
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md). MusicDatabase's values always win.
@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~397 tests, ~3s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~407 tests, ~3s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -68,7 +68,20 @@ non-trivial work in that area.
 - `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets). `database_dir`
   defaults to `src/database/` but can be overridden via Settings → Server → Database location in the menu
   (persisted by `utils/database/database_location.py`); takes effect after a restart, not
-  immediately — why: `docs/runbooks/database.md`.
+  immediately — why: `docs/runbooks/database.md`. `local_library_dir` is the mp3 collection, on the
+  T7 SSD at `/media/owner/T7/Shared/Music/Library/` since 2026-10-12 (Samba: `Shared (SSD)`);
+  the old copy on the HDD (`ServerHDD/Shared/Music/`) is no longer the source. Its old
+  `.mp3_index.sqlite3` (made by some external tool; still used by "Copy songs from storage" and
+  `tags_fetcher`) stores local T7 paths; `files.db` below is meant to replace it.
+- `src/utils/database/files_index.py` — `files.db`, the music library index: one row per audio
+  file under `local_library_dir` (path relative to it), its `songs.id` matched with
+  `read_file_metadata()` + `LocalSongMatcher`, artist/title from tags as a fallback. Settings →
+  Server → "Index music library", and once a day at startup after the backup, right before the
+  databases are copied for the phone (which downloads `files.db` too). Only new/changed files are
+  re-read, and old unmatched ones are rematched only when the catalog fingerprint changes — the
+  shared artist search is slow (~65 ms per lookup). Schema only from `migrations/files/`;
+  merges/deletions reach it through `song_references.apply_song_id_changes()`. Details:
+  `docs/data-model.md`, `docs/runbooks/database.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
   don't inline them. In particular the `"Singles"` album sentinel ("no real parent album" — the
   fetchers, the singles-marker fallback, Years' per-title lookup and duplicate resolution all
@@ -85,7 +98,7 @@ non-trivial work in that area.
   them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
-  `tag.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
+  `tag.db` / `files.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally. It also depends on the `songs` / `artists` /
@@ -113,12 +126,16 @@ non-trivial work in that area.
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
   `user_playlists.py` saves playlists. Nothing sends or serves them yet:
   [ADR-0004](docs/decisions/0004-per-user-data.md). `song_references.py` keeps every reference to
-  `songs.id` from another file valid: tag.db's tags, and users' playlist tracks and private tags.
+  `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
+  tracks and private tags.
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
   flush listener; merges must call `record_song_merge()` and bulk `query().delete()` must call
   `record_song_deletions()`. Each referencing file replays the log past its own cursor in
   `apply_song_id_changes()`. A deleted id is never handed to a new song (the same listener numbers
-  new songs). Rules and why: the module docstring and `docs/data-model.md`. `artist_splitting.py` —
+  new songs). Rules and why: the module docstring and `docs/data-model.md`. Session-factory
+  listeners (this one, `albums.register_album_sync()`) are guarded by a `WeakSet` of registered
+  factories, not `event.contains()`: SQLAlchemy keys that by `id()`, so a new factory reusing a
+  collected one's address looked registered and never logged (flaky in tests, one factory each). `artist_splitting.py` —
   splitting a joined name ("A feat. B", "A x B") into separate artists, always behind the
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
@@ -140,7 +157,8 @@ non-trivial work in that area.
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
-  write a second one. `docs/agent-notes/normalization-and-matching.md`.
+  write a second one. `normalize()` is `lru_cache`d (pure function of its arguments): the artist
+  search re-normalizes every artist per lookup, so keep it free of side effects and global state. `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
   short-string-threshold pitfalls: `docs/agent-notes/normalization-and-matching.md`. The
   `check_spelling()` cost path and return shape: `docs/agent-notes/import-pipeline.md`.
@@ -245,7 +263,8 @@ non-trivial work in that area.
   (migrations 0005–0008). Cover *images* are never stored in a DB file: they're in
   `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). Each
   user's private `user.db` is a third kind, on T7 (`Settings.users_dir`), with its own migration
-  track `migrations/user/` — see the `users.py` Module map entry. Those files and tag.db point at
+  track `migrations/user/` — see the `users.py` Module map entry. `files.db` (the music library
+  index, `migrations/files/`, next to music.db) is a fourth. Those files and tag.db point at
   `songs.id` with plain integers, so deleting or merging a song must go through the ORM (or log
   itself via `song_references.py`), and `songs.id` must never be set or reused by hand. `datatables.py` /
   `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
@@ -321,7 +340,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~397 tests, ~3 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~407 tests, ~3 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

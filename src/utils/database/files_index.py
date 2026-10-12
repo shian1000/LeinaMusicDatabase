@@ -1,0 +1,265 @@
+"""
+files.db: the music library index - every audio file under
+Settings.local_library_dir and the music.db song it is. Settings -> Server ->
+"Index music library", and once a day at startup after the daily backup,
+before the databases are copied for the phone (which downloads files.db with
+music.db and tag.db, so it knows which songs have a file on the server).
+
+One row per file (schema: migrations/files/, created by initialize_db() -
+there's no bootstrap):
+- path is relative to the library folder with '/' separators, so the index
+  survives the library moving again and never shows the phone a server path;
+- size + mtime decide whether a file is read again: a daily scan of an
+  unchanged library only lists the folder;
+- song_id is music.db's songs.id, matched the way the cover import and
+  playlists from folders match (read_file_metadata() +
+  import_engine.LocalSongMatcher - local only, nothing created). Unmatched
+  files keep artist/title from their tags and are tried again whenever what
+  matching reads from music.db (artist names, synonyms, song titles) has
+  changed since the last scan, so a song added to the database later picks
+  up its file. Not on every scan: the shared artist search reloads every
+  artist per lookup, so ~700 unmatched files take ~30 s - too long for a
+  startup that found nothing new. A new file, or one whose contents
+  changed, is always matched. Rows with match_source 'manual' are
+  never rematched (nothing sets them yet).
+- ids are AUTOINCREMENT, never reused: a file that's moved or renamed is a
+  new row.
+
+song_id is a plain integer pointing into another file, so merges and
+deletions reach it through song_references.apply_song_id_changes() like
+tag.db; a scan replays the log first so it never matches against stale ids.
+"""
+
+import contextlib
+import hashlib
+import io
+import os
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from sqlalchemy import Column, Integer, String, create_engine, text
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+from config.constants import FILE_MATCH_AUTO, LIBRARY_AUDIO_EXTENSIONS
+from settings import Settings
+from utils.common.debug import flog, mlog, slog
+from utils.database.backup import DB_FILES
+from utils.database.migrations import FILES_TRACK, initialize_db
+
+FILES_DB_PATH = DB_FILES[FILES_TRACK]
+# Commit this often, so an interrupted first scan keeps what it read
+_COMMIT_EVERY = 500
+_FINGERPRINT_KEY = "catalog_fingerprint"
+
+FilesBase = declarative_base()
+
+
+class LibraryFile(FilesBase):
+    """Mirrors migrations/files/ - keep in step with each new file there."""
+    __tablename__ = "files"
+
+    id = Column(Integer, primary_key=True)
+    path = Column(String, nullable=False, unique=True)
+    size = Column(Integer, nullable=False)
+    mtime = Column(Integer, nullable=False)
+    song_id = Column(Integer, index=True)
+    match_source = Column(String, nullable=False, default=FILE_MATCH_AUTO)
+    artist = Column(String)
+    title = Column(String)
+    duration_s = Column(Integer)
+    indexed_at = Column(String, nullable=False)
+
+
+class LibraryUnavailableError(Exception):
+    """The library folder isn't there (e.g. the T7 drive isn't plugged in) or isn't local."""
+
+
+@dataclass
+class IndexReport:
+    files: int = 0       # audio files in the library now
+    added: int = 0
+    changed: int = 0     # re-read because size or mtime changed
+    removed: int = 0
+    matched_now: int = 0  # files that got a song in this scan
+    unmatched: list = field(default_factory=list)  # (path, artist, title) of files still without a song
+
+
+@contextmanager
+def files_db_session(db_path: Path = None):
+    """A session on files.db; its engine is disposed afterwards. The caller commits."""
+    engine = create_engine(f"sqlite:///{db_path or FILES_DB_PATH}")
+    session = sessionmaker(bind=engine)()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def ensure_files_db(db_path: Path = None) -> Path:
+    db_path = Path(db_path or FILES_DB_PATH)
+    if not db_path.exists():
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        initialize_db(db_path, FILES_TRACK, db_path.name)
+        mlog(f"Created {db_path}")
+    return db_path
+
+
+def library_root() -> Path:
+    """The library folder, or LibraryUnavailableError. Only a local folder
+    can be indexed (an smb:// library would have to be read over the network)."""
+    root_str = Settings.local_library_dir_str
+    if "://" in root_str and not root_str.startswith("file://"):
+        raise LibraryUnavailableError(f"{root_str} is not a local folder")
+    root = Path(root_str.removeprefix("file://"))
+    if not root.is_dir():
+        raise LibraryUnavailableError(f"{root} not found - is its drive plugged in?")
+    return root
+
+
+def library_audio_files(root: Path) -> dict:
+    """{relative posix path: (size, mtime)} of every audio file under root."""
+    found = {}
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            if os.path.splitext(name)[1].lower() not in LIBRARY_AUDIO_EXTENSIONS:
+                continue
+            full = Path(dirpath) / name
+            try:
+                st = full.stat()
+            except OSError as exc:
+                slog(f"[FILES INDEX] can't stat {full}: {exc}")
+                continue
+            found[full.relative_to(root).as_posix()] = (st.st_size, int(st.st_mtime))
+    return found
+
+
+def _read_tags(file: Path) -> tuple:
+    """(artist, title, duration_s) - tags, else the filename, like the tag import."""
+    from utils.discoveries.folder_playlist import audio_duration
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+    # read_file_metadata() prints a warning per file without tags - fine for
+    # one import, thousands of lines for a whole library
+    with contextlib.redirect_stdout(io.StringIO()):
+        try:
+            metadata = read_file_metadata(file)
+        except Exception as exc:
+            slog(f"[FILES INDEX] can't read tags of {file}: {exc}")
+            metadata = {}
+    return metadata.get("artist_name") or None, metadata.get("title") or file.stem, audio_duration(file)
+
+
+def catalog_fingerprint(music_session) -> str:
+    """Hash of everything LocalSongMatcher reads from music.db: artists'
+    names and synonyms, songs' titles and artists. Filling in albums or
+    years doesn't change it."""
+    digest = hashlib.sha256()
+    for query in ("SELECT id, name, synonyms FROM artists ORDER BY id",
+                  "SELECT id, artist_id, title FROM songs ORDER BY id"):
+        for row in music_session.execute(text(query)):
+            digest.update(repr(tuple(row)).encode())
+    return digest.hexdigest()
+
+
+def _state(session, key: str) -> str | None:
+    return session.execute(text("SELECT value FROM index_state WHERE key = :k"), {"k": key}).scalar()
+
+
+def _set_state(session, key: str, value: str) -> None:
+    session.execute(text("INSERT INTO index_state (key, value) VALUES (:k, :v) "
+                         "ON CONFLICT (key) DO UPDATE SET value = :v"), {"k": key, "v": value})
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def scan_library(music_session, root: Path = None, db_path: Path = None, progress=None) -> IndexReport:
+    """Bring files.db up to date with the library folder and match files
+    without a song. `progress(done, total)` is called every few hundred
+    files read. Raises LibraryUnavailableError when there's no library."""
+    from utils.database.song_references import _replay, load_changes
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    root = Path(root) if root else library_root()
+    db_path = ensure_files_db(db_path)
+    report = IndexReport()
+    on_disk = library_audio_files(root)
+    report.files = len(on_disk)
+
+    with files_db_session(db_path) as session:
+        _replay(session, load_changes(), has_tags=False, has_files=True)
+        session.commit()
+
+        fingerprint = catalog_fingerprint(music_session)
+        catalog_changed = _state(session, _FINGERPRINT_KEY) != fingerprint
+        indexed = {row.path: row for row in session.query(LibraryFile)}
+        to_read = [p for p, stat in on_disk.items()
+                   if p not in indexed or (indexed[p].size, indexed[p].mtime) != stat]
+        for done, rel in enumerate(sorted(to_read), 1):
+            size, mtime = on_disk[rel]
+            artist, title, duration = _read_tags(root / rel)
+            row = indexed.get(rel)
+            if row is None:
+                row = LibraryFile(path=rel, match_source=FILE_MATCH_AUTO)
+                session.add(row)
+                report.added += 1
+            else:
+                report.changed += 1
+                if row.match_source == FILE_MATCH_AUTO:
+                    row.song_id = None
+            row.size, row.mtime = size, mtime
+            row.artist, row.title, row.duration_s = artist, title, duration
+            row.indexed_at = _now()
+            if done % _COMMIT_EVERY == 0:
+                session.commit()
+                if progress:
+                    progress(done, len(to_read))
+
+        for rel, row in indexed.items():
+            if rel not in on_disk:
+                session.delete(row)
+                report.removed += 1
+        session.commit()
+
+        matcher = LocalSongMatcher(music_session)
+        read_now = set(to_read)
+        for row in (session.query(LibraryFile)
+                    .filter(LibraryFile.song_id.is_(None), LibraryFile.match_source == FILE_MATCH_AUTO)
+                    .order_by(LibraryFile.path)):
+            song = None
+            if catalog_changed or row.path in read_now:
+                song = matcher.match({"artist_name": row.artist, "title": row.title})
+            if song is not None:
+                row.song_id = song.id
+                report.matched_now += 1
+            else:
+                report.unmatched.append((row.path, row.artist, row.title))
+        _set_state(session, _FINGERPRINT_KEY, fingerprint)
+        session.commit()
+
+    for path, artist, title in report.unmatched:
+        flog(f"Library index: no song in the database for {path} ({artist} - {title})")
+    mlog(f"Library index: {report.files} files, +{report.added} ~{report.changed} -{report.removed}, "
+         f"{report.matched_now} matched now, {len(report.unmatched)} without a song")
+    return report
+
+
+def scan_library_quietly() -> IndexReport | None:
+    """scan_library() for the startup path, on a music session of its own: a
+    missing drive or any failure is logged, never raised, so it can't block
+    opening the app."""
+    from utils.database.music_db_manager import get_music_session
+    music_session = get_music_session()
+    try:
+        return scan_library(music_session)
+    except LibraryUnavailableError as exc:
+        slog(f"Library index skipped: {exc}", priority=3)
+    except Exception as exc:
+        slog(f"Library index failed (non-fatal): {exc}", priority=3)
+    finally:
+        music_session.rollback()  # matching only reads
+        music_session.close()
+    return None
