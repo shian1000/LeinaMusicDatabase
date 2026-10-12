@@ -70,6 +70,10 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS = [
     "Audio",
     "From",
     "Video",
+    # Says who uploaded it again, not which version (real case:
+    # "DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")
+    "Reupload",
+    "Re-upload",
 ]
 _YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS) + r")\b",

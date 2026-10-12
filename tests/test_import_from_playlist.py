@@ -424,3 +424,8 @@ def test_quoted_title_with_feat_bracket_takes_artists_from_the_credit():
 def test_quoted_title_without_feat_bracket_is_split_as_usual():
     assert m.split_quoted_title_feat_credit("'Song' (Live) - Artist") is None
     assert _build("Artist - 'Song' (feat. Guest)")["artist_name"] == "Artist"
+
+
+def test_trailing_reupload_bracket_is_stripped():
+    assert _build("DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")["title"] == "BRUNETKI I BLONDYNKI"
+    assert _build("Artist - Song [Re-upload]")["title"] == "Song"

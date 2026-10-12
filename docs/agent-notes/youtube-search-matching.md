@@ -167,7 +167,8 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
   the genuine `(Sucker Punch Remix)` subtitle right before it is untouched since it's no longer the
   trailing bracket once the `[From ...]` one is stripped first), and `"Video"` (real case:
   `"Hideki Naganuma - GET ENUF (music video)"` -> the bracket doesn't match any whole phrase in
-  `YOUTUBE_TITLE_JUNK_PHRASES`, but the word alone condemns it same as `"Audio"` does).
+  `YOUTUBE_TITLE_JUNK_PHRASES`, but the word alone condemns it same as `"Audio"` does), and
+  `"Reupload"`/`"Re-upload"` (real case: `"DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)"`).
 - `_YOUTUBE_TITLE_YEAR_RE` (checked by `strip_junk_suffix()`, same trailing-only scope as the two
   lists above) - not a word list but a bare `\b\d{4}\b` regex: any 4-digit number condemns the
   trailing bracket, on the assumption it's a release/recording year rather than part of the song's
