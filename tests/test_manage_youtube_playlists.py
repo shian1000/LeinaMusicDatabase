@@ -278,3 +278,28 @@ def test_create_yt_playlist_clears_stale_link_when_replacement_search_finds_noth
     assert committed == [True]
     assert song.youtube_video_id is None
     assert saved_caches[-1]["songs"][key]["video_id"] is None
+
+
+# ---------------------------------------------------------
+# get_video_album()
+# ---------------------------------------------------------
+
+def test_get_video_album_reads_an_official_uploads_metadata(monkeypatch):
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: FakeCompletedProcess(
+        stdout="Ґрунт\tГлюки\tZlypni, Данило Грицак\n"))
+    assert m.get_video_album("TSEjLo_hlgk") == ("Ґрунт", "Глюки", "Zlypni, Данило Грицак")
+
+
+def test_get_video_album_none_for_a_video_without_album(monkeypatch):
+    # yt-dlp prints "NA" for every field of an ordinary (non "Provided to YouTube") video
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: FakeCompletedProcess(stdout="NA\tNA\tNA\n"))
+    assert m.get_video_album("E3c2yvV1qUU") is None
+
+
+def test_get_video_album_skips_no_video_sentinel_and_failures(monkeypatch):
+    calls = []
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: calls.append(a) or FakeCompletedProcess(
+        returncode=1, stderr="ERROR: Video unavailable"))
+    assert m.get_video_album(m.NO_VIDEO_SENTINEL) is None
+    assert calls == []
+    assert m.get_video_album("deadbeef123") is None

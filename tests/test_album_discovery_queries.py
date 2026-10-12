@@ -151,3 +151,38 @@ def test_no_cyrillic_retry_without_cyrillic_context():
     modules = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=fake_get_album_name))]
     discoveries_manager.discover_album_name(song, modules)
     assert queries == ["V Krayu Magnoliy"]
+
+
+def _linked_song(video_id, artist="Злипні", synonyms=None, title="Глюки"):
+    return SimpleNamespace(artist=SimpleNamespace(name=artist, synonyms=synonyms), title=title, album=None,
+                           additional_artists=[], youtube_video_id=video_id)
+
+
+def test_album_is_read_off_the_songs_youtube_link_when_every_fetcher_is_empty(monkeypatch):
+    from utils.youtube import manage_youtube_playlists
+    # The official upload credits the Latin "Zlypni" plus a guest; no service's search knows the song
+    monkeypatch.setattr(manage_youtube_playlists, "get_video_album",
+                        lambda video_id: ("Ґрунт", "Глюки", "Zlypni, Данило Грицак") if video_id == "TSEjLo_hlgk" else None)
+    empty = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=lambda artist, title: None))]
+
+    assert discoveries_manager.discover_album_name(_linked_song("TSEjLo_hlgk"), empty) == "Ґрунт"
+    assert discoveries_manager.discover_album_name(_linked_song(None), empty) is None
+
+
+def test_youtube_link_album_for_another_song_is_discarded(monkeypatch):
+    from utils.youtube import manage_youtube_playlists
+    monkeypatch.setattr(manage_youtube_playlists, "get_video_album",
+                        lambda video_id: ("Some Album", "Other Song", "Other Artist"))
+    empty = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=lambda artist, title: None))]
+
+    assert discoveries_manager.discover_album_name(_linked_song("abcdefghijk"), empty) is None
+
+
+def test_fetcher_album_wins_over_youtube_link(monkeypatch):
+    from utils.youtube import manage_youtube_playlists
+    calls = []
+    monkeypatch.setattr(manage_youtube_playlists, "get_video_album", lambda video_id: calls.append(video_id))
+    found = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=lambda artist, title: "Ґрунт"))]
+
+    assert discoveries_manager.discover_album_name(_linked_song("TSEjLo_hlgk"), found) == "Ґрунт"
+    assert calls == []

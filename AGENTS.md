@@ -441,7 +441,7 @@ non-trivial work in that area.
   re-search, both logged to `youtube_link_cache.log`; see also `NO_VIDEO_SENTINEL`, the separate
   `"N/A"` human annotation for "confirmed no video exists at all," settable via the songs menu's
   "Report no YouTube video"; playlists still treat it as an empty field, only Years' YouTube
-  date lookup skips the song),
+  date lookup and the album lookup's last-resort read of the stored link skip the song),
   `transliteration.py`'s alternate-script
   retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
   when the winning pick isn't a confirmed official release, not by a relevance floor), why a collab

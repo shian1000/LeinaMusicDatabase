@@ -8,7 +8,7 @@ from menu.main_menu.enter_database.manage_database.merge_divide_menu import merg
 from utils.database.datatables import artist_categories, song_categories
 from utils.database.tags_management import remove_tag_from_song
 from utils.youtube.manage_youtube_playlists import create_yt_playlist, extract_video_id, NO_VIDEO_SENTINEL
-from utils.ui.display_utils import display_songs
+from utils.ui.display_utils import display_songs, display_song_links
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
@@ -167,6 +167,7 @@ def song_actions(songs_objects):
 
     action_map = {
         "Edit": lambda: edit_songs_menu(songs_objects),
+        "Show links": lambda: display_song_links(songs_objects),
         "Add tags": lambda: add_tags_menu(songs_objects),
         "Copy songs from local storage": lambda: copy_songs_from_storage(songs_list),
         "Make YT playlist": lambda: make_yt_playlist_menu(songs_objects),

@@ -136,6 +136,25 @@ def library_audio_files(root: Path) -> dict:
     return found
 
 
+def song_file_paths(song_ids, db_path: Path = None) -> dict:
+    """{song id: [full path, ...]} of the library files indexed for these
+    songs (several when a song has more than one file). Empty when files.db
+    doesn't exist yet - nothing has been indexed."""
+    db_path = Path(db_path or FILES_DB_PATH)
+    song_ids = [i for i in song_ids if i is not None]
+    if not song_ids or not db_path.exists():
+        return {}
+    root = Settings.local_library_dir_str.removeprefix("file://").rstrip("/")
+    found = {}
+    with files_db_session(db_path) as session:
+        rows = (session.query(LibraryFile.song_id, LibraryFile.path)
+                .filter(LibraryFile.song_id.in_(song_ids))
+                .order_by(LibraryFile.path))
+        for song_id, rel in rows:
+            found.setdefault(song_id, []).append(f"{root}/{rel}")
+    return found
+
+
 def _read_tags(file: Path) -> tuple:
     """(artist, title, duration_s) - tags, else the filename, like the tag import."""
     from utils.discoveries.folder_playlist import audio_duration

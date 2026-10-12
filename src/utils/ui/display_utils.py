@@ -80,6 +80,61 @@ def display_songs(songs: Optional[List[Song]]) -> None:
 
     console.print(table)
 
+def display_song_links(songs: Optional[List[Song]]) -> None:
+    """
+    Display the songs' links: the library file(s) indexed for each song in
+    files.db, its YouTube video and its Spotify page.
+
+    Args:
+        songs: List of Song objects to display
+    """
+    if not songs:
+        return
+
+    from utils.database.files_index import song_file_paths
+    from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
+
+    console: Console = Console()
+
+    table: Table = _create_table("Music Library", [
+        ("Artist", "cyan", None),
+        ("Title", "magenta", None),
+        ("Album", "green", None),
+        ("Year", None, "right"),
+        ("DB path", None, None),
+        ("YouTube", None, None),
+        ("Spotify", None, None),
+    ])
+    # Paths and URLs have no spaces to wrap at - fold them instead of cutting them off with "…"
+    for column in table.columns[4:]:
+        column.overflow = "fold"
+
+    try:
+        paths = song_file_paths([song.id for song in songs])
+    except Exception as exc:
+        slog(f"Couldn't read files.db: {exc}")
+        paths = {}
+
+    for song in songs:
+        video_id = song.youtube_video_id
+        if video_id == NO_VIDEO_SENTINEL:
+            youtube = "N/A (no video)"
+        elif video_id:
+            youtube = f"https://www.youtube.com/watch?v={video_id}"
+        else:
+            youtube = "—"
+        table.add_row(
+            song_artist_label(song),
+            song.title,
+            song.album or "—",
+            str(song.year) if song.year else "—",
+            "\n".join(paths.get(song.id, [])) or "—",
+            youtube,
+            song.spotify_url or "—",
+        )
+
+    console.print(table)
+
 def display_artists(artists: Optional[List[Artist]]) -> None:
     """
     Display a formatted table of artists with their song counts.

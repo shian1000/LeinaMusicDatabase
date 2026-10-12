@@ -1499,6 +1499,41 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
     return None
 
 
+def get_video_album(video_id: str | None, timeout: int = 30) -> tuple[str, str, str] | None:
+    """(album, track title, artist) from a video's YouTube Music metadata, read
+    via yt-dlp. Only official "Provided to YouTube" uploads carry it; None for
+    any other video, or one that doesn't resolve. `artist` may list several
+    names ("Zlypni, Данило Грицак")."""
+    if not video_id or video_id == NO_VIDEO_SENTINEL:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "yt-dlp", "--skip-download", "--no-warnings",
+                "--print", "%(album)s\t%(track)s\t%(artist)s",
+                f"https://www.youtube.com/watch?v={video_id}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        print(f"  ✖ yt-dlp unavailable: {e}")
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
+        flog(f"[yt-dlp] no album for video {video_id}: {' | '.join(errors) or 'no output'}")
+        return None
+
+    fields = result.stdout.strip().splitlines()[-1].split("\t")
+    # yt-dlp prints "NA" for a field the video doesn't have
+    album, track, artist = [("" if f == "NA" else f.strip()) for f in (fields + ["", "", ""])[:3]]
+    if not album:
+        flog(f"[yt-dlp] video {video_id} carries no album (not an official upload)")
+        return None
+    return album, track, artist
+
+
 # watch?v=<id> (any youtube.com host incl. music./m.), youtu.be/<id>,
 # /shorts/<id>, /embed/<id>, /live/<id>, or a bare 11-character id
 _VIDEO_URL_RE = re.compile(

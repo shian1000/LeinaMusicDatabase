@@ -366,6 +366,10 @@ def discover_album_name(song, modules):
         if album:
             return album
 
+    album = album_from_stored_youtube_link(song, credited)
+    if album:
+        return album
+
     # Game/anime soundtracks are often stored with the album in the artist
     # field ("Tekken 5 OST") and no fetcher knows the individual track. Only a
     # last resort - a fetcher may still find the proper album name - and not
@@ -382,6 +386,28 @@ def discover_album_name(song, modules):
         return SINGLES_ALBUM
 
     slog("Gave up =)")
+    return None
+
+
+def album_from_stored_youtube_link(song, credited_artists: list[str] | None = None) -> str | None:
+    """Album read off the song's own YouTube link (Song.youtube_video_id) when
+    no fetcher found one - an official "Provided to YouTube" upload names it
+    even for a release no service's search knows ("Злипні - Глюки" -> "Ґрунт").
+    Last resort, since it costs a yt-dlp call; validated like a fetcher result,
+    with the artist's synonyms as alternative names (the upload may credit
+    "Zlypni"). Not counted in the Statistics menu - it isn't a module."""
+    from utils.youtube.manage_youtube_playlists import get_video_album
+
+    found = get_video_album(getattr(song, "youtube_video_id", None))
+    if not found:
+        return None
+    album, track, artist = found
+    print(f"Looking for the album in the song's YouTube link [{song.youtube_video_id}]")
+    result = DiscoveryResult(album=album, matched_title=track or None, matched_artist=artist or None)
+    for name in [song.artist.name, *split_synonyms(song.artist.synonyms)]:
+        validated = _validate_result(result, name, song.title, "YouTube link", credited_artists)
+        if validated:
+            return validated
     return None
 
 

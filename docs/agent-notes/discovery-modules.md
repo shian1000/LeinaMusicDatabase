@@ -91,7 +91,17 @@ the album lookup fails across the board, not just on Spotify. This is a `truncat
 manager-level gap (the same class of problem as the comma case above, just a different separator),
 not something `spotify_fetcher.py` itself can fix — left as-is rather than special-cased locally.
 
-## Fallbacks when every fetcher is empty (soundtrack artist, singles markers)
+## Fallbacks when every fetcher is empty (YouTube link, soundtrack artist, singles markers)
+
+First, `album_from_stored_youtube_link()` reads the album off the song's own `youtube_video_id`
+(`manage_youtube_playlists.get_video_album()`, yt-dlp's `album`/`track`/`artist` fields). Only
+official "Provided to YouTube" uploads carry them, but those name albums no service's search
+knows ("Злипні - Глюки" -> "Ґрунт", credited "Zlypni, Данило Грицак"). It's the last resort and
+not a step before the modules because it costs a yt-dlp call (seconds) per song, and is cheap only
+where everything else failed. Validated like a fetcher result, retried with each artist synonym as
+the queried name; not counted in `discovery_stats` (not a module). yt-dlp must be on `PATH` (the
+venv's, as for the Years lookups) - a script that runs the venv's python without activating it
+gets nothing here.
 
 Game/anime soundtracks are often stored with the album in the artist field ("Tekken 5 OST -
 Ground Zero Funk"), and no fetcher knows the individual track. If every module (with all its
@@ -382,7 +392,10 @@ otherwise ranks EP over Single, earliest first (rule and reason in its docstring
   (`星のシルエット`). The artist has a Latin sort-name/alias, but the title doesn't, so a romaji
   `recording:"..."` query returns nothing. Even a kanji romanizer (none yet — see `matching_key()`
   in AGENTS.md) wouldn't save katakana loanwords: シルエット romanizes to "shiruetto", not
-  "silhouette". The user sets these albums by hand.
+  "silhouette". What works instead: store the title and artist in the original script and give
+  the artist its Latin name as a synonym (岩崎良美 + "Yoshimi Iwasaki"). Western services credit the
+  romaji name, which the manager can't match to kanji (Google's "Yoshimi Iwasaki" was discarded),
+  but the synonym retry queries with it, and YouTube Music then finds `タッチ`.
 
 ## Don't remove the per-candidate blacklist checks
 
