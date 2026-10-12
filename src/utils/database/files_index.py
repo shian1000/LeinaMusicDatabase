@@ -21,7 +21,7 @@ there's no bootstrap):
   artist per lookup, so ~700 unmatched files take ~30 s - too long for a
   startup that found nothing new. A new file, or one whose contents
   changed, is always matched. Rows with match_source 'manual' are
-  never rematched (nothing sets them yet).
+  never rematched - a file pinned to its song by hand, link_file_to_song().
 - ids are AUTOINCREMENT, never reused: a file that's moved or renamed is a
   new row.
 
@@ -42,7 +42,7 @@ from pathlib import Path
 from sqlalchemy import Column, Integer, String, create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from config.constants import FILE_MATCH_AUTO, LIBRARY_AUDIO_EXTENSIONS
+from config.constants import FILE_MATCH_AUTO, FILE_MATCH_MANUAL, LIBRARY_AUDIO_EXTENSIONS
 from settings import Settings
 from utils.common.debug import flog, mlog, slog
 from utils.database.backup import DB_FILES
@@ -153,6 +153,20 @@ def song_file_paths(song_ids, db_path: Path = None) -> dict:
         for song_id, rel in rows:
             found.setdefault(song_id, []).append(f"{root}/{rel}")
     return found
+
+
+def link_file_to_song(rel_path: str, song_id: int, db_path: Path = None) -> None:
+    """Pin a library file to a song by hand: match_source 'manual', which no
+    scan rematches - for a file whose tags won't find its song again (a
+    title changed to "Mogę zniknąć (SzUsty Blend)" while the tags still say
+    "Mogę zniknąć"). `rel_path` is relative to the library folder, as stored.
+    Raises LookupError if the file isn't indexed."""
+    with files_db_session(ensure_files_db(db_path)) as session:
+        row = session.query(LibraryFile).filter(LibraryFile.path == rel_path).one_or_none()
+        if row is None:
+            raise LookupError(f"{rel_path} is not in the library index - scan the library first")
+        row.song_id, row.match_source = song_id, FILE_MATCH_MANUAL
+        session.commit()
 
 
 def _read_tags(file: Path) -> tuple:

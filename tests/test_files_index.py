@@ -191,6 +191,34 @@ def test_manual_rows_are_never_rematched(env):
     assert _rows(db)["Hey - Karma.mp3"][1:3] == (None, "manual")
 
 
+def test_link_file_to_song_pins_a_file_its_tags_no_longer_find(env):
+    # The tags still say "Mogę zniknąć"; the song was renamed to the version the file really is
+    session, library, db, _, matches = env
+    song = _song(session, "Taco Hemingway", "Mogę zniknąć (SzUsty Blend)")
+    path = _file(library, "Taco Hemingway - Mogę zniknąć.mp3")
+    fi.scan_library(session, root=library, db_path=db)
+    assert _rows(db)["Taco Hemingway - Mogę zniknąć.mp3"][1:3] == (None, "auto")
+
+    fi.link_file_to_song("Taco Hemingway - Mogę zniknąć.mp3", song.id, db_path=db)
+    assert _rows(db)["Taco Hemingway - Mogę zniknąć.mp3"][1:3] == (song.id, "manual")
+
+    # Re-read (its contents changed) and the catalog changed: still pinned, never rematched
+    path.write_bytes(b"retagged")
+    os.utime(path, (1, 1))
+    _song(session, "Taco Hemingway", "Mogę zniknąć")
+    matches.clear()
+    fi.scan_library(session, root=library, db_path=db)
+    assert matches == []
+    assert _rows(db)["Taco Hemingway - Mogę zniknąć.mp3"][1:3] == (song.id, "manual")
+
+
+def test_link_file_to_song_refuses_a_file_not_in_the_index(env):
+    session, library, db, _, _ = env
+    fi.scan_library(session, root=library, db_path=db)
+    with pytest.raises(LookupError):
+        fi.link_file_to_song("Nowhere - Missing.mp3", 1, db_path=db)
+
+
 def test_files_follow_merged_and_deleted_songs(env):
     session, library, db, _, _ = env
     kept = _song(session, "Hey", "Karma")
