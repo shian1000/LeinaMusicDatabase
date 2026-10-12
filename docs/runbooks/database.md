@@ -18,7 +18,7 @@ forward-only migration runner (`src/utils/database/migrations.py`).
 ## Database location
 
 `Settings.database_dir` (`src/settings.py`) defaults to `src/database/`, but can be overridden
-from the terminal UI: Settings → Database location → Change database folder (browse via
+from the terminal UI: Settings → Server → Database location → Change database folder (browse via
 `open_file_browser_terminal()` or type a path). The override is persisted to
 `database_location_config.json` at the project root by `utils/database/database_location.py`;
 "Reset to default" deletes that file.
@@ -36,7 +36,8 @@ run on any session that never opens the database menu at all.
 
 ## Backups
 
-`backup_databases(reason)` copies every existing DB file into `src/database/archive/`, named
+`backup_databases(reason)` copies every existing DB file (plus every user's `user.db`, see
+Users' databases below) into `src/database/archive/`, named
 `<name>.<YYMMDD-HHMM>.db` (or `_2`, `_3`, ... if that exact name is already taken — two backups
 can legitimately happen a few milliseconds apart, see below). It uses SQLite's **online backup
 API** (`sqlite3.Connection.backup()`), not a plain file copy, so it's safe even while the app
@@ -64,7 +65,7 @@ into the backup call.
 
 ### Manual backup
 
-From the app: Settings → "Back up database now" (`backup_database_now()` in
+From the app: Settings → Server → "Back up database now" (`backup_database_now()` in
 `src/menu/main_menu/settings/__init__.py`), which just calls `backup_databases(reason="manual")`.
 
 From a shell/script:
@@ -109,7 +110,7 @@ server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gap
 
 - Automatically, right after a *successful* daily backup in `main.py` (`share_databases_quietly()`,
   which logs and swallows every failure). The pre-migration backup does not trigger it.
-- On demand: Settings → "Submit database for sharing" (`share_databases()`), which prints where
+- On demand: Settings → Server → "Submit database for sharing" (`share_databases()`), which prints where
   and when, or the error.
 - It uses the online backup API into `music.db.tmp` / `tag.db.tmp` in the same folder. Both temp
   copies are made first, then both are `os.replace()`d in, so a download in progress never gets
@@ -121,7 +122,7 @@ server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gap
 
 **Serving** (`utils/database/sharing_server.py`) is a stdlib-only script run on the system
 `python3` by the systemd user units `musicdatabase-share.service` + `.timer` in
-`~/.config/systemd/user/`. Settings → "Setup this PC for database sharing"
+`~/.config/systemd/user/`. Settings → Server → "Setup this PC for database sharing"
 (`install_sharing_service()`) writes them; re-running it overwrites the units and restarts the
 server. Tests: `tests/test_database_sharing.py`.
 
@@ -160,6 +161,28 @@ Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscal
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
+
+## Users' databases
+
+Users are managed from the main menu → Users (create, log in, list, rename, change password,
+delete). Each user has `Settings.users_dir/<username>/` = `/media/owner/T7/Shared/Music/Database/Users/<username>/`
+with `user.db` (their playlists and private tags) and `account.json` (password hash). The logic is in `utils/database/users.py`, and why it works
+this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
+
+- **These are the only copies.** Backups (daily, manual and pre-migration) archive each one as
+  `archive/user-<name>.<YYMMDD-HHMM>.db` next to `music.*.db`. Restore it like the others: copy
+  it back to the user's folder while the app is closed.
+- **Migrations:** `migrations/user/NNNN_*.sql`, applied to every user's `user.db` at startup
+  (`run_pending_user_migrations()`, one backup first). A new user gets every file at creation
+  (`initialize_user_db()`), with no bootstrap step as in `music.db`'s adoption below.
+- **T7 not mounted:** users are skipped by backups and migrations (the next startup with T7
+  mounted catches up on migrations), and "Create a new user" refuses. Nothing is ever created
+  under an empty mount point. The daily backup still counts as done for that day, so a day
+  with T7 unplugged at startup has no user backup.
+- **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
+  (on the system disk). To undo, move it back into `Users/` under its name.
+- **Not served.** The sharing server's whitelist is `music.db` / `tag.db`, so `Users/` and
+  everything in it is a 404.
 
 ## Album covers directory
 

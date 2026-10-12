@@ -1,6 +1,6 @@
 # Data model
 
-Two separate SQLite databases, each its own SQLAlchemy `Base` / engine / session — see
+Two shared SQLite databases (plus one private `user.db` per user, see the end), each its own SQLAlchemy `Base` / engine / session — see
 `src/utils/database/datatables.py` (`music.db`) and `src/utils/database/create_tag_db.py`
 (`tag.db`). Both live under `src/database/` (gitignored — runtime data, not fixtures; see
 `AGENTS.md` → Database safety before writing to either directly).
@@ -156,6 +156,61 @@ name          UNIQUE, NOT NULL  song_id        NOT NULL (references Song.id in m
   `SongTag` row surviving the deletion of its `Song`) is not enforced by either schema; if you write
   code that deletes songs, check `src/utils/database/tags_management.py` for whether it cleans up
   orphaned `SongTag` rows.
+
+## References to `songs.id` from other files
+
+`tag.db`'s `song_tags` and every `user.db`'s `playlist_tracks` / `song_tags` point at `songs.id`
+with plain integers, which SQLite can't enforce across files. `src/utils/database/song_references.py`
+keeps them valid:
+
+- **`song_id_changes`** (music.db, migration 0009) is an append-only log of ids that stopped
+  existing: `old_song_id` → `new_song_id` (the song a merge kept) or NULL (deleted). Deletions
+  through the ORM log themselves (a `before_flush` listener). Merges call `record_song_merge()`
+  (today only `resolve_duplicates.remove_duplicate_songs()`, which keeps the lowest id), and
+  bulk `query().delete()` calls `record_song_deletions()`.
+- **Each referencing file replays it** past its own cursor (`applied_song_changes`: tag migration
+  0002, user migration 0003) in `apply_song_id_changes()`. Merged: tags move to the kept song (one
+  it already has is dropped) and playlist tracks point at it. Deleted: tags go, and playlist
+  tracks keep their title/artist/video with `song_id` NULL, so the playlist still shows them.
+  It runs at startup, at user login, and after any commit that logged something
+  (`database_sessions` submit/close). A user.db on an unplugged T7 catches up later. A new user
+  starts at the end of the log.
+- **Ids are never reused.** `songs.id` has no AUTOINCREMENT, so SQLite would give the next new
+  song the id of the newest one just deleted, and its old tags and playlist entries would land on
+  that new song. The same listener numbers new songs above every id `songs` or the log has ever
+  held. That also makes replaying the log twice harmless.
+- tag.db before this: deleting a song left its tags behind and merging duplicates dropped the
+  deleted copy's tags (143 such rows on 2026-10-12, all `spellchecked`/`album_checked`
+  markers). The first replay into tag.db deletes rows whose song no longer exists.
+
+## `user.db` (one per user)
+
+`Settings.users_dir/<username>/user.db`: a user's private data. The schema comes only from
+`migrations/user/` (there's no SQLAlchemy model yet), and the password hash is kept outside it in
+`account.json`. Why one file per user: [ADR-0004](decisions/0004-per-user-data.md).
+
+```
+playlists                         playlist_tracks
+---------                         ---------------
+id          PK                    playlist_id      PK, -> playlists.id
+name        NOT NULL              position         PK (0-based order; a song may repeat)
+owner                             song_id          music.db songs.id, NULL = not in MusicDatabase
+source, source_id ('youtube' + id) title            NOT NULL
+created_at, updated_at  (Unix ms) artist, youtube_video_id, duration_s
+
+tags (private)                    song_tags (private)
+----                              ---------
+id          PK                    id PK, song_id NOT NULL (music.db), tag_id -> tags.id
+name        UNIQUE, NOT NULL      UNIQUE(song_id, tag_id)
+```
+
+- Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`
+  is what makes them private; `tag.db`'s tags are the global ones.
+- `song_id` is a plain integer across files, like `SongTag.song_id`. A track also keeps its
+  title / artist / video id, so it survives its song being deleted. Merges and deletions reach it
+  through the log above. Models: `src/utils/database/user_datatables.py`.
+- `playlists.source` is `'folder'` (Users → "Create playlist from folder", `source_id` = the
+  folder) or the phone's `'youtube'`.
 
 ## Categories: the search vocabulary, not schema columns
 

@@ -95,6 +95,12 @@ def session():
     s.close()
 
 
+def _match_by_title(session):
+    def match(self, metadata):
+        return session.query(Song).filter(Song.title == metadata["title"]).first()
+    return match
+
+
 def test_import_writes_one_cover_per_album_and_reruns_update(tmp_path, session, monkeypatch):
     artist = Artist(name="Hey")
     session.add(artist)
@@ -116,7 +122,7 @@ def test_import_writes_one_cover_per_album_and_reruns_update(tmp_path, session, 
     _mp3(music / "Empty.mp3")
 
     monkeypatch.setattr(mc, "read_file_metadata", lambda f: {"artist_name": "Hey", "title": f.stem})
-    monkeypatch.setattr(mc, "find_matching_artist", lambda name: artist)
+    monkeypatch.setattr(mc.LocalSongMatcher, "match", _match_by_title(session))
     covers = tmp_path / "covers"
 
     report = mc.import_covers_from_mp3(session, music, covers)

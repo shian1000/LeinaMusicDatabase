@@ -2,8 +2,8 @@
 the images embedded in the user's mp3 files (ID3 APIC frames).
 
 Each file is matched to its song the way the tag import does it
-(read_file_metadata() + a local-only artist lookup + find_existing_song() -
-no MusicBrainz, nothing created), and votes for that song's album with its
+(read_file_metadata() + import_engine.LocalSongMatcher - no MusicBrainz,
+nothing created), and votes for that song's album with its
 image. Per album one image wins: the one most of its tracks carry (the same
 picture re-encoded at another size counts as the same one, by a difference
 hash), ties -> the larger. Albums whose tracks carry different pictures are
@@ -40,9 +40,9 @@ from config.constants import (
 )
 from utils.common.debug import flog, slog
 from utils.database.albums import cover_filename, covers_dir
-from utils.database.datatables import Album, AlbumCover, Song
+from utils.database.datatables import Album, AlbumCover
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
-from utils.discoveries.import_engine import find_existing_song, find_matching_artist
+from utils.discoveries.import_engine import LocalSongMatcher
 
 
 @dataclass
@@ -166,31 +166,9 @@ def save_file_cover(session, album: Album, data: bytes, directory: Path) -> Albu
     return cover
 
 
-class _SongMatcher:
-    """mp3 metadata -> existing Song, caching each artist's songs."""
-
-    def __init__(self, session):
-        self.session = session
-        self._artists = {}
-        self._songs = {}
-
-    def match(self, metadata: dict) -> Song | None:
-        name = metadata.get("artist_name")
-        if not name or not metadata.get("title"):
-            return None
-        if name not in self._artists:
-            self._artists[name] = find_matching_artist(name)
-        artist = self._artists[name]
-        if artist is None:
-            return None
-        if artist.id not in self._songs:
-            self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
-        return find_existing_song(metadata["title"], self._songs[artist.id])
-
-
 def collect_covers(session, files: list[Path], report: CoverImportReport, progress=None) -> dict:
     """album_id -> [EmbeddedCover] for every file whose song has an album."""
-    matcher = _SongMatcher(session)
+    matcher = LocalSongMatcher(session)
     by_album = {}
     for idx, file in enumerate(files, 1):
         if progress and idx % 250 == 0:

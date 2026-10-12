@@ -363,6 +363,21 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
   the page/container text before accepting a result, so the marginal benefit was low, and its
   extraction logic wasn't touched.
 
+## MusicBrainz: which release becomes the album, and what it can't find
+
+`_pick_release()` drops compilations/live/remix releases, takes the first studio Album, and
+otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
+`tests/test_music_brainz_fetcher.py`). Two known misses are by design, not bugs to chase:
+
+- **A song released only on a soundtrack/compilation** (e.g. an anime theme like Yoshimi Iwasaki
+  "Hoshi no Silhouette", only on the *Touch* OST `タッチ`) gets no album from MusicBrainz, because
+  the compilation filter drops every release it has.
+- **Japanese titles in romaji.** MusicBrainz stores Japanese recordings in the original script
+  (`星のシルエット`). The artist has a Latin sort-name/alias, but the title doesn't, so a romaji
+  `recording:"..."` query returns nothing. Even a kanji romanizer (none yet — see `matching_key()`
+  in AGENTS.md) wouldn't save katakana loanwords: シルエット romanizes to "shiruetto", not
+  "silhouette". The user sets these albums by hand.
+
 ## Don't remove the per-candidate blacklist checks
 
 `music_brainz_fetcher.py` and `wikipedia_fetcher.py` both call `is_blacklisted_album()` *inside*

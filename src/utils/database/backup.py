@@ -1,6 +1,7 @@
 """
-Automatic backup of the SQLite databases (music.db, tag.db) into
-src/database/archive/, using SQLite's online backup API so a copy is safe to
+Automatic backup of the SQLite databases (music.db, tag.db, and every
+user's user.db when the T7 drive is mounted - archived as
+user-<name>.<timestamp>.db) into src/database/archive/, using SQLite's online backup API so a copy is safe to
 take even while the app holds an open connection.
 
 Two call sites trigger a backup:
@@ -18,6 +19,7 @@ from pathlib import Path
 
 from settings import Settings
 from utils.common.debug import mlog, slog
+from utils.database.users import user_db_files
 
 ARCHIVE_DIR = Path(str(Settings.database_dir)) / "archive"
 DB_FILES = {
@@ -78,6 +80,10 @@ def backup_databases(reason: str = "manual") -> list[Path]:
         if not src_path.exists():
             continue
         created.append(_backup_one(src_path, name, timestamp))
+    # Each user's user.db on the T7 drive is an original, not a copy - skipped
+    # (not an error) while the drive isn't mounted
+    for username, src_path in user_db_files().items():
+        created.append(_backup_one(src_path, f"user-{username}", timestamp))
     if created:
         mlog(f"Database backup ({reason}): {[p.name for p in created]}")
     return created

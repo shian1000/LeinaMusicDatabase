@@ -16,6 +16,7 @@ from utils.discoveries.discovery_settings import (
 )
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
+from utils.database.users import users_available
 from utils.database.sharing import (
     SharingUnavailableError,
     install_sharing_service,
@@ -32,14 +33,23 @@ from settings import settings
 def settings_menu():
     action_map = {
         "Discovery modules": discovery_modules_menu,
-        "Database location": database_location_menu,
         "Max songs to process per fetch": set_max_songs_per_fetch,
-        "Back up database now": backup_database_now,
-        "Submit database for sharing": submit_database_for_sharing,
-        "Setup this PC for database sharing": setup_database_sharing,
+        "Server": server_menu,
         "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
+
+
+def server_menu():
+    """Where the databases live, their backups, and sharing them with the
+    phone app."""
+    action_map = {
+        "Database location": database_location_menu,
+        "Back up database now": backup_database_now,
+        "Submit database for sharing": submit_database_for_sharing,
+        "Setup this PC for database sharing": setup_database_sharing,
+    }
+    execute_menu_item("Server", action_map, exit_label="Back")
 
 
 def set_max_songs_per_fetch():
@@ -81,7 +91,8 @@ def reset_statistics_records():
 
 
 def backup_database_now():
-    """Manually trigger an immediate snapshot of music.db and tag.db into archive/."""
+    """Manually trigger an immediate snapshot of music.db, tag.db and every
+    user's user.db into archive/."""
     created = backup_databases(reason="manual")
     if created:
         print("Backup created:")
@@ -89,6 +100,8 @@ def backup_database_now():
             print(f"  {path}")
     else:
         print("No database files found to back up.")
+    if not users_available():
+        print(f"Users' databases skipped: {settings.users_dir} is on a drive that isn't mounted.")
 
 
 def submit_database_for_sharing():

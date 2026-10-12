@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from settings import Settings
 from utils.database.datatables import Base, Song, Artist, AdditionalSongArtist
 from utils.database.albums import register_album_sync
+from utils.database.song_references import record_song_deletions, register_song_reference_sync
 import time
 from utils.common.debug import slog, mlog
 
@@ -24,6 +25,8 @@ ENGINE = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=ENGINE)
 # songs.album_id follows songs.album on every flush - see utils/database/albums.py
 register_album_sync(SessionLocal)
+# Deleted song ids are logged for tag.db / users' DBs and never reused - see utils/database/song_references.py
+register_song_reference_sync(SessionLocal)
 mlog("Music DB Manager")
 slog(SessionLocal)
 
@@ -131,6 +134,8 @@ def delete_artist_and_songs(artist_name: str) -> int:
         # additional-artist links go explicitly; the artist's own links on
         # other artists' songs go with session.delete(artist) below.
         song_ids = select(Song.id).where(Song.artist_id == artist.id)
+        # A bulk delete never reaches the flush listener that logs deletions
+        record_song_deletions(session, session.execute(song_ids).scalars().all())
         session.query(AdditionalSongArtist).filter(
             AdditionalSongArtist.song_id.in_(song_ids)
         ).delete(synchronize_session=False)

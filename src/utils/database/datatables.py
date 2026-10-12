@@ -127,6 +127,17 @@ class AlbumCover(Base):
 
     album = relationship("Album", back_populates="covers")
 
+# --------------------
+# Song ids that stopped existing (migration 0009) - see utils/database/song_references.py
+# --------------------
+class SongIdChange(Base):
+    __tablename__ = "song_id_changes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    old_song_id = Column(Integer, nullable=False, index=True)
+    new_song_id = Column(Integer)  # the song kept by a merge; NULL = deleted
+    changed_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
 song_categories = [
     "title",
     "artist name",

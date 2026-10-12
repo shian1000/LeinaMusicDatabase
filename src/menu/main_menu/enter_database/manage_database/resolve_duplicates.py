@@ -7,6 +7,7 @@ from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
+from utils.database.song_references import apply_song_id_changes, record_song_merge
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize
@@ -40,10 +41,13 @@ def remove_duplicate_songs():
         print(f"  - [{song.id}] {song.artist.name} — {song.title}")
 
     for song in duplicates:
+        # Its tags, and users' playlist entries, move to the song kept
+        record_song_merge(session, song.id, seen[(song.artist_id, song.title.lower())].id)
         session.delete(song)
 
     session.commit()
     session.close()
+    apply_song_id_changes()
     print(f"\nRemoved {len(duplicates)} duplicate(s).")
 
 

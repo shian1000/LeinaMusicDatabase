@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~359 tests, ~3s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~382 tests, ~3s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -66,7 +66,7 @@ One line per module — what it owns, and where the depth lives. Read the linked
 non-trivial work in that area.
 
 - `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets). `database_dir`
-  defaults to `src/database/` but can be overridden via Settings → Database location in the menu
+  defaults to `src/database/` but can be overridden via Settings → Server → Database location in the menu
   (persisted by `utils/database/database_location.py`); takes effect after a restart, not
   immediately — why: `docs/runbooks/database.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
@@ -82,9 +82,9 @@ non-trivial work in that area.
   a single "Fetch database data" run processes (Settings → Max songs to process per fetch),
   shared across every "Fill missing data" category (Albums, Years, ...), not just albums.
   `sharing.py` / `sharing_server.py` copy the DBs for the MusicDatabaseApp phone client and serve
-  them. The copy runs after each daily backup and from Settings → "Submit database for sharing";
+  them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
-  installed from Settings → "Setup this PC for database sharing". It serves only `music.db` /
+  installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
   `tag.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
@@ -104,14 +104,35 @@ non-trivial work in that area.
   so every artist merge must also call `reassign_artist_albums()`. Titles several main artists
   share stay NULL for Manage database → "Resolve albums with several artists"
   (`utils/ui/album_resolution_review.py`). Rules, the "Singles" one-song albums, stable ids:
-  `docs/data-model.md`. `artist_splitting.py` —
+  `docs/data-model.md`. `users.py` — users and their private data (main menu → Users): one folder per user under `Settings.users_dir` on T7 holding `user.db` (playlists,
+  private tags; schema only from `migrations/user/`) and `account.json` (salted scrypt password
+  hash). Those files are originals, so backups and startup migrations cover every user. A drive
+  that isn't mounted means users are skipped, never created on the system disk. Main menu → Users
+  (`src/menu/main_menu/users/`) creates users, logs into one (`verify_user()`), and lists /
+  renames / re-passwords / deletes them. Delete moves the folder to `archive/deleted-users/`, it doesn't erase it.
+  `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
+  `user_playlists.py` saves playlists. Nothing sends or serves them yet:
+  [ADR-0004](docs/decisions/0004-per-user-data.md). `song_references.py` keeps every reference to
+  `songs.id` from another file valid: tag.db's tags, and users' playlist tracks and private tags.
+  music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
+  flush listener; merges must call `record_song_merge()` and bulk `query().delete()` must call
+  `record_song_deletions()`. Each referencing file replays the log past its own cursor in
+  `apply_song_id_changes()`. A deleted id is never handed to a new song (the same listener numbers
+  new songs). Rules and why: the module docstring and `docs/data-model.md`. `artist_splitting.py` —
   splitting a joined name ("A feat. B", "A x B") into separate artists, always behind the
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
   `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
-  `utils/youtube/import_from_playlist.py`). `mp3_covers.py` is Fetch database data → "Import
+  `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
+  "which existing song is this file?" lookup, shared by the cover import and playlists from a
+  folder. It's deliberately looser than the import's own `find_existing_song()` check: it matches
+  the main artist of "A ft. B", and titles with brackets and trailing junk stripped. Don't swap one
+  for the other: a loose "already exists" in the import would skip genuinely new songs.
+  `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts
+  every mp3 in alphabetical path order and saves nothing while some file has no song (only
+  "Show" is offered for those so far). `mp3_covers.py` is Fetch database data → "Import
   covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
   `<database_dir>/covers/`, matched to songs like the tag import (`read_file_metadata()`,
   `find_existing_song()`), non-square video frames skipped; see its docstring and
@@ -222,14 +243,18 @@ non-trivial work in that area.
   `additional_song_artists` (extra artists of multi-artist songs; `songs.artist_id` stays the
   primary one) — see the `src/utils/database/` Module map entry — and `albums` / `album_covers`
   (migrations 0005–0008). Cover *images* are never stored in a DB file: they're in
-  `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). `datatables.py` /
+  `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). Each
+  user's private `user.db` is a third kind, on T7 (`Settings.users_dir`), with its own migration
+  track `migrations/user/` — see the `users.py` Module map entry. Those files and tag.db point at
+  `songs.id` with plain integers, so deleting or merging a song must go through the ORM (or log
+  itself via `song_references.py`), and `songs.id` must never be set or reused by hand. `datatables.py` /
   `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
   tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
   restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
 - Backups mostly happen automatically: `main.py` takes one at startup (once per calendar day) and
   another, unconditionally, immediately before applying any pending migration. Don't skip either
   when changing this code path — a schema change without a fresh backup right before it is exactly
-  the failure mode this mechanism exists to remove. Settings → "Back up database now" also lets the
+  the failure mode this mechanism exists to remove. Settings → Server → "Back up database now" also lets the
   user trigger `backup_databases()` on demand, for a snapshot right before something risky.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
   `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
@@ -296,7 +321,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~359 tests, ~3 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~382 tests, ~3 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

@@ -3,6 +3,7 @@ from utils.database.tag_db_manager import get_tag_session
 from sqlalchemy.orm import Session
 from typing import Tuple, Optional
 import threading
+from utils.database.song_references import apply_song_id_changes
 
 def open_database_sessions() -> Tuple[Session, Session]:
     music_session = get_music_session()
@@ -38,6 +39,7 @@ def close_global_database_sessions(commit: bool = True) -> None:
         if commit:
             music_session.commit()
             tag_session.commit()
+            apply_song_id_changes(tag_session=tag_session)
             music_session.close()
             tag_session.close()
         _GLOBAL_DATABASE_SESSION = None
@@ -50,6 +52,8 @@ def submit_global_database_session() -> None:
         music_session, tag_session = _GLOBAL_DATABASE_SESSION
         music_session.commit()
         tag_session.commit()
+        # Deleted/merged songs: their tags and users' playlist entries follow
+        apply_song_id_changes(tag_session=tag_session)
 
 
 

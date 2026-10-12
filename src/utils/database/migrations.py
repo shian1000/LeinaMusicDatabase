@@ -33,6 +33,10 @@ from pathlib import Path
 from settings import Settings
 from utils.common.debug import mlog, slog
 from utils.database.backup import backup_databases
+from utils.database.users import user_db_files
+
+# migrations/user/ - applied to every user's own user.db (utils/database/users.py)
+USER_TRACK = "user"
 
 MIGRATIONS_ROOT = Path(__file__).resolve().parents[3] / "migrations"
 DB_FILES = {
@@ -105,31 +109,84 @@ def run_pending_migrations(db_name: str) -> list:
             )
             return []
 
-        applied = _applied_filenames(conn)
-        pending = [f for f in files if f.name not in applied]
-        if not pending:
-            return []
-
-        backup_databases(reason=f"pre-migration ({db_name})")
-
-        executed = []
-        for f in pending:
-            try:
-                conn.executescript(f.read_text())
-                conn.execute(
-                    "INSERT INTO schema_version (filename) VALUES (?)", (f.name,)
-                )
-                conn.commit()
-                executed.append(f.name)
-                mlog(f"{db_name}.db: applied migration {f.name}")
-            except Exception as exc:
-                slog(f"{db_name}.db: migration {f.name} FAILED, stopping here: {exc}")
-                raise
-        return executed
+        return _apply_pending(conn, files, f"{db_name}.db", backup_first=True)
     finally:
         conn.close()
 
 
+def _apply_pending(conn: sqlite3.Connection, files: list[Path], label: str, backup_first: bool) -> list:
+    applied = _applied_filenames(conn)
+    pending = [f for f in files if f.name not in applied]
+    if not pending:
+        return []
+
+    if backup_first:
+        backup_databases(reason=f"pre-migration ({label})")
+
+    executed = []
+    for f in pending:
+        try:
+            conn.executescript(f.read_text())
+            conn.execute(
+                "INSERT INTO schema_version (filename) VALUES (?)", (f.name,)
+            )
+            conn.commit()
+            executed.append(f.name)
+            mlog(f"{label}: applied migration {f.name}")
+        except Exception as exc:
+            slog(f"{label}: migration {f.name} FAILED, stopping here: {exc}")
+            raise
+    return executed
+
+
+def initialize_user_db(db_path: Path) -> list:
+    """Create a new user's user.db with every migrations/user/ file applied.
+    Unlike music.db/tag.db there is no bootstrap: a user.db always starts
+    empty and gets its whole schema from the files. No backup - there's
+    nothing in it yet."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        _ensure_schema_version_table(conn)
+        return _apply_pending(conn, _migration_files(USER_TRACK), db_path.parent.name, backup_first=False)
+    finally:
+        conn.close()
+
+
+def run_pending_user_migrations() -> dict:
+    """Apply new migrations/user/ files to every user's user.db, after one
+    backup of everything. {username: [applied files]}, only users that had
+    something pending. Nothing when the users drive isn't mounted - the
+    next startup with it mounted catches up."""
+    files = _migration_files(USER_TRACK)
+    if not files:
+        return {}
+    pending_dbs = {}
+    for name, path in user_db_files().items():
+        conn = sqlite3.connect(str(path))
+        try:
+            _ensure_schema_version_table(conn)
+            if {f.name for f in files} - _applied_filenames(conn):
+                pending_dbs[name] = path
+        finally:
+            conn.close()
+    if not pending_dbs:
+        return {}
+
+    backup_databases(reason="pre-migration (users)")
+    executed = {}
+    for name, path in pending_dbs.items():
+        conn = sqlite3.connect(str(path))
+        try:
+            executed[name] = _apply_pending(conn, files, f"user {name}", backup_first=False)
+        finally:
+            conn.close()
+    return executed
+
+
 def run_all_pending_migrations() -> dict:
-    """Runs both DBs' pending migrations. Called once at app startup."""
-    return {name: run_pending_migrations(name) for name in DB_FILES}
+    """Runs every DB's pending migrations - music.db, tag.db and each
+    user's user.db (under "users": {username: [files]}). Called once at app
+    startup."""
+    applied = {name: run_pending_migrations(name) for name in DB_FILES}
+    applied["users"] = run_pending_user_migrations()
+    return applied

@@ -32,6 +32,10 @@ class Settings:
     # only there while mounted - sharing_drive_mount is checked before writing.
     sharing_drive_mount: UPath = UPath("/media/owner/T7")
     sharing_dir: UPath = sharing_drive_mount / "Shared/Music/Database"
+    # One folder per user (utils/database/users.py): their private user.db
+    # (playlists, private tags) and account.json. The originals live here, on
+    # T7 - unlike sharing_dir's music.db/tag.db, these aren't copies.
+    users_dir: UPath = sharing_dir / "Users"
     # Network interface the sharing server also listens on, for the phone on
     # the home Wi-Fi (named, not "first private address": docker0/br-* are
     # private too). Empty = Tailscale only.

@@ -193,6 +193,26 @@ ID3_PICTURE_TYPE_FRONT_COVER = 3
 # size), so they vote together rather than as a disagreement
 ALBUM_COVER_SAME_IMAGE_MAX_DISTANCE = 6
 
+# ==================== Users (utils/database/users.py) ====================
+
+# Lowercase only: the users folder is on exFAT (T7), which ignores case, so
+# "Ania" and "ania" would be the same folder anyway
+USERNAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{1,31}$"
+USER_PASSWORD_MIN_LENGTH = 6
+USER_DB_FILENAME = "user.db"
+USER_ACCOUNT_FILENAME = "account.json"
+# hashlib.scrypt cost parameters, stored with each hash so they can be raised
+# later without invalidating existing passwords
+PASSWORD_SCRYPT_N = 2 ** 14
+PASSWORD_SCRYPT_R = 8
+PASSWORD_SCRYPT_P = 1
+PASSWORD_SALT_BYTES = 16
+
+# playlists.source in a user's user.db: where the playlist came from
+# (source_id says which one). "youtube" is the phone's value for imports.
+USER_PLAYLIST_SOURCE_FOLDER = "folder"
+USER_PLAYLIST_SOURCE_YOUTUBE = "youtube"
+
 # ==================== API Constants ====================
 
 # MusicBrainz API

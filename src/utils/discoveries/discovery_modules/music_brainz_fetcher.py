@@ -47,6 +47,45 @@ def _recording_title_artist(recording) -> tuple[str, str]:
         artist = ""
     return title, artist
 
+# Without a studio album, an EP beats a single and an earlier release beats a
+# later one: a song's later "(Cinematic)"/"(Acoustic)" single tends to come
+# first in search results ("Notion" -> "Notion (Cinematic)" instead of the
+# "Futureproof" EP it came out on).
+FALLBACK_RELEASE_TYPE_RANK = {"EP": 0, "Single": 1}
+
+
+def _pick_release(recordings) -> tuple[str | None, dict | None]:
+    """(release title, its recording) for the best release of the search hits.
+
+    The first Album in result order wins. Otherwise the best-ranked other
+    release of the first recording that has any, by type then earliest date
+    (undated last). Compilations, live albums, remixes and blacklisted titles
+    never count.
+    """
+    for recording in recordings:
+        for release in recording.get("release-list", []):
+            if _release_is_eligible(release) and release.get("release-group", {}).get("primary-type", "") == "Album":
+                return release.get("title", ""), recording
+
+    for recording in recordings:
+        candidates = [release for release in recording.get("release-list", []) if _release_is_eligible(release)]
+        if candidates:
+            best = min(candidates, key=lambda release: (
+                FALLBACK_RELEASE_TYPE_RANK.get(release.get("release-group", {}).get("primary-type", ""),
+                                               len(FALLBACK_RELEASE_TYPE_RANK)),
+                release.get("date") or "9999",
+            ))
+            return best.get("title", ""), recording
+    return None, None
+
+
+def _release_is_eligible(release) -> bool:
+    secondary_types = release.get("release-group", {}).get("secondary-type-list", [])
+    if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
+        return False
+    return not is_blacklisted_album(release.get("title", ""))
+
+
 def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
     """Simple helper: fetch album for a single (artist, song) pair.
 
@@ -71,40 +110,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             response = musicbrainzngs.search_recordings(query=query, limit=5)
         recordings = response.get("recording-list", [])
 
-        album = None
-        album_recording = None
-        fallback = None
-        fallback_recording = None
-
-        for recording in recordings:
-            releases = recording.get("release-list", [])
-            for release in releases:
-                release_title = release.get("title", "")
-                release_group = release.get("release-group", {})
-                primary_type = release_group.get("primary-type", "")
-                secondary_types = release_group.get("secondary-type-list", [])
-
-                # Skip if the release group is explicitly a compilation/live/etc.
-                if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
-                    continue
-
-                slog(release_title)
-                if is_blacklisted_album(release_title):
-                    continue
-
-                if primary_type == "Album":
-                    album = release_title
-                    album_recording = recording
-                    break
-                elif fallback is None:
-                    fallback = release_title
-                    fallback_recording = recording
-
-            if album:
-                break
-
-        result = album or fallback
-        result_recording = album_recording or fallback_recording
+        result, result_recording = _pick_release(recordings)
         slog(result)
 
         if result and not is_blacklisted_album(result):
@@ -119,39 +125,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             response = musicbrainzngs.search_recordings(query=query, limit=25)
         recordings = response.get("recording-list", [])
 
-        album = None
-        album_recording = None
-        fallback = None
-        fallback_recording = None
-
-        for recording in recordings:
-            releases = recording.get("release-list", [])
-            for release in releases:
-                release_title = release.get("title", "")
-                release_group = release.get("release-group", {})
-                primary_type = release_group.get("primary-type", "")
-                secondary_types = release_group.get("secondary-type-list", [])
-
-                if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
-                    continue
-
-                # slog(release_title)
-                if is_blacklisted_album(release_title):
-                    continue
-
-                if primary_type == "Album":
-                    album = release_title
-                    album_recording = recording
-                    break
-                elif fallback is None:
-                    fallback = release_title
-                    fallback_recording = recording
-
-            if album:
-                break
-
-        final = album or fallback
-        final_recording = album_recording or fallback_recording
+        final, final_recording = _pick_release(recordings)
 
         time.sleep(delay)
         if not final:

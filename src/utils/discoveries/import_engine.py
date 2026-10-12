@@ -7,7 +7,8 @@ from utils.common.debug import slog, mlog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix
+from utils.database.artist_splitting import propose_artist_split
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
@@ -324,6 +325,55 @@ def find_existing_song(title: str, artist_songs: list) -> Song | None:
     if exact is not None:
         return exact
     return next((s for s in artist_songs if key in normalize(s.title)), None)
+
+
+def _title_core(title: str) -> str:
+    """A title without brackets or trailing junk ("Official Video", "HD"),
+    normalized: "Pay Your Respect (Official Lyric Video)" -> "pay your respect"."""
+    return normalize(strip_trailing_junk_suffix(remove_brackets(title or "")))
+
+
+class LocalSongMatcher:
+    """mp3/import metadata -> the Song already in the database, looked up
+    locally only (no MusicBrainz, nothing created). Caches each artist's
+    songs, for a whole folder at a time. Shared by the cover import and
+    playlists from folders.
+
+    Looser than the import's own "already exists?" check, because a wrong
+    "yes" here only mislabels one entry rather than skipping a new song: the
+    artist may be the main one of a joined "A ft. B" name, and titles are
+    also compared without brackets or trailing junk on either side - the
+    files still carry what the import or the rubbish cleanup later removed
+    from the database copy."""
+
+    def __init__(self, session):
+        self.session = session
+        self._artists = {}
+        self._songs = {}
+
+    def _artist(self, name: str) -> Artist | None:
+        if name not in self._artists:
+            artist = find_matching_artist(name)
+            proposal = None if artist else propose_artist_split(name)
+            if proposal and proposal.main:
+                artist = find_matching_artist(proposal.main[0])
+            self._artists[name] = artist
+        return self._artists[name]
+
+    def match(self, metadata: dict) -> Song | None:
+        name, title = metadata.get("artist_name"), metadata.get("title")
+        if not name or not title:
+            return None
+        artist = self._artist(name)
+        if artist is None:
+            return None
+        if artist.id not in self._songs:
+            self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
+        songs = self._songs[artist.id]
+        song = find_existing_song(title, songs)
+        if song is None and (core := _title_core(title)):
+            song = next((s for s in songs if _title_core(s.title) == core), None)
+        return song
 
 
 def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) -> tuple:

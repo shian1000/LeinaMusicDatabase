@@ -28,10 +28,12 @@ this index is the map of everything else.
   `src/menu/`; add a future API as a sibling, not a rewrite of it) and
   [ADR-0002](decisions/0002-multiple-artists-per-song.md) (multiple artists per song via the
   `additional_song_artists` link table, `songs.artist_id` kept as the primary; why not extra
-  columns or comma-separated ids), and
+  columns or comma-separated ids),
   [ADR-0003](decisions/0003-phone-client-fills-gaps.md) (the MusicDatabaseApp phone client may
   fill missing data locally, MusicDatabase's values win, phone-found data will come back for
-  review). Don't write one for an ordinary refactor.
+  review), and [ADR-0004](decisions/0004-per-user-data.md) (per-user private data: one `user.db`
+  per user on T7, username + password, a review inbox planned for phone-found global data).
+  Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records
 
