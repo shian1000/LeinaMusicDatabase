@@ -29,6 +29,8 @@ from pathlib import Path
 from utils.common.debug import flog, slog
 from utils.common.normalizer import name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
+from utils.database.artist_splitting import propose_artist_split
+from utils.common.script_utils import cyrillic_search_variant
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 
 def split_synonyms(synonyms: str | None) -> list[str]:
@@ -189,6 +191,12 @@ def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited
     # "Ani Lorak" vs "Ани Лорак", "Ані Лорак" vs "Ани Лорак"
     if resembles_across_scripts(queried_artist, matched_artist):
         return True
+    # A service crediting several artists in one field ("Paulina Przybysz, Ten
+    # Typ Mes, Albo Inaczej") for a song stored under just one of them. Split
+    # by name, not substring: "Ariel Pink" mustn't pass for "Ariel".
+    proposal = propose_artist_split(matched_artist)
+    if proposal and any(_matched_artist_resembles(queried_artist, name) for name in proposal.names):
+        return True
     if credited_artists:
         matched_padded = f" {normalize(matched_artist)} "
         return any(
@@ -307,6 +315,12 @@ def discover_album_name(song, modules):
     # nothing-stripped artist/title.
     raw_differs = art_cln_full != art_full or son_cln_full != son_full
 
+    synonyms = split_synonyms(song.artist.synonyms)
+    # A Latin-transliterated title the sources only know in Cyrillic ("V Krayu
+    # Magnoliy" -> "В краю магнолий"). A Cyrillic artist synonym ("Ариэль")
+    # counts as context, see script_utils.cyrillic_search_variant()
+    alt_script_title = cyrillic_search_variant(son_cln, [art_full, alb or "", *synonyms])
+
     slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
@@ -328,7 +342,7 @@ def discover_album_name(song, modules):
             album = _call_module(module, module_id, module_name, art_full, son_full, credited)
 
         #Repeat the searching with each of the artist's synonyms
-        for synonym in ([] if album else split_synonyms(song.artist.synonyms)):
+        for synonym in ([] if album else synonyms):
             print(f"Looking for it in {module_name} using synonym {synonym}")
             album = _call_module(module, module_id, module_name, synonym, son_cln, credited)
             # The truncated title alone, as in the first attempt, may be a stub
@@ -341,6 +355,13 @@ def discover_album_name(song, modules):
         if not album and multi_label:
             print(f"Looking in {module_name} using all main artists")
             album = _call_module(module, module_id, module_name, multi_label, son_cln, credited)
+
+        if not album and alt_script_title:
+            print(f"Looking in {module_name} using the title in its own script")
+            for alt_artist in [art_cln, *synonyms]:
+                album = _call_module(module, module_id, module_name, alt_artist, alt_script_title, credited)
+                if album:
+                    break
 
         if album:
             return album

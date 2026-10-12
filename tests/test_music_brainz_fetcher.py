@@ -84,3 +84,22 @@ def test_get_album_name_returns_the_ep(monkeypatch):
 
     assert result.album == "Futureproof"
     assert result.matched_title == "Notion"
+
+
+def test_get_album_name_reports_the_queried_artist_among_several_credits(monkeypatch):
+    # "El tango de Roxanne" is credited "Ewan McGregor + José Feliciano + Jacek Koman"; reporting
+    # the first credit made the manager discard the result for José Feliciano.
+    recording = {"title": "El tango de Roxanne",
+                 "artist-credit": [{"artist": {"name": "Ewan McGregor"}}, " & ",
+                                   {"artist": {"name": "José Feliciano"}}, " & ",
+                                   {"artist": {"name": "Jacek Koman"}}],
+                 "release-list": [_release("Moulin Rouge", "Album", "2001-05-08", ["Soundtrack"])]}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings",
+                        lambda query, limit: {"recording-list": [recording]})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: {"found": False})
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+
+    result = get_album_name("José Feliciano", "El tango de Roxanne")
+
+    assert result.album == "Moulin Rouge"
+    assert result.matched_artist == "José Feliciano"

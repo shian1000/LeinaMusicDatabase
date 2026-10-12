@@ -24,7 +24,7 @@ fall back to `resembles_across_scripts()` when either side has non-Latin
 letters. It runs both sides through `script_utils.matching_key()`, a lossy,
 language-agnostic romanization with y/j -> i, kh -> h and ts -> c folds, because
 transliteration schemes disagree exactly there. Latin-only pairs never take
-this looser path. Years also gets one extra search stage with
+this looser path. Years and album lookups also get one extra search stage with
 `cyrillic_search_variant()`, a rough Russian-style Latin -> Cyrillic spelling
 ("Neformat" -> "Неформат"). It's only used when the query is Latin-only but the
 rest of the entry (artist, other titles) has Cyrillic, and search engines

@@ -63,7 +63,10 @@ so Ani Lorak's album "Там, де ти є" went to Spotify as "Ani Lorak" + "Т
 though the synonym is the only name Spotify knows her by. The last stage of
 `discover_release_year_result()` retries with `alt_script_query`, the query in its own script (see
 normalization-and-matching.md → "Matching across alphabets"), first with the artist and then with
-its synonyms.
+its synonyms. `discover_album_name()` has the same last stage for a song title. There the
+artist's synonyms also count as Cyrillic context: "Ariel - V Krayu Magnoliy" has no Cyrillic at
+all until the artist gets the synonym "Ариэль", and MusicBrainz then finds "Ариэль - В краю
+магнолий" only with the Cyrillic artist too.
 
 A third stage exists for the same reason, one level up: every attempt above — truncated *and*
 "untruncated" — still runs both artist and title through `.split("(")[0]`, which assumes
@@ -326,7 +329,10 @@ on the primary artist alone: a guest on one track isn't the album's artist.
 Validation had to change with it: querying "Sw@da" while the service credits "Sw@da, Maxim &
 Niczos" fails plain similarity, so `_matched_artist_resembles()` also accepts a matched field that
 contains any of the song's credited artists as whole words (after `normalize()`). Only for
-multi-artist songs — single-artist validation is unchanged.
+multi-artist songs. Separately, for every song, a matched field that `propose_artist_split()` splits
+into names is accepted when one of the names resembles the query ("Paulina Przybysz, Ten Typ Mes,
+Albo Inaczej" for a song stored under Paulina Przybysz alone) — name by name, never substring, so
+"Ariel Pink" doesn't pass for "Ariel".
 
 One more rule in `_matched_artist_resembles()`, for every song: a matched artist with the same
 `normalizer.name_key()` as the query is accepted. That key is `normalize()` with anything from the

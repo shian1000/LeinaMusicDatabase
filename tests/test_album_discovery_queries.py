@@ -125,3 +125,29 @@ def test_fetcher_album_wins_over_cover_fallback():
     album = discoveries_manager.discover_album_name(_song("Alicia Widar", "Where is my Mind (Pixies cover)"), modules)
 
     assert album == "Surfer Rosa"
+
+
+def _only_in_cyrillic(artist, title):
+    # MusicBrainz knows "Ariel - V Krayu Magnoliy" only as "Ариэль - В краю магнолий"
+    return "Дорога длиной в 35…" if (artist, title) == ("Ариэль", "В Краю Магнолий") else None
+
+
+def test_transliterated_title_is_retried_in_cyrillic_with_a_cyrillic_synonym():
+    song = SimpleNamespace(artist=SimpleNamespace(name="Ariel", synonyms="Ариэль"),
+                           title="V Krayu Magnoliy", album=None, additional_artists=[])
+    modules = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=_only_in_cyrillic))]
+    assert discoveries_manager.discover_album_name(song, modules) == "Дорога длиной в 35…"
+
+
+def test_no_cyrillic_retry_without_cyrillic_context():
+    queries = []
+
+    def fake_get_album_name(artist, title):
+        queries.append(title)
+        return None
+
+    song = SimpleNamespace(artist=SimpleNamespace(name="Ariel", synonyms=None),
+                           title="V Krayu Magnoliy", album=None, additional_artists=[])
+    modules = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=fake_get_album_name))]
+    discoveries_manager.discover_album_name(song, modules)
+    assert queries == ["V Krayu Magnoliy"]

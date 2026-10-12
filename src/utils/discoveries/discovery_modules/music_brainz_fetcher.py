@@ -36,16 +36,13 @@ def _bounded_socket_timeout(seconds: float):
     finally:
         socket.setdefaulttimeout(previous)
 
-def _recording_title_artist(recording) -> tuple[str, str]:
-    """Best-effort extraction of what MusicBrainz recording a release came from."""
+def _recording_title_artist(recording, artist: str) -> tuple[str, str]:
+    """Best-effort extraction of what MusicBrainz recording a release came from.
+    The artist is the credit closest to the queried one, not the first
+    ("Ewan McGregor + José Feliciano + Jacek Koman" for José Feliciano)."""
     if not recording:
         return "", ""
-    title = recording.get("title", "")
-    try:
-        artist = recording["artist-credit"][0]["artist"]["name"]
-    except (KeyError, IndexError, TypeError):
-        artist = ""
-    return title, artist
+    return recording.get("title", ""), _credited_name_like(recording, artist)
 
 # Without a studio album, an EP beats a single and an earlier release beats a
 # later one: a song's later "(Cinematic)"/"(Acoustic)" single tends to come
@@ -117,7 +114,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             if not spell_check:
                 return get_album_name(artist, song, spell_check=True)
             time.sleep(delay)
-            matched_title, matched_artist = _recording_title_artist(result_recording)
+            matched_title, matched_artist = _recording_title_artist(result_recording, artist)
             return DiscoveryResult(album=result, matched_title=matched_title, matched_artist=matched_artist)
 
 
@@ -130,7 +127,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
         time.sleep(delay)
         if not final:
             return None
-        matched_title, matched_artist = _recording_title_artist(final_recording)
+        matched_title, matched_artist = _recording_title_artist(final_recording, artist)
         return DiscoveryResult(album=final, matched_title=matched_title, matched_artist=matched_artist)
 
     except musicbrainzngs.WebServiceError as e:
@@ -219,7 +216,7 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
                     year = _extract_year(release.get("date") or release_group.get("first-release-date"))
                     if year:
                         time.sleep(delay)
-                        matched_title, matched_artist = _recording_title_artist(recording)
+                        matched_title, matched_artist = _recording_title_artist(recording, artist)
                         return YearDiscoveryResult(year=year, matched_title=matched_title, matched_artist=matched_artist)
             return None
 

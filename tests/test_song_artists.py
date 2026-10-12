@@ -271,14 +271,27 @@ def no_discovery_stats(monkeypatch):
         monkeypatch.setattr(dm, name, lambda module_id: None)
 
 
-def test_matched_artist_crediting_the_whole_collab_is_accepted_only_for_multi_artist_songs():
+def test_matched_artist_crediting_the_whole_collab_is_accepted():
     result = DiscoveryResult(album="Kosmos", matched_title="Bahato", matched_artist="Sw@da, Maxim & Niczos")
     credited = ["Sw@da", "Maxim", "Niczos"]
     assert dm._validate_result(result, "Sw@da", "Bahato", "Fake", credited) == "Kosmos"
-    assert dm._validate_result(result, "Sw@da", "Bahato", "Fake") is None
+    # A song stored under one of them only: the service's list still names the queried artist
+    assert dm._validate_result(result, "Sw@da", "Bahato", "Fake") == "Kosmos"
+    assert dm._validate_result(result, "Maxim", "Bahato", "Fake") == "Kosmos"
 
     unrelated = DiscoveryResult(album="Kosmos", matched_title="Bahato", matched_artist="Someone Else")
     assert dm._validate_result(unrelated, "Sw@da", "Bahato", "Fake", credited) is None
+
+
+def test_matched_artist_list_naming_the_queried_artist_is_accepted_but_not_a_longer_name():
+    # Google credits the whole cover project; the DB has the song under Paulina Przybysz alone
+    listed = DiscoveryResult(album="Trzeba było zostać dresiarą", matched_title="Trzeba było zostać dresiarą",
+                             matched_artist="Paulina Przybysz, Ten Typ Mes, Albo Inaczej")
+    assert dm._validate_result(listed, "Paulina Przybysz", "Trzeba było zostać dresiarą", "Fake") \
+        == "Trzeba było zostać dresiarą"
+
+    longer_name = DiscoveryResult(album="Mature Themes", matched_title="Kinda Blue", matched_artist="Ariel Pink")
+    assert dm._validate_result(longer_name, "Ariel", "Kinda Blue", "Fake") is None
 
 
 def test_album_discovery_queries_primary_artist_first_then_main_artist_label(no_discovery_stats):
