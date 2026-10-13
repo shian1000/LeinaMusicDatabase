@@ -10,7 +10,7 @@ from settings import settings
 from utils.common.debug import slog
 from utils.database.database_sessions import open_and_set_global_database_sessions
 from utils.database.song_references import apply_song_id_changes
-from utils.database.user_playlists import list_playlists, playlist_songs, save_playlist
+from utils.database.user_playlists import delete_playlist, list_playlists, playlist_songs, save_playlist
 from utils.database.users import (
     InvalidUserError,
     UsersUnavailableError,
@@ -223,10 +223,21 @@ def _show_playlist(username: str, playlist_id: int, show) -> None:
             print(f"  {track.position + 1}. {track.artist or '?'} - {track.title}{video}")
 
 
+def _delete_playlist(username: str, playlist_id: int, name: str) -> str | None:
+    """Returns _BACK once deleted, which closes the playlist's menu."""
+    print(f"This deletes '{name}' here and on {username}'s phones (at their next sync).")
+    if not questionary.confirm("Delete it?", default=False).ask():
+        return None
+    archived = delete_playlist(username, playlist_id)
+    print(f"Deleted '{name}'." + (f" A copy is kept in {archived}" if archived else ""))
+    return _BACK
+
+
 def _playlist_menu(username: str, playlist_id: int, name: str) -> None:
     action_map = {
         "Show playlist contents": lambda: _show_playlist(username, playlist_id, display_songs),
         "Show playlist links": lambda: _show_playlist(username, playlist_id, display_song_links),
+        "Delete playlist": lambda: _delete_playlist(username, playlist_id, name),
     }
     execute_menu_item(f"Playlist: {name}", action_map, exit_label=_BACK)
 

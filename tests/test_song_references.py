@@ -144,6 +144,71 @@ def test_replay_reaches_users_playlists_and_private_tags(env):
     assert db.execute("SELECT song_id FROM song_tags").fetchall() == [(keep_id,)]
 
 
+def _synced_playlist(folder, uid, song_ids, checked_to=None):
+    """A playlist stored through playlist_sync (as the menu or the server
+    would); `checked_to` = song_ids_checked_to of a server write."""
+    from contextlib import closing
+    from utils.database import playlist_sync as ps
+    with closing(ps.connect(folder / "user.db")) as conn:
+        body = ps.parse_playlist({"name": uid, "updated_at": 1,
+                                  "tracks": [{"song_id": s, "title": f"t{s}"} for s in song_ids]})
+        return ps.store_playlist(conn, folder.name, uid, body, 0, song_ids_checked_to=checked_to)[1]
+
+
+def _revisions(db):
+    return dict(db.execute("SELECT uid, revision FROM playlists").fetchall())
+
+
+def test_replay_gives_changed_playlists_a_new_revision(env):
+    music, tag, _ = env
+    s = music()
+    keep, dup, other = _songs(s, "x", "x", "y")
+    keep_id, dup_id = keep.id, dup.id
+    folder = users.create_user("ania", "secret1")
+    _synced_playlist(folder, "with-dup", [dup_id, other.id])   # revision 1
+    _synced_playlist(folder, "untouched", [other.id])          # revision 2
+
+    sr.record_song_merge(s, dup_id, keep_id)
+    s.delete(dup)
+    s.commit()
+    sr.apply_song_id_changes(tag_session=tag())
+
+    db = sqlite3.connect(folder / "user.db")
+    assert _revisions(db) == {"with-dup": 3, "untouched": 2}
+    assert db.execute("SELECT last_revision FROM playlist_revision").fetchone() == (3,)
+    # Nothing new: no new revision either
+    sr.apply_song_id_changes(tag_session=tag(), force=True)
+    assert _revisions(db) == {"with-dup": 3, "untouched": 2}
+
+
+def test_replay_catches_up_playlists_resolved_against_an_older_shared_copy(env):
+    music, tag, _ = env
+    s = music()
+    a, b, kept = _songs(s, "a", "b", "kept")
+    a_id, b_id, kept_id = a.id, b.id, kept.id
+    folder = users.create_user("ania", "secret1")
+    # Merged and replayed into user.db before the server stored anything...
+    sr.record_song_merge(s, a_id, kept_id)
+    s.delete(a)
+    s.commit()
+    sr.apply_song_id_changes(tag_session=tag())
+    # ...but the shared copy the server read was older (log entry 0), so the
+    # phone's stale id went in as it was; and one more merge comes later
+    _synced_playlist(folder, "from-phone", [a_id, b_id], checked_to=0)
+    _synced_playlist(folder, "from-menu", [a_id])  # (can't happen; shows only server writes are caught up)
+    sr.record_song_merge(s, b_id, kept_id)
+    s.delete(b)
+    s.commit()
+    sr.apply_song_id_changes(tag_session=tag())
+
+    db = sqlite3.connect(folder / "user.db")
+    tracks = db.execute("SELECT p.uid, t.song_id FROM playlist_tracks t JOIN playlists p ON p.id = t.playlist_id "
+                        "ORDER BY p.uid, t.position").fetchall()
+    assert tracks == [("from-menu", a_id), ("from-phone", kept_id), ("from-phone", kept_id)]
+    assert db.execute("SELECT song_ids_checked_to FROM playlists WHERE uid = 'from-phone'").fetchone() == (None,)
+    assert _revisions(db)["from-phone"] == 3
+
+
 def test_new_user_skips_changes_made_before_it_existed(env):
     music, tag, _ = env
     s = music()

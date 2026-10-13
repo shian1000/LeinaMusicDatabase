@@ -50,6 +50,16 @@ with every path passed on the command line.
   is always a verified sender. A name with one needs that user's token (none
   or unknown/revoked -> 401, the phone logs in again; another user's -> 403);
   a name without one is accepted with or without a token, like before login.
+- Playlists (only with --users; the rules in playlist_sync.py, shared with
+  the app): GET /users/<name>/playlists?since=<revision>,
+  PUT /users/<name>/playlists/<uid> (JSON body, base_revision),
+  DELETE /users/<name>/playlists/<uid>?base_revision=<n>&deleted_at=<ms>.
+  Every request needs <name>'s token (none/unknown -> 401, another user's ->
+  403). 200 / 409 answer with JSON; 400 bad body or parameters, 411 no
+  Content-Length, 413 body over --max-playlist-bytes, 503 drive not mounted
+  or that user.db not migrated yet (the server never migrates). It writes
+  user.db itself, one BEGIN IMMEDIATE transaction per request, and resolves
+  incoming song ids against <dir>/music.db's song_id_changes.
 """
 
 import argparse
@@ -58,6 +68,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -67,10 +78,13 @@ from email.utils import formatdate
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from urllib.parse import parse_qs, urlsplit
+
 try:
-    from . import account_auth  # imported as utils.database.sharing_server (the app, tests)
+    from . import account_auth, playlist_sync  # imported as utils.database.sharing_server (the app, tests)
 except ImportError:
     import account_auth  # run as a script by the systemd service (its folder is on sys.path)
+    import playlist_sync
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
@@ -96,6 +110,10 @@ LOGIN_MAX_BODY_BYTES = 4096
 LOGIN_MAX_FAILURES = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
+# A playlist may have up to 5000 tracks (the app's limit)
+DEFAULT_MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
+# /users/<name>/playlists[/<uid>]
+PLAYLISTS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/playlists(?:/(?P<uid>[^/]+))?$")
 
 
 class LoginLimiter:
@@ -153,7 +171,8 @@ def _same_content(path: str, data: bytes) -> bool:
 def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                  max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
-                 users_dir: str | None = None, limiter: LoginLimiter | None = None):
+                 users_dir: str | None = None, limiter: LoginLimiter | None = None,
+                 max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES):
     # One lock for "is there room / is the name free" + the write, so two
     # uploads at once can't both squeeze past the limit or take one name.
     inbox_lock = threading.Lock()
@@ -167,7 +186,16 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             self._serve(send_body=False)
 
         def do_GET(self):
+            if users_dir is not None and PLAYLISTS_PATH_RE.match(urlsplit(self.path).path):
+                self._playlists("GET")
+                return
             self._serve(send_body=True)
+
+        def do_DELETE(self):
+            if users_dir is None or not PLAYLISTS_PATH_RE.match(urlsplit(self.path).path):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            self._playlists("DELETE")
 
         def _serve(self, send_body: bool):
             name = self.path.split("?", 1)[0].lstrip("/")
@@ -285,8 +313,127 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 return False
             return True
 
+        # ---- playlists ----
+
+        def _read_json_body(self, limit: int):
+            """The parsed body, or None after replying (411/413/400)."""
+            length = self.headers.get("Content-Length")
+            if length is None or not length.isdigit():
+                self._reply(HTTPStatus.LENGTH_REQUIRED)
+                return None
+            if int(length) > limit:
+                self.close_connection = True
+                self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"at most {limit} bytes")
+                return None
+            self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
+            try:
+                data = self.rfile.read(int(length))
+            except OSError:
+                self.close_connection = True
+                return None
+            try:
+                return json.loads(data)
+            except ValueError:
+                self._reply(HTTPStatus.BAD_REQUEST, "not JSON")
+                return None
+
+        def _playlists(self, method: str):
+            url = urlsplit(self.path)
+            match = PLAYLISTS_PATH_RE.match(url.path)
+            username, uid = match.group("user"), match.group("uid")
+            if (method == "GET") != (uid is None):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            body = None
+            if method == "PUT":
+                body = self._read_json_body(max_playlist_bytes)
+                if body is None:
+                    return
+            if not os.path.ismount(mount):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            sender = account_auth.token_user(users_dir, self._bearer_token())
+            if sender is None:
+                self._reply(HTTPStatus.UNAUTHORIZED, "log in again")
+                return
+            if sender != username:
+                self._reply(HTTPStatus.FORBIDDEN, "another user's playlists")
+                return
+            if uid is not None and not playlist_sync.UID_RE.match(uid):
+                self._reply(HTTPStatus.BAD_REQUEST, "not a playlist uid")
+                return
+            query = parse_qs(url.query)
+            try:
+                if method == "GET":
+                    since = self._query_int(query, "since", default=0)
+                elif method == "PUT":
+                    playlist = playlist_sync.parse_playlist(body)
+                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
+                    if body.get("uid", uid) != uid:
+                        raise playlist_sync.BadPlaylistError("uid: differs from the one in the path")
+                else:
+                    base_revision = self._query_int(query, "base_revision")
+                    deleted_at = self._query_int(query, "deleted_at")
+            except playlist_sync.BadPlaylistError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            folder = os.path.join(users_dir, username)
+            try:
+                if method == "PUT":
+                    # Before the transaction: it reads another file
+                    checked_to = playlist_sync.resolve_song_ids(playlist["tracks"],
+                                                                os.path.join(share_dir, "music.db"))
+                conn = playlist_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
+            except playlist_sync.NotMigratedError as exc:
+                print(f"Playlists of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Playlists of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if method == "GET":
+                    self._reply_json(HTTPStatus.OK, playlist_sync.changes_since(conn, since))
+                    return
+                if method == "PUT":
+                    applied, stored = playlist_sync.store_playlist(conn, username, uid, playlist, base_revision,
+                                                                   song_ids_checked_to=checked_to)
+                    archived = None
+                else:
+                    applied, stored, archived = playlist_sync.delete_playlist(conn, folder, uid, base_revision,
+                                                                              deleted_at)
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Playlists of {username}: {method} {uid} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            finally:
+                conn.close()
+            if applied and (method == "PUT" or archived):
+                what = "deleted (archived in " + str(archived) + ")" if archived else \
+                    f"stored ({len(stored.get('tracks', []))} tracks)"
+                print(f"Playlist {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
+            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
+
+        @staticmethod
+        def _query_int(query: dict, name: str, default: int | None = None) -> int:
+            values = query.get(name)
+            if not values:
+                if default is None:
+                    raise playlist_sync.BadPlaylistError(f"{name}: missing")
+                return default
+            if not values[0].isdigit():
+                raise playlist_sync.BadPlaylistError(f"{name}: expected an integer >= 0")
+            return int(values[0])
+
+        # ---- inbox ----
+
         def do_PUT(self):
             name = self.path.split("?", 1)[0]
+            if users_dir is not None and PLAYLISTS_PATH_RE.match(name):
+                self._playlists("PUT")
+                return
             if inbox_dir is None or not name.startswith(INBOX_PREFIX):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
@@ -460,17 +607,18 @@ def main(argv=None) -> int:
     parser.add_argument("--inbox", help="accept requests from the phone into this folder (on --mount)")
     parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--inbox-limit-bytes", type=int, default=DEFAULT_INBOX_LIMIT_BYTES)
-    parser.add_argument("--users", help="log in as the users in this folder (on --mount)")
+    parser.add_argument("--users", help="log in as the users in this folder (on --mount) and sync their playlists")
+    parser.add_argument("--max-playlist-bytes", type=int, default=DEFAULT_MAX_PLAYLIST_BYTES)
     args = parser.parse_args(argv)
 
     handler = make_handler(args.dir, args.mount, args.inbox, args.max_request_bytes, args.inbox_limit_bytes,
-                           users_dir=args.users)
+                           users_dir=args.users, max_playlist_bytes=args.max_playlist_bytes)
 
     def bind_and_serve(label, get_address):
         server = bind_when_ready(handler, args.port, get_address, label)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
-        inbox += f", logins for {args.users}" if args.users else ""
+        inbox += f", logins and playlists for {args.users}" if args.users else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 

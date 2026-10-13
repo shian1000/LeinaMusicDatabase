@@ -727,3 +727,162 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert calls == [
         ("daemon-reload",), ("enable", "musicdatabase-share.timer"), ("restart", "musicdatabase-share.service"),
     ] * 2
+
+
+# ==================== playlists ====================
+
+@pytest.fixture
+def playlist_server(serve, share_dir, tmp_path):
+    """--users with 'ola_k' (a migrated user.db) and 'bob' (no user.db);
+    the shared music.db has song 4, with 2 merged into it and 5 deleted."""
+    from utils.database import account_auth
+    from utils.database.migrations import initialize_user_db
+
+    users_dir = tmp_path / "Users"
+    for name in ("ola_k", "bob"):
+        (users_dir / name).mkdir(parents=True)
+        (users_dir / name / account_auth.ACCOUNT_FILENAME).write_text(f'{{"username": "{name}"}}')
+    initialize_user_db(users_dir / "ola_k" / "user.db")
+    tokens = {name: account_auth.issue_token(str(users_dir), name) for name in ("ola_k", "bob")}
+    music = sqlite3.connect(share_dir / "music.db")
+    music.execute("CREATE TABLE songs (id INTEGER PRIMARY KEY)")
+    music.execute("CREATE TABLE song_id_changes (id INTEGER PRIMARY KEY, old_song_id INTEGER, new_song_id INTEGER)")
+    music.execute("INSERT INTO songs VALUES (4)")
+    music.executemany("INSERT INTO song_id_changes VALUES (?, ?, ?)", [(1, 2, 4), (2, 5, None)])
+    music.commit()
+    music.close()
+
+    def start(mount="/", **kw):
+        handler = sharing_server.make_handler(str(share_dir), mount, users_dir=str(users_dir), **kw)
+        return serve(share_dir, mount, handler=handler)
+
+    return start, users_dir, tokens
+
+
+def _call(method, url, token=None, payload=None, raw=None):
+    data = raw if raw is not None else (None if payload is None else json.dumps(payload).encode())
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            body = resp.read()
+            return resp.status, json.loads(body) if body.startswith(b"{") else body
+    except urllib.error.HTTPError as err:
+        body = err.read()
+        return err.code, json.loads(body) if body.startswith(b"{") else body
+
+
+UID = "8f0c1a2b-0000-4000-8000-000000000001"
+
+
+def _body(base_revision=0, updated_at=1000, **extra):
+    return {"name": "Mix", "source": "youtube", "source_id": "PL1", "source_owner": "Someone",
+            "created_at": 900, "updated_at": updated_at, "base_revision": base_revision,
+            "tracks": [{"song_id": 2, "title": "merged", "artist": "A", "youtube_video_id": "v",
+                        "spotify_track_id": None, "youtube_removed": False, "duration_s": 215},
+                       {"song_id": 5, "title": "deleted"}, {"song_id": 4, "title": "kept"}], **extra}
+
+
+def test_playlist_round_trip(playlist_server):
+    start, users_dir, tokens = playlist_server
+    base = f"{start()}/users/ola_k/playlists"
+    token = tokens["ola_k"]
+
+    assert _call("GET", base, token) == (200, {"revision": 0, "playlists": []})
+    status, stored = _call("PUT", f"{base}/{UID}", token, _body())
+    assert status == 200 and stored["revision"] == 1 and stored["uid"] == UID
+    # Song ids resolved against the shared music.db: merged -> kept, deleted -> NULL
+    assert [(t["song_id"], t["title"]) for t in stored["tracks"]] == [(4, "merged"), (None, "deleted"), (4, "kept")]
+    assert stored["tracks"][0]["duration_s"] == 215 and stored["source_owner"] == "Someone"
+    assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "playlists": [stored]})
+    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 1, "playlists": []})
+
+    status, deleted = _call("DELETE", f"{base}/{UID}?base_revision=1&deleted_at=1791839796631", token)
+    assert (status, deleted) == (200, {"uid": UID, "revision": 2, "updated_at": 1791839796631, "deleted": True})
+    (archived,) = (users_dir / "ola_k" / "archive" / "playlists").iterdir()
+    assert json.loads(archived.read_text())["tracks"][2]["title"] == "kept"
+    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 2, "playlists": [deleted]})
+    # Deleting again, or something never seen, is done
+    assert _call("DELETE", f"{base}/{UID}?base_revision=0&deleted_at=1", token) == (200, deleted)
+    db = sqlite3.connect(users_dir / "ola_k" / "user.db")
+    assert db.execute("SELECT song_ids_checked_to FROM playlists").fetchone() == (None,)
+
+
+def test_playlist_conflicts_are_409_with_the_stored_playlist(playlist_server):
+    start, _, tokens = playlist_server
+    url = f"{start()}/users/ola_k/playlists/{UID}"
+    token = tokens["ola_k"]
+    _call("PUT", url, token, _body(updated_at=1000))
+    _, newer = _call("PUT", url, token, _body(base_revision=1, updated_at=3000, name="Newer"))
+    status, stored = _call("PUT", url, token, _body(base_revision=1, updated_at=2000, name="Older"))
+    assert (status, stored) == (409, newer)
+    status, stored = _call("DELETE", f"{url}?base_revision=1&deleted_at=2500", token)
+    assert (status, stored) == (409, newer)
+    # The resend of an applied change: 409 with what it sent
+    assert _call("PUT", url, token, _body(base_revision=1, updated_at=3000, name="Newer")) == (409, newer)
+
+
+def test_server_stored_playlist_remembers_the_log_position_it_was_checked_against(playlist_server):
+    start, users_dir, tokens = playlist_server
+    _call("PUT", f"{start()}/users/ola_k/playlists/{UID}", tokens["ola_k"], _body())
+    db = sqlite3.connect(users_dir / "ola_k" / "user.db")
+    assert db.execute("SELECT song_ids_checked_to FROM playlists").fetchone() == (2,)
+
+
+@pytest.mark.parametrize("token_of, status", [(None, 401), ("revoked", 401), ("bob", 403)])
+def test_playlists_need_that_users_token(playlist_server, token_of, status):
+    start, _, tokens = playlist_server
+    base = f"{start()}/users/ola_k/playlists"
+    token = {"revoked": "not-a-token", None: None}.get(token_of, tokens.get(token_of))
+    assert _call("GET", base, token)[0] == status
+    assert _call("PUT", f"{base}/{UID}", token, _body())[0] == status
+    assert _call("DELETE", f"{base}/{UID}?base_revision=0&deleted_at=1", token)[0] == status
+
+
+def test_playlists_unavailable(playlist_server, tmp_path):
+    start, _, tokens = playlist_server
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _call("GET", f"{unmounted}/users/ola_k/playlists", tokens["ola_k"])[0] == 503
+    # bob's user.db doesn't exist / isn't migrated: never migrated by the server
+    assert _call("GET", f"{start()}/users/bob/playlists", tokens["bob"])[0] == 503
+
+
+@pytest.mark.parametrize("path, payload", [
+    (f"/users/ola_k/playlists/{UID}", {"name": "x"}),
+    (f"/users/ola_k/playlists/{UID}", {**_body(), "base_revision": -1}),
+    (f"/users/ola_k/playlists/{UID}", {**_body(), "uid": "another-uid-1"}),
+    ("/users/ola_k/playlists/bad%20uid", _body()),
+])
+def test_bad_playlist_requests_are_400(playlist_server, path, payload):
+    start, _, tokens = playlist_server
+    assert _call("PUT", f"{start()}{path}", tokens["ola_k"], payload)[0] == 400
+
+
+def test_bad_playlist_parameters_and_bodies(playlist_server):
+    start, _, tokens = playlist_server
+    base = start()
+    url = f"{base}/users/ola_k/playlists"
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{url}/{UID}", token, raw=b"{not json")[0] == 400
+    assert _call("GET", f"{url}?since=-1", token)[0] == 400
+    assert _call("DELETE", f"{url}/{UID}?deleted_at=5", token)[0] == 400
+    assert _call("GET", f"{url}/{UID}", token)[0] == 404
+    assert _call("DELETE", url, token)[0] == 404
+    small = start(max_playlist_bytes=100)
+    assert _call("PUT", f"{small}/users/ola_k/playlists/{UID}", token, _body())[0] == 413
+
+    import http.client
+    host, port = base.removeprefix("http://").split(":")
+    conn = http.client.HTTPConnection(host, int(port))
+    conn.putrequest("PUT", f"/users/ola_k/playlists/{UID}")
+    conn.putheader("Transfer-Encoding", "chunked")
+    conn.endheaders()
+    assert conn.getresponse().status == 411
+    conn.close()
+
+
+def test_without_users_there_are_no_playlists(inbox_server):
+    start, _ = inbox_server
+    assert _call("GET", f"{start()}/users/ola_k/playlists")[0] == 404

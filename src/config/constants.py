@@ -228,9 +228,13 @@ PASSWORD_SCRYPT_P = 1
 PASSWORD_SALT_BYTES = 16
 
 # playlists.source in a user's user.db: where the playlist came from
-# (source_id says which one). "youtube" is the phone's value for imports.
+# (source_id says which one: the folder, or the YouTube playlist / Spotify
+# playlist / Spotify album id). The phone's values, part of the playlist sync
+# contract (utils/database/playlist_sync.SOURCES must match).
 USER_PLAYLIST_SOURCE_FOLDER = "folder"
 USER_PLAYLIST_SOURCE_YOUTUBE = "youtube"
+USER_PLAYLIST_SOURCE_SPOTIFY = "spotify"
+USER_PLAYLIST_SOURCE_SPOTIFY_ALBUM = "spotifyAlbum"
 
 # ==================== Music library index (utils/database/files_index.py) ====================
 

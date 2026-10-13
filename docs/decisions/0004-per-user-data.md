@@ -3,8 +3,9 @@
 - Status: Accepted (built on this side: user folders, the schema, backups, login and user
   management in the terminal menu, playlists from a folder, song id changes reaching user DBs;
   on the phone since 2026-10-13: logging in as a user through the sharing server and sending
-  inbox requests signed with that user's token — MusicDatabaseApp's ADR 0006; its user data,
-  playlists and private tags, isn't sent to or read on the phone yet)
+  inbox requests signed with that user's token — MusicDatabaseApp's ADR 0006; playlists sync
+  with the user's phones through the sharing server since 2026-10-13 on this side, the phone's
+  part is the app's ADR 0007; private tags aren't sent anywhere yet)
 - Date: 2026-10-12
 
 ## Context
@@ -57,9 +58,15 @@ anywhere.
 
 ## Not done yet
 
-- Nothing sends, receives or serves `user.db`. The sharing server still serves only
-  `music.db`/`tag.db`/`files.db` (everything else is a 404, including `Users/`) and takes only
-  inbox requests. Uploading user data needs agreeing with the MusicDatabaseApp side first.
+- `user.db` itself is never served: the sharing server serves only
+  `music.db`/`tag.db`/`files.db` (everything else is a 404, including `Users/`). Private tags
+  don't reach the phone yet; they'll follow the playlists' pattern.
+
+Since built (2026-10-13): playlists sync between `user.db` and the user's phones, one whole
+playlist at a time, through `GET/PUT/DELETE /users/<name>/playlists` on the sharing server (the
+hub), the newer change winning a conflict and deletions archived first
+([runbooks/database.md](../runbooks/database.md) → "Playlists on the phone"). This is the "may
+be sent to the phone one day" above, done per playlist rather than by sending the file.
 
 Since built (2026-10-13): the phone logs in as one of these users through the sharing server
 (`POST /login` → a token, kept as a hash in `Users/<name>/tokens.json`) and signs its inbox

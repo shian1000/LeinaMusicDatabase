@@ -218,8 +218,42 @@ because the server imports it too (as a sibling module), and `users.py` uses it 
   missing T7 is a 503, never a 401. The name pattern's user part is `USERNAME_PATTERN` (may hold
   `_`; the fixed-shape date keeps the split unambiguous).
 
+**Playlists on the phone (2026-10-13).** A logged-in phone syncs the user's playlists with their
+`user.db` through the server, which is the hub; phones never talk to each other. The owner's
+decisions and the phone's side are in the app's `docs/handoffs/musicdatabase-playlists.md`; the
+answer, with the final contract, is [`docs/handoffs/playlists-for-musicdatabaseapp.md`](../handoffs/playlists-for-musicdatabaseapp.md).
+The rules live in `utils/database/playlist_sync.py`, standard-library only like `account_auth.py`,
+because the server and the app's own writes (`user_playlists.py`) both use it.
+
+- `GET /users/<name>/playlists?since=<revision>`, `PUT /users/<name>/playlists/<uid>` (whole
+  playlist + `base_revision`), `DELETE /users/<name>/playlists/<uid>?base_revision=&deleted_at=`.
+  Every call needs `<name>`'s token (401 none/unknown, 403 another user's); 503 when T7 isn't
+  mounted or that `user.db` hasn't got migration `user/0004_playlist_sync.sql` (the server never
+  migrates; the app does at startup). Bodies up to `--max-playlist-bytes` (8 MiB).
+- **Revisions:** every change to a playlist, from any writer, gives it the next number of the
+  user's `playlist_revision` counter: a phone, the menu (create, delete), and
+  `apply_song_id_changes()` when a merge or deletion changes a track's `song_id`.
+- **Conflicts:** the newer change wins. A change based on the stored revision is applied; one
+  based on an older revision only if its `updated_at` (the device's clock, stored as sent) is
+  later, otherwise the answer is 409 with the stored playlist. A deletion uses `deleted_at` the
+  same way. A resend after a lost answer gets a 409 that matches what it sent.
+- **Same import on two phones:** a PUT of an unknown uid whose `source` + `source_id` match a live
+  playlist updates that one instead, and the answer carries the existing uid.
+- **Song ids** from a phone's older `music.db` are run through `song_id_changes` of the *shared
+  copy* in `--dir` before they're stored (merged → kept song, chains followed, deleted → NULL; an
+  id that's neither a song nor in the log → NULL). That copy can be a day behind, so the playlist
+  keeps `song_ids_checked_to` = the last log entry checked, and the next `apply_song_id_changes()`
+  replays the entries between that and the file's cursor for that playlist only.
+- **Deleting** (phone or Users → "Show playlists" → "Delete playlist") keeps the row as a marker
+  without tracks, so every phone hears about it. Before the tracks go, the whole playlist is written
+  to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json` (the deletion time; `_2`, `_3` …
+  if the name is taken; never overwritten). Nothing reads that folder: it's for recovering a
+  playlist by hand. It isn't part of the backups; those files are already the backup.
+- The server writes `user.db` with `sqlite3`, one `BEGIN IMMEDIATE` transaction per request with
+  a 15 s busy timeout, so a request and the app's own writes queue up instead of interleaving.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
@@ -243,8 +277,11 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
   with T7 unplugged at startup has no user backup.
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
-- **Not served.** The sharing server's whitelist is `music.db` / `tag.db` / `files.db`, so `Users/` and
-  everything in it is a 404.
+- **Not served as files.** The sharing server's whitelist is `music.db` / `tag.db` / `files.db`, so
+  `Users/` and everything in it is a 404. Playlists reach the logged-in user's phones through the
+  playlist endpoints above; private tags don't go anywhere yet.
+- **Deleted playlists** are copied to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json`
+  first (see "Playlists on the phone" above). To recover one, read its tracks from that file.
 
 ## Music library index (`files.db`)
 

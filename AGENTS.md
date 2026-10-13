@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~515 tests, ~20s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~580 tests, ~25s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -99,10 +99,11 @@ non-trivial work in that area.
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
   `tag.db` / `files.db`, and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
-  at most 1 MiB each, nothing while `new/` holds 100 MiB), port 8002, only on the Tailscale IP plus the named LAN interface from
+  at most 1 MiB each, nothing while `new/` holds 100 MiB), syncs a logged-in user's playlists
+  (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor the inbox URL, name pattern or answers).
+  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist endpoints and their JSON).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports; Manage database →
   "Resolve new requests" (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value
   never lands without review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
@@ -134,11 +135,16 @@ non-trivial work in that area.
   (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
   `docs/runbooks/database.md` → "Logging in from the phone".
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
-  `user_playlists.py` saves playlists and reads them back (`playlist_songs()`:
+  `user_playlists.py` saves / deletes playlists and reads them back (`playlist_songs()`:
   the music.db `Song` rows in order, plus the tracks with no song). "Show playlists" shows them
   through the same `display_songs()` / `display_song_links()` tables as Fetch songs, and lists the
-  tracks without a song underneath, since those tables need `Song` rows. Nothing sends or
-  serves them yet: [ADR-0004](docs/decisions/0004-per-user-data.md). `song_references.py` keeps every reference to
+  tracks without a song underneath, since those tables need `Song` rows. Playlists sync with the
+  user's phones through the sharing server (`GET/PUT/DELETE /users/<name>/playlists`); the rules
+  (uid, per-user revision counter, newer `updated_at` wins, deletion = archived JSON + marker row,
+  song ids resolved against the shared music.db) are in `playlist_sync.py`, standard-library only
+  because the server imports it. Every write to `playlists` / `playlist_tracks` must go through
+  it, or bump the revision with `mark_changed()`, or the phones never see the change. Details:
+  `docs/runbooks/database.md` → "Playlists on the phone". `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
   tracks and private tags.
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
@@ -372,7 +378,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~515 tests, ~20 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~580 tests, ~25 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

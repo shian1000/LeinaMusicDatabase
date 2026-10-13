@@ -221,17 +221,21 @@ with `music.db` / `tag.db`.
 ## `user.db` (one per user)
 
 `Settings.users_dir/<username>/user.db`: a user's private data. The schema comes only from
-`migrations/user/` (there's no SQLAlchemy model yet), and the password hash is kept outside it in
+`migrations/user/` (the SQLAlchemy models in `user_datatables.py` mirror it), and the password hash is kept outside it in
 `account.json`. Why one file per user: [ADR-0004](decisions/0004-per-user-data.md).
 
 ```
 playlists                         playlist_tracks
 ---------                         ---------------
-id          PK                    playlist_id      PK, -> playlists.id
-name        NOT NULL              position         PK (0-based order; a song may repeat)
-owner                             song_id          music.db songs.id, NULL = not in MusicDatabase
-source, source_id ('youtube' + id) title            NOT NULL
-created_at, updated_at  (Unix ms) artist, youtube_video_id, duration_s
+id          PK (local to the file) playlist_id     PK, -> playlists.id
+uid         UNIQUE (the sync id)  position         PK (0-based order; a song may repeat)
+name        NOT NULL              song_id          music.db songs.id, NULL = not in MusicDatabase
+owner       (the username)        title            NOT NULL
+source, source_id, source_owner   artist, youtube_video_id, spotify_track_id, duration_s
+created_at, updated_at  (Unix ms) youtube_removed  0/1 (video gone, the phone finds another)
+revision, deleted_at, song_ids_checked_to
+
+playlist_revision: one row, last_revision = the user's revision counter
 
 tags (private)                    song_tags (private)
 ----                              ---------
@@ -245,7 +249,14 @@ name        UNIQUE, NOT NULL      UNIQUE(song_id, tag_id)
   title / artist / video id, so it survives its song being deleted. Merges and deletions reach it
   through the log above. Models: `src/utils/database/user_datatables.py`.
 - `playlists.source` is `'folder'` (Users → "Create playlist from folder", `source_id` = the
-  folder) or the phone's `'youtube'`.
+  folder) or the phone's `'youtube'`, `'spotify'`, `'spotifyAlbum'` (`source_id` = the playlist /
+  album id, `source_owner` = its author on YouTube/Spotify).
+- Playlists sync with the user's phones (user migration 0004, `playlist_sync.py`): `uid` is the
+  id every device uses, `revision` the user's counter at the playlist's last change from any
+  writer, `updated_at` the changing device's clock (it decides conflicts), `deleted_at` set on a
+  deleted playlist, which keeps its row without tracks. `song_ids_checked_to`: the shared
+  music.db's last `song_id_changes` entry a server write was resolved against, cleared by the next
+  replay. Rules: [runbooks/database.md](runbooks/database.md) → "Playlists on the phone".
 
 ## Categories: the search vocabulary, not schema columns
 

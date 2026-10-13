@@ -16,7 +16,8 @@ originals, not copies, so backup_databases() includes them.
 
 The phone logs in as one of these users through the sharing server
 (account_auth.py: password check, tokens in Users/<username>/tokens.json).
-Nothing sends or receives user.db yet (docs/decisions/0004-per-user-data.md).
+user.db itself is never sent; its playlists sync with the user's phones
+through the same server (playlist_sync.py, docs/decisions/0004-per-user-data.md).
 """
 
 import hashlib
