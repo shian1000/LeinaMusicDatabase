@@ -2,7 +2,9 @@
 
 - Status: Accepted (built on this side: user folders, the schema, backups, login and user
   management in the terminal menu, playlists from a folder, song id changes reaching user DBs;
-  nothing on the phone side yet)
+  on the phone since 2026-10-13: logging in as a user through the sharing server and sending
+  inbox requests signed with that user's token — MusicDatabaseApp's ADR 0006; its user data,
+  playlists and private tags, isn't sent to or read on the phone yet)
 - Date: 2026-10-12
 
 ## Context
