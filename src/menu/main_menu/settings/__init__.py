@@ -19,6 +19,7 @@ from utils.database.backup import backup_databases
 from utils.database.database_sessions import open_and_set_global_database_sessions
 from utils.database.files_index import FILES_DB_PATH, LibraryUnavailableError, scan_library
 from utils.database.users import users_available
+from utils.database.moods import apply_global_mood_changes_quietly
 from utils.database.sharing import (
     SharingUnavailableError,
     install_sharing_service,
@@ -132,6 +133,10 @@ def index_music_library():
 def submit_database_for_sharing():
     """Copy music.db, tag.db and files.db to the folder the mobile app downloads from,
     right now instead of waiting for the next daily backup."""
+    # Phones' changes to global moods go into tag.db first, so this copy has them
+    applied = apply_global_mood_changes_quietly()
+    if applied:
+        print(f"Applied {len(applied)} change(s) to global moods from the phones.")
     try:
         published = share_databases()
     except SharingUnavailableError as exc:

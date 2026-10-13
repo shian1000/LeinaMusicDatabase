@@ -40,7 +40,8 @@ from config.constants import (
     USERNAME_PATTERN,
 )
 from settings import Settings
-from utils.database.account_auth import password_matches, revoke_all_tokens
+from utils.database.account_auth import PERMISSIONS, password_matches, revoke_all_tokens
+from utils.database.account_auth import user_permissions as _user_permissions
 
 USERS_DIR = Path(str(Settings.users_dir))
 USERS_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
@@ -249,6 +250,29 @@ def delete_user(username: str) -> Path:
     revoke_all_tokens(folder)
     shutil.move(str(folder), str(target))
     return target
+
+
+# --------------------
+# Permissions
+# --------------------
+
+def user_permissions(username: str) -> list[str]:
+    """What the owner allowed this user (account.json "permissions")."""
+    folder = _existing_user_dir(username)
+    return _user_permissions(folder.parent, folder.name)
+
+
+def set_permissions(username: str, permissions) -> list[str]:
+    """Replace a user's permissions; the sharing server sees the change on
+    the phone's next request. Returns them sorted."""
+    folder = _existing_user_dir(username)
+    unknown = set(permissions) - set(PERMISSIONS)
+    if unknown:
+        raise InvalidUserError(f"Unknown permission(s): {', '.join(sorted(unknown))}")
+    account = _read_account(folder)
+    account["permissions"] = sorted(set(permissions))
+    _write_account(folder, account)
+    return account["permissions"]
 
 
 def read_account(username: str) -> dict:

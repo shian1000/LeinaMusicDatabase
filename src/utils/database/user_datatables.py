@@ -51,10 +51,22 @@ class PlaylistTrack(UserBase):
 
 
 class PrivateTag(UserBase):
+    """A private tag; with kind 'mood', one of the user's moods (migration
+    0005, synced by mood_sync.py, which does every write to moods)."""
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=False)  # unique among live rows (deleted_at IS NULL)
+    kind = Column(String, nullable=False, default="marker")
+    uid = Column(String, unique=True)
+    revision = Column(Integer, nullable=False, default=0)  # the user's mood_revision counter
+    created_at = Column(Integer)  # Unix ms
+    updated_at = Column(Integer)
+    deleted_at = Column(Integer)  # NULL = live, else a marker without songs
+    song_ids_checked_to = Column(Integer)
+    promoted_to = Column(Integer)  # tag.db id of the global mood it was moved into
+    promoted_to_name = Column(String)
+    merged_into = Column(String)  # uid of the mood it was merged into
 
 
 class PrivateSongTag(UserBase):

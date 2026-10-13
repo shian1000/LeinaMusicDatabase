@@ -5,7 +5,9 @@
   on the phone since 2026-10-13: logging in as a user through the sharing server and sending
   inbox requests signed with that user's token — MusicDatabaseApp's ADR 0006; playlists sync
   with the user's phones through the sharing server since 2026-10-13 on this side, the phone's
-  part is the app's ADR 0007; private tags aren't sent anywhere yet)
+  part is the app's ADR 0007; moods - private tags with kind 'mood' - sync the same way since
+  2026-10-13 on this side, and permissions the owner grants live in account.json; other
+  private tags aren't sent anywhere)
 - Date: 2026-10-12
 
 ## Context
@@ -71,6 +73,12 @@ be sent to the phone one day" above, done per playlist rather than by sending th
 Since built (2026-10-13): the phone logs in as one of these users through the sharing server
 (`POST /login` → a token, kept as a hash in `Users/<name>/tokens.json`) and signs its inbox
 requests with it — [runbooks/database.md](../runbooks/database.md) → "Logging in from the phone".
+
+Since built (2026-10-13): moods. A user's own moods are private tags with kind `'mood'`, synced
+through `/users/<name>/moods` like playlists. Global moods are `tag.db` tags with kind `'mood'`;
+users the owner gave the `edit_global_moods` permission (kept in `account.json`, because it's the
+owner's trust and not the user's data) change them from the phone without review, through a log the
+app applies — [runbooks/database.md](../runbooks/database.md) → "Moods on the phone".
 
 Since built: song merges and deletions reach users' playlists and private tags, and tag.db, via
 an id-change log in `music.db` replayed by each file

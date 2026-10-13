@@ -718,6 +718,7 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert f"--dir {sharing.SHARING_DIR}" in service
     assert f"--inbox {sharing.PHONE_INBOX_DIR}" in service
     assert f"--users {sharing.USERS_DIR}" in service
+    assert f"--mood-changes {sharing.GLOBAL_MOOD_CHANGES_DIR}" in service
     assert "--inbox-limit-bytes 104857600" in service
     assert f"--mount {sharing.SHARING_DRIVE_MOUNT}" in service
     assert str(sharing.SERVER_SCRIPT) in service
@@ -886,3 +887,143 @@ def test_bad_playlist_parameters_and_bodies(playlist_server):
 def test_without_users_there_are_no_playlists(inbox_server):
     start, _ = inbox_server
     assert _call("GET", f"{start()}/users/ola_k/playlists")[0] == 404
+
+
+# ==================== permissions and moods ====================
+
+@pytest.fixture
+def mood_server(playlist_server, share_dir, tmp_path):
+    """playlist_server plus a shared tag.db with global mood 1 'Siłownia' and
+    marker 2 'spellchecked', and a --mood-changes folder; 'ola_k' may edit
+    global moods, 'bob' may not."""
+    start_playlists, users_dir, tokens = playlist_server
+    tag = sqlite3.connect(share_dir / "tag.db")
+    tag.execute("CREATE TABLE tags (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL UNIQUE, "
+                "kind VARCHAR NOT NULL DEFAULT 'marker')")
+    tag.executemany("INSERT INTO tags VALUES (?, ?, ?)", [(1, "Siłownia", "mood"), (2, "spellchecked", "marker")])
+    tag.commit()
+    tag.close()
+    (users_dir / "ola_k" / "account.json").write_text('{"username": "ola_k", "permissions": ["edit_global_moods"]}')
+    changes = tmp_path / "MoodChanges"
+
+    def start(mount="/", **kw):
+        kw.setdefault("mood_changes_dir", str(changes))
+        return start_playlists(mount=mount, **kw)
+
+    return start, users_dir, tokens, changes
+
+
+def test_login_and_profile_carry_the_permissions(login_server):
+    start, users_dir, _ = login_server
+    base = start()
+    account = users_dir / "ola_k" / "account.json"
+    status, _, body = _login(base)
+    assert status == 200 and json.loads(body)["permissions"] == []
+    token = json.loads(body)["token"]
+    account.write_text(account.read_text()[:-1] + ', "permissions": ["edit_global_moods"]}')
+    assert _call("GET", f"{base}/users/ola_k", token) == (
+        200, {"username": "ola_k", "permissions": ["edit_global_moods"]})
+    assert json.loads(_login(base)[2])["permissions"] == ["edit_global_moods"]
+    # Revoked: the next GET shows it, no new login needed
+    account.write_text(account.read_text().replace('"edit_global_moods"', ""))
+    assert _call("GET", f"{base}/users/ola_k", token) == (200, {"username": "ola_k", "permissions": []})
+    assert _call("GET", f"{base}/users/ola_k")[0] == 401
+    assert _call("GET", f"{base}/users/someone_else", token)[0] == 403
+
+
+def _mood_body(base_revision=0, updated_at=1000, **extra):
+    return {"name": "Siłownia", "created_at": 900, "updated_at": updated_at, "base_revision": base_revision,
+            "song_ids": [2, 5, 4], **extra}
+
+
+def test_mood_round_trip(mood_server):
+    start, users_dir, tokens, _ = mood_server
+    base = f"{start()}/users/ola_k/moods"
+    token = tokens["ola_k"]
+
+    assert _call("GET", base, token) == (200, {"revision": 0, "moods": []})
+    status, stored = _call("PUT", f"{base}/{UID}", token, _mood_body())
+    # 2 merged into 4, 5 deleted: a mood holds only songs that exist
+    assert (status, stored) == (200, {"uid": UID, "revision": 1, "name": "Siłownia", "created_at": 900,
+                                      "updated_at": 1000, "deleted": False, "song_ids": [4]})
+    assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "moods": [stored]})
+    db = sqlite3.connect(users_dir / "ola_k" / "user.db")
+    assert db.execute("SELECT song_ids_checked_to FROM tags").fetchone() == (2,)
+
+    # Another phone made a mood with the same name: merged, the existing uid comes back
+    other_uid = "8f0c1a2b-0000-4000-8000-000000000002"
+    status, merged = _call("PUT", f"{base}/{other_uid}", token, _mood_body(song_ids=[4]))
+    assert status == 200 and merged["uid"] == UID
+
+    stale = _call("PUT", f"{base}/{UID}", token, _mood_body(base_revision=1, updated_at=500, name="Old"))
+    assert stale == (409, merged)
+    status, deleted = _call("DELETE", f"{base}/{UID}?base_revision=2&deleted_at=5000", token)
+    assert (status, deleted) == (200, {"uid": UID, "revision": 3, "updated_at": 5000, "deleted": True})
+    assert len(list((users_dir / "ola_k" / "archive" / "moods").iterdir())) == 1
+    # Moods don't touch the playlists
+    assert _call("GET", f"{start()}/users/ola_k/playlists", token) == (200, {"revision": 0, "playlists": []})
+
+
+@pytest.mark.parametrize("token_of, status", [(None, 401), ("revoked", 401), ("bob", 403)])
+def test_moods_need_that_users_token(mood_server, token_of, status):
+    start, _, tokens, _ = mood_server
+    base = f"{start()}/users/ola_k/moods"
+    token = {"revoked": "not-a-token", None: None}.get(token_of, tokens.get(token_of))
+    assert _call("GET", base, token)[0] == status
+    assert _call("PUT", f"{base}/{UID}", token, _mood_body())[0] == status
+    assert _call("DELETE", f"{base}/{UID}?base_revision=0&deleted_at=1", token)[0] == status
+
+
+def test_bad_or_unavailable_mood_requests(mood_server, tmp_path):
+    start, _, tokens, _ = mood_server
+    base = start()
+    url = f"{base}/users/ola_k/moods"
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{url}/{UID}", token, {"name": "x"})[0] == 400
+    assert _call("PUT", f"{url}/{UID}", token, _mood_body(song_ids=[0]))[0] == 400
+    assert _call("PUT", f"{url}/{UID}", token, _mood_body(uid="another-uid-1"))[0] == 400
+    assert _call("PUT", f"{url}/bad%20uid", token, _mood_body())[0] == 400
+    assert _call("DELETE", f"{url}/{UID}?deleted_at=5", token)[0] == 400
+    assert _call("GET", f"{url}/{UID}", token)[0] == 404
+    assert _call("GET", f"{base}/users/bob/moods", tokens["bob"])[0] == 503  # no user.db
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _call("GET", f"{unmounted}/users/ola_k/moods", token)[0] == 503
+
+
+def test_permitted_user_changes_a_global_mood(mood_server):
+    from utils.database import global_mood_log
+
+    start, _, tokens, changes = mood_server
+    base = start()
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{base}/global-moods/1/songs/2", token) == (
+        202, {"mood_id": 1, "song_id": 4, "action": "add"})  # 2 was merged into 4
+    assert _call("DELETE", f"{base}/global-moods/1/songs/4", token)[0] == 202
+    records = [r for _, r in global_mood_log.pending_changes(changes)]
+    assert [(r["user"], r["action"], r["mood_id"], r["mood_name"], r["song_id"], r["requested_song_id"])
+            for r in records] == [("ola_k", "add", 1, "Siłownia", 4, 2), ("ola_k", "remove", 1, "Siłownia", 4, 4)]
+    assert records[0]["song_ids_checked_to"] == 2
+
+
+def test_global_mood_changes_are_checked(mood_server, tmp_path):
+    start, users_dir, tokens, changes = mood_server
+    base = start()
+    token = tokens["ola_k"]
+    # No permission: 403 with a body the phone can tell from "another user's token"
+    assert _call("PUT", f"{base}/global-moods/1/songs/4", tokens["bob"]) == (
+        403, {"error": "permission", "permission": "edit_global_moods"})
+    assert _call("PUT", f"{base}/global-moods/1/songs/4")[0] == 401
+    assert _call("PUT", f"{base}/global-moods/2/songs/4", token) == (404, {"error": "mood", "mood_id": 2})
+    assert _call("PUT", f"{base}/global-moods/9/songs/4", token)[0] == 404
+    assert _call("PUT", f"{base}/global-moods/1/songs/5", token) == (404, {"error": "song", "song_id": 5})
+    assert _call("PUT", f"{base}/global-moods/1/songs/77", token)[0] == 404
+    assert _call("PUT", f"{base}/global-moods/x/songs/4", token)[0] == 400
+    assert _call("PUT", f"{base}/global-moods/1/songs/0", token)[0] == 400
+    assert _call("GET", f"{base}/global-moods/1/songs/4", token)[0] == 404
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _call("PUT", f"{unmounted}/global-moods/1/songs/4", token)[0] == 503
+    assert _call("PUT", f"{start(mood_changes_dir=None)}/global-moods/1/songs/4", token)[0] == 404
+    assert not (changes / "pending").exists() or not list((changes / "pending").iterdir())
+    # Revoked: refused on the next request
+    (users_dir / "ola_k" / "account.json").write_text('{"username": "ola_k", "permissions": []}')
+    assert _call("PUT", f"{base}/global-moods/1/songs/4", token)[0] == 403

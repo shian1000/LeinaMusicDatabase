@@ -236,6 +236,20 @@ USER_PLAYLIST_SOURCE_YOUTUBE = "youtube"
 USER_PLAYLIST_SOURCE_SPOTIFY = "spotify"
 USER_PLAYLIST_SOURCE_SPOTIFY_ALBUM = "spotifyAlbum"
 
+# tags.kind in tag.db and user.db: a mood ("Nastrój" on the phone - global in
+# tag.db, a user's own in user.db) or anything else, e.g. the "spellchecked"
+# marker. The phone reads only moods (utils/database/mood_sync.MOOD_KIND must match).
+TAG_KIND_MOOD = "mood"
+TAG_KIND_MARKER = "marker"
+
+# What the owner can allow a user (main menu -> Users -> Permissions), kept
+# in that user's account.json. Names are part of the phone contract
+# (utils/database/account_auth.PERMISSIONS must match); the label is the menu's.
+PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
+PERMISSION_LABELS = {
+    PERMISSION_EDIT_GLOBAL_MOODS: "Edit global moods from the phone (add and remove songs)",
+}
+
 # ==================== Music library index (utils/database/files_index.py) ====================
 
 FILES_DB_FILENAME = "files.db"

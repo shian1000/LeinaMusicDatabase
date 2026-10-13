@@ -21,10 +21,11 @@ them across: tag.db's song_tags (global tags), every user's user.db
    that logged something (database_sessions.submit/close). A user.db on an
    unplugged T7 is simply caught up later, which is why it's a log with
    cursors and not an update made on the spot.
-   In a user.db every playlist whose tracks changed gets a new revision
-   (playlist_sync.mark_changed()), so the phones fetch the new ids. Tracks
+   In a user.db every playlist whose tracks changed, and every mood whose
+   songs changed, gets a new revision (playlist_sync / mood_sync
+   .mark_changed()), so the phones fetch the new ids. Tracks and mood songs
    the sharing server stored were resolved against the *shared copy* of
-   music.db, which may be a day behind: such a playlist carries
+   music.db, which may be a day behind: such a playlist or mood carries
    song_ids_checked_to, and the log entries between that and the cursor are
    replayed for it alone first.
 3. A deleted id is never given to a new song: the same listener numbers new
@@ -45,7 +46,7 @@ from sqlalchemy import event, func, select, text
 
 from config.constants import FILE_MATCH_AUTO
 from utils.common.debug import mlog
-from utils.database import playlist_sync
+from utils.database import mood_sync, playlist_sync
 from utils.database.backup import DB_FILES
 from utils.database.datatables import Song, SongIdChange
 from utils.database.user_datatables import user_db_session
@@ -160,7 +161,7 @@ def latest_change_id() -> int:
         return conn.execute(select(func.max(SongIdChange.id))).scalar() or 0
 
 
-def _existing_song_ids() -> set:
+def existing_song_ids() -> set:
     with _music_engine().connect() as conn:
         return {r[0] for r in conn.execute(select(Song.id))}
 
@@ -178,10 +179,10 @@ def set_cursor(session, change_id: int) -> None:
 
 
 def _replay(session, changes: list, has_playlists: bool = False, has_tags: bool = True,
-            has_files: bool = False, changed_playlists: set | None = None) -> int:
+            has_files: bool = False, changed_playlists: set | None = None, changed_tags: set | None = None) -> int:
     """Apply the log entries past this file's cursor. Returns how many rows
-    changed; adds the playlists whose tracks changed to `changed_playlists`.
-    Caller commits."""
+    changed; adds the playlists whose tracks changed to `changed_playlists`
+    and the tags whose songs changed to `changed_tags`. Caller commits."""
     last = _cursor(session) or 0
     touched = 0
     for change_id, old_id, new_id in changes:
@@ -195,6 +196,9 @@ def _replay(session, changes: list, has_playlists: bool = False, has_tags: bool 
                     text("SELECT DISTINCT playlist_id FROM playlist_tracks WHERE song_id = :old"), params))
             touched += session.execute(
                 text("UPDATE playlist_tracks SET song_id = :new WHERE song_id = :old"), params).rowcount
+        if has_tags and changed_tags is not None:
+            changed_tags.update(r[0] for r in session.execute(
+                text("SELECT DISTINCT tag_id FROM song_tags WHERE song_id = :old"), params))
         if new_id is not None:
             if has_tags:
                 touched += session.execute(
@@ -240,16 +244,47 @@ def _catch_up_server_playlists(session, changes: list, changed_playlists: set) -
     return touched
 
 
+def _catch_up_server_moods(session, changes: list, changed_tags: set) -> int:
+    """_catch_up_server_playlists() for moods: the songs of a mood the
+    sharing server stored, checked up to song_ids_checked_to."""
+    cursor = _cursor(session) or 0
+    touched = 0
+    pending = session.execute(text(
+        "SELECT id, song_ids_checked_to FROM tags WHERE song_ids_checked_to IS NOT NULL")).all()
+    for tag_id, checked_to in pending:
+        for change_id, old_id, new_id in changes:
+            if checked_to < change_id <= cursor:
+                params = {"new": new_id, "old": old_id, "t": tag_id}
+                rows = 0
+                if new_id is not None:
+                    rows += session.execute(text("UPDATE OR IGNORE song_tags SET song_id = :new "
+                                                 "WHERE tag_id = :t AND song_id = :old"), params).rowcount
+                rows += session.execute(text("DELETE FROM song_tags WHERE tag_id = :t AND song_id = :old"),
+                                        params).rowcount
+                if rows:
+                    touched += rows
+                    changed_tags.add(tag_id)
+        session.execute(text("UPDATE tags SET song_ids_checked_to = NULL WHERE id = :t "
+                             "AND song_ids_checked_to = :c"), {"t": tag_id, "c": checked_to})
+    return touched
+
+
 def _replay_user_db(session, changes: list) -> int:
     raw = session.connection().connection.driver_connection
     if not playlist_sync.is_migrated(raw):
         # Before the sync columns (migration not applied yet): tracks only
         return _replay(session, changes, has_playlists=True)
-    changed_playlists = set()
+    has_moods = playlist_sync.is_migrated(raw, mood_sync.REQUIRED_MIGRATION)
+    changed_playlists, changed_tags = set(), set()
     touched = _catch_up_server_playlists(session, changes, changed_playlists)
-    touched += _replay(session, changes, has_playlists=True, changed_playlists=changed_playlists)
+    if has_moods:
+        touched += _catch_up_server_moods(session, changes, changed_tags)
+    touched += _replay(session, changes, has_playlists=True, changed_playlists=changed_playlists,
+                       changed_tags=changed_tags if has_moods else None)
     # A new revision, so the phones fetch the new song ids
     playlist_sync.mark_changed(raw, changed_playlists)
+    if has_moods:
+        mood_sync.mark_changed(raw, changed_tags)
     return touched
 
 
@@ -257,7 +292,7 @@ def _replay_tag_db(tag_session, changes: list) -> int:
     first_time = _cursor(tag_session) is None
     touched = _replay(tag_session, changes, has_playlists=False)
     if first_time:
-        existing = _existing_song_ids()
+        existing = existing_song_ids()
         stale = [r[0] for r in tag_session.execute(text("SELECT DISTINCT song_id FROM song_tags"))
                  if r[0] not in existing]
         for song_id in stale:

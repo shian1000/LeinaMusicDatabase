@@ -252,8 +252,69 @@ because the server and the app's own writes (`user_playlists.py`) both use it.
 - The server writes `user.db` with `sqlite3`, one `BEGIN IMMEDIATE` transaction per request with
   a 15 s busy timeout, so a request and the app's own writes queue up instead of interleaving.
 
+**Moods on the phone (2026-10-13).** Moods ("Nastroje" in the app) are sets of songs with the same
+feel, without order; the phone plays one shuffled. The owner's decisions are in the app's
+`docs/handoffs/musicdatabase-moods.md`; the answer, with the final contract, is
+[`docs/handoffs/moods-for-musicdatabaseapp.md`](../handoffs/moods-for-musicdatabaseapp.md). Only songs in
+`music.db` can be in a mood (song ids, no title fallback).
+
+- **Kinds of tags.** `tags.kind` (tag migration 0003, user migration 0005) is `'mood'` or
+  `'marker'`. Every older tag, including `spellchecked` / `album_checked`, is a marker and is never
+  listed or sent as a mood. `tags.name` is unique per file, so a global mood can't take a marker's
+  name; creating, renaming or promoting onto one is refused (`utils/database/moods.py`).
+- **Global moods** are `tag.db` tags with kind `'mood'`; every user sees them in the downloaded
+  `tag.db`. Only the owner creates, renames and deletes them: main menu → Users → Moods → "Global
+  moods", which also adds and removes songs.
+- **A user's own moods** are private tags in their `user.db`, synced exactly like playlists
+  (`utils/database/mood_sync.py`, built on `playlist_sync.py`): `GET /users/<name>/moods?since=`,
+  `PUT /users/<name>/moods/<uid>`, `DELETE …?base_revision=&deleted_at=`, same codes, own
+  `mood_revision` counter, song ids resolved against the shared `music.db` (a deleted or unknown
+  id is dropped, not kept as NULL), `song_ids_checked_to` caught up by `apply_song_id_changes()`.
+  Names are unique among a user's live moods: a new uid with a live mood's name is merged into it
+  (union of songs, the answer carries the existing uid), and a rename onto another mood's name
+  merges into that one and leaves a marker with `merged_into`. Deleted moods are archived to
+  `Users/<name>/archive/moods/<uid>.<YYMMDD-HHMM>.json`. The table was rebuilt by migration 0005
+  so a deleted mood's name is free again (unique index over live rows only).
+- **The owner sees every user's moods** without their password: Users → Moods → "Users' moods".
+  "Promote to a global mood" moves one into `tag.db`: a new global mood of that name, or merged
+  (union) into an existing one; refused if a marker has the name. The user's mood then becomes a
+  marker with `promoted_to` / `promoted_to_name`, so their phones switch to the global one. A
+  promoted or merged mood is never revived by a later PUT (409 with the marker).
+- **Permissions** live in `account.json` (`"permissions": [...]`, `account_auth.PERMISSIONS`),
+  not in `user.db`: they're what the owner trusts a user with. Users → Permissions ticks them per
+  user (`users.set_permissions()`); the first is `edit_global_moods`, more go into
+  `PERMISSIONS` + `PERMISSION_LABELS`. `POST /login` answers them, and `GET /users/<name>` (that
+  user's token) returns `{"username", "permissions"}`. The server reads the file on every request,
+  so a revoked permission works at once.
+
+**Global moods from the phone.** A user with `edit_global_moods` adds or removes songs with
+`PUT` / `DELETE /global-moods/<mood id>/songs/<song id>` (no body). Nothing is reviewed — the
+permission is the trust — but everything is recorded (`utils/database/global_mood_log.py`):
+
+- The server checks the token (401), the permission (403 with JSON
+  `{"error": "permission", "permission": "edit_global_moods"}`, which the phone tells apart from
+  the plain-text "another user" 403), that the mood is a mood in the *shared* `tag.db` (404
+  `{"error": "mood"}`) and resolves the song against the shared `music.db` (merged → kept song;
+  deleted or unknown → 404 `{"error": "song"}`). It then writes one JSON file into
+  `Settings.global_mood_changes_dir/pending/` (`--mood-changes`, `.../Database/MoodChanges`) and
+  answers 202 `{"mood_id", "song_id", "action"}`. **It never writes `tag.db`**: the original is on
+  the system disk and `main.py` may hold it open.
+- MusicDatabase applies the pending files in arrival order (`moods.apply_global_mood_changes()`):
+  at startup (after `apply_song_id_changes()`), before every copy for the phones (startup and
+  "Submit database for sharing"), and when the Moods menu shows global moods or the log. Song ids
+  are followed through `song_id_changes` past what the server checked. Each change is appended to
+  `MoodChanges/history.jsonl` with `applied_at` and a result (`added`, `removed`, `unchanged`,
+  `mood_gone`, `song_gone`), then its file is deleted. A crash in between re-applies the same
+  changes next time, which ends in the same state.
+- **Delay:** other phones get the change with the next copy of `tag.db` — the daily one at
+  MusicDatabase's startup, or Settings → Server → "Submit database for sharing". The phone that made
+  it keeps it locally until its downloaded `tag.db` has it.
+- **Seeing and undoing:** Users → Moods → "Changes from the phones" lists who added or removed which
+  song in which mood, newest first (100 shown; the whole log is `history.jsonl`). Undo by hand in
+  "Global moods" → the mood → "Add a song" / "Remove songs". `MoodChanges/` isn't backed up; tag.db is.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists` (401 without a token), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists` and `…/users/<name>/moods` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
@@ -278,8 +339,8 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
 - **Not served as files.** The sharing server's whitelist is `music.db` / `tag.db` / `files.db`, so
-  `Users/` and everything in it is a 404. Playlists reach the logged-in user's phones through the
-  playlist endpoints above; private tags don't go anywhere yet.
+  `Users/` and everything in it is a 404. Playlists and moods reach the logged-in user's phones
+  through their endpoints above; other private tags (kind `'marker'`) don't go anywhere.
 - **Deleted playlists** are copied to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json`
   first (see "Playlists on the phone" above). To recover one, read its tracks from that file.
 

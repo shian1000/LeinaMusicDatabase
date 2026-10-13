@@ -45,6 +45,11 @@ class Settings:
     # Requests from the phone (utils/database/inbox_requests.py): the sharing
     # server writes them into new/, "Resolve new requests" moves them to processed/.
     phone_inbox_dir: UPath = sharing_dir / "Inbox"
+    # Changes to global moods sent from the phone by users allowed to make
+    # them (utils/database/global_mood_log.py): the sharing server writes one
+    # file per change into pending/, MusicDatabase applies them to tag.db and
+    # appends them to history.jsonl.
+    global_mood_changes_dir: UPath = sharing_dir / "MoodChanges"
     # Network interface the sharing server also listens on, for the phone on
     # the home Wi-Fi (named, not "first private address": docker0/br-* are
     # private too). Empty = Tailscale only.

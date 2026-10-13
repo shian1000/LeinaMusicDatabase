@@ -2,7 +2,8 @@
 Checking a user's password and the phone's login tokens, against the files
 in a user's folder (Users/<username>/, see users.py):
 
-    account.json  username + salted scrypt password hash (written by users.py)
+    account.json  username + salted scrypt password hash, and the
+                  permissions the owner granted (written by users.py)
     tokens.json   {"tokens": [{"hash": <sha256 hex>, "created_at": ...}]}
 
 Standard-library only and free of the app's config, because the sharing
@@ -10,6 +11,11 @@ server (sharing_server.py, run on the system python3) imports it too, for
 POST /login, POST /logout and signed inbox uploads (docs/runbooks/database.md
 -> "Logging in from the phone"). users.py uses it for the same password
 check and to revoke tokens.
+
+Permissions say what the owner trusts a user with, so they live in
+account.json rather than in user.db (the user's own data). The server reads
+them on every request that needs one, so a revoked permission takes effect at
+once, without logging in again.
 
 A token is 32 random bytes the phone keeps instead of the password. Only its
 SHA-256 is stored, so tokens.json leaks nothing usable. Tokens never expire;
@@ -32,6 +38,10 @@ USERNAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{1,31}$"
 ACCOUNT_FILENAME = "account.json"
 TOKENS_FILENAME = "tokens.json"
 TOKEN_BYTES = 32
+# Every permission there is (also config.constants.PERMISSION_LABELS); the
+# names are part of the phone contract
+PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
+PERMISSIONS = (PERMISSION_EDIT_GLOBAL_MOODS,)
 
 # Compared against when the user doesn't exist, so a wrong username takes as
 # long as a wrong password (scrypt) and the answer doesn't tell them apart
@@ -77,6 +87,18 @@ def check_login(users_dir, username, password) -> str | None:
         password_matches(password, _DUMMY_HASH)
         return None
     return name if password_matches(password, stored) else None
+
+
+def user_permissions(users_dir, username: str) -> list[str]:
+    """The known permissions in a user's account.json, sorted; [] when the
+    user or the file is missing or unreadable."""
+    try:
+        granted = json.loads((Path(users_dir) / username / ACCOUNT_FILENAME).read_text()).get("permissions", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(granted, list):
+        return []
+    return sorted(p for p in set(granted) if p in PERMISSIONS)
 
 
 def _token_hash(token: str) -> str:

@@ -1,5 +1,6 @@
 """Main menu -> Users: creating users, logging into a user's private
-database, and managing the users themselves (utils/database/users.py)."""
+database, managing the users themselves (utils/database/users.py), and the
+owner's view of moods and permissions (moods.py next to this file)."""
 
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from utils.database.users import (
     verify_user,
 )
 from utils.database.datatables import Song
+from menu.main_menu.users.moods import moods_menu, permissions_menu
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.folder_playlist import assign_song, build_folder_playlist
 from utils.discoveries.import_engine import find_songs_by_title
@@ -395,5 +397,7 @@ def users_menu() -> None:
         "Rename user": rename_user_menu,
         "Change password": change_password_menu,
         "Delete user": delete_user_menu,
+        "Moods": moods_menu,
+        "Permissions": permissions_menu,
     }
     execute_menu_item("Users", action_map, exit_label="Back")

@@ -60,6 +60,19 @@ with every path passed on the command line.
   or that user.db not migrated yet (the server never migrates). It writes
   user.db itself, one BEGIN IMMEDIATE transaction per request, and resolves
   incoming song ids against <dir>/music.db's song_id_changes.
+- Moods (only with --users; rules in mood_sync.py): the same three calls and
+  answers under /users/<name>/moods[/<uid>], a mood being a name + song ids.
+  GET /users/<name> -> {"username", "permissions"} with that user's token
+  (POST /login answers the permissions too), so a revoked permission reaches
+  the phone without logging in again.
+- Global moods (only with --users and --mood-changes): PUT / DELETE
+  /global-moods/<mood id>/songs/<song id> adds / removes a song, for users
+  whose account.json grants "edit_global_moods" (otherwise 403 with JSON
+  {"error": "permission", "permission": "edit_global_moods"}). The mood and
+  song are checked against the shared copies in --dir (404 with JSON
+  {"error": "mood"} / {"error": "song"}); the change is only recorded in
+  --mood-changes/pending/ (202) - MusicDatabase applies it to the original
+  tag.db later (global_mood_log.py). The server never writes tag.db.
 """
 
 import argparse
@@ -81,9 +94,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 try:
-    from . import account_auth, playlist_sync  # imported as utils.database.sharing_server (the app, tests)
+    from . import account_auth, global_mood_log, mood_sync, playlist_sync  # as utils.database.sharing_server
 except ImportError:
     import account_auth  # run as a script by the systemd service (its folder is on sys.path)
+    import global_mood_log
+    import mood_sync
     import playlist_sync
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
@@ -114,6 +129,12 @@ LOGIN_LOCKOUT_SECONDS = 5 * 60
 DEFAULT_MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
 # /users/<name>/playlists[/<uid>]
 PLAYLISTS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/playlists(?:/(?P<uid>[^/]+))?$")
+# /users/<name>/moods[/<uid>]
+MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$")
+# /users/<name>: who the token is and what they may do
+USER_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)$")
+# /global-moods/<mood id>/songs/<song id>
+GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 
 
 class LoginLimiter:
@@ -172,7 +193,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                  max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
                  users_dir: str | None = None, limiter: LoginLimiter | None = None,
-                 max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES):
+                 max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES, mood_changes_dir: str | None = None):
     # One lock for "is there room / is the name free" + the write, so two
     # uploads at once can't both squeeze past the limit or take one name.
     inbox_lock = threading.Lock()
@@ -185,17 +206,30 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
         def do_HEAD(self):
             self._serve(send_body=False)
 
+        def _route_users(self, method: str) -> bool:
+            """The endpoints that need --users; False if the path is none of them."""
+            if users_dir is None:
+                return False
+            path = urlsplit(self.path).path
+            if PLAYLISTS_PATH_RE.match(path):
+                self._playlists(method)
+            elif MOODS_PATH_RE.match(path):
+                self._moods(method)
+            elif method == "GET" and USER_PATH_RE.match(path):
+                self._profile(USER_PATH_RE.match(path).group("user"))
+            elif method in ("PUT", "DELETE") and GLOBAL_MOOD_SONG_PATH_RE.match(path):
+                self._global_mood_song(method)
+            else:
+                return False
+            return True
+
         def do_GET(self):
-            if users_dir is not None and PLAYLISTS_PATH_RE.match(urlsplit(self.path).path):
-                self._playlists("GET")
-                return
-            self._serve(send_body=True)
+            if not self._route_users("GET"):
+                self._serve(send_body=True)
 
         def do_DELETE(self):
-            if users_dir is None or not PLAYLISTS_PATH_RE.match(urlsplit(self.path).path):
+            if not self._route_users("DELETE"):
                 self._reply(HTTPStatus.NOT_FOUND)
-                return
-            self._playlists("DELETE")
 
         def _serve(self, send_body: bool):
             name = self.path.split("?", 1)[0].lstrip("/")
@@ -284,7 +318,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
             print(f"User {name} logged in from {self.client_address[0]}", flush=True)
-            self._reply_json(HTTPStatus.OK, {"username": name, "token": token})
+            self._reply_json(HTTPStatus.OK, {"username": name, "token": token,
+                                             "permissions": account_auth.user_permissions(users_dir, name)})
 
         def _logout(self):
             token = self._bearer_token()
@@ -312,6 +347,32 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._reply(HTTPStatus.FORBIDDEN, "the file name names another user")
                 return False
             return True
+
+        def _sender(self) -> str | None:
+            """The user the token belongs to, or None after replying (503
+            drive not mounted - checked first, tokens live there - or 401)."""
+            if not os.path.ismount(mount):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return None
+            sender = account_auth.token_user(users_dir, self._bearer_token())
+            if sender is None:
+                self._reply(HTTPStatus.UNAUTHORIZED, "log in again")
+            return sender
+
+        def _authorize(self, username: str, forbidden: str) -> bool:
+            """True when the token is `username`'s; else replies 503/401/403."""
+            sender = self._sender()
+            if sender is None:
+                return False
+            if sender != username:
+                self._reply(HTTPStatus.FORBIDDEN, forbidden)
+                return False
+            return True
+
+        def _profile(self, username: str):
+            if self._authorize(username, "another user"):
+                self._reply_json(HTTPStatus.OK, {"username": username,
+                                                 "permissions": account_auth.user_permissions(users_dir, username)})
 
         # ---- playlists ----
 
@@ -349,15 +410,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 body = self._read_json_body(max_playlist_bytes)
                 if body is None:
                     return
-            if not os.path.ismount(mount):
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                return
-            sender = account_auth.token_user(users_dir, self._bearer_token())
-            if sender is None:
-                self._reply(HTTPStatus.UNAUTHORIZED, "log in again")
-                return
-            if sender != username:
-                self._reply(HTTPStatus.FORBIDDEN, "another user's playlists")
+            if not self._authorize(username, "another user's playlists"):
                 return
             if uid is not None and not playlist_sync.UID_RE.match(uid):
                 self._reply(HTTPStatus.BAD_REQUEST, "not a playlist uid")
@@ -416,6 +469,126 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 print(f"Playlist {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
             self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
 
+        # ---- moods (a user's own) ----
+
+        def _moods(self, method: str):
+            url = urlsplit(self.path)
+            match = MOODS_PATH_RE.match(url.path)
+            username, uid = match.group("user"), match.group("uid")
+            if (method == "GET") != (uid is None):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            body = None
+            if method == "PUT":
+                body = self._read_json_body(max_playlist_bytes)
+                if body is None:
+                    return
+            if not self._authorize(username, "another user's moods"):
+                return
+            if uid is not None and not playlist_sync.UID_RE.match(uid):
+                self._reply(HTTPStatus.BAD_REQUEST, "not a mood uid")
+                return
+            query = parse_qs(url.query)
+            try:
+                if method == "GET":
+                    since = self._query_int(query, "since", default=0)
+                elif method == "PUT":
+                    mood = mood_sync.parse_mood(body)
+                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
+                    if body.get("uid", uid) != uid:
+                        raise mood_sync.BadMoodError("uid: differs from the one in the path")
+                else:
+                    base_revision = self._query_int(query, "base_revision")
+                    deleted_at = self._query_int(query, "deleted_at")
+            except mood_sync.BadMoodError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            folder = os.path.join(users_dir, username)
+            try:
+                if method == "PUT":
+                    mood["song_ids"], checked_to = mood_sync.resolve_song_ids(mood["song_ids"],
+                                                                              os.path.join(share_dir, "music.db"))
+                conn = mood_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
+            except mood_sync.NotMigratedError as exc:
+                print(f"Moods of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Moods of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if method == "GET":
+                    self._reply_json(HTTPStatus.OK, mood_sync.changes_since(conn, since))
+                    return
+                archived = None
+                if method == "PUT":
+                    applied, stored = mood_sync.store_mood(conn, folder, uid, mood, base_revision,
+                                                           song_ids_checked_to=checked_to)
+                else:
+                    applied, stored, archived = mood_sync.delete_mood(conn, folder, uid, base_revision, deleted_at)
+            except mood_sync.BadMoodError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Moods of {username}: {method} {uid} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            finally:
+                conn.close()
+            if applied and (method == "PUT" or archived):
+                what = "deleted (archived in " + str(archived) + ")" if archived else \
+                    f"stored ({len(stored.get('song_ids', []))} songs)"
+                print(f"Mood {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
+            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
+
+        # ---- global moods (tag.db), only with the permission ----
+
+        def _global_mood_song(self, method: str):
+            """PUT adds a song to a global mood, DELETE removes it. Recorded
+            in --mood-changes for MusicDatabase to apply (global_mood_log.py)."""
+            match = GLOBAL_MOOD_SONG_PATH_RE.match(urlsplit(self.path).path)
+            if mood_changes_dir is None:
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            sender = self._sender()
+            if sender is None:
+                return
+            permission = account_auth.PERMISSION_EDIT_GLOBAL_MOODS
+            if permission not in account_auth.user_permissions(users_dir, sender):
+                # JSON, unlike "another user's token", so the phone can tell them apart
+                self._reply_json(HTTPStatus.FORBIDDEN, {"error": "permission", "permission": permission})
+                return
+            mood_id, requested = match.group("mood"), match.group("song")
+            if not (mood_id.isdigit() and requested.isdigit() and int(requested) >= 1):
+                self._reply(HTTPStatus.BAD_REQUEST, "expected /global-moods/<mood id>/songs/<song id>")
+                return
+            mood_id, requested = int(mood_id), int(requested)
+            # Both checked against the copies the phone downloads: a mood or
+            # song it knows is in them
+            mood_name = global_mood_log.global_mood_name(os.path.join(share_dir, "tag.db"), mood_id)
+            if mood_name is None:
+                self._reply_json(HTTPStatus.NOT_FOUND, {"error": "mood", "mood_id": mood_id})
+                return
+            # A merged song becomes the kept one; deleted or unknown -> 404
+            ids, checked_to = mood_sync.resolve_song_ids([requested], os.path.join(share_dir, "music.db"))
+            if not ids:
+                self._reply_json(HTTPStatus.NOT_FOUND, {"error": "song", "song_id": requested})
+                return
+            song_id = ids[0]
+            action = global_mood_log.ACTION_ADD if method == "PUT" else global_mood_log.ACTION_REMOVE
+            try:
+                global_mood_log.record_change(mood_changes_dir, sender, action, mood_id, mood_name,
+                                              song_id, requested, checked_to)
+            except OSError as exc:
+                print(f"Recording a global mood change by {sender} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            print(f"{sender}: {action} song {song_id} {'to' if action == 'add' else 'from'} global mood "
+                  f"{mood_id} ({mood_name}), pending", flush=True)
+            self._reply_json(HTTPStatus.ACCEPTED, {"mood_id": mood_id, "song_id": song_id, "action": action})
+
         @staticmethod
         def _query_int(query: dict, name: str, default: int | None = None) -> int:
             values = query.get(name)
@@ -430,10 +603,9 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
         # ---- inbox ----
 
         def do_PUT(self):
-            name = self.path.split("?", 1)[0]
-            if users_dir is not None and PLAYLISTS_PATH_RE.match(name):
-                self._playlists("PUT")
+            if self._route_users("PUT"):
                 return
+            name = self.path.split("?", 1)[0]
             if inbox_dir is None or not name.startswith(INBOX_PREFIX):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
@@ -513,7 +685,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             body = f"{status.value} {status.phrase}{f' - {detail}' if detail else ''}\n".encode()
             self._send(status, body, "text/plain; charset=utf-8", headers)
 
-        def _reply_json(self, status: HTTPStatus, payload: dict):
+        def _reply_json(self, status: HTTPStatus, payload):
             self._send(status, json.dumps(payload).encode(), "application/json", None)
 
         def _send(self, status: HTTPStatus, body: bytes, content_type: str | None, headers: dict | None):
@@ -609,16 +781,20 @@ def main(argv=None) -> int:
     parser.add_argument("--inbox-limit-bytes", type=int, default=DEFAULT_INBOX_LIMIT_BYTES)
     parser.add_argument("--users", help="log in as the users in this folder (on --mount) and sync their playlists")
     parser.add_argument("--max-playlist-bytes", type=int, default=DEFAULT_MAX_PLAYLIST_BYTES)
+    parser.add_argument("--mood-changes", help="with --users: record permitted users' changes to global moods "
+                                               "in this folder (on --mount)")
     args = parser.parse_args(argv)
 
     handler = make_handler(args.dir, args.mount, args.inbox, args.max_request_bytes, args.inbox_limit_bytes,
-                           users_dir=args.users, max_playlist_bytes=args.max_playlist_bytes)
+                           users_dir=args.users, max_playlist_bytes=args.max_playlist_bytes,
+                           mood_changes_dir=args.mood_changes)
 
     def bind_and_serve(label, get_address):
         server = bind_when_ready(handler, args.port, get_address, label)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
-        inbox += f", logins and playlists for {args.users}" if args.users else ""
+        inbox += f", logins, playlists and moods for {args.users}" if args.users else ""
+        inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 

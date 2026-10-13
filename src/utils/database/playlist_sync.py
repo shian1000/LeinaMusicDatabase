@@ -64,23 +64,24 @@ def new_uid() -> str:
     return str(uuid.uuid4())
 
 
-def connect(db_path) -> sqlite3.Connection:
-    """A connection to a migrated user.db, in autocommit mode (the write
-    functions open their own transactions). Raises NotMigratedError."""
+def connect(db_path, required_migration: str = REQUIRED_MIGRATION) -> sqlite3.Connection:
+    """A connection to a user.db that has `required_migration`, in
+    autocommit mode (the write functions open their own transactions).
+    Raises NotMigratedError."""
     if not os.path.exists(db_path):
         raise NotMigratedError(f"{db_path} doesn't exist")
     conn = sqlite3.connect(str(db_path), timeout=BUSY_TIMEOUT_SECONDS, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    if not is_migrated(conn):
+    if not is_migrated(conn, required_migration):
         conn.close()
-        raise NotMigratedError(f"{db_path} hasn't got {REQUIRED_MIGRATION} yet")
+        raise NotMigratedError(f"{db_path} hasn't got {required_migration} yet")
     return conn
 
 
-def is_migrated(conn) -> bool:
+def is_migrated(conn, required_migration: str = REQUIRED_MIGRATION) -> bool:
     try:
         return conn.execute("SELECT 1 FROM schema_version WHERE filename = ?",
-                            (REQUIRED_MIGRATION,)).fetchone() is not None
+                            (required_migration,)).fetchone() is not None
     except sqlite3.Error:
         return False
 
@@ -330,8 +331,9 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
         return True, playlist_json(conn, stored)
 
 
-def _archive(user_folder, payload: dict, deleted_at: int) -> Path:
-    folder = Path(user_folder) / ARCHIVE_SUBDIR
+def _archive(user_folder, payload: dict, deleted_at: int, subdir: Path = ARCHIVE_SUBDIR) -> Path:
+    """Write a deleted playlist (or mood) to <user folder>/<subdir>/<uid>.<stamp>.json."""
+    folder = Path(user_folder) / subdir
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.fromtimestamp(deleted_at / 1000).strftime(ARCHIVE_STAMP_FORMAT)
     data = json.dumps({**payload, "deleted_at": deleted_at}, ensure_ascii=False, indent=2) + "\n"
@@ -339,7 +341,7 @@ def _archive(user_folder, payload: dict, deleted_at: int) -> Path:
     while True:
         target = folder / f"{payload['uid']}.{stamp}{'' if suffix == 1 else f'_{suffix}'}.json"
         try:
-            # "x": never overwrite an archived playlist
+            # "x": never overwrite an archived file
             with open(target, "x", encoding="utf-8") as f:
                 f.write(data)
                 f.flush()

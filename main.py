@@ -12,6 +12,7 @@ from utils.database.sharing import share_databases_quietly
 from utils.database.files_index import scan_library_quietly
 from utils.database.song_references import apply_song_id_changes
 from utils.database.inbox_requests import count_new_requests
+from utils.database.moods import apply_global_mood_changes_quietly
 from utils.ui.ytdlp_update_prompt import offer_ytdlp_update
 from utils.common.debug import slog
 
@@ -27,6 +28,12 @@ def main():
         apply_song_id_changes(force=True)
     except Exception as exc:
         slog(f"Updating song references failed (non-fatal): {exc}", priority=3)
+    # Songs users with the permission added to / removed from global moods
+    # on their phones - before the copy below, so the other phones get them
+    mood_changes = apply_global_mood_changes_quietly()
+    if mood_changes:
+        print(f"Applied {len(mood_changes)} change(s) to global moods from the phones - "
+              "Users -> Moods -> Changes from the phones")
     # Once a day, after the backup: refresh the music library index, then
     # the copies the mobile app downloads (files.db included)
     if daily:

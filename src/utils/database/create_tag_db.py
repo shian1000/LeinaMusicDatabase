@@ -32,6 +32,8 @@ class Tag(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, nullable=False)
+    # TAG_KIND_MOOD (a global mood) or TAG_KIND_MARKER (e.g. "spellchecked"); tag migration 0003
+    kind = Column(String, nullable=False, default="marker", server_default="marker")
 
     def __repr__(self):
         return f"<Tag(name='{self.name}')>"

@@ -103,7 +103,8 @@ non-trivial work in that area.
   (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist endpoints and their JSON).
+  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / `GET /users/<name>`
+  endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports; Manage database →
   "Resolve new requests" (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value
   never lands without review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
@@ -133,7 +134,10 @@ non-trivial work in that area.
   standard-library only because `sharing_server.py` imports it too). Tokens are kept only as hashes in
   `Users/<name>/tokens.json`; re-password / rename / delete must keep dropping them
   (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
-  `docs/runbooks/database.md` → "Logging in from the phone".
+  `docs/runbooks/database.md` → "Logging in from the phone". Permissions the owner grants
+  (Users → Permissions, `users.set_permissions()`) live in `account.json`, not `user.db`; a new one
+  goes into `account_auth.PERMISSIONS` + `constants.PERMISSION_LABELS`. The server reads them per
+  request (`/login` and `GET /users/<name>` answer them).
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
   `user_playlists.py` saves / deletes playlists and reads them back (`playlist_songs()`:
   the music.db `Song` rows in order, plus the tracks with no song). "Show playlists" shows them
@@ -144,9 +148,20 @@ non-trivial work in that area.
   song ids resolved against the shared music.db) are in `playlist_sync.py`, standard-library only
   because the server imports it. Every write to `playlists` / `playlist_tracks` must go through
   it, or bump the revision with `mark_changed()`, or the phones never see the change. Details:
-  `docs/runbooks/database.md` → "Playlists on the phone". `song_references.py` keeps every reference to
+  `docs/runbooks/database.md` → "Playlists on the phone".
+  Moods ("Nastroje" on the phone): `tags.kind` (`'mood'` / `'marker'`) in tag.db and user.db.
+  `spellchecked` / `album_checked` are markers and must never show up as moods. Names are unique per
+  file across kinds. A user's own moods sync like playlists through `mood_sync.py`
+  (standard-library, built on `playlist_sync.py`, own `mood_revision` counter, same-name moods
+  merged). `moods.py` owns global moods (tag.db), promoting a user's mood into one, and applying
+  the phones' global-mood changes. Those come from `PUT/DELETE /global-moods/<id>/songs/<id>` by users
+  with `edit_global_moods` and are only *recorded* by the server (`global_mood_log.py`, files in
+  `Settings.global_mood_changes_dir` on T7): the server never writes tag.db. The app applies them at
+  startup, before every sharing copy and in the Moods menu. Owner's menu: Users → Moods
+  (`menu/main_menu/users/moods.py`). Details: `docs/runbooks/database.md` → "Moods on the phone".
+  `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
-  tracks and private tags.
+  tracks and private tags (a mood whose songs change gets a new revision too).
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
   flush listener; merges must call `record_song_merge()` and bulk `query().delete()` must call
   `record_song_deletions()`. Each referencing file replays the log past its own cursor in

@@ -160,11 +160,16 @@ Tag                             SongTag
 ---                              -------
 id            PK                id             PK
 name          UNIQUE, NOT NULL  song_id        NOT NULL (references Song.id in music.db)
-                                 tag_id         NOT NULL (references Tag.id, this db)
-                                 UNIQUE(song_id, tag_id)
+kind          NOT NULL          tag_id         NOT NULL (references Tag.id, this db)
+              'marker'/'mood'   UNIQUE(song_id, tag_id)
 ```
 
 - `Tag.name` **is** unique — unlike `Artist.name`, duplicate tags are rejected at the schema level.
+  Unique across kinds too, so a global mood can't share a marker's name.
+- `Tag.kind` (migration 0003): `'mood'` = a **global mood** ("Nastrój" on the phone, which reads only
+  these), `'marker'` = everything else, e.g. the technical `spellchecked` / `album_checked`
+  markers. A mood's songs are its `SongTag` rows. Rules: `src/utils/database/moods.py`,
+  [runbooks/database.md](runbooks/database.md) → "Moods on the phone".
 - `SongTag.song_id` is a **plain integer**, not a `ForeignKey` — SQLite can't enforce a foreign key
   across two separate database files. Referential integrity between `tag.db` and `music.db` (e.g. a
   `SongTag` row surviving the deletion of its `Song`) is not enforced by either schema; if you write
@@ -240,11 +245,23 @@ playlist_revision: one row, last_revision = the user's revision counter
 tags (private)                    song_tags (private)
 ----                              ---------
 id          PK                    id PK, song_id NOT NULL (music.db), tag_id -> tags.id
-name        UNIQUE, NOT NULL      UNIQUE(song_id, tag_id)
+name        NOT NULL, unique      UNIQUE(song_id, tag_id)
+            among live rows
+kind        'marker' / 'mood'
+uid, revision, created_at, updated_at, deleted_at, song_ids_checked_to   (moods' sync)
+promoted_to, promoted_to_name, merged_into                              (deletion markers)
+
+mood_revision: one row, last_revision = the user's mood counter (separate from playlists')
 ```
 
 - Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`
   is what makes them private; `tag.db`'s tags are the global ones.
+- Private tags with kind `'mood'` are the user's own moods (migration 0005, which rebuilt the
+  table so names are unique only among live rows: `ux_tags_live_name ... WHERE deleted_at IS
+  NULL`). They sync with the user's phones like playlists (`mood_sync.py`): `uid` / `revision` /
+  `updated_at` / `deleted_at` / `song_ids_checked_to` mean the same, a deleted mood keeps its row
+  without songs, `promoted_to` (tag.db id) + `promoted_to_name` mark one the owner moved into a
+  global mood, `merged_into` (a uid) one renamed onto another mood's name.
 - `song_id` is a plain integer across files, like `SongTag.song_id`. A track also keeps its
   title / artist / video id, so it survives its song being deleted. Merges and deletions reach it
   through the log above. Models: `src/utils/database/user_datatables.py`.
