@@ -42,5 +42,6 @@ debug.log
 debug.html
 tests/!DOCTYPE_html_html.txt
 youtube_link_cache.log
+yt_playlist_cache.json
 MusicDatabase - ToDo.txt
 debug_spotify.html
