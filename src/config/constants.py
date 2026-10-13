@@ -54,6 +54,21 @@ SHARING_SERVICE_NAME = "musicdatabase-share"
 # Delay after the user's systemd manager starts (= after login, without linger)
 # before the sharing server is started.
 SHARING_STARTUP_DELAY = "1min"
+# Requests the phone sends to the sharing server (PUT /inbox/<name>.db, see
+# sharing_server.py): one file at most PHONE_REQUEST_MAX_BYTES, and none taken
+# while the unprocessed ones (Settings.phone_inbox_dir / "new") reach
+# PHONE_INBOX_LIMIT_BYTES. Part of the app's contract, like the port.
+PHONE_REQUEST_MAX_BYTES = 1024 * 1024
+PHONE_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
+# Request file format this version understands (request.format)
+PHONE_REQUEST_FORMAT = 1
+
+# Daily "is yt-dlp current?" check (utils/youtube/ytdlp_update.py)
+YTDLP_PYPI_URL = "https://pypi.org/pypi/yt-dlp/json"
+YTDLP_UPDATE_CHECK_TIMEOUT = 10
+# Country (ISO 3166-1 alpha-2) the database's YouTube links have to play in -
+# a video region-blocked here counts as not playing (videos_exist_via_api())
+YOUTUBE_REGION = "PL"
 
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",

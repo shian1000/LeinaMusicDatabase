@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import types
+
 import pytest
 from googleapiclient.errors import HttpError
 
@@ -45,6 +47,25 @@ def test_is_video_id_valid_false_when_ytdlp_reports_error(monkeypatch):
         m.subprocess, "run", lambda *a, **k: FakeCompletedProcess(returncode=1, stderr="ERROR: Video unavailable")
     )
     assert m.is_video_id_valid("deadbeef123") is False
+
+
+@pytest.mark.parametrize("stderr, expected", [
+    ("ERROR: [youtube] 49JVQEOkNmY: This video is not available", False),
+    ("ERROR: [youtube] x: Private video. Sign in if you've been granted access to this video", False),
+    # The bot wall after rate limiting says nothing about the video (real output, 2026-10-13)
+    ("WARNING: [youtube] bqM-TDv73Bg: Unable to download webpage: HTTP Error 429: Too Many Requests\n"
+     "ERROR: [youtube] bqM-TDv73Bg: Sign in to confirm you\u2019re not a bot. Use --cookies-from-browser", None),
+    ("ERROR: [youtube] x: Video unavailable. This content isn't available, try again later.", None),
+    # A 429 warning before a definite answer doesn't hide the answer
+    ("WARNING: HTTP Error 429: Too Many Requests\nERROR: [youtube] x: This video is not available", False),
+    ("ERROR: [youtube] x: Sign in to confirm your age.", None),
+    ("ERROR: [youtube] x: The uploader has not made this video available in your country", None),
+])
+def test_video_playability_tells_gone_from_blocked(monkeypatch, stderr, expected):
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: FakeCompletedProcess(returncode=1, stderr=stderr))
+    assert m.video_playability("bqM-TDv73Bg") is expected
+    # Only a definite "gone" may make a stored link look stale
+    assert m.is_video_id_valid("bqM-TDv73Bg") is (expected is not False)
 
 
 def test_is_video_id_valid_false_for_empty_id():
@@ -303,3 +324,76 @@ def test_get_video_album_skips_no_video_sentinel_and_failures(monkeypatch):
     assert m.get_video_album(m.NO_VIDEO_SENTINEL) is None
     assert calls == []
     assert m.get_video_album("deadbeef123") is None
+
+
+# ---------------------------------------------------------
+# videos_exist_via_api()
+# ---------------------------------------------------------
+
+class _FakeVideos:
+    def __init__(self, items, calls):
+        self.items, self.calls = items, calls
+
+    def list(self, part, id, maxResults):
+        self.calls.append(id.split(","))
+        items = [{"id": v, "status": self.items[v].get("status", self.items[v]),
+                  "contentDetails": self.items[v].get("contentDetails", {})}
+                 for v in id.split(",") if v in self.items]
+        return types.SimpleNamespace(execute=lambda: {"items": items})
+
+
+def _fake_service(monkeypatch, items):
+    calls = []
+    service = types.SimpleNamespace(videos=lambda: _FakeVideos(items, calls))
+    monkeypatch.setattr(m, "_read_only_youtube_service", lambda: service)
+    return calls
+
+
+def test_videos_exist_via_api_reads_status(monkeypatch):
+    calls = _fake_service(monkeypatch, {
+        "public00000": {"privacyStatus": "public", "uploadStatus": "processed"},
+        "unlisted000": {"privacyStatus": "unlisted", "uploadStatus": "processed"},
+        "private0000": {"privacyStatus": "private", "uploadStatus": "processed"},
+        "rejected000": {"privacyStatus": "public", "uploadStatus": "rejected"},
+    })
+
+    result = m.videos_exist_via_api(
+        ["public00000", "unlisted000", "private0000", "rejected000", "missing0000", "public00000", "N/A", None])
+
+    assert result == {"public00000": True, "unlisted000": True, "private0000": False,
+                      "rejected000": False, "missing0000": False}
+    assert len(calls) == 1  # deduplicated, one call
+
+
+def test_videos_exist_via_api_region_blocks(monkeypatch):
+    public = {"privacyStatus": "public", "uploadStatus": "processed"}
+    _fake_service(monkeypatch, {
+        # Real case (2026-10-13): a dead Topic upload blocked nearly everywhere
+        "49JVQEOkNmY": {"status": {**public, "privacyStatus": "unlisted"},
+                        "contentDetails": {"regionRestriction": {"blocked": ["DE", "PL", "US"]}}},
+        "bqM-TDv73Bg": {"status": public, "contentDetails": {"regionRestriction": {"allowed": ["DE", "PL"]}}},
+        "notforpl000": {"status": public, "contentDetails": {"regionRestriction": {"allowed": ["US"]}}},
+        "blockedelse": {"status": public, "contentDetails": {"regionRestriction": {"blocked": ["US"]}}},
+    })
+    monkeypatch.setattr(m, "YOUTUBE_REGION", "PL")
+
+    assert m.videos_exist_via_api(["49JVQEOkNmY", "bqM-TDv73Bg", "notforpl000", "blockedelse"]) == {
+        "49JVQEOkNmY": False, "bqM-TDv73Bg": True, "notforpl000": False, "blockedelse": True,
+    }
+
+
+def test_videos_exist_via_api_batches_by_fifty(monkeypatch):
+    calls = _fake_service(monkeypatch, {})
+    m.videos_exist_via_api([f"v{i:010d}" for i in range(120)])
+    assert [len(c) for c in calls] == [50, 50, 20]
+
+
+def test_videos_exist_via_api_none_without_service_or_on_error(monkeypatch):
+    monkeypatch.setattr(m, "_read_only_youtube_service", lambda: None)
+    assert m.videos_exist_via_api(["public00000"]) is None
+
+    def broken():
+        raise RuntimeError("quota")
+    monkeypatch.setattr(m, "_read_only_youtube_service",
+                        lambda: types.SimpleNamespace(videos=lambda: types.SimpleNamespace(list=lambda **k: broken())))
+    assert m.videos_exist_via_api(["public00000"]) is None

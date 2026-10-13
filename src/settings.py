@@ -27,6 +27,10 @@ class Settings:
     local_library_dir: UPath = UPath(local_library_dir_str)
     smb_username: str = os.getenv("SMB_USERNAME")
     smb_password: str = os.getenv("SMB_PASSWORD")
+    # A YouTube Data API key (Google Cloud console -> Credentials -> API key,
+    # "YouTube Data API v3"), only for reading public video data such as
+    # whether a video still exists. Unlike the OAuth token it doesn't expire.
+    youtube_api_key: str | None = os.getenv("YOUTUBE_API_KEY")
     smb_local_library_dir: UPath = UPath(f"smb://{smb_username}:{smb_password}@server.local/Shared (SSD)/Music/Library/")
     export_dir: UPath = UPath(__file__).parent.parent / "import"
     # Where music.db / tag.db are copied for the mobile app to download
@@ -38,6 +42,9 @@ class Settings:
     # (playlists, private tags) and account.json. The originals live here, on
     # T7 - unlike sharing_dir's music.db/tag.db, these aren't copies.
     users_dir: UPath = sharing_dir / "Users"
+    # Requests from the phone (utils/database/inbox_requests.py): the sharing
+    # server writes them into new/, "Resolve new requests" moves them to processed/.
+    phone_inbox_dir: UPath = sharing_dir / "Inbox"
     # Network interface the sharing server also listens on, for the phone on
     # the home Wi-Fi (named, not "first private address": docker0/br-* are
     # private too). Empty = Tailscale only.

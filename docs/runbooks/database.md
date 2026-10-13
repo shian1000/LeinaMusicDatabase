@@ -103,8 +103,8 @@ The app also reads the files' contents directly: the `songs` / `artists` /
 confirmed no video, NULL or `""` = unknown). For songs with no value it may find a YouTube link
 itself; that stays on the phone and is dropped once a downloaded `music.db` has its own value. So
 when adding a migration that touches those tables, or changing what `youtube_video_id` can hold,
-check the app side too. Sending phone-found data back for review is planned, not built — the
-server is download-only. See [ADR-0003](../decisions/0003-phone-client-fills-gaps.md).
+check the app side too. Phone-found data comes back as requests through the server's inbox (below)
+and is reviewed here, never applied blindly. See [ADR-0003](../decisions/0003-phone-client-fills-gaps.md).
 
 **Copying** (`utils/database/sharing.py`) puts every file in `backup.DB_FILES` (music, tag,
 files) in `Settings.sharing_dir`
@@ -160,6 +160,40 @@ server. Tests: `tests/test_database_sharing.py`.
   `Linger=no` (the owner chose this on 2026-10-10) that means one minute after login, not after
   boot. That's fine here because the machine logs into GNOME, and T7 is only mounted after login
   anyway.
+
+**Requests from the phone (inbox, 2026-10-13).** The phone keeps an outbox of requests (app ADR
+0005, format in the app's `docs/handoffs/musicdatabase-outbox.md`) and sends each as one SQLite file:
+`PUT /inbox/[<user>_]YYYY-MM-DD_HH-MM-SS_NNN.db` on the same port and addresses. The service runs
+with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
+
+- The server stores it in `Inbox/new/`, written as a dot-named `.part` file and `os.replace()`d
+  in. It never overwrites and never serves inbox files back (a GET is a 404). Answers: 201 stored,
+  200 the same file is already in `new/` or `processed/` (a resend), 409 another file under that
+  name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
+  (1 MiB), 507 inbox full, 503 T7 not mounted (nothing is created then).
+- **Inbox limit:** while the files in `new/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB, the owner's
+  choice) nothing more is taken; the phone keeps the request and retries later. Processing moves
+  files out of `new/`, which frees the room; `processed/` doesn't count.
+- Anyone on the home network can send a request, the same trust as downloading. That's why the
+  name, size and header checks are there, and why a request only ever reaches the database through
+  the review below.
+- Manage database → "Resolve new requests (N)" (`utils/ui/inbox_request_review.py`, logic in
+  `utils/database/inbox_requests.py`; `main.py` prints a line at startup when some are waiting).
+  For `dead_youtube_links`: follows `song_id` through `song_id_changes`, settles without asking a
+  report whose song is gone or whose link already changed (another id or "N/A"), groups repeats of
+  one (song, dead video), checks with yt-dlp whether the dead link and the phone's video play and
+  runs our own `search_video_ytdlp()` (`check_dead_link_cases()`: one batched Data API call for
+  every id, yt-dlp only for candidates the API didn't rule out, the dead link not replayed), then
+  asks per song: keep the suggested link / keep the
+  newfound link (ours) / paste a link / "N/A" / keep the current link / skip. Both are offered even
+  when the check says they don't play. The check is `video_playability()`: True / False / None, where
+  None means YouTube blocked it (HTTP 429, "confirm you're not a bot") and is shown as "couldn't
+  check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way. Answers go to `Inbox/decisions.json`; only "kept" is read
+  back (it changes nothing in the database, so a pending or repeated report would otherwise be asked
+  again, unless it was detected after the answer).
+- A file moves to `Inbox/processed/` once every row is settled. It stays in `new/` while a row is
+  skipped, while it has a table this version doesn't know (a future request type), or while its
+  `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
 
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
 (200), `/` and any other path (404), the same for `http://192.0.2.13:8002/`, and

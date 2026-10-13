@@ -37,6 +37,10 @@ this index is the map of everything else.
 
 ## Temporary / point-in-time records
 
-Not used yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`
+- [`handoffs/`](handoffs/) — notes for an agent working in another repo (passed on by the owner),
+  e.g. [the inbox contract for MusicDatabaseApp](handoffs/inbox-for-musicdatabaseapp.md). Once
+  the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
+
+Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`
 (point-in-time investigation whose conclusions stay useful) entry, create the directory then — once
 work ships, fold the stable result into the pages above rather than leaving it stranded in a plan.

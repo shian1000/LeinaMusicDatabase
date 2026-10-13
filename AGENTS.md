@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~459 tests, ~20s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~515 tests, ~20s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -98,10 +98,14 @@ non-trivial work in that area.
   them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
-  `tag.db` / `files.db`, port 8002, only on the Tailscale IP plus the named LAN interface from
+  `tag.db` / `files.db`, and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`,
+  at most 1 MiB each, nothing while `new/` holds 100 MiB), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally. It also depends on the `songs` / `artists` /
+  the port or file names unilaterally (nor the inbox URL, name pattern or answers).
+  `inbox_requests.py` reads that inbox and settles dead YouTube link reports; Manage database →
+  "Resolve new requests" (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value
+  never lands without review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
   `additional_song_artists` schema and on `songs.youtube_video_id`'s values (video id = linked,
   `"N/A"` = confirmed no video, NULL/`""` = unknown, which the phone may search for itself) —
   coordinate schema or sentinel changes with the app
@@ -204,7 +208,13 @@ non-trivial work in that area.
   in fetchers/searches, not `slog()`.
 - `src/utils/youtube/` — YouTube playlist/download helpers, `score_result()` match ranking
   (DB → YouTube), and `import_from_playlist.py` (YouTube → DB, "Import data from YouTube
-  playlist"). `docs/agent-notes/youtube-search-matching.md`.
+  playlist"). `docs/agent-notes/youtube-search-matching.md`. Whether a video plays:
+  `video_playability()` (yt-dlp: True / False / None = YouTube blocked the check — rate limiting,
+  "not a bot" wall — never treat None as dead) and `videos_exist_via_api()` (Data API, batched,
+  no bot wall; a region block in `YOUTUBE_REGION` counts as gone; only its False is final). `ytdlp_update.py` — once a day after the backup `main.py`
+  offers a newer yt-dlp from PyPI (`utils/ui/ytdlp_update_prompt.py`) and re-pins
+  requirements.txt. yt-dlp is installed as `yt-dlp[default]` (with `yt-dlp-ejs`) plus the pinned
+  `deno` package as its JS runtime, all in the venv; without deno YouTube blocks it much sooner.
 - `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
   it for "search then resolve to one DB row" rather than re-duplicating.
   `docs/agent-notes/database-search.md`.
@@ -302,6 +312,14 @@ non-trivial work in that area.
 
 - `SMB_USERNAME` / `SMB_PASSWORD` load from `.env` (gitignored) into `src/settings.py`, used to
   build `smb://` URIs for the local library. Never hardcode, print, or log these.
+- `YOUTUBE_API_KEY` (optional, `.env`) — a read-only YouTube Data API key for
+  `videos_exist_via_api()`. Same rules. The OAuth token in `.secrets/token.json` (playlists) is a
+  separate credential and expires; without the key and a valid token the API check is skipped.
+- `.secrets/client_secret.json` (Desktop-app OAuth client, Google Cloud project `<gcp-project>`
+  since 2026-10-13) + `.secrets/token.json`, both `chmod 600`. `get_youtube_service()` discards a
+  token issued to another client and logs in again in the browser. An OAuth app left in "Testing"
+  gets its refresh token revoked after 7 days (`invalid_grant`); deleting the project behind the
+  client gives "Project … has been deleted" (403).
 
 ## Coding conventions
 
@@ -349,7 +367,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~459 tests, ~20 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~515 tests, ~20 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

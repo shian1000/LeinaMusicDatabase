@@ -930,7 +930,17 @@ video only ever needs to be found once, not just the ones a human manually confi
 longer trusts that value blindly — `is_video_id_valid()` (`yt-dlp --simulate`, no API quota)
 confirms it still resolves before reuse, since a video can go stale (deleted, made private) long
 after it was set; a failed check falls back to a fresh search instead of silently keeping a dead
-link. If that fallback search also comes up empty, `save_video_id_to_song()` is called again with
+link. Only a definite "gone" fails the check: `is_video_id_valid()` wraps
+`video_playability()` (True / False / None), and None — YouTube's HTTP 429 / "Sign in to confirm
+you're not a bot" wall, age/region limits, a timeout — keeps the link. Before 2026-10-13 any yt-dlp
+error counted as dead, so a rate-limited run could make good links look stale (and get them
+cleared). Where many ids need checking at once (inbox requests), ask the Data API
+first — `videos_exist_via_api()`, 50 ids per 1-unit call, no bot wall, API key from `.env` or the
+OAuth token — and use yt-dlp only for what it didn't rule out. A region block in `YOUTUBE_REGION`
+(PL) counts as gone: that is what the phone's "UNPLAYABLE" Topic uploads turned out to be
+(49JVQEOkNmY: unlisted, blocked in nearly every country; checked 2026-10-13). The API's True still
+isn't proof — y8I4NFlKjms is listed public and unrestricted, yet yt-dlp got "This video is not
+available" for it — hence yt-dlp as the second opinion. If that fallback search also comes up empty, `save_video_id_to_song()` is called again with
 `video_id=None` to wipe the dead link from the DB (and the cache entry) — otherwise it would sit
 there forever, silently re-failing the same `is_video_id_valid()` check on every future run instead
 of ever getting a real second chance at a fresh search. Reach for a *manual* set of this field

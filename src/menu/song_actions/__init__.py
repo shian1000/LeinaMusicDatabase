@@ -1,3 +1,4 @@
+from googleapiclient.errors import HttpError
 import questionary
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
@@ -23,7 +24,14 @@ def make_yt_playlist_menu(songs_objects):
     print("About to create a playlist with these songs:")
     display_songs(songs_objects)
     playlist_name = input("Enter playlsit name:")
-    create_yt_playlist(songs_objects, playlist_name)
+    try:
+        create_yt_playlist(songs_objects, playlist_name)
+    except HttpError as exc:
+        # e.g. "Project ... has been deleted" - .secrets/client_secret.json
+        # is from a Google Cloud project that's gone
+        print(f"YouTube refused: {exc.reason}")
+        print("If it's about the project or credentials: put a Desktop-app OAuth client from the "
+              "current Google Cloud project into .secrets/client_secret.json and try again.")
 
 def add_tags_menu(song_objects):
     tag = input("What tags do you wish to add to these songs?")

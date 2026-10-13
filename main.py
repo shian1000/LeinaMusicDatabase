@@ -11,6 +11,8 @@ from utils.database.albums import ALBUM_ID_MIGRATION, run_album_backfill
 from utils.database.sharing import share_databases_quietly
 from utils.database.files_index import scan_library_quietly
 from utils.database.song_references import apply_song_id_changes
+from utils.database.inbox_requests import count_new_requests
+from utils.ui.ytdlp_update_prompt import offer_ytdlp_update
 from utils.common.debug import slog
 
 def main():
@@ -31,6 +33,14 @@ def main():
         print("Indexing the music library...")
         scan_library_quietly()
         share_databases_quietly()
+        # Once a day too: an old yt-dlp gets blocked by YouTube sooner
+        try:
+            offer_ytdlp_update()
+        except Exception as exc:
+            slog(f"yt-dlp update check failed (non-fatal): {exc}", priority=3)
+    waiting = count_new_requests()
+    if waiting:
+        print(f"{waiting} new request(s) in the inbox - Enter database -> Manage database -> Resolve new requests")
     #Comment it to unload tests
     # test()
     main_menu()

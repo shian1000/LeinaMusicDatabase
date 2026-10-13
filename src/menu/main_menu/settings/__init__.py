@@ -34,9 +34,9 @@ from settings import settings
 
 def settings_menu():
     action_map = {
+        "Server": server_menu,
         "Discovery modules": discovery_modules_menu,
         "Max songs to process per fetch": set_max_songs_per_fetch,
-        "Server": server_menu,
         "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
@@ -46,8 +46,8 @@ def server_menu():
     """Where the databases live, their backups, and sharing them with the
     phone app."""
     action_map = {
-        "Database location": database_location_menu,
         "Back up database now": backup_database_now,
+        "Database location": database_location_menu,
         "Index music library": index_music_library,
         "Submit database for sharing": submit_database_for_sharing,
         "Setup this PC for database sharing": setup_database_sharing,

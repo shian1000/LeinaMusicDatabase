@@ -6,10 +6,6 @@ from menu.main_menu.settings import settings_menu
 from menu.main_menu.youtube import youtube_menu
 from utils.common.debug import slog
 
-def android_test():
-    print("To jest testowy komunikat dla aplikacji Android. Milego dnia")
-
-
 def main_menu():
     action_map = {
         "Enter database": enter_database,
@@ -17,7 +13,6 @@ def main_menu():
         "Statistics": show_discovery_stats,
         "YouTube": youtube_menu,
         "Settings": settings_menu,
-        "Android Test": android_test
     }
 
     slog(action_map)

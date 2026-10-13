@@ -24,7 +24,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config.constants import SHARING_HTTP_PORT, SHARING_SERVICE_NAME, SHARING_STARTUP_DELAY
+from config.constants import (
+    PHONE_INBOX_LIMIT_BYTES,
+    PHONE_REQUEST_MAX_BYTES,
+    SHARING_HTTP_PORT,
+    SHARING_SERVICE_NAME,
+    SHARING_STARTUP_DELAY,
+)
 from settings import Settings
 from utils.common.debug import mlog, slog
 from utils.database.backup import DB_FILES
@@ -32,6 +38,7 @@ from utils.database.backup import DB_FILES
 SHARING_DIR = Path(str(Settings.sharing_dir))
 SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
 SHARING_LAN_INTERFACE = Settings.sharing_lan_interface
+PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir))
 SERVER_SCRIPT = Path(__file__).with_name("sharing_server.py")
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
@@ -115,8 +122,10 @@ def _service_unit(python: str) -> str:
     command = f"{python} {SERVER_SCRIPT} --dir {SHARING_DIR} --mount {SHARING_DRIVE_MOUNT} --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
+    command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
+                f" --inbox-limit-bytes {PHONE_INBOX_LIMIT_BYTES}")
     return f"""[Unit]
-Description=MusicDatabase - serve music.db/tag.db/files.db to the mobile app over Tailscale and the LAN
+Description=MusicDatabase - serve music.db/tag.db/files.db to the mobile app and take its requests, over Tailscale and the LAN
 
 [Service]
 ExecStart={command}

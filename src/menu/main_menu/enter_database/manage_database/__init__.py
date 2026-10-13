@@ -11,6 +11,8 @@ from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import review_multi_artist_albums
+from utils.ui.inbox_request_review import resolve_new_requests
+from utils.database.inbox_requests import count_new_requests
 import questionary
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
@@ -165,7 +167,9 @@ def check_spelling_menu():
         
 
 def manage_database():
+    waiting = count_new_requests()
     action_map = {
+        f"Resolve new requests{f' ({waiting})' if waiting else ''}": resolve_new_requests,
         "Fetch database data": fetch_database_data,
         "Manual management": manual_management,
         "Resolve duplicates": resolve_duplicates,

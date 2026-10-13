@@ -26,6 +26,8 @@ from utils.common.normalizer import APOSTROPHES
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import flog
+from settings import Settings
+from config.constants import YOUTUBE_REGION
 import json
 
 
@@ -247,14 +249,28 @@ def _keyword_present(keyword: str, text: str) -> bool:
 # AUTHENTICATION
 # ---------------------------------------------------------
 
+def _oauth_client_id() -> str | None:
+    try:
+        with open(CLIENT_SECRET_PATH) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return (data.get("installed") or data.get("web") or {}).get("client_id")
+
+
 def get_youtube_service():
     """Authenticate and return a YouTube API service instance."""
 
     creds = None
 
-    # Load cached credentials
+    # Load cached credentials - unless they belong to another OAuth client
+    # (client_secret.json replaced, e.g. after its Google Cloud project was
+    # deleted): such a token only gets "Project ... has been deleted" errors.
     if os.path.exists(TOKEN_PATH):
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        if creds.client_id != _oauth_client_id():
+            print("The saved YouTube login is for another OAuth client - logging in again.")
+            creds = None
 
     # If no valid credentials, login with OAuth
     if not creds or not creds.valid:
@@ -1430,18 +1446,30 @@ def search_video(
     return video_id
 
 
-def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
-    """Check whether a stored YouTube video ID still resolves to a watchable
-    video.
+# yt-dlp ERROR lines that mean YouTube didn't answer the question at all -
+# rate limiting (HTTP 429) and the "confirm you're not a bot" wall it puts up
+# after it. Checked before _VIDEO_GONE_ERRORS: a blocked check says nothing
+# about the video (2026-10-13: a video that played fine on the phone came
+# back "Sign in to confirm you're not a bot" and was shown as dead).
+# "Sign in to confirm your age" lands here too - the video exists.
+_YTDLP_BLOCKED_ERRORS = (
+    "not a bot", "sign in to confirm", "429", "too many requests", "try again later",
+)
+# ...and the ones that mean the video itself is gone: removed, private,
+# unavailable, channel terminated. Any other error (region, members-only,
+# network) leaves the answer unknown.
+_VIDEO_GONE_ERRORS = (
+    "video unavailable", "this video is not available", "this video is no longer available",
+    "private video", "has been removed", "account associated with this video has been terminated",
+    "this video does not exist",
+)
 
-    `Song.youtube_video_id` (whether set manually or by `save_video_id_to_song()`
-    below) can go stale after the fact — the video gets deleted, made
-    private, or taken down — and trusting it blindly would keep adding a dead
-    link to every future playlist instead of falling back to a fresh search.
-    Uses yt-dlp (`--simulate`, no download) rather than the Data API so
-    validating a stored link doesn't burn API quota, consistent with
-    `search_video()`'s yt-dlp-first preference.
-    """
+
+def video_playability(video_id: str | None, timeout: int = 20) -> bool | None:
+    """Whether a YouTube video plays, asked with yt-dlp (`--simulate`, no
+    download, no API quota): True = plays, False = gone (removed, private,
+    unavailable, channel terminated), None = couldn't tell (YouTube blocked
+    the check, rate limiting, region/age limits, yt-dlp missing or too slow)."""
     if not video_id:
         return False
     try:
@@ -1452,15 +1480,106 @@ def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
             timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        _logger.warning(f"Could not validate video_id={video_id} ({e}) — assuming it's still valid")
+        _logger.warning(f"Could not check video_id={video_id} ({e})")
+        return None
+
+    if result.returncode == 0:
         return True
-
-    if result.returncode != 0:
-        error_output = (result.stderr or result.stdout or "").strip().splitlines()
-        _logger.info(f"video_id={video_id} failed validation: {error_output[-1] if error_output else 'unknown error'}")
+    output = (result.stderr or result.stdout or "").strip().splitlines()
+    errors = [line for line in output if line.startswith("ERROR")] or output[-1:]
+    message = errors[-1] if errors else "unknown error"
+    lowered = message.lower()
+    if any(marker in lowered for marker in _YTDLP_BLOCKED_ERRORS):
+        flog(f"[yt-dlp] couldn't check video {video_id}, YouTube blocked it: {message}")
+        return None
+    if any(marker in lowered for marker in _VIDEO_GONE_ERRORS):
+        _logger.info(f"video_id={video_id} failed validation: {message}")
         return False
+    flog(f"[yt-dlp] couldn't tell whether video {video_id} plays: {message}")
+    return None
 
-    return True
+
+# videos.list takes at most 50 ids per call (1 quota unit per call)
+_API_VIDEOS_PER_CALL = 50
+_GONE_UPLOAD_STATUSES = {"deleted", "failed", "rejected"}
+
+
+def _read_only_youtube_service():
+    """A Data API client for reading public data without a browser login: the
+    YOUTUBE_API_KEY from .env, else the saved OAuth token if it's still
+    valid or refreshable. None when neither works - never starts the OAuth
+    browser flow (the app is often run over ssh)."""
+    if Settings.youtube_api_key:
+        return build("youtube", "v3", developerKey=Settings.youtube_api_key, cache_discovery=False)
+    try:
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        if not creds.valid:
+            creds.refresh(Request())
+    except Exception as exc:
+        flog(f"[YouTube API] no API key and no usable token ({type(exc).__name__}) - skipping the API check")
+        return None
+    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+
+
+def _region_blocked(regions: dict) -> bool:
+    if YOUTUBE_REGION in regions.get("blocked", []):
+        return True
+    return "allowed" in regions and YOUTUBE_REGION not in regions["allowed"]
+
+
+def videos_exist_via_api(video_ids) -> dict | None:
+    """{video id: False if YouTube's Data API says the video is gone (not
+    listed at all = deleted, private or channel terminated; private; upload
+    deleted/failed/rejected) or region-blocked in YOUTUBE_REGION, True if
+    it's listed, public/unlisted and allowed here}. Region blocks are how
+    dead "Topic" uploads look (2026-10-13: Elise Trouw's 49JVQEOkNmY,
+    unlisted and blocked in nearly every country, PL included).
+    None when the API can't be used. Not affected by yt-dlp's rate limiting
+    or bot wall, but it can't see everything: a video YouTube refuses to
+    play ("UNPLAYABLE" Topic uploads, 2026-10-12) may still be listed as
+    fine, so True isn't proof that it plays - only False is final."""
+    ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
+    if not ids:
+        return {}
+    service = _read_only_youtube_service()
+    if service is None:
+        return None
+    result = {}
+    try:
+        for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
+            chunk = ids[start:start + _API_VIDEOS_PER_CALL]
+            response = service.videos().list(
+                part="status,contentDetails", id=",".join(chunk), maxResults=50).execute()
+            listed = {item["id"]: item for item in response.get("items", [])}
+            for video_id in chunk:
+                item = listed.get(video_id)
+                status = (item or {}).get("status", {})
+                regions = (item or {}).get("contentDetails", {}).get("regionRestriction", {})
+                result[video_id] = (
+                    item is not None
+                    and status.get("privacyStatus") != "private"
+                    and status.get("uploadStatus") not in _GONE_UPLOAD_STATUSES
+                    and not _region_blocked(regions)
+                )
+    except Exception as exc:
+        flog(f"[YouTube API] videos.list failed: {exc}")
+        return None
+    return result
+
+
+def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
+    """Check whether a stored YouTube video ID still resolves to a watchable
+    video.
+
+    `Song.youtube_video_id` (whether set manually or by `save_video_id_to_song()`
+    below) can go stale after the fact — the video gets deleted, made
+    private, or taken down — and trusting it blindly would keep adding a dead
+    link to every future playlist instead of falling back to a fresh search.
+    Only a definite "gone" from video_playability() counts as invalid: when
+    the check itself fails (yt-dlp missing, timeout, YouTube's bot wall) the
+    link is trusted, since a dead-looking link can end up cleared from the DB.
+    """
+    return video_playability(video_id, timeout) is not False
 
 
 def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | None:

@@ -46,17 +46,19 @@ anywhere.
    (`archive/user-<name>.<timestamp>.db`), and `migrations/user/` is applied to each of them at
    startup, after a backup. While T7 isn't mounted, users are skipped, never created on the
    system disk.
-6. **Global data the phone finds goes through a review inbox, not straight in** (planned): a
-   separate small database of requests (who, what, payload, status) that MusicDatabase reads and
-   the user accepts or rejects. That's the "come back for review" of
+6. **Global data the phone finds goes through a review inbox, not straight in**: requests that
+   MusicDatabase reads and the user accepts or rejects. Built 2026-10-13 as one SQLite file per
+   request uploaded to the sharing server's inbox and reviewed in Manage database → "Resolve new
+   requests" ([runbooks/database.md](../runbooks/database.md)) rather than one shared database. That's the "come back for review" of
    [ADR-0003](0003-phone-client-fills-gaps.md). Private data needs no review: it goes straight
    into that user's `user.db`.
 
 ## Not done yet
 
 - Nothing sends, receives or serves `user.db`. The sharing server still serves only
-  `music.db`/`tag.db` (everything else is a 404, including `Users/`). Uploading, logging in from
-  the phone and the inbox each need agreeing with the MusicDatabaseApp side first.
+  `music.db`/`tag.db`/`files.db` (everything else is a 404, including `Users/`) and takes only
+  inbox requests. Uploading user data and logging in from the phone need agreeing with the
+  MusicDatabaseApp side first.
 
 Since built: song merges and deletions reach users' playlists and private tags, and tag.db, via
 an id-change log in `music.db` replayed by each file

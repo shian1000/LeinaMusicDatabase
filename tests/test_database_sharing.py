@@ -228,6 +228,156 @@ def test_second_socket_on_same_port_serves_the_same_files(serve, share_dir):
     assert _request(f"{second}/secret.txt")[0] == 404
 
 
+# ==================== inbox uploads ====================
+
+REQUEST_NAME = "2026-10-12_23-44-05_001.db"
+
+
+def _put(url: str, data: bytes | None, headers: dict | None = None):
+    req = urllib.request.Request(url, data=data, method="PUT", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+
+
+def _sqlite_bytes(tmp_path: Path, value: int = 1) -> bytes:
+    path = tmp_path / f"req{value}.db"
+    if not path.exists():
+        _make_db(path, value)
+    return path.read_bytes()
+
+
+@pytest.fixture
+def inbox_server(serve, share_dir, tmp_path):
+    inbox = tmp_path / "Inbox"
+
+    def start(mount="/", **limits):
+        handler = sharing_server.make_handler(str(share_dir), mount, str(inbox), **limits)
+        return serve(share_dir, mount, handler=handler)
+
+    return start, inbox
+
+
+def test_upload_is_stored_in_new(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start()
+    data = _sqlite_bytes(tmp_path)
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", data)[0] == 201
+    assert (inbox / "new" / REQUEST_NAME).read_bytes() == data
+    assert [p.name for p in (inbox / "new").iterdir()] == [REQUEST_NAME]  # no .part left
+
+
+def test_upload_with_user_name(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start()
+
+    assert _put(f"{base}/inbox/ola-2_{REQUEST_NAME}", _sqlite_bytes(tmp_path))[0] == 201
+
+
+def test_same_upload_again_is_ok_and_another_under_its_name_is_a_conflict(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start()
+    data = _sqlite_bytes(tmp_path, 1)
+    _put(f"{base}/inbox/{REQUEST_NAME}", data)
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", data)[0] == 200
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path, 2))[0] == 409
+    assert (inbox / "new" / REQUEST_NAME).read_bytes() == data
+
+
+def test_upload_already_processed_is_ok(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start()
+    data = _sqlite_bytes(tmp_path)
+    (inbox / "processed").mkdir(parents=True)
+    (inbox / "processed" / REQUEST_NAME).write_bytes(data)
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", data)[0] == 200
+    assert not (inbox / "new" / REQUEST_NAME).exists()
+
+
+@pytest.mark.parametrize("name", [
+    "music.db", "2026-10-12_23-44-05_01.db", "../2026-10-12_23-44-05_001.db", "a_b_2026-10-12_23-44-05_001.db",
+    "2026-10-12_23-44-05_001.db.part", "%2e%2e%2f2026-10-12_23-44-05_001.db", "ola_2026-10-12_23-44-05_001.sqlite",
+])
+def test_upload_with_a_bad_name_is_refused(inbox_server, tmp_path, name):
+    start, inbox = inbox_server
+    base = start()
+
+    assert _put(f"{base}/inbox/{name}", _sqlite_bytes(tmp_path))[0] == 400
+    assert not (inbox / "new").exists() or not any((inbox / "new").iterdir())
+
+
+def test_upload_that_isnt_sqlite_is_refused(inbox_server):
+    start, inbox = inbox_server
+    base = start()
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", b"#!/bin/sh\nrm -rf /\n")[0] == 400
+
+
+def test_upload_over_the_size_limit_is_refused(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    data = _sqlite_bytes(tmp_path)
+    base = start(max_request_bytes=len(data) - 1)
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", data)[0] == 413
+
+
+def test_full_inbox_refuses_new_requests_until_one_is_processed(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    first, second = _sqlite_bytes(tmp_path, 1), _sqlite_bytes(tmp_path, 2)
+    base = start(inbox_limit_bytes=len(first) + len(second) - 1)
+    other = "2026-10-12_23-45-00_002.db"
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", first)[0] == 201
+    assert _put(f"{base}/inbox/{other}", second)[0] == 507
+    assert not (inbox / "new" / other).exists()
+
+    # Processing moves it out of new/, which frees the room
+    (inbox / "processed").mkdir()
+    (inbox / "new" / REQUEST_NAME).rename(inbox / "processed" / REQUEST_NAME)
+    assert _put(f"{base}/inbox/{other}", second)[0] == 201
+
+
+def test_upload_without_length_is_refused(inbox_server, tmp_path):
+    start, _ = inbox_server
+    base = start()
+    host, port = base.removeprefix("http://").split(":")
+    import http.client
+    conn = http.client.HTTPConnection(host, int(port))
+    conn.putrequest("PUT", f"/inbox/{REQUEST_NAME}")
+    conn.putheader("Transfer-Encoding", "chunked")
+    conn.endheaders()
+    assert conn.getresponse().status == 411
+    conn.close()
+
+
+def test_upload_when_drive_unmounted(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start(mount=str(tmp_path / "not-a-mount-point"))
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path))[0] == 503
+    assert not inbox.exists()  # nothing created on the system disk
+
+
+def test_without_inbox_uploads_are_404(serve, share_dir, tmp_path):
+    base = serve(share_dir, "/")
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path))[0] == 404
+    assert _put(f"{base}/music.db", _sqlite_bytes(tmp_path))[0] == 404
+
+
+def test_inbox_files_are_never_downloadable(inbox_server, tmp_path):
+    start, _ = inbox_server
+    base = start()
+    _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path))
+
+    assert _request(f"{base}/inbox/{REQUEST_NAME}")[0] == 404
+
+
 # ==================== Tailscale / LAN binding ====================
 
 @pytest.mark.parametrize("stdout, expected", [
@@ -418,6 +568,8 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     service, timer = (text for _, text in second)
     assert f"--port {sharing.SHARING_HTTP_PORT}" in service
     assert f"--dir {sharing.SHARING_DIR}" in service
+    assert f"--inbox {sharing.PHONE_INBOX_DIR}" in service
+    assert "--inbox-limit-bytes 104857600" in service
     assert f"--mount {sharing.SHARING_DRIVE_MOUNT}" in service
     assert str(sharing.SERVER_SCRIPT) in service
     assert "Restart=always" in service

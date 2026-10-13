@@ -5,10 +5,10 @@ One row per subsystem. "Docs" links to where the *depth* lives — a system with
 
 | System | Owns | Docs |
 | --- | --- | --- |
-| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags and albums (`albums.py`: `songs.album_id` kept in step with `songs.album`, cover rows), the search/getter API, the category system, backups/migrations, users and their private `user.db` (`users.py`, `user_playlists.py`), the music library index `files.db` mapping audio files to songs (`files_index.py`), keeping `songs.id` references in tag.db / files.db / users' DBs valid across merges and deletions (`song_references.py`), and copying + serving the DBs to the MusicDatabaseApp phone client (`sharing.py`, `sharing_server.py`) | [agent-notes/database-search.md](../agent-notes/database-search.md), [runbooks/database.md](../runbooks/database.md) |
+| Catalog / DB search | `src/utils/database/` — storage for artists/songs/tags and albums (`albums.py`: `songs.album_id` kept in step with `songs.album`, cover rows), the search/getter API, the category system, backups/migrations, users and their private `user.db` (`users.py`, `user_playlists.py`), the music library index `files.db` mapping audio files to songs (`files_index.py`), keeping `songs.id` references in tag.db / files.db / users' DBs valid across merges and deletions (`song_references.py`), copying + serving the DBs to the MusicDatabaseApp phone client (`sharing.py`, `sharing_server.py`), and the inbox of requests it sends back (`inbox_requests.py`, reviewed in `utils/ui/inbox_request_review.py`) | [agent-notes/database-search.md](../agent-notes/database-search.md), [runbooks/database.md](../runbooks/database.md) |
 | Discovery | `src/utils/discoveries/` — external metadata fetchers (MusicBrainz, Wikipedia, iTunes, Genius, Google, Spotify, YouTube), MP3-tag import, album covers from embedded mp3 pictures (`mp3_covers.py`), playlists from a folder of mp3s (`folder_playlist.py`) | [agent-notes/discovery-modules.md](../agent-notes/discovery-modules.md), [agent-notes/import-pipeline.md](../agent-notes/import-pipeline.md) |
 | Normalization & matching | `src/utils/common/normalizer.py`, `text_utils.py` — canonical string normalization and fuzzy-match helpers | [agent-notes/normalization-and-matching.md](../agent-notes/normalization-and-matching.md) |
-| YouTube | `src/utils/youtube/` — matching songs to YouTube videos, downloads, playlist management | [agent-notes/youtube-search-matching.md](../agent-notes/youtube-search-matching.md) |
+| YouTube | `src/utils/youtube/` — matching songs to YouTube videos, whether a video plays (yt-dlp + Data API), downloads, playlist management, keeping yt-dlp current (`ytdlp_update.py`) | [agent-notes/youtube-search-matching.md](../agent-notes/youtube-search-matching.md) |
 | Terminal UI | `src/menu/`, `src/utils/ui/` — presentation, prompt flow, and wiring the other systems together | `AGENTS.md` → Module map |
 | Config & settings | `src/config/constants.py`, `src/settings.py` — thresholds/labels, env-based paths and secrets | `AGENTS.md` → Module map, Secrets |
 
@@ -26,6 +26,7 @@ One edge per line so both directions are `grep`-able.
 - Catalog/DB search -> Normalization & matching — Python-side fallback filter, category/similarity matching
 - YouTube -> Normalization & matching — scores candidate videos via `similarity()` / `scaled_similarity_threshold()`
 - YouTube -> Catalog/DB search — `yt_cache.init_cache()` reads a song's artist credits (`song_artists.song_artist_credits()`) for matching, not for search
+- Catalog/DB search -> YouTube — `inbox_requests.check_dead_link_cases()` uses `search_video_ytdlp()`, `video_playability()` and `videos_exist_via_api()` to check reported dead links
 - Everything -> Config & settings — constants, thresholds, env-based paths/secrets
 
 ## Boundaries
