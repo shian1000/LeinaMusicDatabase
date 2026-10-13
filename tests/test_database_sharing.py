@@ -945,7 +945,7 @@ def test_mood_round_trip(mood_server):
     status, stored = _call("PUT", f"{base}/{UID}", token, _mood_body())
     # 2 merged into 4, 5 deleted: a mood holds only songs that exist
     assert (status, stored) == (200, {"uid": UID, "revision": 1, "name": "Siłownia", "created_at": 900,
-                                      "updated_at": 1000, "deleted": False, "song_ids": [4]})
+                                      "updated_at": 1000, "deleted": False, "song_ids": [4], "cover": None})
     assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "moods": [stored]})
     db = sqlite3.connect(users_dir / "ola_k" / "user.db")
     assert db.execute("SELECT song_ids_checked_to FROM tags").fetchone() == (2,)
@@ -1027,3 +1027,115 @@ def test_global_mood_changes_are_checked(mood_server, tmp_path):
     # Revoked: refused on the next request
     (users_dir / "ola_k" / "account.json").write_text('{"username": "ola_k", "permissions": []}')
     assert _call("PUT", f"{base}/global-moods/1/songs/4", token)[0] == 403
+
+
+# ==================== covers ====================
+
+COVER_PNG = b"\x89PNG\r\n\x1a\n" + b"cover"
+COVER_SHA = hashlib.sha256(COVER_PNG).hexdigest()
+
+
+def _put_blob(url, token, data, content_type="image/png"):
+    headers = {"Content-Type": content_type}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=data, method="PUT", headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status
+    except urllib.error.HTTPError as err:
+        return err.code
+
+
+def test_cover_blob_round_trip(playlist_server):
+    start, users_dir, tokens = playlist_server
+    base = start()
+    url = f"{base}/users/ola_k/covers/{COVER_SHA}"
+    token = tokens["ola_k"]
+    assert _call("GET", url, token)[0] == 404
+    assert _put_blob(url, token, COVER_PNG) == 201
+    assert _put_blob(url, token, COVER_PNG) == 200  # a retry is harmless
+    assert (users_dir / "ola_k" / "covers" / f"{COVER_SHA}.png").read_bytes() == COVER_PNG
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req) as resp:
+        assert resp.read() == COVER_PNG
+        assert resp.headers["Content-Type"] == "image/png"
+        assert "immutable" in resp.headers["Cache-Control"]
+
+
+def test_bad_cover_blobs(playlist_server, tmp_path):
+    start, _, tokens = playlist_server
+    base = start()
+    url = f"{base}/users/ola_k/covers/{COVER_SHA}"
+    token = tokens["ola_k"]
+    other = hashlib.sha256(b"other").hexdigest()
+    assert _put_blob(f"{base}/users/ola_k/covers/{other}", token, COVER_PNG) == 400   # hash mismatch
+    assert _put_blob(f"{base}/users/ola_k/covers/{COVER_SHA.upper()}", token, COVER_PNG) == 400
+    assert _put_blob(url, token, COVER_PNG, "image/gif") == 415
+    gif = b"GIF89a"
+    assert _put_blob(f"{base}/users/ola_k/covers/{hashlib.sha256(gif).hexdigest()}", token, gif) == 415
+    # Over 4 MiB: refused on the header alone, before the body is read
+    import http.client
+    host, port = base.removeprefix("http://").split(":")
+    conn = http.client.HTTPConnection(host, int(port))
+    conn.putrequest("PUT", f"/users/ola_k/covers/{COVER_SHA}")
+    conn.putheader("Content-Type", "image/png")
+    conn.putheader("Content-Length", str(4 * 1024 * 1024 + 1))
+    conn.endheaders()
+    assert conn.getresponse().status == 413
+    conn.close()
+    assert _put_blob(url, None, COVER_PNG) == 401
+    assert _put_blob(url, tokens["bob"], COVER_PNG) == 403
+    assert _call("GET", url, tokens["bob"])[0] == 403
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _put_blob(f"{unmounted}/users/ola_k/covers/{COVER_SHA}", token, COVER_PNG) == 503
+
+
+def test_playlist_and_mood_covers(mood_server):
+    start, users_dir, tokens, _ = mood_server
+    base = start()
+    token = tokens["ola_k"]
+    playlist_url = f"{base}/users/ola_k/playlists/{UID}"
+    # The blob first, else cover_missing
+    assert _call("PUT", playlist_url, token, _body(cover=COVER_SHA)) == (
+        400, {"error": "cover_missing", "cover": COVER_SHA})
+    _put_blob(f"{base}/users/ola_k/covers/{COVER_SHA}", token, COVER_PNG)
+    status, stored = _call("PUT", playlist_url, token, _body(cover=COVER_SHA))
+    assert status == 200 and stored["cover"] == COVER_SHA
+    # An app without covers keeps it; null removes it
+    assert _call("PUT", playlist_url, token, _body(base_revision=1, updated_at=2000))[1]["cover"] == COVER_SHA
+    assert _call("PUT", playlist_url, token, _body(base_revision=2, updated_at=3000, cover=None))[1]["cover"] is None
+
+    mood_url = f"{base}/users/ola_k/moods/{UID}"
+    status, stored = _call("PUT", mood_url, token, _mood_body(cover=COVER_SHA))
+    assert status == 200 and stored["cover"] == COVER_SHA
+    status, _ = _call("DELETE", f"{mood_url}?base_revision=1&deleted_at=5000", token)
+    assert status == 200
+    assert (users_dir / "ola_k" / "archive" / "covers" / f"{COVER_SHA}.png").exists()
+    # Unreferenced now, but fresh: still there
+    assert (users_dir / "ola_k" / "covers" / f"{COVER_SHA}.png").exists()
+
+
+def test_global_mood_covers(mood_server):
+    start, _, tokens, _ = mood_server
+    base = start()
+    token = tokens["ola_k"]
+    url = f"{base}/users/ola_k/global-mood-covers"
+    assert _call("GET", url, token) == (200, {"revision": 0, "covers": []})
+    body = {"base_revision": 0, "updated_at": 1000, "cover": COVER_SHA}
+    assert _call("PUT", f"{url}/1", token, body) == (400, {"error": "cover_missing", "cover": COVER_SHA})
+    _put_blob(f"{base}/users/ola_k/covers/{COVER_SHA}", token, COVER_PNG)
+    status, stored = _call("PUT", f"{url}/1", token, body)
+    assert (status, stored) == (200, {"mood_id": 1, "revision": 1, "cover": COVER_SHA, "updated_at": 1000})
+    assert _call("PUT", f"{url}/1", token, {**body, "updated_at": 500, "cover": None}) == (409, stored)
+    status, removed = _call("PUT", f"{url}/1", token, {"base_revision": 1, "updated_at": 2000, "cover": None})
+    assert (status, removed["cover"], removed["revision"]) == (200, None, 2)
+    assert _call("GET", f"{url}?since=1", token) == (200, {"revision": 2, "covers": [removed]})
+    # Any id >= 1, even one no tag.db has
+    assert _call("PUT", f"{url}/777", token, {**body, "cover": None})[0] == 200
+    assert _call("PUT", f"{url}/0", token, body)[0] == 400
+    assert _call("PUT", f"{url}/1", token, {"base_revision": 0, "updated_at": 1})[0] == 400  # cover required
+    assert _call("GET", f"{url}/1", token)[0] == 404
+    assert _call("DELETE", f"{url}/1", token)[0] == 404
+    assert _call("GET", url, tokens["bob"])[0] == 403
+    assert _call("GET", f"{base}/users/bob/global-mood-covers", tokens["bob"])[0] == 503  # no user.db

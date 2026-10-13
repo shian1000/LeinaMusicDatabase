@@ -313,6 +313,38 @@ permission is the trust — but everything is recorded (`utils/database/global_m
   song in which mood, newest first (100 shown; the whole log is `history.jsonl`). Undo by hand in
   "Global moods" → the mood → "Add a song" / "Remove songs". `MoodChanges/` isn't backed up; tag.db is.
 
+**Covers on the phone (2026-10-13).** A playlist or mood can have a cover the user picked from their
+photos on the phone. It syncs with the user's account like the rest of the playlist/mood. The owner's
+decisions are in the app's `docs/handoffs/musicdatabase-covers.md`; the answer, with the final
+contract, is [`docs/handoffs/covers-for-musicdatabaseapp.md`](../handoffs/covers-for-musicdatabaseapp.md).
+MusicDatabase only stores covers; the menu can't set them, it just adds ", cover" to the playlist
+and mood lists.
+
+- **Pictures are files, not rows** (`utils/database/covers.py`): `Users/<name>/covers/<sha256>.png|.jpg`,
+  named by the SHA-256 of the exact bytes. `PUT /users/<name>/covers/<sha256>` (body = the image,
+  `image/png` or `image/jpeg`, at most 4 MiB, signature checked, never decoded) answers 201 new /
+  200 already stored, 400 hash mismatch, 413, 415; `GET` serves it with `Cache-Control: immutable`.
+  Same token rules as playlists.
+- **References** are `cover_sha256` on `playlists`, on mood `tags` rows and in
+  `global_mood_covers` (user migration 0006; until a user.db has it, every playlist / mood /
+  cover call for that user is 503). Playlist and mood JSON carry `"cover"`: a PUT without the key
+  keeps the stored one (older app versions), `null` removes it, a hash with no blob is 400
+  `{"error": "cover_missing", "cover": …}`. Merges: the side with the newer `updated_at` keeps its
+  cover, or the other side's when it has none (same import on two phones, same mood name).
+- **Private covers of global moods** (`mood_sync.py`): `GET /users/<name>/global-mood-covers?since=`
+  and `PUT …/global-mood-covers/<tag.db mood id>` with `base_revision`, `updated_at`, `cover`.
+  Own counter (`global_mood_cover_revision`), the playlist conflict rule, removal = `cover: null`
+  (the row stays). Promoting a user's mood moves its cover here.
+- **Deleting** a playlist or mood copies its blob to `Users/<name>/archive/covers/` next to the
+  archived JSON and clears the reference. **Clean-up** (`covers.clean_up()`) runs on the server
+  after every applied write of that user and removes blobs nothing refers to once their file is
+  24 hours old (mtime; a re-upload touches it). The grace period is there because the phone uploads
+  the blob before the PUT that names it. Blob writes, the "blob exists" check plus its write, and
+  the clean-up share one lock in the server.
+- `covers/` lives in the user's folder on T7, which the backups don't copy (they copy `user.db`).
+  A restored user.db may name blobs the folder no longer has; the phone then re-uploads on
+  `cover_missing`, and a GET of a missing blob is 404.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
 (200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists` and `…/users/<name>/moods` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.

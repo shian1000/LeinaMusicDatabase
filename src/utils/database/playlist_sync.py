@@ -15,7 +15,10 @@ phone"; the app's docs/handoffs/musicdatabase-playlists.md):
 - A deleted playlist keeps its row (uid, revision, updated_at) without
   tracks, so every phone hears about it. Before its tracks go, the whole
   playlist is written to Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json
-  (never overwritten, never read by code - for recovering by hand).
+  (never overwritten, never read by code - for recovering by hand), and its
+  cover picture to archive/covers/ (covers.py).
+- A cover is part of the playlist: its `cover` is the sha256 of a picture
+  stored by covers.py. A PUT without the key keeps the stored one.
 
 Standard-library only and free of the app's config, because the sharing
 server (sharing_server.py, run on the system python3) imports it as well as
@@ -35,6 +38,11 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from . import covers  # imported as utils.database.playlist_sync (the app, tests)
+except ImportError:
+    import covers  # run by the sharing server as a script (its folder is on sys.path)
+
 # Must match config.constants (tests/test_playlist_sync.py checks they do)
 USER_DB_FILENAME = "user.db"
 SOURCES = ("folder", "youtube", "spotify", "spotifyAlbum")
@@ -46,6 +54,11 @@ ARCHIVE_SUBDIR = Path("archive") / "playlists"
 ARCHIVE_STAMP_FORMAT = "%y%m%d-%H%M"
 BUSY_TIMEOUT_SECONDS = 15
 UID_RE = re.compile(r"^[0-9A-Za-z-]{8,64}$")
+
+
+# A PUT body without the "cover" key: keep the stored cover (an older app
+# version must not wipe covers it doesn't know about); null removes it
+KEEP_COVER = object()
 
 
 class NotMigratedError(Exception):
@@ -64,9 +77,10 @@ def new_uid() -> str:
     return str(uuid.uuid4())
 
 
-def connect(db_path, required_migration: str = REQUIRED_MIGRATION) -> sqlite3.Connection:
-    """A connection to a user.db that has `required_migration`, in
-    autocommit mode (the write functions open their own transactions).
+def connect(db_path, required_migration: str = covers.REQUIRED_MIGRATION) -> sqlite3.Connection:
+    """A connection to a user.db that has `required_migration` (by default
+    the newest one the sync code reads - every column of playlists, moods
+    and covers), in autocommit mode (the write functions open their own transactions).
     Raises NotMigratedError."""
     if not os.path.exists(db_path):
         raise NotMigratedError(f"{db_path} doesn't exist")
@@ -143,6 +157,7 @@ def playlist_json(conn, row, with_tracks: bool = True) -> dict:
         "uid": row["uid"], "revision": row["revision"], "name": row["name"],
         "source": row["source"], "source_id": row["source_id"], "source_owner": row["source_owner"],
         "created_at": row["created_at"], "updated_at": row["updated_at"], "deleted": False,
+        "cover": row["cover_sha256"],
     }
     if with_tracks:
         payload["tracks"] = _tracks_json(conn, row["id"])
@@ -184,6 +199,19 @@ def _text(value, field: str, optional: bool = True):
     return value
 
 
+def parse_cover(body: dict, required: bool = False):
+    """The body's "cover": a sha256, None (remove), or KEEP_COVER when the
+    key is missing (and not `required`)."""
+    if "cover" not in body:
+        if required:
+            raise BadPlaylistError("cover: missing")
+        return KEEP_COVER
+    value = body["cover"]
+    if value is not None and not covers.is_sha256(value):
+        raise BadPlaylistError("cover: expected a lowercase hex sha256 or null")
+    return value
+
+
 def parse_playlist(body) -> dict:
     """A PUT body (or the menu's playlist) checked and reduced to what's
     stored. Raises BadPlaylistError."""
@@ -220,6 +248,7 @@ def parse_playlist(body) -> dict:
         "created_at": _int(body.get("created_at"), "created_at", optional=True),
         "updated_at": updated_at,
         "tracks": parsed_tracks,
+        "cover": parse_cover(body),
     }
 
 
@@ -300,30 +329,45 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
     the stored one won. An unknown uid is created, except that with
     `merge_same_source` a live playlist with the same source + source_id
     (two phones imported the same YouTube/Spotify playlist) is updated
-    instead, keeping its uid."""
+    instead, keeping its uid. Its cover: the newer side's, or the other
+    side's when the newer has none. A `cover` must already be stored as a
+    blob (the caller checks, covers.require_blob())."""
+    incoming_cover = playlist.get("cover", KEEP_COVER)
     with _transaction(conn):
         row = _row_by_uid(conn, uid)
+        same_source = False
         if row is None and merge_same_source and playlist["source"] and playlist["source_id"]:
             row = conn.execute(
                 "SELECT * FROM playlists WHERE source = ? AND source_id = ? AND deleted_at IS NULL "
                 "ORDER BY id LIMIT 1", (playlist["source"], playlist["source_id"])).fetchone()
+            same_source = row is not None
         if row is not None and not _wins(row, base_revision, playlist["updated_at"]):
+            if same_source and row["cover_sha256"] is None and incoming_cover not in (None, KEEP_COVER):
+                # The same import on two phones: the newer side's cover, or
+                # the other's when the newer one has none
+                conn.execute("UPDATE playlists SET cover_sha256 = ?, revision = ? WHERE id = ?",
+                             (incoming_cover, next_revision(conn), row["id"]))
+                row = _row_by_uid(conn, row["uid"])
             return False, playlist_json(conn, row)
 
+        if incoming_cover is KEEP_COVER or (same_source and incoming_cover is None):
+            cover = row["cover_sha256"] if row is not None else None
+        else:
+            cover = incoming_cover
         revision = next_revision(conn)
         values = (playlist["name"], username, playlist["source"], playlist["source_id"], playlist["source_owner"],
-                  playlist["updated_at"], revision, song_ids_checked_to)
+                  playlist["updated_at"], revision, song_ids_checked_to, cover)
         if row is None:
             created_at = playlist["created_at"] if playlist["created_at"] is not None else playlist["updated_at"]
             playlist_id = conn.execute(
                 "INSERT INTO playlists (name, owner, source, source_id, source_owner, updated_at, revision, "
-                "song_ids_checked_to, uid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "song_ids_checked_to, cover_sha256, uid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values + (uid, created_at)).lastrowid
         else:
             playlist_id = row["id"]
             conn.execute(
                 "UPDATE playlists SET name = ?, owner = ?, source = ?, source_id = ?, source_owner = ?, "
-                "updated_at = ?, revision = ?, song_ids_checked_to = ?, deleted_at = NULL, "
+                "updated_at = ?, revision = ?, song_ids_checked_to = ?, cover_sha256 = ?, deleted_at = NULL, "
                 "created_at = COALESCE(?, created_at) WHERE id = ?",
                 values + (playlist["created_at"], playlist_id))
         _write_tracks(conn, playlist_id, playlist["tracks"])
@@ -370,8 +414,9 @@ def delete_playlist(conn, user_folder, uid: str, base_revision: int,
         # Written before anything is dropped; if the commit fails after it,
         # an extra archive file is all that's left
         archived = _archive(user_folder, {**playlist_json(conn, row), "owner": row["owner"]}, deleted_at)
+        covers.archive_blob(user_folder, row["cover_sha256"])
         conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (row["id"],))
         conn.execute("UPDATE playlists SET deleted_at = ?, updated_at = ?, revision = ?, "
-                     "song_ids_checked_to = NULL WHERE id = ?",
+                     "song_ids_checked_to = NULL, cover_sha256 = NULL WHERE id = ?",
                      (deleted_at, deleted_at, next_revision(conn), row["id"]))
         return True, playlist_json(conn, _row_by_uid(conn, uid)), archived

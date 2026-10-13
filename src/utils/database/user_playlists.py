@@ -49,11 +49,12 @@ def delete_playlist(username: str, playlist_id: int) -> Path | None:
 
 
 def list_playlists(username: str) -> list[tuple]:
-    """(id, name, track count, tracks without a song in the database), newest
-    first; deleted playlists (kept only as markers for the phones) are left out."""
+    """(id, name, track count, tracks without a song in the database, whether
+    it has a cover), newest first; deleted playlists (kept only as markers for
+    the phones) are left out."""
     with user_db_session(user_dir(username) / USER_DB_FILENAME) as session:
         return [
-            (p.id, p.name, len(p.tracks), sum(1 for t in p.tracks if t.song_id is None))
+            (p.id, p.name, len(p.tracks), sum(1 for t in p.tracks if t.song_id is None), p.cover_sha256 is not None)
             for p in session.query(Playlist).filter(Playlist.deleted_at.is_(None))
             .order_by(Playlist.updated_at.desc()).all()
         ]

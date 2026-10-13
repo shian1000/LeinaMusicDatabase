@@ -56,6 +56,9 @@ DECISIONS_FILE = "decisions.json"
 
 DEAD_LINKS_TABLE = "dead_youtube_links"
 KNOWN_TABLES = {"request", DEAD_LINKS_TABLE}
+# Android's SQLiteDatabase adds this to every file it creates (just the locale) -
+# not a request, so it never keeps a file in the inbox
+PLATFORM_TABLES = {"android_metadata"}
 
 # Case statuses: OPEN needs an answer; the others are settled
 OPEN = "open"
@@ -201,7 +204,8 @@ def read_request_file(path: Path) -> RequestFile:
             request.error = f"request table has {len(rows)} rows, expected 1"
             return request
         request.format, request.created_at, request.user_name, request.app = rows[0]
-        request.unknown_tables = sorted(t for t in tables if t not in KNOWN_TABLES)
+        request.unknown_tables = sorted(t for t in tables
+                                         if t not in KNOWN_TABLES and t not in PLATFORM_TABLES)
         if request.format != PHONE_REQUEST_FORMAT:
             return request
         if DEAD_LINKS_TABLE in tables:

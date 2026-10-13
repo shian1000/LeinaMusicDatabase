@@ -250,8 +250,15 @@ name        NOT NULL, unique      UNIQUE(song_id, tag_id)
 kind        'marker' / 'mood'
 uid, revision, created_at, updated_at, deleted_at, song_ids_checked_to   (moods' sync)
 promoted_to, promoted_to_name, merged_into                              (deletion markers)
+cover_sha256                      (also on playlists; the phone-picked cover, NULL = none)
 
 mood_revision: one row, last_revision = the user's mood counter (separate from playlists')
+
+global_mood_covers                global_mood_cover_revision: one row, its own counter
+------------------
+mood_id       PK (tag.db tags.id, may not exist there)
+cover_sha256  NULL = removed (row kept for the phones)
+revision, updated_at
 ```
 
 - Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`
@@ -274,6 +281,10 @@ mood_revision: one row, last_revision = the user's mood counter (separate from p
   deleted playlist, which keeps its row without tracks. `song_ids_checked_to`: the shared
   music.db's last `song_id_changes` entry a server write was resolved against, cleared by the next
   replay. Rules: [runbooks/database.md](runbooks/database.md) → "Playlists on the phone".
+- `cover_sha256` (user migration 0006) names a picture file in `Users/<name>/covers/`, never
+  stored in the database; a deleted playlist or mood has none. `global_mood_covers` holds the
+  user's private covers of global moods. Rules: [runbooks/database.md](runbooks/database.md) →
+  "Covers on the phone".
 
 ## Categories: the search vocabulary, not schema columns
 

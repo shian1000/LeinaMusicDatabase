@@ -27,6 +27,7 @@ class Playlist(UserBase):
     revision = Column(Integer, nullable=False, default=0)
     deleted_at = Column(Integer)  # Unix ms; NULL = live, else a marker without tracks
     song_ids_checked_to = Column(Integer)
+    cover_sha256 = Column(String)  # the phone-picked cover (covers.py); NULL = none
 
     tracks = relationship(
         "PlaylistTrack", back_populates="playlist", order_by="PlaylistTrack.position",
@@ -67,6 +68,18 @@ class PrivateTag(UserBase):
     promoted_to = Column(Integer)  # tag.db id of the global mood it was moved into
     promoted_to_name = Column(String)
     merged_into = Column(String)  # uid of the mood it was merged into
+    cover_sha256 = Column(String)  # the phone-picked cover (covers.py); NULL = none
+
+
+class GlobalMoodCover(UserBase):
+    """The user's private cover of a global mood (tag.db's tags.id), synced
+    by mood_sync.py (migration 0006)."""
+    __tablename__ = "global_mood_covers"
+
+    mood_id = Column(Integer, primary_key=True)
+    cover_sha256 = Column(String)  # NULL = removed (the row stays for the phones)
+    revision = Column(Integer, nullable=False)  # the user's global_mood_cover_revision counter
+    updated_at = Column(Integer, nullable=False)
 
 
 class PrivateSongTag(UserBase):

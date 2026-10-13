@@ -93,7 +93,7 @@ def test_new_playlist_and_changes_since(conn):
     assert applied
     assert stored == {
         "uid": "uid-0001", "revision": 1, "name": "Mix", "source": "youtube", "source_id": "PL1",
-        "source_owner": "Someone", "created_at": 1000, "updated_at": 1000, "deleted": False,
+        "source_owner": "Someone", "created_at": 1000, "updated_at": 1000, "deleted": False, "cover": None,
         "tracks": [
             {"song_id": 1, "title": "Karma", "artist": "Hey", "youtube_video_id": "v1",
              "spotify_track_id": None, "youtube_removed": True, "duration_s": 215},

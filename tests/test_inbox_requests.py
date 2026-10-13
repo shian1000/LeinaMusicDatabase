@@ -103,6 +103,16 @@ def test_unknown_table_is_read_but_noted(env):
     assert len(request.dead_links) == 1
 
 
+def test_android_metadata_table_is_not_unknown(env):
+    # Android's SQLiteDatabase adds it to every file; it must not keep the file in the inbox
+    _request(env["inbox"], "2026-10-13_00-08-40_001.db", [_row()],
+             extra_sql="CREATE TABLE android_metadata (locale TEXT);")
+
+    [request] = pr.read_new_requests()
+
+    assert request.supported and request.unknown_tables == []
+
+
 def test_newer_format_is_not_read(env):
     _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row()], fmt=2)
 

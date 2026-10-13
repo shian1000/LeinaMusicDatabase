@@ -73,6 +73,16 @@ with every path passed on the command line.
   {"error": "mood"} / {"error": "song"}); the change is only recorded in
   --mood-changes/pending/ (202) - MusicDatabase applies it to the original
   tag.db later (global_mood_log.py). The server never writes tag.db.
+- Covers (only with --users; covers.py): PUT /users/<name>/covers/<sha256>
+  stores a PNG/JPEG picture under the SHA-256 of its bytes (201 new, 200
+  already stored, 400 hash mismatch, 413 over 4 MiB, 415 another type or
+  bytes that aren't one), GET answers it (404 unknown, cacheable forever).
+  Playlists and moods carry the hash in "cover" (a PUT without the key keeps
+  the stored one; a hash with no blob -> 400 {"error": "cover_missing"}).
+  GET /users/<name>/global-mood-covers?since=<revision> and
+  PUT /users/<name>/global-mood-covers/<mood id> sync the user's private
+  covers of global moods like moods. After every applied write, blobs the
+  user's rows no longer use are removed once a day old.
 """
 
 import argparse
@@ -94,9 +104,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 try:
-    from . import account_auth, global_mood_log, mood_sync, playlist_sync  # as utils.database.sharing_server
+    from . import account_auth, covers, global_mood_log, mood_sync, playlist_sync  # as utils.database.sharing_server
 except ImportError:
     import account_auth  # run as a script by the systemd service (its folder is on sys.path)
+    import covers
     import global_mood_log
     import mood_sync
     import playlist_sync
@@ -133,6 +144,13 @@ PLAYLISTS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/playlists(?:/(?P<uid>[^
 MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$")
 # /users/<name>: who the token is and what they may do
 USER_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)$")
+# /users/<name>/covers/<sha256>
+COVERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/covers/(?P<sha>[^/]+)$")
+# /users/<name>/global-mood-covers[/<mood id>]
+GLOBAL_MOOD_COVERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/global-mood-covers(?:/(?P<mood>[^/]+))?$")
+GLOBAL_MOOD_COVER_MAX_BODY_BYTES = 4096
+# A hash never changes its picture
+COVER_CACHE_CONTROL = "private, max-age=31536000, immutable"
 # /global-moods/<mood id>/songs/<song id>
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 
@@ -197,6 +215,10 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
     # One lock for "is there room / is the name free" + the write, so two
     # uploads at once can't both squeeze past the limit or take one name.
     inbox_lock = threading.Lock()
+    # Storing a blob, checking a cover exists + the write naming it, and the
+    # clean-up never interleave, so a clean-up can't remove a blob between
+    # the check and the commit
+    covers_lock = threading.Lock()
     limiter = limiter or LoginLimiter()
 
     class ShareHandler(BaseHTTPRequestHandler):
@@ -215,6 +237,10 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._playlists(method)
             elif MOODS_PATH_RE.match(path):
                 self._moods(method)
+            elif method in ("GET", "PUT") and COVERS_PATH_RE.match(path):
+                self._cover_blob(method)
+            elif GLOBAL_MOOD_COVERS_PATH_RE.match(path):
+                self._global_mood_covers(method)
             elif method == "GET" and USER_PATH_RE.match(path):
                 self._profile(USER_PATH_RE.match(path).group("user"))
             elif method in ("PUT", "DELETE") and GLOBAL_MOOD_SONG_PATH_RE.match(path):
@@ -450,13 +476,19 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 if method == "GET":
                     self._reply_json(HTTPStatus.OK, playlist_sync.changes_since(conn, since))
                     return
-                if method == "PUT":
-                    applied, stored = playlist_sync.store_playlist(conn, username, uid, playlist, base_revision,
-                                                                   song_ids_checked_to=checked_to)
-                    archived = None
-                else:
-                    applied, stored, archived = playlist_sync.delete_playlist(conn, folder, uid, base_revision,
-                                                                              deleted_at)
+                with covers_lock:
+                    if method == "PUT":
+                        self._require_cover(folder, playlist["cover"])
+                        applied, stored = playlist_sync.store_playlist(conn, username, uid, playlist, base_revision,
+                                                                       song_ids_checked_to=checked_to)
+                        archived = None
+                    else:
+                        applied, stored, archived = playlist_sync.delete_playlist(conn, folder, uid, base_revision,
+                                                                                  deleted_at)
+                    self._clean_up_covers(conn, folder, username)
+            except covers.CoverMissingError as exc:
+                self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
+                return
             except (OSError, sqlite3.Error) as exc:
                 print(f"Playlists of {username}: {method} {uid} failed: {exc}", flush=True)
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
@@ -523,11 +555,18 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                     self._reply_json(HTTPStatus.OK, mood_sync.changes_since(conn, since))
                     return
                 archived = None
-                if method == "PUT":
-                    applied, stored = mood_sync.store_mood(conn, folder, uid, mood, base_revision,
-                                                           song_ids_checked_to=checked_to)
-                else:
-                    applied, stored, archived = mood_sync.delete_mood(conn, folder, uid, base_revision, deleted_at)
+                with covers_lock:
+                    if method == "PUT":
+                        self._require_cover(folder, mood["cover"])
+                        applied, stored = mood_sync.store_mood(conn, folder, uid, mood, base_revision,
+                                                               song_ids_checked_to=checked_to)
+                    else:
+                        applied, stored, archived = mood_sync.delete_mood(conn, folder, uid, base_revision,
+                                                                          deleted_at)
+                    self._clean_up_covers(conn, folder, username)
+            except covers.CoverMissingError as exc:
+                self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
+                return
             except mood_sync.BadMoodError as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
@@ -541,6 +580,147 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 what = "deleted (archived in " + str(archived) + ")" if archived else \
                     f"stored ({len(stored.get('song_ids', []))} songs)"
                 print(f"Mood {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
+            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
+
+        # ---- covers ----
+
+        @staticmethod
+        def _require_cover(folder: str, cover) -> None:
+            if cover is not playlist_sync.KEEP_COVER:
+                covers.require_blob(folder, cover)
+
+        @staticmethod
+        def _clean_up_covers(conn, folder: str, username: str) -> None:
+            """Inside covers_lock. A failure here never fails the request."""
+            try:
+                removed = covers.clean_up(conn, folder)
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Cleaning up the covers of {username} failed: {exc}", flush=True)
+                return
+            if removed:
+                print(f"Removed {len(removed)} unused cover(s) of {username}", flush=True)
+
+        def _cover_blob(self, method: str):
+            match = COVERS_PATH_RE.match(urlsplit(self.path).path)
+            username, sha = match.group("user"), match.group("sha")
+            data = None
+            if method == "PUT":
+                length = self.headers.get("Content-Length")
+                if length is None or not length.isdigit():
+                    self._reply(HTTPStatus.LENGTH_REQUIRED)
+                    return
+                if int(length) > covers.MAX_COVER_BYTES:
+                    self.close_connection = True
+                    self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"at most {covers.MAX_COVER_BYTES} bytes")
+                    return
+                self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
+                try:
+                    data = self.rfile.read(int(length))
+                except OSError:
+                    self.close_connection = True
+                    return
+                if len(data) != int(length):
+                    self.close_connection = True
+                    return
+            if not self._authorize(username, "another user's covers"):
+                return
+            if not covers.is_sha256(sha):
+                self._reply(HTTPStatus.BAD_REQUEST, "expected the lowercase hex sha256 of the picture")
+                return
+            folder = os.path.join(users_dir, username)
+            if method == "GET":
+                path = covers.blob_path(folder, sha)
+                try:
+                    body = path.read_bytes() if path is not None else None
+                except OSError:
+                    body = None  # removed by a clean-up just now
+                if body is None:
+                    self._reply(HTTPStatus.NOT_FOUND)
+                    return
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", covers.content_type_of(path))
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", COVER_CACHE_CONTROL)
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            try:
+                with covers_lock:
+                    created = covers.store_blob(folder, sha, data, self.headers.get("Content-Type"))
+            except covers.HashMismatchError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except covers.UnsupportedImageError as exc:
+                self._reply(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, str(exc))
+                return
+            except OSError as exc:
+                print(f"Storing cover {sha} of {username} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            if created:
+                print(f"Cover {sha} of {username} stored ({len(data)} bytes)", flush=True)
+            self._reply(HTTPStatus.CREATED if created else HTTPStatus.OK, "stored" if created else "already stored")
+
+        def _global_mood_covers(self, method: str):
+            """The user's private covers of global moods (mood_sync.py)."""
+            url = urlsplit(self.path)
+            match = GLOBAL_MOOD_COVERS_PATH_RE.match(url.path)
+            username, mood_id = match.group("user"), match.group("mood")
+            if method not in ("GET", "PUT") or (method == "GET") != (mood_id is None):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            body = None
+            if method == "PUT":
+                body = self._read_json_body(GLOBAL_MOOD_COVER_MAX_BODY_BYTES)
+                if body is None:
+                    return
+            if not self._authorize(username, "another user's covers"):
+                return
+            try:
+                if method == "GET":
+                    since = self._query_int(parse_qs(url.query), "since", default=0)
+                else:
+                    if not mood_id.isdigit() or int(mood_id) < 1:
+                        raise mood_sync.BadMoodError("expected /global-mood-covers/<mood id>")
+                    mood_id = int(mood_id)
+                    change = mood_sync.parse_global_cover(body)
+                    if body.get("mood_id", mood_id) != mood_id:
+                        raise mood_sync.BadMoodError("mood_id: differs from the one in the path")
+            except mood_sync.BadMoodError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            folder = os.path.join(users_dir, username)
+            try:
+                conn = mood_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
+            except mood_sync.NotMigratedError as exc:
+                print(f"Covers of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Covers of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if method == "GET":
+                    self._reply_json(HTTPStatus.OK, mood_sync.global_covers_since(conn, since))
+                    return
+                with covers_lock:
+                    covers.require_blob(folder, change["cover"])
+                    applied, stored = mood_sync.store_global_cover(conn, mood_id, change["cover"],
+                                                                   change["base_revision"], change["updated_at"])
+                    self._clean_up_covers(conn, folder, username)
+            except covers.CoverMissingError as exc:
+                self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Covers of {username}: PUT global mood {mood_id} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            finally:
+                conn.close()
+            if applied:
+                print(f"Cover of global mood {mood_id} for {username}: {stored['cover'] or 'removed'}, "
+                      f"revision {stored['revision']}", flush=True)
             self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
 
         # ---- global moods (tag.db), only with the permission ----
@@ -793,7 +973,7 @@ def main(argv=None) -> int:
         server = bind_when_ready(handler, args.port, get_address, label)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
-        inbox += f", logins, playlists and moods for {args.users}" if args.users else ""
+        inbox += f", logins, playlists, moods and covers for {args.users}" if args.users else ""
         inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()

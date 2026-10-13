@@ -88,7 +88,7 @@ def test_new_mood_and_changes_since(conn, user_folder):
     applied, stored = _put(conn, user_folder, name="  Siłownia ", song_ids=[5, 2, 5], created_at=900)
     assert applied
     assert stored == {"uid": "uid-0001", "revision": 1, "name": "Siłownia", "created_at": 900,
-                      "updated_at": 1000, "deleted": False, "song_ids": [2, 5]}
+                      "updated_at": 1000, "deleted": False, "song_ids": [2, 5], "cover": None}
     _put(conn, user_folder, uid="uid-0002", name="Chill")
     assert [m["uid"] for m in ms.changes_since(conn, 0)["moods"]] == ["uid-0001", "uid-0002"]
     assert ms.changes_since(conn, 2) == {"revision": 2, "moods": []}

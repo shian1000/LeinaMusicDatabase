@@ -92,7 +92,7 @@ def test_saved_playlist_keeps_order_and_fallback_text(users_env, tmp_path, music
     playlist = fp.build_folder_playlist(music_session, folder)
 
     playlist_id = save_playlist("ania", "Mix", playlist.tracks, source="folder", source_id=str(folder))
-    assert list_playlists("ania") == [(playlist_id, "Mix", 2, 0)]
+    assert list_playlists("ania") == [(playlist_id, "Mix", 2, 0, False)]
 
     import sqlite3
     rows = sqlite3.connect(users_env / "ania" / "user.db").execute(
@@ -212,7 +212,7 @@ def test_unmatched_file_picked_by_title_then_saved_and_tagged(users_env, tmp_pat
 
     menu._create_playlist_from_folder("ania")
 
-    ((playlist_id, name, count, missing),) = list_playlists("ania")
+    ((playlist_id, name, count, missing, _),) = list_playlists("ania")
     assert (name, count, missing) == ("Mix", 2, 0)
     from utils.database.user_playlists import playlist_songs
     songs, _ = playlist_songs(music_session, "ania", playlist_id)
@@ -260,7 +260,7 @@ def test_title_pick_can_be_rejected_for_a_manual_search(users_env, tmp_path, mus
 
     menu._create_playlist_from_folder("ania")
 
-    ((playlist_id, _, _, _),) = list_playlists("ania")
+    ((playlist_id, _, _, _, _),) = list_playlists("ania")
     from utils.database.user_playlists import playlist_songs
     songs, _ = playlist_songs(music_session, "ania", playlist_id)
     assert [s.title for s in songs] == ["Teksański"]

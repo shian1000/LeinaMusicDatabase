@@ -103,7 +103,7 @@ non-trivial work in that area.
   (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / `GET /users/<name>`
+  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
   endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports; Manage database →
   "Resolve new requests" (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value
@@ -149,6 +149,13 @@ non-trivial work in that area.
   because the server imports it. Every write to `playlists` / `playlist_tracks` must go through
   it, or bump the revision with `mark_changed()`, or the phones never see the change. Details:
   `docs/runbooks/database.md` → "Playlists on the phone".
+  Covers of playlists and moods (picked on the phone): `covers.py` (standard-library) stores the
+  pictures as files `Users/<name>/covers/<sha256>.png|.jpg`, never in a DB; rows hold only
+  `cover_sha256` (user migration 0006, which every sync `connect()` now requires). Served and
+  uploaded at `/users/<name>/covers/<sha256>`; private covers of global moods sync through
+  `/users/<name>/global-mood-covers` (`mood_sync.py`). A PUT without `cover` keeps the stored one.
+  Unreferenced blobs go only after 24 h (the phone uploads before the PUT naming it). Details:
+  `docs/runbooks/database.md` → "Covers on the phone".
   Moods ("Nastroje" on the phone): `tags.kind` (`'mood'` / `'marker'`) in tag.db and user.db.
   `spellchecked` / `album_checked` are markers and must never show up as moods. Names are unique per
   file across kinds. A user's own moods sync like playlists through `mood_sync.py`

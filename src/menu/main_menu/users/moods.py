@@ -261,8 +261,9 @@ def users_moods() -> None:
         if not moods:
             print(f"{username} has no moods yet.")
             return
-        choices = [questionary.Choice(title=f"{name} - {count} song(s)", value=(mood_id, name, count))
-                   for mood_id, _, name, count in moods]
+        choices = [questionary.Choice(title=f"{name} - {count} song(s)" + (", cover" if cover else ""),
+                                      value=(mood_id, name, count))
+                   for mood_id, _, name, count, cover in moods]
         picked = questionary.select(f"{username}'s moods:", choices=choices + [_BACK]).ask()
         if picked is None or picked == _BACK:
             return

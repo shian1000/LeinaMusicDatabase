@@ -253,10 +253,11 @@ def _show_playlists(username: str) -> None:
             return
         choices = [
             questionary.Choice(
-                title=f"{name} - {tracks} track(s)" + (f", {missing} not in the database" if missing else ""),
+                title=f"{name} - {tracks} track(s)" + (f", {missing} not in the database" if missing else "")
+                + (", cover" if cover else ""),
                 value=(playlist_id, name),
             )
-            for playlist_id, name, tracks, missing in playlists
+            for playlist_id, name, tracks, missing, cover in playlists
         ]
         picked = questionary.select("Playlists:", choices=choices + [_BACK]).ask()
         if picked is None or picked == _BACK:
