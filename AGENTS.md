@@ -98,7 +98,7 @@ non-trivial work in that area.
   them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
-  `tag.db` / `files.db`, and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`,
+  `tag.db` / `files.db`, and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
   at most 1 MiB each, nothing while `new/` holds 100 MiB), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
@@ -128,6 +128,11 @@ non-trivial work in that area.
   that isn't mounted means users are skipped, never created on the system disk. Main menu → Users
   (`src/menu/main_menu/users/`) creates users, logs into one (`verify_user()`), and lists /
   renames / re-passwords / deletes them. Delete moves the folder to `archive/deleted-users/`, it doesn't erase it.
+  The phone logs in as a user through the sharing server (`POST /login` → a token; `account_auth.py`,
+  standard-library only because `sharing_server.py` imports it too). Tokens are kept only as hashes in
+  `Users/<name>/tokens.json`; re-password / rename / delete must keep dropping them
+  (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
+  `docs/runbooks/database.md` → "Logging in from the phone".
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
   `user_playlists.py` saves playlists and reads them back (`playlist_songs()`:
   the music.db `Song` rows in order, plus the tracks with no song). "Show playlists" shows them

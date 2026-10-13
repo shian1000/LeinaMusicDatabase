@@ -57,8 +57,11 @@ anywhere.
 
 - Nothing sends, receives or serves `user.db`. The sharing server still serves only
   `music.db`/`tag.db`/`files.db` (everything else is a 404, including `Users/`) and takes only
-  inbox requests. Uploading user data and logging in from the phone need agreeing with the
-  MusicDatabaseApp side first.
+  inbox requests. Uploading user data needs agreeing with the MusicDatabaseApp side first.
+
+Since built (2026-10-13): the phone logs in as one of these users through the sharing server
+(`POST /login` → a token, kept as a hash in `Users/<name>/tokens.json`) and signs its inbox
+requests with it — [runbooks/database.md](../runbooks/database.md) → "Logging in from the phone".
 
 Since built: song merges and deletions reach users' playlists and private tags, and tag.db, via
 an id-change log in `music.db` replayed by each file

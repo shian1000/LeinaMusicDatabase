@@ -195,8 +195,31 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
 
+**Logging in from the phone (2026-10-13).** The phone (app ADR 0006) logs in as a MusicDatabase
+user (main menu → Users) and keeps a token, never the password. The service runs with `--users` =
+`Settings.users_dir`; the checks are in `utils/database/account_auth.py`, standard-library only
+because the server imports it too (as a sibling module), and `users.py` uses it as well.
+
+- `POST /login`, JSON `{"username", "password"}` (username as typed; trimmed and lowercased) →
+  200 `{"username": <normalized>, "token"}`, 401 wrong username or password (never says which; an
+  unknown user costs the same scrypt time), 400 malformed body, 503 T7 not mounted (hashes and
+  tokens only live there — decided not to cache them elsewhere).
+- Tokens: 32 random bytes; only their SHA-256 is stored, in `Users/<name>/tokens.json` (not in
+  `user.db`, which may be sent to the phone one day). No expiry. `POST /logout` with
+  `Authorization: Bearer <token>` revokes one (always 204). `change_password()`, `rename_user()`
+  and `delete_user()` drop all of a user's tokens (a renamed user's file names change too).
+- Lockout: 5 failed logins within 15 minutes from one client address *or* for one username lock
+  that address/username out for 5 minutes (429 + `Retry-After`). In memory only.
+- Signed uploads: the user part of a request file name is always a verified sender, so "Resolve
+  new requests" can trust it without an extra record. A name with a user part needs that user's
+  token (none, unknown or revoked → 401, which the phone takes as "log in again"; another user's →
+  403). A name without one is accepted with or without a token (old phones, requests made before
+  logging in), but a token that is sent must be valid. Auth is checked after the mount check, so a
+  missing T7 is a 503, never a 401. The name pattern's user part is `USERNAME_PATTERN` (may hold
+  `_`; the fixed-shape date keeps the split unambiguous).
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.

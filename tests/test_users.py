@@ -119,3 +119,45 @@ def test_new_user_migration_is_applied_after_a_backup(users_env, tmp_path, monke
     assert "extra" in _tables(users_env / "ania" / "user.db")
     assert len(list((tmp_path / "archive").glob("user-ania.*.db"))) == 1
     assert migrations.run_pending_user_migrations() == {}
+
+
+def test_account_auth_agrees_with_the_app_constants():
+    from config import constants
+    from utils.database import account_auth
+
+    assert account_auth.USERNAME_PATTERN == constants.USERNAME_PATTERN
+    assert account_auth.ACCOUNT_FILENAME == constants.USER_ACCOUNT_FILENAME
+
+
+def test_password_change_rename_and_delete_revoke_the_phones_tokens(users_env, tmp_path, monkeypatch):
+    from utils.database import account_auth
+
+    monkeypatch.setattr(users, "DELETED_USERS_DIR", tmp_path / "archive" / "deleted-users")
+    users.create_user("ania", "secret1")
+    users.create_user("ola", "secret1")
+    assert account_auth.check_login(users_env, " Ania", "secret1") == "ania"
+    assert account_auth.check_login(users_env, "ania", "nope") is None
+
+    def login(name):
+        token = account_auth.issue_token(users_env, name)
+        assert account_auth.token_user(users_env, token) == name
+        return token
+
+    kept = login("ola")
+    token = login("ania")
+    users.change_password("ania", "better2")
+    assert account_auth.token_user(users_env, token) is None
+
+    token = login("ania")
+    users.rename_user("ania", "anna")
+    assert account_auth.token_user(users_env, token) is None
+
+    token = login("anna")
+    archived = users.delete_user("anna")
+    assert account_auth.token_user(users_env, token) is None
+    assert not (archived / account_auth.TOKENS_FILENAME).exists()
+
+    assert account_auth.token_user(users_env, kept) == "ola"
+    assert account_auth.revoke_token(users_env, kept)
+    assert account_auth.token_user(users_env, kept) is None
+    assert not account_auth.revoke_token(users_env, kept)

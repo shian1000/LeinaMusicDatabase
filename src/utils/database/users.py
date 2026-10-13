@@ -14,11 +14,12 @@ users know that. Passwords are only stored as salted scrypt hashes, outside
 user.db (that file may be sent to the phone one day). These files are the
 originals, not copies, so backup_databases() includes them.
 
-Nothing sends or receives these files yet (docs/decisions/0004-per-user-data.md).
+The phone logs in as one of these users through the sharing server
+(account_auth.py: password check, tokens in Users/<username>/tokens.json).
+Nothing sends or receives user.db yet (docs/decisions/0004-per-user-data.md).
 """
 
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -38,6 +39,7 @@ from config.constants import (
     USERNAME_PATTERN,
 )
 from settings import Settings
+from utils.database.account_auth import password_matches, revoke_all_tokens
 
 USERS_DIR = Path(str(Settings.users_dir))
 USERS_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
@@ -113,17 +115,6 @@ def hash_password(password: str) -> str:
         password.encode(), salt=salt, n=PASSWORD_SCRYPT_N, r=PASSWORD_SCRYPT_R, p=PASSWORD_SCRYPT_P
     )
     return f"scrypt${PASSWORD_SCRYPT_N}${PASSWORD_SCRYPT_R}${PASSWORD_SCRYPT_P}${salt.hex()}${digest.hex()}"
-
-
-def password_matches(password: str, stored: str) -> bool:
-    try:
-        scheme, n, r, p, salt, digest = stored.split("$")
-    except ValueError:
-        return False
-    if scheme != "scrypt":
-        return False
-    candidate = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=int(n), r=int(r), p=int(p))
-    return hmac.compare_digest(candidate, bytes.fromhex(digest))
 
 
 def verify_user(username: str, password: str) -> bool:
@@ -222,6 +213,8 @@ def rename_user(old_username: str, new_username: str) -> Path:
     if target.exists():
         raise InvalidUserError(f"User '{new_name}' already exists.")
     os.rename(folder, target)
+    # The phone's tokens belong to the old name (its request file names carry it)
+    revoke_all_tokens(target)
     account = _read_account(target)
     account["username"] = new_name
     _write_account(target, account)
@@ -237,6 +230,7 @@ def change_password(username: str, new_password: str) -> None:
     account["password"] = hash_password(new_password)
     account["password_changed_at"] = datetime.now().isoformat(timespec="seconds")
     _write_account(folder, account)
+    revoke_all_tokens(folder)
 
 
 def delete_user(username: str) -> Path:
@@ -251,6 +245,7 @@ def delete_user(username: str) -> Path:
     while target.exists():
         suffix += 1
         target = DELETED_USERS_DIR / f"{folder.name}.{stamp}_{suffix}"
+    revoke_all_tokens(folder)
     shutil.move(str(folder), str(target))
     return target
 

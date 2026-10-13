@@ -1,3 +1,5 @@
+import hashlib
+import json
 import sqlite3
 import subprocess
 import sys
@@ -300,7 +302,8 @@ def test_upload_already_processed_is_ok(inbox_server, tmp_path):
 
 
 @pytest.mark.parametrize("name", [
-    "music.db", "2026-10-12_23-44-05_01.db", "../2026-10-12_23-44-05_001.db", "a_b_2026-10-12_23-44-05_001.db",
+    "music.db", "2026-10-12_23-44-05_01.db", "../2026-10-12_23-44-05_001.db", "Ola_2026-10-12_23-44-05_001.db",
+    "a_2026-10-12_23-44-05_001.db", "_ola_2026-10-12_23-44-05_001.db",
     "2026-10-12_23-44-05_001.db.part", "%2e%2e%2f2026-10-12_23-44-05_001.db", "ola_2026-10-12_23-44-05_001.sqlite",
 ])
 def test_upload_with_a_bad_name_is_refused(inbox_server, tmp_path, name):
@@ -376,6 +379,151 @@ def test_inbox_files_are_never_downloadable(inbox_server, tmp_path):
     _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path))
 
     assert _request(f"{base}/inbox/{REQUEST_NAME}")[0] == 404
+
+
+# ==================== login and signed uploads ====================
+
+@pytest.fixture
+def login_server(serve, share_dir, tmp_path):
+    """A server with --inbox and --users; one user 'ola_k' (password 'secret1')."""
+    from utils.database import account_auth
+
+    users_dir = tmp_path / "Users"
+    (users_dir / "ola_k").mkdir(parents=True)
+    salt = b"0" * 16
+    digest = hashlib.scrypt(b"secret1", salt=salt, n=2 ** 14, r=8, p=1)
+    (users_dir / "ola_k" / account_auth.ACCOUNT_FILENAME).write_text(
+        f'{{"username": "ola_k", "password": "scrypt$16384$8$1${salt.hex()}${digest.hex()}"}}')
+    inbox = tmp_path / "Inbox"
+
+    def start(mount="/", clock=None):
+        limiter = sharing_server.LoginLimiter(clock) if clock else None
+        handler = sharing_server.make_handler(str(share_dir), mount, str(inbox),
+                                              users_dir=str(users_dir), limiter=limiter)
+        return serve(share_dir, mount, handler=handler)
+
+    return start, users_dir, inbox
+
+
+def _post(url: str, payload=None, headers: dict | None = None, raw: bytes | None = None):
+    data = raw if raw is not None else (None if payload is None else json.dumps(payload).encode())
+    headers = {"Content-Type": "application/json", **(headers or {})}
+    req = urllib.request.Request(url, data=data if data is not None else b"", method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, resp.headers, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.headers, err.read()
+
+
+def _login(base, username="ola_k", password="secret1"):
+    return _post(f"{base}/login", {"username": username, "password": password})
+
+
+def test_login_returns_normalized_username_and_a_token_stored_only_as_a_hash(login_server):
+    start, users_dir, _ = login_server
+    base = start()
+
+    status, headers, body = _login(base, "  Ola_K ")
+
+    assert status == 200 and headers["Content-Type"] == "application/json"
+    answer = json.loads(body)
+    assert answer["username"] == "ola_k"
+    assert len(answer["token"]) >= 40
+    stored = (users_dir / "ola_k" / "tokens.json").read_text()
+    assert answer["token"] not in stored
+    assert hashlib.sha256(answer["token"].encode()).hexdigest() in stored
+
+
+@pytest.mark.parametrize("username, password", [("ola_k", "wrong"), ("nobody", "secret1"), ("../ola_k", "secret1")])
+def test_wrong_login_is_401(login_server, username, password):
+    start, users_dir, _ = login_server
+    assert _login(start(), username, password)[0] == 401
+    assert not (users_dir / "ola_k" / "tokens.json").exists()
+
+
+@pytest.mark.parametrize("raw", [b"not json", b'["ola_k", "secret1"]', b'{"username": "ola_k"}'])
+def test_malformed_login_is_400(login_server, raw):
+    start, _, _ = login_server
+    assert _post(f"{start()}/login", raw=raw)[0] == 400
+
+
+def test_login_when_drive_unmounted_is_503(login_server, tmp_path):
+    start, _, _ = login_server
+    assert _login(start(mount=str(tmp_path / "not-a-mount-point")))[0] == 503
+
+
+def test_without_users_there_is_no_login(inbox_server):
+    start, _ = inbox_server
+    assert _login(start())[0] == 404
+
+
+def test_repeated_failed_logins_lock_out_for_a_while(login_server):
+    start, _, _ = login_server
+    now = [1000.0]
+    base = start(clock=lambda: now[0])
+
+    for _ in range(sharing_server.LOGIN_MAX_FAILURES):
+        assert _login(base, password="wrong")[0] == 401
+    status, headers, _ = _login(base)  # even the right password
+    assert status == 429
+    assert int(headers["Retry-After"]) == sharing_server.LOGIN_LOCKOUT_SECONDS
+
+    now[0] += sharing_server.LOGIN_LOCKOUT_SECONDS
+    assert _login(base)[0] == 200
+
+
+def test_failures_spread_out_dont_lock_out(login_server):
+    start, _, _ = login_server
+    now = [1000.0]
+    base = start(clock=lambda: now[0])
+
+    for _ in range(sharing_server.LOGIN_MAX_FAILURES * 2):
+        assert _login(base, password="wrong")[0] == 401
+        now[0] += sharing_server.LOGIN_FAILURE_WINDOW_SECONDS / (sharing_server.LOGIN_MAX_FAILURES - 1)
+
+
+def test_logout_revokes_the_token(login_server, tmp_path):
+    start, _, inbox = login_server
+    base = start()
+    token = json.loads(_login(base)[2])["token"]
+    other = json.loads(_login(base)[2])["token"]
+
+    assert _post(f"{base}/logout", headers={"Authorization": f"Bearer {token}"})[0] == 204
+    assert _post(f"{base}/logout", headers={"Authorization": "Bearer unknown"})[0] == 204
+    assert _post(f"{base}/logout")[0] == 204
+
+    name = f"ola_k_{REQUEST_NAME}"
+    assert _put(f"{base}/inbox/{name}", _sqlite_bytes(tmp_path), {"Authorization": f"Bearer {token}"})[0] == 401
+    assert _put(f"{base}/inbox/{name}", _sqlite_bytes(tmp_path), {"Authorization": f"Bearer {other}"})[0] == 201
+
+
+def test_signed_uploads(login_server, tmp_path):
+    start, users_dir, inbox = login_server
+    base = start()
+    token = json.loads(_login(base)[2])["token"]
+    data = _sqlite_bytes(tmp_path)
+    auth = {"Authorization": f"Bearer {token}"}
+
+    # A user part needs that user's token
+    assert _put(f"{base}/inbox/ola_k_{REQUEST_NAME}", data)[0] == 401
+    assert _put(f"{base}/inbox/ola_k_{REQUEST_NAME}", data, {"Authorization": "Bearer nope"})[0] == 401
+    assert _put(f"{base}/inbox/ola_k_{REQUEST_NAME}", data, {"Authorization": token})[0] == 401
+    assert _put(f"{base}/inbox/ania_{REQUEST_NAME}", data, auth)[0] == 403
+    assert not (inbox / "new").exists() or not any((inbox / "new").iterdir())
+    assert _put(f"{base}/inbox/ola_k_{REQUEST_NAME}", data, auth)[0] == 201
+    # No user part: accepted with or without a token (made before logging in)
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", data)[0] == 201
+    assert _put(f"{base}/inbox/2026-10-12_23-45-00_002.db", data, auth)[0] == 201
+    # ...but a bad token is still a bad token
+    assert _put(f"{base}/inbox/2026-10-12_23-46-00_003.db", data, {"Authorization": "Bearer nope"})[0] == 401
+
+
+def test_signed_upload_when_drive_unmounted_is_503_not_401(login_server, tmp_path):
+    start, _, _ = login_server
+    base = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _put(f"{base}/inbox/ola_k_{REQUEST_NAME}", _sqlite_bytes(tmp_path),
+                {"Authorization": "Bearer whatever"})[0] == 503
 
 
 # ==================== Tailscale / LAN binding ====================
@@ -569,6 +717,7 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert f"--port {sharing.SHARING_HTTP_PORT}" in service
     assert f"--dir {sharing.SHARING_DIR}" in service
     assert f"--inbox {sharing.PHONE_INBOX_DIR}" in service
+    assert f"--users {sharing.USERS_DIR}" in service
     assert "--inbox-limit-bytes 104857600" in service
     assert f"--mount {sharing.SHARING_DRIVE_MOUNT}" in service
     assert str(sharing.SERVER_SCRIPT) in service
