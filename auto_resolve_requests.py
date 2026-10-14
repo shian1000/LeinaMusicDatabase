@@ -43,8 +43,9 @@ def main() -> int:
             print(f"Changed: {change['text']}")
         print(f"{len(result.moved)} file(s) done, {len(result.left)} left for review "
               f"({result.to_review} case(s)).")
-        # The phones should see the fixed links / values without waiting a day
-        if result.changes:
+        # The phones should see the fixed links / values, and the videos
+        # found bad, without waiting a day
+        if result.changes or result.check_stats.get("marked"):
             share_databases_quietly()
     finally:
         lock.close()

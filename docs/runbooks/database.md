@@ -193,8 +193,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   the review shows the note and reuses the check for `INBOX_CHECK_MAX_AGE_HOURS` (24 h). What it
   changed is in `Inbox/auto_report.json`; `main.py` prints the entries not shown yet at startup, and
   the review screen lists them all. `decisions.json` entries it wrote carry `"by": "auto"`.
-  The `apply_corrections` permission is a user's (account.json), not a device's; for the app:
-  [`docs/handoffs/automatic-requests-for-musicdatabaseapp.md`](../handoffs/automatic-requests-for-musicdatabaseapp.md).
+  The `apply_corrections` permission is a user's (account.json), not a device's. Leina Radio
+  shows nothing for it. It stores permission names it doesn't know as text and checks only the
+  ones it knows (its tests cover `apply_corrections`). A new permission therefore needs no change
+  in the app unless the app should act on it (confirmed 2026-10-14).
 - **The pass never runs while the app is open:** both write music.db, and the open app's ORM
   objects would go stale (`utils/database/app_lock.py`: `main.py` holds an `flock` on
   `<database_dir>/.musicdatabase.lock` shared for its whole run, the pass needs it exclusive and
@@ -208,7 +210,7 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   For `dead_youtube_links`: follows `song_id` through `song_id_changes`, settles without asking a
   report whose song is gone or whose link already changed (another id or "N/A"), groups repeats of
   one (song, dead video), checks with yt-dlp whether the dead link and the phone's video play and
-  runs our own `search_video_ytdlp()` (`check_dead_link_cases()`: one batched Data API call for
+  runs our own `search_video_ytdlp()` (`check_link_cases()`: one batched Data API call for
   every id, yt-dlp only for candidates the API didn't rule out, the dead link not replayed), then
   asks per song: keep the suggested link / keep the
   newfound link (ours) / paste a link / "N/A" / keep the current link / skip. Both are offered even
@@ -232,6 +234,30 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   artist's name offers merging into it (`merge_artists_in_db()`). A value that can't be stored
   (not a number, an unknown album type, an empty title) can only be edited. Applied through the
   ORM, so the album listener does what it does after any edit.
+- For `found_youtube_links` (2026-10-14, `utils/database/inbox_found_links.py`, app handoff
+  `musicdatabase-found-youtube-links.md`, answer [`docs/handoffs/found-links-for-musicdatabaseapp.md`](../handoffs/found-links-for-musicdatabaseapp.md)):
+  a video Leina Radio found and plays for a song music.db has no link for (NULL or `""`, not "N/A").
+  One case per song (through `song_id_changes`), every video offered, the newest `found_at` first.
+  Settled without asking: the song is gone, it has a link or "N/A" now, or every video named is in
+  `bad_youtube_videos` (below). The automatic pass saves a link by the dead-link rule (our search found
+  the same video and it plays here; `link_verdict()`), settles the case when none of the videos plays
+  here (Leina Radio then finds another and reports it), and leaves the rest for review: keep Leina
+  Radio's video / our newfound one / paste / "N/A" / "Wrong video" (the song stays without a link,
+  the videos are remembered as wrong for it) / skip.
+- **Videos found bad** (music.db's `bad_youtube_videos`, migration 0010, owner's request
+  2026-10-14; `load_bad_videos()` / `mark_bad_videos()` / `unmark_bad_video()` in
+  `inbox_requests.py`). Leina Radio reads the table too (app handoff `musicdatabase-bad-videos.md`,
+  answer [`docs/handoffs/bad-videos-for-musicdatabaseapp.md`](../handoffs/bad-videos-for-musicdatabaseapp.md))
+  and stops using those videos. `song_id` NULL = bad for every song: `removed` per the Data API,
+  `unplayable` per yt-dlp (only a `False`, never a blocked `None`), `replaced_dead_link` (a dead link
+  replaced or set to "N/A"). Otherwise wrong for that song: `wrong_for_song` (the owner chose "Wrong
+  video") or `no_video_for_song` ("N/A" while Leina Radio had videos). The codes are
+  `constants.BAD_VIDEO_REASONS`. A trigger on `song_id_changes` moves per-song rows to the kept song
+  of a merge and drops them with a deleted song, so `song_id` is always a current id. The check
+  commits what it finds, and the automatic pass copies the databases for sharing when it found any. A found link naming one is turned
+  down without asking YouTube; a dead link's suggestion naming one is left out (shown dimmed in the
+  review, still choosable) and our own search never offers one. Choosing a video, or keeping a link
+  reported dead, takes it off the list. Delete a row (app closed) to give a video another chance.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
@@ -474,7 +500,12 @@ bootstrap moment actually execute.
    schema's source of truth for the *current* shape.
 2. Add `migrations/<db_name>/NNNN_description.sql` with the matching DDL, e.g.
    `ALTER TABLE songs ADD COLUMN rating INTEGER;`. Use the next number after whatever's already in
-   that folder.
+   that folder. A **trigger** (or anything else a model can't declare) must also go into the model
+   as a `DDL` on an `after_create` event. `create_all()` builds the test databases and a fresh
+   install, and the bootstrap marks every migration applied there without running it, so a
+   trigger only in the `.sql` file would silently never exist there. Hang it on the table it fires
+   *on*: `bad_youtube_videos_follow_songs` hangs on `song_id_changes` in `datatables.py`, since
+   creating a trigger on a table that doesn't exist yet fails.
 3. **One logical change per file.** The runner applies a file with `executescript()`, which can
    partially execute a multi-statement script before failing — there's no automatic rollback of a
    half-applied file. The real safety net is the mandatory backup taken right before the file

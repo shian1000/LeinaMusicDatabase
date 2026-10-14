@@ -11,7 +11,9 @@ What it does with the files in new/:
 - what needs no answer is settled as in the review (song gone, link already
   changed, value already there, ...);
 - a dead YouTube link is replaced when the phone's suggestion and our own
-  search found the same video and it plays here (check_dead_link_cases());
+  search found the same video and it plays here (check_link_cases());
+- a link the phone found for a song without one is saved by the same rule;
+  when none of its videos plays here it's settled (the phone looks again);
 - a field correction is saved when its newest report was sent by a logged-in
   user with the PERMISSION_APPLY_CORRECTIONS permission and nothing about it
   needs a judgement: the value is storable, the database still holds what
@@ -19,7 +21,7 @@ What it does with the files in new/:
   has that title / artist / album, and saving would merge nothing (another
   artist of that name, an album twin) nor leave the choice of renaming a
   whole album;
-- every case left over gets an auto_note (why), and its dead link check is
+- every case left over gets an auto_note (why), and its YouTube check is
   kept in auto_checks.json, so the review shows both without searching
   YouTube again;
 - a file with nothing left goes to processed/, the rest to review/.
@@ -42,14 +44,20 @@ from utils.database.inbox_field_corrections import (
     collect_field_correction_cases,
     song_album_to_rename,
 )
+from utils.database.inbox_found_links import (
+    apply_found_link_decision,
+    collect_found_link_cases,
+    settle_if_none_plays,
+)
 from utils.database.inbox_requests import (
+    LINK_ALREADY_CHANGED,
     OPEN,
     REVIEW,
     USE_VIDEO,
     RequestFile,
     add_auto_report,
     apply_dead_link_decision,
-    check_dead_link_cases,
+    check_link_cases,
     collect_dead_link_cases,
     finish_request_files,
     now_iso,
@@ -68,7 +76,7 @@ class AutoResult:
     to_review: int = 0  # cases left to the owner
     moved: list = field(default_factory=list)  # files done (processed/)
     left: list = field(default_factory=list)  # files in review/
-    check_stats: dict = field(default_factory=dict)  # check_dead_link_cases()'s
+    check_stats: dict = field(default_factory=dict)  # check_link_cases()'s
 
 
 def _song_label(song, report) -> str:
@@ -81,13 +89,15 @@ def _shown(value) -> str:
     return "empty" if value is None or value == "" else f'"{value}"' if isinstance(value, str) else str(value)
 
 
-def dead_link_verdict(case) -> tuple[str | None, str | None]:
-    """(video id to put in, None) when the pass may replace the link, else
-    (None, why not)."""
+def link_verdict(case) -> tuple[str | None, str | None]:
+    """(video id to put in, None) when the pass may set the link (a dead
+    link's replacement or a found link), else (None, why not)."""
     if not case.checked_at:
         return None, "not checked on YouTube"
     suggested = [r.video_id for r in case.replacements]
     if not suggested:
+        if case.bad:
+            return None, "Leina Radio suggested only videos found bad before"
         return None, ("Leina Radio suggested no video" if not case.our_video_id
                       else "Leina Radio suggested no video, only our search found one")
     if not case.our_video_id:
@@ -141,12 +151,16 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
     senders = {r.name: r.sender for r in requests}
 
     dead_cases = collect_dead_link_cases(session, requests)
+    found_cases = collect_found_link_cases(session, requests)
     open_dead = [c for c in dead_cases if c.status == OPEN]
-    if open_dead:
-        result.check_stats = check_dead_link_cases(
-            open_dead, on_case=(lambda i, case: on_case(i, len(open_dead), case)) if on_case else None)
+    open_found = [c for c in found_cases if c.status == OPEN]
+    to_check = open_dead + open_found
+    if to_check:
+        # One batch, so the Data API is asked once for everything
+        result.check_stats = check_link_cases(
+            to_check, on_case=(lambda i, case: on_case(i, len(to_check), case)) if on_case else None)
     for case in open_dead:
-        video_id, case.auto_note = dead_link_verdict(case)
+        video_id, case.auto_note = link_verdict(case)
         if video_id is None:
             continue
         apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO)
@@ -155,6 +169,25 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
             "at": now_iso(), "kind": "dead_link", "song_id": case.song_id,
             "text": f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id} "
                     "(Leina Radio's suggestion; our search found the same video)",
+            "files": sorted({r.file_name for r in case.reports}),
+        })
+
+    for case in open_found:
+        if case.song.youtube_video_id:
+            # A dead link report for the same song was just settled above
+            case.status = LINK_ALREADY_CHANGED
+            continue
+        if settle_if_none_plays(case):
+            continue
+        video_id, case.auto_note = link_verdict(case)
+        if video_id is None:
+            continue
+        apply_found_link_decision(case, USE_VIDEO, video_id, by=AUTO)
+        session.commit()
+        result.changes.append({
+            "at": now_iso(), "kind": "found_link", "song_id": case.song_id,
+            "text": f"{_song_label(case.song, case.reports[0])}: YouTube link -> {video_id} "
+                    "(found by Leina Radio; our search found the same video)",
             "files": sorted({r.file_name for r in case.reports}),
         })
 
@@ -177,7 +210,7 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
             "files": sorted({r.file_name for r in case.reports}),
         })
 
-    cases = dead_cases + field_cases
+    cases = dead_cases + found_cases + field_cases
     left_cases = [c for c in cases if c.pending]
     result.to_review = len(left_cases)
     save_case_checks(left_cases)

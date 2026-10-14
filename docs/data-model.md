@@ -196,6 +196,12 @@ keeps them valid:
   It runs at startup, at user login, and after any commit that logged something
   (`database_sessions` submit/close). A user.db on an unplugged T7 catches up later. A new user
   starts at the end of the log.
+- **`bad_youtube_videos`** (music.db, migration 0010) is not replayed: an `AFTER INSERT` trigger
+  on `song_id_changes` moves its per-song rows to the kept song (one the kept song already has
+  wins) and deletes a deleted song's rows, so the phone, which reads the table, sees current ids.
+  `create_all()` adds the same trigger (`datatables.py`), and the rows are unique per
+  `(video_id, IFNULL(song_id, 0))`. Meaning of the rows: `docs/runbooks/database.md` → "Videos
+  found bad".
 - **Ids are never reused.** `songs.id` has no AUTOINCREMENT, so SQLite would give the next new
   song the id of the newest one just deleted, and its old tags and playlist entries would land on
   that new song. The same listener numbers new songs above every id `songs` or the log has ever

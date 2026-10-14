@@ -300,7 +300,7 @@ def test_checks_ask_youtube_as_little_as_possible(env, youtube):
     youtube["api"] = {"dead0": False, "gone1": False}
     _, cases = _cases(env)
 
-    stats = pr.check_dead_link_cases(cases)
+    stats = pr.check_link_cases(cases)
 
     # One API call for every id; yt-dlp never for the dead links, an id the
     # API ruled out, or the same id twice
@@ -311,7 +311,7 @@ def test_checks_ask_youtube_as_little_as_possible(env, youtube):
     assert first.dead_still_plays is False and second.dead_still_plays is None
     assert first.plays == {"sugg0": True} and first.our_video_id == "sugg0"
     assert second.plays == {"gone1": False, "ours1": True}
-    assert stats == {"api": True, "blocked": 0}
+    assert stats == {"api": True, "blocked": 0, "marked": 2}  # dead0 and gone1 gone
 
 
 def test_blocked_ytdlp_falls_back_to_the_api_listing(env, youtube):
@@ -319,7 +319,7 @@ def test_blocked_ytdlp_falls_back_to_the_api_listing(env, youtube):
     youtube["ytdlp"] = {"sugg0": None}
     _, [case] = _cases(env)
 
-    assert pr.check_dead_link_cases([case]) == {"api": True, "blocked": 1}
+    assert pr.check_link_cases([case]) == {"api": True, "blocked": 1, "marked": 0}
     assert case.plays == {"sugg0": True}
 
 
@@ -329,7 +329,7 @@ def test_without_the_api_a_blocked_check_stays_unknown(env, youtube):
     youtube["ytdlp"] = {"sugg0": None}
     _, [case] = _cases(env)
 
-    assert pr.check_dead_link_cases([case]) == {"api": False, "blocked": 1}
+    assert pr.check_link_cases([case]) == {"api": False, "blocked": 1, "marked": 0}
     assert case.plays == {"sugg0": None} and case.dead_still_plays is None
 
 
@@ -339,6 +339,6 @@ def test_ytdlp_saying_gone_beats_the_api_listing(env, youtube):
     youtube["ytdlp"] = {"sugg0": False}
     _, [case] = _cases(env)
 
-    pr.check_dead_link_cases([case])
+    pr.check_link_cases([case])
 
     assert case.plays == {"sugg0": False}

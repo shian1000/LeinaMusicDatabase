@@ -70,6 +70,21 @@ INBOX_AUTO_INTERVAL = "15min"
 INBOX_AUTO_STARTUP_DELAY = "5min"
 # The review reuses the automatic pass's YouTube check while it's this fresh
 INBOX_CHECK_MAX_AGE_HOURS = 24
+# Why a video is in music.db's bad_youtube_videos (migration 0010). The codes
+# are read by the phone client (it only shows them), so keep them stable; a
+# new one needs no app change. Labels are what this app shows.
+BAD_VIDEO_REMOVED = "removed"  # gone per the YouTube Data API
+BAD_VIDEO_UNPLAYABLE = "unplayable"  # yt-dlp says it doesn't play here
+BAD_VIDEO_REPLACED_DEAD_LINK = "replaced_dead_link"  # reported dead, replaced or set to "N/A"
+BAD_VIDEO_WRONG_FOR_SONG = "wrong_for_song"  # the owner turned it down for the song
+BAD_VIDEO_NO_VIDEO_FOR_SONG = "no_video_for_song"  # the owner chose "N/A" while it was suggested
+BAD_VIDEO_REASONS = {
+    BAD_VIDEO_REMOVED: "removed from YouTube (Data API)",
+    BAD_VIDEO_UNPLAYABLE: "doesn't play here (yt-dlp)",
+    BAD_VIDEO_REPLACED_DEAD_LINK: "reported dead by Leina Radio, replaced",
+    BAD_VIDEO_WRONG_FOR_SONG: "turned down for this song by the owner",
+    BAD_VIDEO_NO_VIDEO_FOR_SONG: 'the owner chose "N/A" (no video) for this song',
+}
 
 # Daily "is yt-dlp current?" check (utils/youtube/ytdlp_update.py)
 YTDLP_PYPI_URL = "https://pypi.org/pypi/yt-dlp/json"

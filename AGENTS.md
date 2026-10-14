@@ -109,10 +109,14 @@ non-trivial work in that area.
   endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
-  artist's origin, an album's title, ...). `inbox_auto.py` is the automatic pass: every 15 min a
+  artist's origin, an album's title, ...), and `inbox_found_links.py` for links the phone found for
+  songs without one. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
+  music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
+  request naming one is turned down without asking YouTube again, and the phone, which reads the
+  table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: every 15 min a
   systemd user timer (`musicdatabase-inbox`, `auto_resolve_requests.py` at the repo root, installed
-  with the sharing service) takes `Inbox/new/`. It replaces a dead link only when the phone's and
-  our search agree and the video plays. It saves a correction only from a user with the
+  with the sharing service) takes `Inbox/new/`. It replaces a dead link, or fills a missing one the phone
+  found, only when the phone's and our search agree and the video plays. It saves a correction only from a user with the
   `apply_corrections` permission and when nothing conflicts. The rest goes to `Inbox/review/` with
   a note why. Manage database → "Resolve new requests" (`utils/ui/inbox_request_review.py`) runs the
   same pass, then asks about `review/`. Otherwise a phone's value never lands without review. The
@@ -147,7 +151,8 @@ non-trivial work in that area.
   (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
   `docs/runbooks/database.md` → "Logging in from the phone". Permissions the owner grants
   (Users → Permissions, `users.set_permissions()`) live in `account.json`, not `user.db`; a new one
-  goes into `account_auth.PERMISSIONS` + `constants.PERMISSION_LABELS`. The server reads them per
+  goes into `account_auth.PERMISSIONS` + `constants.PERMISSION_LABELS`. Leina Radio ignores names it
+  doesn't know, so adding one needs no app change; renaming or removing one does. The server reads them per
   request (`/login` and `GET /users/<name>` answer them).
   `user_datatables.py` has the `user.db` models (keep them in step with `migrations/user/`),
   `user_playlists.py` saves / deletes playlists and reads them back (`playlist_songs()`:
@@ -308,7 +313,8 @@ non-trivial work in that area.
   `NO_VIDEO_SENTINEL`), need coordinating with the app. The same goes for `albums`: the app keys
   its cover cache on album ids, so they must stay stable (merge, never renumber). It also still
   reads `songs.album`, so that text column stays filled until the user says the app has moved to
-  `album_id`.
+  `album_id`. It also reads `bad_youtube_videos` (`song_id` NULL = bad for every song, else
+  wrong for that song; `reason` codes from `constants.BAD_VIDEO_REASONS`, only shown there).
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →

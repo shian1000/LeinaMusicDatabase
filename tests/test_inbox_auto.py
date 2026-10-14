@@ -62,12 +62,12 @@ def env(tmp_path, monkeypatch):
     def fake_check(cases, on_case=None):
         youtube["calls"] += 1
         for case in cases:
-            case.our_video_id = youtube["ours"].get(case.dead_video_id)
+            case.our_video_id = youtube["ours"].get(case.dead_video_id or case.song_id)
             ids = [r.video_id for r in case.replacements] + ([case.our_video_id] if case.our_video_id else [])
             case.plays = {v: youtube["plays"].get(v, True) for v in ids}
             case.checked_at = pr.now_iso()
         return {"api": True, "blocked": 0}
-    monkeypatch.setattr(ia, "check_dead_link_cases", fake_check)
+    monkeypatch.setattr(ia, "check_link_cases", fake_check)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
     Base.metadata.create_all(engine)

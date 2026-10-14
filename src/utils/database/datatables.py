@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index, text
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from utils.common.debug import slog
 import re
@@ -137,6 +137,34 @@ class SongIdChange(Base):
     old_song_id = Column(Integer, nullable=False, index=True)
     new_song_id = Column(Integer)  # the song kept by a merge; NULL = deleted
     changed_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+# --------------------
+# YouTube videos found bad (migration 0010), read by the phone client too -
+# see utils/database/inbox_requests.py
+# --------------------
+class BadYoutubeVideo(Base):
+    __tablename__ = "bad_youtube_videos"
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(String, nullable=False)
+    song_id = Column(Integer, index=True)  # NULL = bad for every song
+    reason = Column(String, nullable=False)  # constants.BAD_VIDEO_REASONS
+    marked_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+Index("ux_bad_youtube_videos", BadYoutubeVideo.video_id, func.ifnull(BadYoutubeVideo.song_id, 0), unique=True)
+
+# Same trigger as migration 0010, so a database made by create_all() keeps
+# song_id current through merges and deletions too. Hung on song_id_changes,
+# the table it fires on, which has to exist first.
+event.listen(SongIdChange.__table__, "after_create", DDL("""
+CREATE TRIGGER IF NOT EXISTS bad_youtube_videos_follow_songs
+AFTER INSERT ON song_id_changes
+BEGIN
+	UPDATE OR IGNORE bad_youtube_videos SET song_id = NEW.new_song_id
+		WHERE song_id = NEW.old_song_id AND NEW.new_song_id IS NOT NULL;
+	DELETE FROM bad_youtube_videos WHERE song_id = NEW.old_song_id;
+END
+"""))
 
 song_categories = [
     "title",

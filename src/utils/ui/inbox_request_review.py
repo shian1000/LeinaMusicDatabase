@@ -7,7 +7,8 @@ through the same automatic pass the background timer runs
 (review/) is asked about, with the pass's note on why. Like the other
 reviews, the slow YouTube checks run first for every report (reusing the
 pass's check while it's fresh) and the questions come after, in one go: dead
-links first, then field corrections (inbox_field_corrections.py). Anything
+links first, then links found for songs without one (inbox_found_links.py),
+then field corrections (inbox_field_corrections.py). Anything
 skipped stays in review/ for next time. The screen also lists what the
 automatic pass changed."""
 
@@ -31,6 +32,7 @@ from utils.database.inbox_field_corrections import (
     collect_field_correction_cases,
     song_album_to_rename,
 )
+from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
 from utils.database.song_artists import count_artist_songs, song_artist_label
@@ -42,7 +44,7 @@ from utils.database.inbox_requests import (
     USE_VIDEO,
     apply_dead_link_decision,
     auto_report,
-    check_dead_link_cases,
+    check_link_cases,
     collect_dead_link_cases,
     finish_request_files,
     inbox_available,
@@ -78,6 +80,20 @@ def _not_playing_note(value: bool | None) -> str:
     return " - didn't play here" if value is False else ""
 
 
+def _show_bad(case) -> None:
+    for r in case.bad_replacements:
+        print(f"    [dim]Found bad:    {_url(r.video_id)}  {escape(case.bad[r.video_id])}[/dim]")
+
+
+def _show_ours(case) -> None:
+    if case.our_video_id:
+        same = " [green](same as Leina Radio's)[/green]" if any(
+            r.video_id == case.our_video_id for r in case.replacements) else ""
+        print(f"    Newfound:     {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
+    else:
+        print("    Newfound:     [dim]our search found nothing[/dim]")
+
+
 def _show_case(case, position: str) -> None:
     song = case.song
     print(f"\n{position} [yellow]{escape(song.artist.name)} - {escape(song.title)}[/yellow]  (song #{song.id})")
@@ -92,12 +108,8 @@ def _show_case(case, position: str) -> None:
         about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
         print(f"    Suggested:    {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
               + (f"  {about}" if about else ""))
-    if case.our_video_id:
-        same = " [green](same as the suggestion)[/green]" if any(
-            r.video_id == case.our_video_id for r in case.replacements) else ""
-        print(f"    Newfound:     {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
-    else:
-        print("    Newfound:     [dim]our search found nothing[/dim]")
+    _show_bad(case)
+    _show_ours(case)
     files = sorted({r.file_name for r in case.reports})
     print(f"    [dim]Reported in {', '.join(files)}[/dim]")
     _show_auto_note(case)
@@ -108,30 +120,38 @@ def _show_auto_note(case) -> None:
         print(f"    [cyan]Left for you by the automatic check: {escape(case.auto_note)}[/cyan]")
 
 
-def _choices(case) -> list:
-    # Offered even when the check said it doesn't play - the user may know better
+def _video_choices(case, label: str) -> list:
+    """The phone's videos, ours, those found bad before, paste, "N/A".
+    Offered even when the check said it doesn't play - the user may know better."""
     choices = []
     for r in case.replacements:
         also = " - our search found it too" if r.video_id == case.our_video_id else ""
         note = _not_playing_note(case.plays.get(r.video_id))
-        choices.append(questionary.Choice(f"Keep the suggested link ({r.video_id}){also}{note}", (USE_VIDEO, r.video_id)))
+        choices.append(questionary.Choice(f"Keep {label} ({r.video_id}){also}{note}", (USE_VIDEO, r.video_id)))
     if case.our_video_id and not any(r.video_id == case.our_video_id for r in case.replacements):
         note = _not_playing_note(case.plays.get(case.our_video_id))
         choices.append(questionary.Choice(f"Keep the newfound link ({case.our_video_id}){note}", (USE_VIDEO, case.our_video_id)))
-    choices += [
+    for r in case.bad_replacements:
+        choices.append(questionary.Choice(f"Keep {label} ({r.video_id}) - found bad before: {case.bad[r.video_id]}",
+                                          (USE_VIDEO, r.video_id)))
+    return choices + [
         questionary.Choice(_PASTE, _PASTE),
         questionary.Choice(_NO_VIDEO, (NO_VIDEO, None)),
     ]
+
+
+def _choices(case) -> list:
+    choices = _video_choices(case, "the suggested link")
     if case.song.youtube_video_id == case.dead_video_id:
         choices.append(questionary.Choice(_KEEP, (KEEP, None)))
     choices += [questionary.Choice(_SKIP, _SKIP), questionary.Choice(_STOP, _STOP)]
     return choices
 
 
-def _ask(case):
+def _ask(case, choices: list):
     """(decision, video id), _SKIP or _STOP."""
     while True:
-        answer = questionary.select("What should the database do?", choices=_choices(case)).ask()
+        answer = questionary.select("What should the database do?", choices=choices).ask()
         if answer is None:
             return _STOP
         if answer != _PASTE:
@@ -143,6 +163,86 @@ def _ask(case):
         if video_id:
             return USE_VIDEO, video_id
         print(f"'{escape(url)}' isn't a YouTube video link.")
+
+
+def _check(cases: list, what: str) -> None:
+    """The automatic pass's check, while fresh; YouTube only for the rest."""
+    load_case_checks(cases, INBOX_CHECK_MAX_AGE_HOURS)
+    unchecked = [c for c in cases if not c.checked_at]
+    if not unchecked:
+        return
+    print(f"\nLooking for videos for {len(unchecked)} {what}...")
+    stats = check_link_cases(
+        unchecked,
+        on_case=lambda i, case: print(f"  [{i}/{len(unchecked)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
+    )
+    _print_check_stats(stats)
+
+
+def _print_check_stats(stats: dict) -> None:
+    if not stats["api"]:
+        print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
+              "checked with yt-dlp only.[/yellow]")
+    if stats.get("blocked"):
+        print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
+              f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
+
+
+# ==================== found links ====================
+
+def _show_found(case, position: str) -> None:
+    song = case.song
+    print(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
+    if case.title_differs:
+        shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
+        print(f"    [red]The request showed it as[/red] {escape(shown)}")
+    print("    Now:          [dim]no YouTube link[/dim]")
+    for i, r in enumerate(case.replacements):
+        about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
+        latest = "  [dim](its latest pick)[/dim]" if i == 0 and len(case.replacements) > 1 else ""
+        print(f"    Leina Radio:  {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
+              + (f"  {about}" if about else "") + latest)
+    _show_bad(case)
+    _show_ours(case)
+    files = sorted({r.file_name for r in case.reports})
+    print(f"    [dim]Found in {', '.join(files)}[/dim]")
+    _show_auto_note(case)
+
+
+def _found_choices(case) -> list:
+    return _video_choices(case, "Leina Radio's link") + [
+        questionary.Choice("Wrong video - leave the song without a link (not offered again)", (REJECTED, None)),
+        questionary.Choice(_SKIP, _SKIP),
+        questionary.Choice(_STOP, _STOP),
+    ]
+
+
+def _review_found_links(session, requests) -> tuple[list, bool]:
+    """Returns (cases, stopped)."""
+    cases = collect_found_link_cases(session, requests)
+    settled = [c for c in cases if c.status != OPEN]
+    open_cases = [c for c in cases if c.status == OPEN]
+    if settled:
+        print(f"\n{len(settled)} link(s) found by Leina Radio need no answer:")
+        for case in settled:
+            report = case.reports[0]
+            print(f"    {escape(report.artist)} - {escape(report.title)} "
+                  f"({', '.join(r.video_id for r in case.all_replacements())}): {case.status}")
+    if not open_cases:
+        return cases, False
+    _check(open_cases, "song(s) Leina Radio found a link for")
+    print(f"\n{len(open_cases)} link(s) Leina Radio found for songs without one:")
+    for i, case in enumerate(open_cases, 1):
+        _show_found(case, f"[{i}/{len(open_cases)}]")
+        answer = _ask(case, _found_choices(case))
+        if answer == _STOP:
+            return cases, True
+        if answer == _SKIP:
+            continue
+        decision, video_id = answer
+        apply_found_link_decision(case, decision, video_id)
+        submit_global_database_session()
+    return cases, False
 
 
 # ==================== field corrections ====================
@@ -300,13 +400,8 @@ def _auto_pass(session) -> None:
     for request in result.rejected:
         print(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - "
               f"moved to {INBOX_DIR / 'rejected'}")
-    stats = result.check_stats
-    if stats and not stats["api"]:
-        print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
-              "checked with yt-dlp only.[/yellow]")
-    if stats.get("blocked"):
-        print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
-              f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
+    if result.check_stats:
+        _print_check_stats(result.check_stats)
     if result.changes:
         print(f"\n[green]Changed automatically ({len(result.changes)}):[/green]")
         show_auto_changes(result.changes)
@@ -366,25 +461,10 @@ def resolve_new_requests() -> None:
             print(f"    {escape(report.artist)} - {escape(report.title)} ({case.dead_video_id}): {case.status}")
 
     if open_cases:
-        # The automatic pass's check, while fresh; YouTube only for the rest
-        load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
-        unchecked = [c for c in open_cases if not c.checked_at]
-        if unchecked:
-            print(f"\nLooking for videos for {len(unchecked)} dead link report(s)...")
-            stats = check_dead_link_cases(
-                unchecked,
-                on_case=lambda i, case: print(f"  [{i}/{len(unchecked)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
-            )
-            if not stats["api"]:
-                print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
-                      "checked with yt-dlp only.[/yellow]")
-            if stats["blocked"]:
-                print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
-                      f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
-
+        _check(open_cases, "dead link report(s)")
         for i, case in enumerate(open_cases, 1):
             _show_case(case, f"[{i}/{len(open_cases)}]")
-            answer = _ask(case)
+            answer = _ask(case, _choices(case))
             if answer == _STOP:
                 stopped = True
                 break
@@ -394,12 +474,16 @@ def resolve_new_requests() -> None:
             apply_dead_link_decision(case, decision, video_id)
             submit_global_database_session()
 
+    # Not asked after a stop, but they still keep their files in review/
+    if not stopped:
+        found_cases, stopped = _review_found_links(session, requests)
+    else:
+        found_cases = collect_found_link_cases(session, requests)
     if not stopped:
         field_cases, stopped = _review_field_corrections(session, requests)
-        cases = cases + field_cases
     else:
-        # Not asked this time, but they still keep their files in review/
-        cases = cases + collect_field_correction_cases(session, requests)
+        field_cases = collect_field_correction_cases(session, requests)
+    cases = cases + found_cases + field_cases
 
     moved, left = finish_request_files(requests, cases)
     if moved:

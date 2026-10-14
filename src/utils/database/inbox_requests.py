@@ -15,7 +15,8 @@ Inbox (Settings.phone_inbox_dir, on T7):
 - processed/  - files whose every row has been settled; kept, not deleted.
                 The server answers a resend of one of these with 200.
 - rejected/   - files that aren't readable request files.
-- decisions.json - every answer given, keyed "<song id>:<dead video id>".
+- decisions.json - every answer given, keyed "<song id>:<dead video id>"
+                (found links: "found:<song id>:<video id>").
                 Only "kept" answers are looked up again: they leave the
                 database unchanged, so without the record the same report
                 (from a file still waiting on a skipped row, or another
@@ -25,10 +26,17 @@ Inbox (Settings.phone_inbox_dir, on T7):
 - auto_report.json - what the automatic pass changed; main.py shows the
                 entries not shown yet at startup.
 
+Videos found bad are kept in music.db's bad_youtube_videos (migration 0010),
+which the phone reads too, so a later request naming one is turned down
+without asking YouTube again (load_bad_videos()): for every song (removed,
+doesn't play here, a dead link that was replaced) or for one song (the owner
+turned it down or chose "N/A"). Choosing a video takes it off.
+
 One request file is one SQLite file with a one-row `request` table and one
 table per request type (app ADR 0005; format described in the app's
-docs/handoffs/musicdatabase-outbox.md). Known types: dead_youtube_links and
-field_corrections (handled in inbox_field_corrections.py). A file with a
+docs/handoffs/musicdatabase-outbox.md). Known types: dead_youtube_links,
+field_corrections (handled in inbox_field_corrections.py) and
+found_youtube_links (inbox_found_links.py). A file with a
 table this version doesn't know stays in new/, so a later version can still
 handle that part.
 
@@ -37,7 +45,8 @@ A dead link report is settled without asking when:
 - songs.youtube_video_id already holds another link or "N/A";
 - the user kept that link after the report was made.
 song_id follows merges through song_id_changes. Reports of the same
-(song, dead video) from several files are asked about once.
+(song, dead video) from several files are asked about once. Suggestions
+found bad before are left out (LinkCase.bad).
 """
 
 import json
@@ -48,11 +57,21 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from config.constants import PHONE_REQUEST_FORMAT
+from sqlalchemy import or_
+from sqlalchemy.orm import object_session
+
+from config.constants import (
+    BAD_VIDEO_NO_VIDEO_FOR_SONG,
+    BAD_VIDEO_REASONS,
+    BAD_VIDEO_REMOVED,
+    BAD_VIDEO_REPLACED_DEAD_LINK,
+    BAD_VIDEO_UNPLAYABLE,
+    PHONE_REQUEST_FORMAT,
+)
 from settings import Settings
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
-from utils.database.datatables import Song
+from utils.database.datatables import BadYoutubeVideo, Song
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.song_references import load_changes
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
@@ -72,7 +91,8 @@ _SENDER_RE = re.compile(r"^(?P<user>[a-z0-9][a-z0-9_-]{1,31})_\d{4}-\d{2}-\d{2}_
 
 DEAD_LINKS_TABLE = "dead_youtube_links"
 FIELD_CORRECTIONS_TABLE = "field_corrections"
-KNOWN_TABLES = {"request", DEAD_LINKS_TABLE, FIELD_CORRECTIONS_TABLE}
+FOUND_LINKS_TABLE = "found_youtube_links"
+KNOWN_TABLES = {"request", DEAD_LINKS_TABLE, FIELD_CORRECTIONS_TABLE, FOUND_LINKS_TABLE}
 # Android's SQLiteDatabase adds this to every file it creates (just the locale) -
 # not a request, so it never keeps a file in the inbox
 PLATFORM_TABLES = {"android_metadata"}
@@ -121,6 +141,20 @@ class FieldCorrection:
 
 
 @dataclass
+class FoundLinkReport:
+    """A video the phone found for a song music.db had no link for (app
+    handoff musicdatabase-found-youtube-links.md)."""
+    file_name: str
+    song_id: int
+    title: str
+    artist: str
+    video_id: str
+    video_title: str | None
+    video_channel: str | None
+    found_at: str
+
+
+@dataclass
 class RequestFile:
     path: Path
     format: int | None = None
@@ -129,6 +163,7 @@ class RequestFile:
     app: str | None = None
     dead_links: list[DeadLinkReport] = field(default_factory=list)
     field_corrections: list[FieldCorrection] = field(default_factory=list)
+    found_links: list[FoundLinkReport] = field(default_factory=list)
     unknown_tables: list[str] = field(default_factory=list)
     error: str | None = None  # not a readable request file
 
@@ -155,14 +190,16 @@ class Replacement:
 
 
 @dataclass
-class DeadLinkCase:
-    """One (song, dead video) pair, from however many reports."""
+class LinkCase:
+    """A song's YouTube link the phone wants set: a dead link replaced
+    (DeadLinkCase) or a link found for a song without one
+    (inbox_found_links.FoundLinkCase). Checked with YouTube the same way."""
     song_id: int | None  # after following merges; None = song deleted
-    dead_video_id: str
-    reports: list[DeadLinkReport]
+    dead_video_id: str | None  # the link being replaced; None = the song had none
+    reports: list
     song: Song | None = None
     status: str = OPEN
-    # Filled by check_dead_link_cases() (slow: YouTube)
+    # Filled by check_link_cases() (slow: YouTube)
     # False = the Data API says the dead link is gone; None = not rechecked
     # (the request already says it's dead - one request fewer to YouTube)
     dead_still_plays: bool | None = None
@@ -171,24 +208,30 @@ class DeadLinkCase:
     our_video_id: str | None = None
     checked_at: str | None = None  # when the above was filled; None = not checked
     auto_note: str | None = None  # why the automatic pass left it to the owner
-
-    @property
-    def key(self) -> str:
-        return _decision_key(self.song_id, self.dead_video_id)
+    # The phone's videos found bad before (bad_youtube_videos): video id -> why
+    bad: dict = field(default_factory=dict)
 
     @property
     def pending(self) -> bool:
         """Keeps its files in new/."""
         return self.status == OPEN
 
+    def all_replacements(self) -> list[Replacement]:
+        """Every video the phone named for the song, known bad ones too."""
+        raise NotImplementedError
+
     @property
     def replacements(self) -> list[Replacement]:
-        seen = {}
-        for report in self.reports:
-            vid = report.replacement_video_id
-            if vid and vid != self.dead_video_id and vid not in seen:
-                seen[vid] = Replacement(vid, report.replacement_title, report.replacement_channel)
-        return list(seen.values())
+        """The phone's videos worth considering."""
+        return [r for r in self.all_replacements() if r.video_id not in self.bad]
+
+    @property
+    def bad_replacements(self) -> list[Replacement]:
+        return [r for r in self.all_replacements() if r.video_id in self.bad]
+
+    def find_bad(self, bad_videos) -> None:
+        self.bad = {r.video_id: why for r in self.all_replacements()
+                    if (why := bad_videos.why(r.video_id, self.song_id))}
 
     @property
     def title_differs(self) -> bool:
@@ -196,6 +239,23 @@ class DeadLinkCase:
         if self.song is None:
             return False
         return any(normalize(r.title or "") != normalize(self.song.title or "") for r in self.reports)
+
+
+@dataclass
+class DeadLinkCase(LinkCase):
+    """One (song, dead video) pair, from however many reports."""
+
+    @property
+    def key(self) -> str:
+        return _decision_key(self.song_id, self.dead_video_id)
+
+    def all_replacements(self) -> list[Replacement]:
+        seen = {}
+        for report in self.reports:
+            vid = report.replacement_video_id
+            if vid and vid != self.dead_video_id and vid not in seen:
+                seen[vid] = Replacement(vid, report.replacement_title, report.replacement_channel)
+        return list(seen.values())
 
 
 def _decision_key(song_id, video_id) -> str:
@@ -287,6 +347,16 @@ def read_request_file(path: Path) -> RequestFile:
                 return request
             for row in conn.execute(f"SELECT {', '.join(wanted)} FROM {FIELD_CORRECTIONS_TABLE}"):
                 request.field_corrections.append(FieldCorrection(path.name, *row))
+        if FOUND_LINKS_TABLE in tables:
+            wanted = ["song_id", "title", "artist", "video_id", "video_title", "video_channel", "found_at"]
+            have = _columns(conn, FOUND_LINKS_TABLE)
+            missing = [c for c in wanted if c not in have and c not in ("video_title", "video_channel")]
+            if missing:
+                request.error = f"{FOUND_LINKS_TABLE} lacks {', '.join(missing)}"
+                return request
+            select = ", ".join(c if c in have else "NULL" for c in wanted)
+            for row in conn.execute(f"SELECT {select} FROM {FOUND_LINKS_TABLE}"):
+                request.found_links.append(FoundLinkReport(path.name, *row))
     except sqlite3.Error as exc:
         request.error = f"unreadable: {exc}"
     finally:
@@ -360,7 +430,7 @@ def save_case_checks(cases: list) -> None:
     checks = _load_json(CHECKS_FILE, {})
     for case in cases:
         entry = {"note": getattr(case, "auto_note", None)}
-        if isinstance(case, DeadLinkCase) and case.checked_at:
+        if isinstance(case, LinkCase) and case.checked_at:
             entry.update(checked_at=case.checked_at, our_video_id=case.our_video_id,
                          plays=case.plays, dead_still_plays=case.dead_still_plays)
         checks[case.key] = entry
@@ -376,7 +446,7 @@ def load_case_checks(cases: list, max_age_hours: float) -> None:
         if not isinstance(entry, dict):
             continue
         case.auto_note = entry.get("note")
-        if not isinstance(case, DeadLinkCase) or not entry.get("checked_at"):
+        if not isinstance(case, LinkCase) or not entry.get("checked_at"):
             continue
         checked = parse_time(entry["checked_at"])
         if checked is None or (datetime.now().astimezone() - checked).total_seconds() > max_age_hours * 3600:
@@ -426,6 +496,77 @@ def _kept_after_reports(decision: dict | None, reports: list[DeadLinkReport]) ->
     return decided is not None and all(t <= decided for t in detected)
 
 
+# ==================== videos found bad ====================
+
+def merged_song_ids() -> dict:
+    """song_id_changes as {old id: new id, or None = deleted}."""
+    return {old: new for _, old, new in load_changes()}
+
+
+def _reason_label(reason: str | None) -> str:
+    return BAD_VIDEO_REASONS.get(reason, reason or "found bad before")
+
+
+class BadVideos:
+    """music.db's bad_youtube_videos as read once per pass. A video is bad for
+    every song (song_id NULL) or for one song (wrong for it, not broken);
+    song_id is kept current through merges by a trigger (migration 0010)."""
+
+    def __init__(self, rows):
+        self.gone = {}
+        self.wrong = {}
+        for row in rows:
+            if row.song_id is None:
+                self.gone[row.video_id] = row.reason
+            else:
+                self.wrong.setdefault(row.song_id, {})[row.video_id] = row.reason
+
+    def why(self, video_id: str | None, song_id: int | None = None) -> str | None:
+        """Why this video is no good (for this song), as shown, or None."""
+        if not video_id:
+            return None
+        if video_id in self.gone:
+            return _reason_label(self.gone[video_id])
+        if song_id is not None and video_id in self.wrong.get(song_id, {}):
+            return _reason_label(self.wrong[song_id][video_id])
+        return None
+
+
+def load_bad_videos(session) -> BadVideos:
+    return BadVideos(session.query(BadYoutubeVideo).all())
+
+
+def mark_bad_videos(session, video_ids, reason: str, song_id: int | None = None) -> int:
+    """Remember these videos as bad (a BAD_VIDEO_REASONS code): for every
+    song, or with `song_id` only for that song. A row already there stays.
+    The caller commits. Returns how many were added."""
+    video_ids = [v for v in dict.fromkeys(video_ids) if v and v != NO_VIDEO_SENTINEL]
+    if not video_ids:
+        return 0
+    query = session.query(BadYoutubeVideo.video_id).filter(BadYoutubeVideo.video_id.in_(video_ids))
+    query = query.filter(BadYoutubeVideo.song_id.is_(None) if song_id is None
+                         else BadYoutubeVideo.song_id == song_id)
+    there = {v for (v,) in query}
+    added = [v for v in video_ids if v not in there]
+    for video_id in added:
+        session.add(BadYoutubeVideo(video_id=video_id, song_id=song_id, reason=reason, marked_at=now_iso()))
+    if added:
+        mlog(f"Inbox: bad video(s) {', '.join(added)}{f' for song {song_id}' if song_id else ''}: {reason}")
+    return len(added)
+
+
+def unmark_bad_video(session, video_id: str | None, song_id: int | None) -> None:
+    """The owner chose or kept this video for this song: it's not bad (for
+    every song either - they know better than a check that said it doesn't
+    play). The caller commits."""
+    if not video_id:
+        return
+    session.query(BadYoutubeVideo).filter(
+        BadYoutubeVideo.video_id == video_id,
+        or_(BadYoutubeVideo.song_id.is_(None), BadYoutubeVideo.song_id == song_id),
+    ).delete(synchronize_session=False)
+
+
 # ==================== cases ====================
 
 def resolve_song_id(song_id: int, merged_into: dict) -> int | None:
@@ -442,7 +583,8 @@ def resolve_song_id(song_id: int, merged_into: dict) -> int | None:
 def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLinkCase]:
     """Group every supported file's dead link reports by (current song, dead
     video) and settle what needs no answer. Order: first report first."""
-    merged_into = {old: new for _, old, new in load_changes()}
+    merged_into = merged_song_ids()
+    bad_videos = load_bad_videos(session)
     decisions = load_decisions()
     cases: dict[tuple, DeadLinkCase] = {}
     for request in requests:
@@ -466,11 +608,14 @@ def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLi
             case.status = LINK_ALREADY_CHANGED
         elif _kept_after_reports(decisions.get(case.key), case.reports):
             case.status = ALREADY_KEPT
+        else:
+            case.find_bad(bad_videos)
     return list(cases.values())
 
 
-def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
-    """Find our own candidate for every case and check whether the candidates
+def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
+    """Find our own candidate for every case (dead links and found links) and
+    check whether the candidates
     play, asking YouTube as little as possible - yt-dlp gets rate-limited and
     then hits a "confirm you're not a bot" wall (2026-10-13):
     1. our matcher's search (yt-dlp), per case - the phone's matcher has less
@@ -480,13 +625,21 @@ def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
     3. yt-dlp only for suggested/newfound ids the API didn't rule out, once
        per id - the API lists some videos YouTube won't play.
     The dead link itself isn't played again; only the API's answer is kept.
+    A video found bad before is never our candidate, and what this finds gone
+    or not playing goes to bad_youtube_videos - committed here, so the
+    phones learn it with the next copy of music.db.
     `on_case(i, case)` is called before each search, for progress. Fills
     checked_at, so save_case_checks() can keep it for the review.
-    Returns counts for the screen: {"api": bool, "blocked": n}."""
+    Returns counts for the screen: {"api": bool, "blocked": n, "marked": n}
+    (n videos newly found bad)."""
     from utils.youtube.manage_youtube_playlists import (
         search_video_ytdlp, video_playability, videos_exist_via_api,
     )
 
+    if not cases:
+        return {"api": False, "blocked": 0, "marked": 0}
+    session = object_session(cases[0].song)
+    bad_videos = load_bad_videos(session)
     for i, case in enumerate(cases, 1):
         if on_case:
             on_case(i, case)
@@ -500,12 +653,14 @@ def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
         except Exception as exc:
             flog(f"Search for inbox request {song.artist.name} - {song.title} failed: {exc}")
             found = None
-        case.our_video_id = found if found != case.dead_video_id else None
+        if found == case.dead_video_id or bad_videos.why(found, case.song_id):
+            found = None
+        case.our_video_id = found
 
     candidates = [[r.video_id for r in case.replacements] + ([case.our_video_id] if case.our_video_id else [])
                   for case in cases]
     api = videos_exist_via_api(
-        [case.dead_video_id for case in cases] + [v for ids in candidates for v in ids])
+        [case.dead_video_id for case in cases if case.dead_video_id] + [v for ids in candidates for v in ids])
     known = {}
     blocked = 0
     for case, ids in zip(cases, candidates):
@@ -524,7 +679,13 @@ def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
                     known[video_id] = answer
             case.plays[video_id] = known[video_id]
         case.checked_at = now_iso()
-    return {"api": api is not None, "blocked": blocked}
+
+    removed = [v for v, exists in (api or {}).items() if exists is False]
+    marked = mark_bad_videos(session, removed, BAD_VIDEO_REMOVED)
+    marked += mark_bad_videos(session, [v for v, plays in known.items() if plays is False and v not in removed],
+                              BAD_VIDEO_UNPLAYABLE)
+    session.commit()
+    return {"api": api is not None, "blocked": blocked, "marked": marked}
 
 
 def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None,
@@ -532,14 +693,22 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
     """Change the song's link as the user decided and record the answer
     (`by` = "auto" for the automatic pass). The caller commits the music
     session."""
+    session = object_session(case.song)
     if decision == USE_VIDEO:
         if not video_id:
             raise ValueError("USE_VIDEO needs a video id")
         case.song.youtube_video_id = video_id
+        unmark_bad_video(session, video_id, case.song_id)
     elif decision == NO_VIDEO:
         case.song.youtube_video_id = NO_VIDEO_SENTINEL
+        mark_bad_videos(session, [r.video_id for r in case.all_replacements()],
+                        BAD_VIDEO_NO_VIDEO_FOR_SONG, case.song_id)
     elif decision != KEEP:
         raise ValueError(f"Unknown decision {decision!r}")
+    if decision == KEEP:
+        unmark_bad_video(session, case.dead_video_id, case.song_id)
+    else:
+        mark_bad_videos(session, [case.dead_video_id], BAD_VIDEO_REPLACED_DEAD_LINK)
     save_decision(case.key, {
         "decision": decision,
         "video_id": video_id,
@@ -564,7 +733,8 @@ def finish_request_files(requests: list[RequestFile], cases: list,
             continue
         done = (request.supported and not request.unknown_tables
                 and not any(id(report) in open_reports
-                            for report in request.dead_links + request.field_corrections))
+                            for report in request.dead_links + request.field_corrections
+                            + request.found_links))
         if done:
             _move(request.path, PROCESSED)
             moved.append(request)
