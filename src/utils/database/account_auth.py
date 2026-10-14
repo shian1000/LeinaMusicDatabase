@@ -41,7 +41,9 @@ TOKEN_BYTES = 32
 # Every permission there is (also config.constants.PERMISSION_LABELS); the
 # names are part of the phone contract
 PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
-PERMISSIONS = (PERMISSION_EDIT_GLOBAL_MOODS,)
+# Read by the app's automatic inbox pass (utils/database/inbox_auto.py), not the server
+PERMISSION_APPLY_CORRECTIONS = "apply_corrections"
+PERMISSIONS = (PERMISSION_EDIT_GLOBAL_MOODS, PERMISSION_APPLY_CORRECTIONS)
 
 # Compared against when the user doesn't exist, so a wrong username takes as
 # long as a wrong password (scrypt) and the answer doesn't tell them apart

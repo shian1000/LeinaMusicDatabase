@@ -227,7 +227,7 @@ def _show_playlist(username: str, playlist_id: int, show) -> None:
 
 def _delete_playlist(username: str, playlist_id: int, name: str) -> str | None:
     """Returns _BACK once deleted, which closes the playlist's menu."""
-    print(f"This deletes '{name}' here and on {username}'s phones (at their next sync).")
+    print(f"This deletes '{name}' here and in {username}'s Leina Radio (at its next sync).")
     if not questionary.confirm("Delete it?", default=False).ask():
         return None
     archived = delete_playlist(username, playlist_id)

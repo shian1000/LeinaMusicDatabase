@@ -62,6 +62,14 @@ PHONE_REQUEST_MAX_BYTES = 1024 * 1024
 PHONE_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
 # Request file format this version understands (request.format)
 PHONE_REQUEST_FORMAT = 1
+# The automatic pass over new requests (utils/database/inbox_auto.py), run by
+# a systemd user timer (auto_resolve_requests.py) this often, while the app
+# isn't open
+INBOX_AUTO_SERVICE_NAME = "musicdatabase-inbox"
+INBOX_AUTO_INTERVAL = "15min"
+INBOX_AUTO_STARTUP_DELAY = "5min"
+# The review reuses the automatic pass's YouTube check while it's this fresh
+INBOX_CHECK_MAX_AGE_HOURS = 24
 
 # Daily "is yt-dlp current?" check (utils/youtube/ytdlp_update.py)
 YTDLP_PYPI_URL = "https://pypi.org/pypi/yt-dlp/json"
@@ -246,8 +254,10 @@ TAG_KIND_MARKER = "marker"
 # in that user's account.json. Names are part of the phone contract
 # (utils/database/account_auth.PERMISSIONS must match); the label is the menu's.
 PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
+PERMISSION_APPLY_CORRECTIONS = "apply_corrections"
 PERMISSION_LABELS = {
-    PERMISSION_EDIT_GLOBAL_MOODS: "Edit global moods from the phone (add and remove songs)",
+    PERMISSION_EDIT_GLOBAL_MOODS: "Edit global moods from Leina Radio (add and remove songs)",
+    PERMISSION_APPLY_CORRECTIONS: "Field corrections from Leina Radio are saved without review (when nothing conflicts)",
 }
 
 # ==================== Music library index (utils/database/files_index.py) ====================

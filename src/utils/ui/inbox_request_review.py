@@ -1,16 +1,23 @@
 """Manage database -> "Resolve new requests": requests in the inbox (so far
 only the phone sends them, through the sharing server; other sources may
 follow, so the screen never says where a request came from). The logic is utils/database/inbox_requests.py; this
-only shows it and asks. Like the other reviews, the slow YouTube checks run
-first for every report and the questions come after, in one go: dead links
-first, then field corrections (inbox_field_corrections.py). Anything skipped
-stays in the inbox for next time."""
+only shows it and asks. Files nobody has looked at yet (new/) first go
+through the same automatic pass the background timer runs
+(utils/database/inbox_auto.py); then everything it left to the owner
+(review/) is asked about, with the pass's note on why. Like the other
+reviews, the slow YouTube checks run first for every report (reusing the
+pass's check while it's fresh) and the questions come after, in one go: dead
+links first, then field corrections (inbox_field_corrections.py). Anything
+skipped stays in review/ for next time. The screen also lists what the
+automatic pass changed."""
 
 import questionary
 from rich import print
 from rich.markup import escape
 
+from config.constants import INBOX_CHECK_MAX_AGE_HOURS
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
+from utils.database.inbox_auto import auto_resolve
 from utils.database.inbox_field_corrections import (
     ACCEPT,
     EDIT,
@@ -34,12 +41,18 @@ from utils.database.inbox_requests import (
     OPEN,
     USE_VIDEO,
     apply_dead_link_decision,
+    auto_report,
     check_dead_link_cases,
     collect_dead_link_cases,
     finish_request_files,
     inbox_available,
+    load_case_checks,
+    mark_auto_report_shown,
+    new_request_paths,
     read_new_requests,
+    read_review_requests,
     reject_request_file,
+    review_request_paths,
 )
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
 
@@ -87,6 +100,12 @@ def _show_case(case, position: str) -> None:
         print("    Newfound:     [dim]our search found nothing[/dim]")
     files = sorted({r.file_name for r in case.reports})
     print(f"    [dim]Reported in {', '.join(files)}[/dim]")
+    _show_auto_note(case)
+
+
+def _show_auto_note(case) -> None:
+    if case.auto_note:
+        print(f"    [cyan]Left for you by the automatic check: {escape(case.auto_note)}[/cyan]")
 
 
 def _choices(case) -> list:
@@ -153,19 +172,20 @@ def _show_correction(session, case, position: str) -> None:
     if case.title_differs:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
         print(f"    [red]The request showed it as[/red] {escape(shown)}")
-    print(f"    Field:       {case.label}  [dim]({_row_label(session, case)})[/dim]")
+    print(f"    Field:           {case.label}  [dim]({_row_label(session, case)})[/dim]")
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
         print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
-    print(f"    Phone had:   {_value(report.old_value)}")
-    changed = "  [yellow](changed since the phone's copy)[/yellow]" if case.changed_since else ""
-    print(f"    Now:         {_value(case.current)}{changed}")
+    print(f"    Leina Radio had: {_value(report.old_value)}")
+    changed = "  [yellow](changed since Leina Radio's copy)[/yellow]" if case.changed_since else ""
+    print(f"    Now:             {_value(case.current)}{changed}")
     error = f"  [red]can't be stored: {escape(case.error)}[/red]" if case.error else ""
-    print(f"    Correction:  {_value(report.new_value)}{error}")
+    print(f"    Correction:      {_value(report.new_value)}{error}")
     if case.earlier_values:
         print(f"    [dim]Earlier asked for: {', '.join(_value(v) for v in case.earlier_values)}[/dim]")
     files = sorted({r.file_name for r in case.reports})
     print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {', '.join(files)}[/dim]")
+    _show_auto_note(case)
 
 
 def _value_notes(session, case, value) -> list:
@@ -250,6 +270,7 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
               f"their files stay in the inbox.[/yellow]")
     if open_cases:
         print(f"\n{len(open_cases)} field correction(s) to look at:")
+        load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
     for i, case in enumerate(open_cases, 1):
         _show_correction(session, case, f"[{i}/{len(open_cases)}]")
         answer = _ask_correction(session, case)
@@ -263,15 +284,64 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
     return cases, False
 
 
+def show_auto_changes(entries: list[dict]) -> None:
+    for entry in entries:
+        when = (entry.get("at") or "?")[:16].replace("T", " ")
+        print(f"  [dim]{escape(when)}[/dim]  {escape(entry.get('text', '?'))}")
+
+
+def _auto_pass(session) -> None:
+    """The automatic pass over new/, shown as it goes."""
+    requests = read_new_requests()
+    print(f"Checking {len(requests)} new request file(s) automatically first...")
+    result = auto_resolve(
+        session, requests, shown=True,
+        on_case=lambda i, n, case: print(f"  [{i}/{n}] {escape(case.song.artist.name)} - {escape(case.song.title)}"))
+    for request in result.rejected:
+        print(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - "
+              f"moved to {INBOX_DIR / 'rejected'}")
+    stats = result.check_stats
+    if stats and not stats["api"]:
+        print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
+              "checked with yt-dlp only.[/yellow]")
+    if stats.get("blocked"):
+        print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
+              f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
+    if result.changes:
+        print(f"\n[green]Changed automatically ({len(result.changes)}):[/green]")
+        show_auto_changes(result.changes)
+    print(f"{len(result.moved)} file(s) done, {len(result.left)} left for you to review.")
+
+
 def resolve_new_requests() -> None:
     if not inbox_available():
         print(f"The inbox ({INBOX_DIR}) is on a drive that isn't mounted - is T7 plugged in?")
         return
-    requests = read_new_requests()
-    if not requests:
+    new_count, review_count = len(new_request_paths()), len(review_request_paths())
+    history = auto_report()
+    print(f"New request files (not checked yet): {new_count}")
+    print(f"Waiting for your review (checked automatically): {review_count}")
+    review_label = "Review the requests"
+    history_label = f"Show what the automatic check changed ({len(history)})"
+    choices = ([review_label] if new_count or review_count else []) + ([history_label] if history else [])
+    if not choices:
         print("No new requests in the inbox.")
         return
-    print(f"{len(requests)} request file(s) in the inbox.")
+    answer = questionary.select("What now?", choices=choices + ["Back"]).ask()
+    if answer == history_label:
+        show_auto_changes(history)
+        mark_auto_report_shown()
+        return
+    if answer != review_label:
+        return
+
+    session = open_and_set_global_database_sessions()[0]
+    if new_count:
+        _auto_pass(session)
+    requests = read_review_requests()
+    if not requests:
+        return
+    print(f"\n{len(requests)} request file(s) to review.")
 
     for request in [r for r in requests if r.error]:
         target = reject_request_file(request)
@@ -285,7 +355,6 @@ def resolve_new_requests() -> None:
             print(f"[yellow]{escape(request.name)}[/yellow] also has {', '.join(request.unknown_tables)}, which this "
                   f"version can't handle yet - the file stays in the inbox.")
 
-    session = open_and_set_global_database_sessions()[0]
     cases = collect_dead_link_cases(session, requests)
     settled = [c for c in cases if c.status != OPEN]
     open_cases = [c for c in cases if c.status == OPEN]
@@ -297,17 +366,21 @@ def resolve_new_requests() -> None:
             print(f"    {escape(report.artist)} - {escape(report.title)} ({case.dead_video_id}): {case.status}")
 
     if open_cases:
-        print(f"\nLooking for videos for {len(open_cases)} dead link report(s)...")
-        stats = check_dead_link_cases(
-            open_cases,
-            on_case=lambda i, case: print(f"  [{i}/{len(open_cases)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
-        )
-        if not stats["api"]:
-            print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
-                  "checked with yt-dlp only.[/yellow]")
-        if stats["blocked"]:
-            print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
-                  f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
+        # The automatic pass's check, while fresh; YouTube only for the rest
+        load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
+        unchecked = [c for c in open_cases if not c.checked_at]
+        if unchecked:
+            print(f"\nLooking for videos for {len(unchecked)} dead link report(s)...")
+            stats = check_dead_link_cases(
+                unchecked,
+                on_case=lambda i, case: print(f"  [{i}/{len(unchecked)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
+            )
+            if not stats["api"]:
+                print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
+                      "checked with yt-dlp only.[/yellow]")
+            if stats["blocked"]:
+                print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
+                      f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
 
         for i, case in enumerate(open_cases, 1):
             _show_case(case, f"[{i}/{len(open_cases)}]")
@@ -325,7 +398,7 @@ def resolve_new_requests() -> None:
         field_cases, stopped = _review_field_corrections(session, requests)
         cases = cases + field_cases
     else:
-        # Not asked this time, but they still keep their files in new/
+        # Not asked this time, but they still keep their files in review/
         cases = cases + collect_field_correction_cases(session, requests)
 
     moved, left = finish_request_files(requests, cases)

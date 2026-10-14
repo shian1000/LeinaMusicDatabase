@@ -6,8 +6,12 @@ utils/ui/inbox_request_review.py (Manage database -> "Resolve new requests");
 nothing here asks anything, so a later intake can reuse it (ADR-0001).
 
 Inbox (Settings.phone_inbox_dir, on T7):
-- new/        - what the sharing server stored (PUT /inbox/<name>.db); counts
-                towards its size limit, so processing frees room for more.
+- new/        - what the sharing server stored (PUT /inbox/<name>.db), not
+                looked at yet. The automatic pass (inbox_auto.py) takes them
+                from here.
+- review/     - files the automatic pass couldn't settle on its own, waiting
+                for the owner. new/ + review/ count towards the server's size
+                limit, so only settling a file frees room for more.
 - processed/  - files whose every row has been settled; kept, not deleted.
                 The server answers a resend of one of these with 200.
 - rejected/   - files that aren't readable request files.
@@ -16,6 +20,10 @@ Inbox (Settings.phone_inbox_dir, on T7):
                 database unchanged, so without the record the same report
                 (from a file still waiting on a skipped row, or another
                 phone) would be asked about again.
+- auto_checks.json - per case: the automatic pass's YouTube check and why it
+                left the case to the owner, shown in the review.
+- auto_report.json - what the automatic pass changed; main.py shows the
+                entries not shown yet at startup.
 
 One request file is one SQLite file with a one-row `request` table and one
 table per request type (app ADR 0005; format described in the app's
@@ -34,6 +42,7 @@ song_id follows merges through song_id_changes. Reports of the same
 
 import json
 import os
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -51,9 +60,15 @@ from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
 INBOX_DIR = Path(str(Settings.phone_inbox_dir))
 INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
 NEW = "new"
+REVIEW = "review"
 PROCESSED = "processed"
 REJECTED = "rejected"
 DECISIONS_FILE = "decisions.json"
+CHECKS_FILE = "auto_checks.json"
+REPORT_FILE = "auto_report.json"
+# The user part of a request file name - the server only takes a named file
+# from that user's token, so it is a verified sender
+_SENDER_RE = re.compile(r"^(?P<user>[a-z0-9][a-z0-9_-]{1,31})_\d{4}-\d{2}-\d{2}_")
 
 DEAD_LINKS_TABLE = "dead_youtube_links"
 FIELD_CORRECTIONS_TABLE = "field_corrections"
@@ -125,6 +140,12 @@ class RequestFile:
     def supported(self) -> bool:
         return self.error is None and self.format == PHONE_REQUEST_FORMAT
 
+    @property
+    def sender(self) -> str | None:
+        """The logged-in user who sent it (from the file name); None = anonymous."""
+        match = _SENDER_RE.match(self.name)
+        return match.group("user") if match else None
+
 
 @dataclass
 class Replacement:
@@ -148,6 +169,8 @@ class DeadLinkCase:
     # Suggested and newfound videos: True plays / False gone / None unknown
     plays: dict = field(default_factory=dict)
     our_video_id: str | None = None
+    checked_at: str | None = None  # when the above was filled; None = not checked
+    auto_note: str | None = None  # why the automatic pass left it to the owner
 
     @property
     def key(self) -> str:
@@ -186,19 +209,30 @@ def inbox_available() -> bool:
     return os.path.ismount(INBOX_DRIVE_MOUNT)
 
 
-def new_request_paths() -> list[Path]:
-    """Request files waiting in new/, oldest name first; [] when T7 isn't there."""
-    new_dir = INBOX_DIR / NEW
-    if not inbox_available() or not new_dir.is_dir():
+def _request_paths(folder: str) -> list[Path]:
+    directory = INBOX_DIR / folder
+    if not inbox_available() or not directory.is_dir():
         return []
     # Dot files are uploads still being written by the server
-    return sorted(p for p in new_dir.iterdir()
+    return sorted(p for p in directory.iterdir()
                   if p.is_file() and p.suffix == ".db" and not p.name.startswith("."))
 
 
+def new_request_paths() -> list[Path]:
+    """Request files nobody has looked at yet (new/), oldest name first; []
+    when T7 isn't there."""
+    return _request_paths(NEW)
+
+
+def review_request_paths() -> list[Path]:
+    """Request files the automatic pass left to the owner (review/)."""
+    return _request_paths(REVIEW)
+
+
 def count_new_requests() -> int:
+    """Request files not settled yet: new/ and review/."""
     try:
-        return len(new_request_paths())
+        return len(new_request_paths()) + len(review_request_paths())
     except OSError:
         return 0
 
@@ -264,8 +298,14 @@ def read_new_requests() -> list[RequestFile]:
     return [read_request_file(path) for path in new_request_paths()]
 
 
+def read_review_requests() -> list[RequestFile]:
+    return [read_request_file(path) for path in review_request_paths()]
+
+
 def _move(path: Path, folder: str) -> Path:
     target_dir = INBOX_DIR / folder
+    if path.parent == target_dir:
+        return path
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / path.name
     n = 1
@@ -283,20 +323,89 @@ def reject_request_file(request: RequestFile) -> Path:
 
 # ==================== decisions ====================
 
-def load_decisions() -> dict:
+def _load_json(name: str, default):
     try:
-        return json.loads((INBOX_DIR / DECISIONS_FILE).read_text())
+        value = json.loads((INBOX_DIR / name).read_text())
     except (OSError, ValueError):
-        return {}
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+def _save_json(name: str, value) -> None:
+    path = INBOX_DIR / name
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False))
+    os.replace(tmp, path)
+
+
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def load_decisions() -> dict:
+    return _load_json(DECISIONS_FILE, {})
 
 
 def save_decision(key: str, entry: dict) -> None:
     decisions = load_decisions()
     decisions[key] = entry
-    path = INBOX_DIR / DECISIONS_FILE
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(decisions, indent=2, ensure_ascii=False))
-    os.replace(tmp, path)
+    _save_json(DECISIONS_FILE, decisions)
+
+
+# ==================== the automatic pass's notes ====================
+
+def save_case_checks(cases: list) -> None:
+    """Remember each case's YouTube check (dead links) and auto_note, for
+    the review. `cases`: dead link and field correction cases."""
+    checks = _load_json(CHECKS_FILE, {})
+    for case in cases:
+        entry = {"note": getattr(case, "auto_note", None)}
+        if isinstance(case, DeadLinkCase) and case.checked_at:
+            entry.update(checked_at=case.checked_at, our_video_id=case.our_video_id,
+                         plays=case.plays, dead_still_plays=case.dead_still_plays)
+        checks[case.key] = entry
+    _save_json(CHECKS_FILE, checks)
+
+
+def load_case_checks(cases: list, max_age_hours: float) -> None:
+    """Fill auto_note, and a dead link case's check while it's younger than
+    `max_age_hours` (an older one is left unchecked, to be checked again)."""
+    checks = _load_json(CHECKS_FILE, {})
+    for case in cases:
+        entry = checks.get(case.key)
+        if not isinstance(entry, dict):
+            continue
+        case.auto_note = entry.get("note")
+        if not isinstance(case, DeadLinkCase) or not entry.get("checked_at"):
+            continue
+        checked = parse_time(entry["checked_at"])
+        if checked is None or (datetime.now().astimezone() - checked).total_seconds() > max_age_hours * 3600:
+            continue
+        case.checked_at = entry["checked_at"]
+        case.our_video_id = entry.get("our_video_id")
+        case.plays = entry.get("plays") or {}
+        case.dead_still_plays = entry.get("dead_still_plays")
+
+
+def add_auto_report(entries: list[dict], shown: bool = False) -> None:
+    """Append what the automatic pass changed (each {"text", ...});
+    `shown` = the owner has seen it already (the pass ran in the app)."""
+    if not entries:
+        return
+    report = _load_json(REPORT_FILE, [])
+    report += [{**entry, "shown": shown} for entry in entries]
+    _save_json(REPORT_FILE, report)
+
+
+def auto_report(unshown_only: bool = False) -> list[dict]:
+    return [e for e in _load_json(REPORT_FILE, [])
+            if isinstance(e, dict) and not (unshown_only and e.get("shown"))]
+
+
+def mark_auto_report_shown() -> None:
+    report = _load_json(REPORT_FILE, [])
+    if any(isinstance(e, dict) and not e.get("shown") for e in report):
+        _save_json(REPORT_FILE, [{**e, "shown": True} if isinstance(e, dict) else e for e in report])
 
 
 def parse_time(value: str | None) -> datetime | None:
@@ -371,7 +480,8 @@ def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
     3. yt-dlp only for suggested/newfound ids the API didn't rule out, once
        per id - the API lists some videos YouTube won't play.
     The dead link itself isn't played again; only the API's answer is kept.
-    `on_case(i, case)` is called before each search, for progress.
+    `on_case(i, case)` is called before each search, for progress. Fills
+    checked_at, so save_case_checks() can keep it for the review.
     Returns counts for the screen: {"api": bool, "blocked": n}."""
     from utils.youtube.manage_youtube_playlists import (
         search_video_ytdlp, video_playability, videos_exist_via_api,
@@ -413,12 +523,15 @@ def check_dead_link_cases(cases: list[DeadLinkCase], on_case=None) -> dict:
                         answer = True if api is not None and api.get(video_id) else None
                     known[video_id] = answer
             case.plays[video_id] = known[video_id]
+        case.checked_at = now_iso()
     return {"api": api is not None, "blocked": blocked}
 
 
-def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None) -> None:
-    """Change the song's link as the user decided and record the answer.
-    The caller commits the music session."""
+def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None,
+                             by: str | None = None) -> None:
+    """Change the song's link as the user decided and record the answer
+    (`by` = "auto" for the automatic pass). The caller commits the music
+    session."""
     if decision == USE_VIDEO:
         if not video_id:
             raise ValueError("USE_VIDEO needs a video id")
@@ -430,17 +543,20 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
     save_decision(case.key, {
         "decision": decision,
         "video_id": video_id,
-        "decided_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
+        **({"by": by} if by else {}),
     })
     case.status = DECIDED
     mlog(f"Inbox request: song {case.song_id} dead link {case.dead_video_id} -> {decision} {video_id or ''}")
 
 
-def finish_request_files(requests: list[RequestFile], cases: list) -> tuple[list, list]:
-    """Move every file with nothing left to answer to processed/. `cases`:
-    every case of every type (anything with `.reports` and `.pending`).
-    Returns (moved, kept in new/) as RequestFiles."""
+def finish_request_files(requests: list[RequestFile], cases: list,
+                         left_to: str | None = None) -> tuple[list, list]:
+    """Move every file with nothing left to answer to processed/, the rest
+    to `left_to` (REVIEW for the automatic pass) or nowhere. `cases`: every
+    case of every type (anything with `.reports` and `.pending`).
+    Returns (moved, left) as RequestFiles."""
     open_reports = {id(report) for case in cases if case.pending for report in case.reports}
     moved, left = [], []
     for request in requests:
@@ -453,5 +569,7 @@ def finish_request_files(requests: list[RequestFile], cases: list) -> tuple[list
             _move(request.path, PROCESSED)
             moved.append(request)
         else:
+            if left_to:
+                request.path = _move(request.path, left_to)
             left.append(request)
     return moved, left

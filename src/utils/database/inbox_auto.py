@@ -1,0 +1,188 @@
+"""
+The automatic pass over new requests from the phone: settles on its own what
+it safely can, and leaves the rest to the owner's review (Manage database ->
+"Resolve new requests", utils/ui/inbox_request_review.py). Run every
+INBOX_AUTO_INTERVAL by a systemd user timer (auto_resolve_requests.py at the
+repo root) while the app isn't open, and by the review itself before asking
+anything. Nothing here asks anything (ADR-0001).
+
+What it does with the files in new/:
+- an unreadable file goes to rejected/;
+- what needs no answer is settled as in the review (song gone, link already
+  changed, value already there, ...);
+- a dead YouTube link is replaced when the phone's suggestion and our own
+  search found the same video and it plays here (check_dead_link_cases());
+- a field correction is saved when its newest report was sent by a logged-in
+  user with the PERMISSION_APPLY_CORRECTIONS permission and nothing about it
+  needs a judgement: the value is storable, the database still holds what
+  the phone had, no other report asked for another value, the song still
+  has that title / artist / album, and saving would merge nothing (another
+  artist of that name, an album twin) nor leave the choice of renaming a
+  whole album;
+- every case left over gets an auto_note (why), and its dead link check is
+  kept in auto_checks.json, so the review shows both without searching
+  YouTube again;
+- a file with nothing left goes to processed/, the rest to review/.
+What it changed goes to auto_report.json; main.py shows the new entries at
+the next start.
+"""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from settings import Settings
+from utils.common.debug import mlog
+from utils.database.account_auth import PERMISSION_APPLY_CORRECTIONS, user_permissions
+from utils.database.inbox_field_corrections import (
+    ACCEPT,
+    OPEN as FIELD_OPEN,
+    album_title_twin,
+    apply_field_correction,
+    artist_twins,
+    collect_field_correction_cases,
+    song_album_to_rename,
+)
+from utils.database.inbox_requests import (
+    OPEN,
+    REVIEW,
+    USE_VIDEO,
+    RequestFile,
+    add_auto_report,
+    apply_dead_link_decision,
+    check_dead_link_cases,
+    collect_dead_link_cases,
+    finish_request_files,
+    now_iso,
+    reject_request_file,
+    save_case_checks,
+)
+from utils.database.song_artists import song_artist_label
+
+AUTO = "auto"
+
+
+@dataclass
+class AutoResult:
+    rejected: list = field(default_factory=list)  # RequestFiles
+    changes: list = field(default_factory=list)  # auto_report entries
+    to_review: int = 0  # cases left to the owner
+    moved: list = field(default_factory=list)  # files done (processed/)
+    left: list = field(default_factory=list)  # files in review/
+    check_stats: dict = field(default_factory=dict)  # check_dead_link_cases()'s
+
+
+def _song_label(song, report) -> str:
+    if song is not None:
+        return f"{song_artist_label(song)} - {song.title}"
+    return f"{report.artist} - {report.title}"
+
+
+def _shown(value) -> str:
+    return "empty" if value is None or value == "" else f'"{value}"' if isinstance(value, str) else str(value)
+
+
+def dead_link_verdict(case) -> tuple[str | None, str | None]:
+    """(video id to put in, None) when the pass may replace the link, else
+    (None, why not)."""
+    if not case.checked_at:
+        return None, "not checked on YouTube"
+    suggested = [r.video_id for r in case.replacements]
+    if not suggested:
+        return None, ("Leina Radio suggested no video" if not case.our_video_id
+                      else "Leina Radio suggested no video, only our search found one")
+    if not case.our_video_id:
+        return None, "our search found nothing to compare Leina Radio's suggestion with"
+    if case.our_video_id not in suggested:
+        return None, "Leina Radio's suggestion and our search found different videos"
+    plays = case.plays.get(case.our_video_id)
+    if plays is not True:
+        return None, ("the video doesn't play here" if plays is False
+                      else "couldn't check whether the video plays (YouTube blocked it)")
+    return case.our_video_id, None
+
+
+def field_correction_verdict(session, case, sender: str | None, permitted: bool) -> str | None:
+    """None when the pass may save the correction, else why not."""
+    if sender is None:
+        return "sent without logging in"
+    if not permitted:
+        return f"{sender} has no permission to save corrections without review"
+    if case.error:
+        return f"the value can't be stored: {case.error}"
+    if case.changed_since:
+        return "the database's value changed since Leina Radio's copy"
+    if case.earlier_values:
+        return "other reports asked for other values"
+    if case.song is None:
+        return "the song it was corrected from is gone"
+    if case.title_differs:
+        return "the song has another title now"
+    if case.not_on_song:
+        return "that artist / album isn't the song's any more"
+    if artist_twins(session, case, case.new_value):
+        return "another artist already has that name (a merge?)"
+    if album_title_twin(session, case, case.new_value) is not None:
+        return "the artist already has an album of that title (saving merges the two)"
+    if song_album_to_rename(case) is not None:
+        return "its whole album could be renamed instead"
+    return None
+
+
+def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool = False) -> AutoResult:
+    """The automatic pass over `requests` (read from new/). Commits
+    `session` (music.db) after each change and adds the changes to
+    auto_report.json (`shown` = the owner is watching, the app ran it).
+    `on_case(i, n, case)` is called before each YouTube search, for progress."""
+    result = AutoResult()
+    for request in [r for r in requests if r.error]:
+        reject_request_file(request)
+        result.rejected.append(request)
+    requests = [r for r in requests if not r.error]
+    senders = {r.name: r.sender for r in requests}
+
+    dead_cases = collect_dead_link_cases(session, requests)
+    open_dead = [c for c in dead_cases if c.status == OPEN]
+    if open_dead:
+        result.check_stats = check_dead_link_cases(
+            open_dead, on_case=(lambda i, case: on_case(i, len(open_dead), case)) if on_case else None)
+    for case in open_dead:
+        video_id, case.auto_note = dead_link_verdict(case)
+        if video_id is None:
+            continue
+        apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO)
+        session.commit()
+        result.changes.append({
+            "at": now_iso(), "kind": "dead_link", "song_id": case.song_id,
+            "text": f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id} "
+                    "(Leina Radio's suggestion; our search found the same video)",
+            "files": sorted({r.file_name for r in case.reports}),
+        })
+
+    field_cases = collect_field_correction_cases(session, requests)
+    permitted = {}
+    for case in [c for c in field_cases if c.status == FIELD_OPEN]:
+        sender = senders.get(case.latest.file_name)
+        if sender is not None and sender not in permitted:
+            permitted[sender] = PERMISSION_APPLY_CORRECTIONS in user_permissions(Path(str(Settings.users_dir)), sender)
+        case.auto_note = field_correction_verdict(session, case, sender, permitted.get(sender, False))
+        if case.auto_note is not None:
+            continue
+        old = case.current
+        apply_field_correction(session, case, ACCEPT, by=AUTO)
+        session.commit()
+        result.changes.append({
+            "at": now_iso(), "kind": "field_correction", "song_id": case.song.id if case.song else None,
+            "text": f"{_song_label(case.song, case.latest)}: {case.label} {_shown(old)} -> "
+                    f"{_shown(case.current)} (corrected by {sender})",
+            "files": sorted({r.file_name for r in case.reports}),
+        })
+
+    cases = dead_cases + field_cases
+    left_cases = [c for c in cases if c.pending]
+    result.to_review = len(left_cases)
+    save_case_checks(left_cases)
+    result.moved, result.left = finish_request_files(requests, cases, left_to=REVIEW)
+    add_auto_report(result.changes, shown=shown)
+    for change in result.changes:
+        mlog(f"Inbox auto: {change['text']}")
+    return result

@@ -171,14 +171,40 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   200 the same file is already in `new/` or `processed/` (a resend), 409 another file under that
   name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
   (1 MiB), 507 inbox full, 503 T7 not mounted (nothing is created then).
-- **Inbox limit:** while the files in `new/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB, the owner's
-  choice) nothing more is taken; the phone keeps the request and retries later. Processing moves
-  files out of `new/`, which frees the room; `processed/` doesn't count.
+- **Inbox limit:** while the files in `new/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
+  the owner's choice) nothing more is taken; the phone keeps the request and retries later. Settling
+  a file moves it to `processed/`, which frees the room; `processed/` doesn't count. A resend of a
+  file in any of the three folders is a 200.
 - Anyone on the home network can send a request, the same trust as downloading. That's why the
   name, size and header checks are there, and why a request only ever reaches the database through
-  the review below.
+  the review below, or through the automatic pass in the narrow cases it may settle.
+- **Automatic pass (2026-10-14)** — `utils/database/inbox_auto.py`, run every `INBOX_AUTO_INTERVAL`
+  (15 min) by the `musicdatabase-inbox` systemd user timer (`auto_resolve_requests.py` at the repo
+  root, the venv's python with `venv/bin` on PATH for yt-dlp/deno; installed with the sharing
+  service by `install_sharing_service()`), and by "Resolve new requests" itself before asking.
+  It takes the files in `new/`: settles what needs no answer, replaces a dead link only when the
+  phone's suggestion and our own search found the same video and it plays here, and saves a field
+  correction only when the newest report came from a logged-in user with the `apply_corrections`
+  permission (Users → Permissions; the file name's user part, which the server verified) and
+  nothing needs a judgement (`field_correction_verdict()`: storable, unchanged since the phone's
+  copy, no other value asked for, the song still has that title / artist / album, no artist or
+  album twin, no "rename the whole album" alternative). Everything else gets a note (why) in
+  `Inbox/auto_checks.json`, together with its YouTube check, and its file goes to `Inbox/review/`;
+  the review shows the note and reuses the check for `INBOX_CHECK_MAX_AGE_HOURS` (24 h). What it
+  changed is in `Inbox/auto_report.json`; `main.py` prints the entries not shown yet at startup, and
+  the review screen lists them all. `decisions.json` entries it wrote carry `"by": "auto"`.
+  The `apply_corrections` permission is a user's (account.json), not a device's; for the app:
+  [`docs/handoffs/automatic-requests-for-musicdatabaseapp.md`](../handoffs/automatic-requests-for-musicdatabaseapp.md).
+- **The pass never runs while the app is open:** both write music.db, and the open app's ORM
+  objects would go stale (`utils/database/app_lock.py`: `main.py` holds an `flock` on
+  `<database_dir>/.musicdatabase.lock` shared for its whole run, the pass needs it exclusive and
+  skips the run otherwise; an app started during a run waits for it). It also skips while T7 isn't
+  mounted or music.db has a pending migration (`migrations.has_pending_migrations()`), and copies
+  the databases for the phones after any change. Log: `journalctl --user -u musicdatabase-inbox`.
 - Manage database → "Resolve new requests (N)" (`utils/ui/inbox_request_review.py`, logic in
-  `utils/database/inbox_requests.py`; `main.py` prints a line at startup when some are waiting).
+  `utils/database/inbox_requests.py`; `main.py` prints a line at startup when some are waiting; N
+  counts `new/` + `review/`). It shows how many files are new (unchecked) and how many wait for
+  review, then runs the automatic pass over `new/` and asks about everything in `review/`.
   For `dead_youtube_links`: follows `song_id` through `song_id_changes`, settles without asking a
   report whose song is gone or whose link already changed (another id or "N/A"), groups repeats of
   one (song, dead video), checks with yt-dlp whether the dead link and the phone's video play and
@@ -206,7 +232,7 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   artist's name offers merging into it (`merge_artists_in_db()`). A value that can't be stored
   (not a number, an unknown album type, an empty title) can only be edited. Applied through the
   ORM, so the album listener does what it does after any edit.
-- A file moves to `Inbox/processed/` once every row is settled. It stays in `new/` while a row is
+- A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
 
@@ -324,7 +350,7 @@ permission is the trust — but everything is recorded (`utils/database/global_m
 - **Delay:** other phones get the change with the next copy of `tag.db` — the daily one at
   MusicDatabase's startup, or Settings → Server → "Submit database for sharing". The phone that made
   it keeps it locally until its downloaded `tag.db` has it.
-- **Seeing and undoing:** Users → Moods → "Changes from the phones" lists who added or removed which
+- **Seeing and undoing:** Users → Moods → "Changes from Leina Radio" lists who added or removed which
   song in which mood, newest first (100 shown; the whole log is `history.jsonl`). Undo by hand in
   "Global moods" → the mood → "Add a song" / "Remove songs". `MoodChanges/` isn't backed up; tag.db is.
 

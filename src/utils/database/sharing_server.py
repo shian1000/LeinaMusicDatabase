@@ -32,11 +32,12 @@ with every path passed on the command line.
   error and simply retries the next day.
 - Uploads (anyone on the home network can send one, like anyone can
   download): only file names of the request format, only SQLite files, at
-  most --max-request-bytes each, and nothing once <inbox>/new/ holds
-  --inbox-limit-bytes - processing a request moves it out of new/ and frees
-  the space. Never overwrites: the same file sent again is a 200, another
-  file under a taken name a 409. Answers:
-  201 stored, 200 already here (new/ or processed/), 400 bad name or not
+  most --max-request-bytes each, and nothing once <inbox>/new/ and review/
+  (left to the owner by the app's automatic pass) hold --inbox-limit-bytes -
+  settling a request moves it to processed/ and frees the space. Never
+  overwrites: the same file sent again is a 200, another file under a taken
+  name a 409. Answers:
+  201 stored, 200 already here (new/, review/ or processed/), 400 bad name or not
   SQLite, 409 name taken, 411 no Content-Length, 413 too big, 507 inbox
   full, 503 drive not mounted.
 - Logging in (only with --users; password and token checks in
@@ -124,6 +125,7 @@ REQUEST_NAME_RE = re.compile(
 SQLITE_HEADER = b"SQLite format 3\x00"
 INBOX_PREFIX = "/inbox/"
 INBOX_NEW = "new"
+INBOX_REVIEW = "review"
 INBOX_PROCESSED = "processed"
 DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024
 DEFAULT_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
@@ -192,6 +194,8 @@ class LoginLimiter:
 
 def _dir_size(path: str) -> int:
     total = 0
+    if not os.path.isdir(path):
+        return 0
     with os.scandir(path) as entries:
         for entry in entries:
             if entry.is_file(follow_symlinks=False):
@@ -830,7 +834,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 try:
                     os.makedirs(new_dir, exist_ok=True)
                     # Sent again (e.g. the answer to the first try got lost)
-                    for folder in (INBOX_NEW, INBOX_PROCESSED):
+                    for folder in (INBOX_NEW, INBOX_REVIEW, INBOX_PROCESSED):
                         existing = os.path.join(inbox_dir, folder, name)
                         if os.path.exists(existing):
                             if _same_content(existing, data):
@@ -838,7 +842,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                             else:
                                 self._reply(HTTPStatus.CONFLICT, "another request has this name")
                             return
-                    if _dir_size(new_dir) + len(data) > inbox_limit_bytes:
+                    waiting = _dir_size(new_dir) + _dir_size(os.path.join(inbox_dir, INBOX_REVIEW))
+                    if waiting + len(data) > inbox_limit_bytes:
                         self._reply(HTTPStatus.INSUFFICIENT_STORAGE, "inbox full")
                         return
                     part = os.path.join(new_dir, f"{_PART_PREFIX}{name}{_PART_SUFFIX}")
@@ -956,7 +961,7 @@ def main(argv=None) -> int:
     parser.add_argument("--mount", required=True, help="mount point of the drive holding --dir")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--lan-interface", help="also serve on this interface's private IPv4 address")
-    parser.add_argument("--inbox", help="accept requests from the phone into this folder (on --mount)")
+    parser.add_argument("--inbox", help="accept requests from Leina Radio into this folder (on --mount)")
     parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--inbox-limit-bytes", type=int, default=DEFAULT_INBOX_LIMIT_BYTES)
     parser.add_argument("--users", help="log in as the users in this folder (on --mount) and sync their playlists")

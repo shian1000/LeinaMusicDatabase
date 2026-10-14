@@ -193,6 +193,23 @@ def run_pending_user_migrations() -> dict:
     return executed
 
 
+def has_pending_migrations(db_name: str) -> bool:
+    """Whether the app's next start would migrate this database - for code
+    that runs without main.py (auto_resolve_requests.py) and mustn't touch
+    a schema older than the models. Read-only."""
+    db_path = DB_FILES[db_name]
+    files = _migration_files(db_name)
+    if not db_path.exists() or not files:
+        return False
+    conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone():
+            return True
+        return any(f.name not in _applied_filenames(conn) for f in files)
+    finally:
+        conn.close()
+
+
 def run_all_pending_migrations() -> dict:
     """Runs every DB's pending migrations - music.db, tag.db, files.db and each
     user's user.db (under "users": {username: [files]}). Called once at app

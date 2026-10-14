@@ -2,7 +2,8 @@
 Copy music.db, tag.db and files.db (the music library index) into the
 sharing folder (Settings.sharing_dir) that the MusicDatabaseApp mobile
 client downloads from, plus installing the systemd user service that serves
-that folder over Tailscale (sharing_server.py).
+that folder over Tailscale (sharing_server.py) and the timer that runs the
+automatic pass over the phone's requests (auto_resolve_requests.py).
 
 Contract the app relies on (see docs/runbooks/database.md -> "Sharing with
 the mobile app"):
@@ -25,6 +26,9 @@ import sys
 from pathlib import Path
 
 from config.constants import (
+    INBOX_AUTO_INTERVAL,
+    INBOX_AUTO_SERVICE_NAME,
+    INBOX_AUTO_STARTUP_DELAY,
     PHONE_INBOX_LIMIT_BYTES,
     PHONE_REQUEST_MAX_BYTES,
     SHARING_HTTP_PORT,
@@ -42,6 +46,8 @@ PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir))
 USERS_DIR = Path(str(Settings.users_dir))
 GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir))
 SERVER_SCRIPT = Path(__file__).with_name("sharing_server.py")
+REPO_ROOT = Path(__file__).resolve().parents[3]
+INBOX_AUTO_SCRIPT = REPO_ROOT / "auto_resolve_requests.py"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
 # Must never be named music.db / tag.db - the server would serve a half-written file.
@@ -150,6 +156,35 @@ WantedBy=timers.target
 """
 
 
+def _inbox_service_unit(python: str) -> str:
+    # The venv's bin first: the YouTube checks run its yt-dlp (and deno)
+    path = f"{Path(python).parent}:/usr/local/bin:/usr/bin:/bin"
+    return f"""[Unit]
+Description=MusicDatabase - settle new requests from the phone on its own where it safely can
+
+[Service]
+Type=oneshot
+WorkingDirectory={REPO_ROOT}
+Environment=PATH={path}
+ExecStart={python} {INBOX_AUTO_SCRIPT}
+Nice=10
+"""
+
+
+def _inbox_timer_unit() -> str:
+    return f"""[Unit]
+Description=Run the MusicDatabase automatic request check every {INBOX_AUTO_INTERVAL}
+
+[Timer]
+OnStartupSec={INBOX_AUTO_STARTUP_DELAY}
+OnUnitActiveSec={INBOX_AUTO_INTERVAL}
+Unit={INBOX_AUTO_SERVICE_NAME}.service
+
+[Install]
+WantedBy=timers.target
+"""
+
+
 def _systemctl(*args: str) -> None:
     subprocess.run(["systemctl", "--user", *args], check=True, capture_output=True, text=True)
 
@@ -169,19 +204,28 @@ def install_sharing_service() -> list[str]:
     timer_path = SYSTEMD_USER_DIR / f"{SHARING_SERVICE_NAME}.timer"
     service_path.write_text(_service_unit(python))
     timer_path.write_text(_timer_unit())
-    steps = [f"Wrote {service_path}", f"Wrote {timer_path}"]
+    # The automatic pass needs the app's packages: the venv's interpreter
+    inbox_service_path = SYSTEMD_USER_DIR / f"{INBOX_AUTO_SERVICE_NAME}.service"
+    inbox_timer_path = SYSTEMD_USER_DIR / f"{INBOX_AUTO_SERVICE_NAME}.timer"
+    inbox_service_path.write_text(_inbox_service_unit(sys.executable))
+    inbox_timer_path.write_text(_inbox_timer_unit())
+    steps = [f"Wrote {path}" for path in (service_path, timer_path, inbox_service_path, inbox_timer_path)]
 
     _systemctl("daemon-reload")
     _systemctl("enable", f"{SHARING_SERVICE_NAME}.timer")
     steps.append(f"Enabled {SHARING_SERVICE_NAME}.timer (starts the server {SHARING_STARTUP_DELAY} after login)")
     _systemctl("restart", f"{SHARING_SERVICE_NAME}.service")
     steps.append(f"Started {SHARING_SERVICE_NAME}.service now")
+    _systemctl("enable", "--now", f"{INBOX_AUTO_SERVICE_NAME}.timer")
+    steps.append(f"Enabled {INBOX_AUTO_SERVICE_NAME}.timer (checks new requests every {INBOX_AUTO_INTERVAL})")
     return steps
 
 
 def sharing_service_disable_hint() -> str:
+    units = [f"{name}.{kind}" for name in (SHARING_SERVICE_NAME, INBOX_AUTO_SERVICE_NAME)
+             for kind in ("timer", "service")]
     return (
-        f"systemctl --user disable --now {SHARING_SERVICE_NAME}.timer {SHARING_SERVICE_NAME}.service\n"
-        f"rm {SYSTEMD_USER_DIR}/{SHARING_SERVICE_NAME}.service {SYSTEMD_USER_DIR}/{SHARING_SERVICE_NAME}.timer\n"
+        f"systemctl --user disable --now {' '.join(units)}\n"
+        f"rm {' '.join(f'{SYSTEMD_USER_DIR}/{unit}' for unit in units)}\n"
         f"systemctl --user daemon-reload"
     )

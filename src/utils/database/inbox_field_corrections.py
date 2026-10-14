@@ -150,6 +150,7 @@ class FieldCorrectionCase:
     row: object = None  # the Song / Artist / Album
     song: Song | None = None  # where the newest report was made from, after merges
     status: str = OPEN
+    auto_note: str | None = None  # why the automatic pass left it to the owner
 
     @property
     def latest(self) -> FieldCorrection:
@@ -303,18 +304,20 @@ def song_album_to_rename(case: FieldCorrectionCase) -> Album | None:
 
 # ==================== answers ====================
 
-def apply_field_correction(session, case: FieldCorrectionCase, decision: str, value=None) -> None:
+def apply_field_correction(session, case: FieldCorrectionCase, decision: str, value=None,
+                           by: str | None = None) -> None:
     """Store the answer: ACCEPT the phone's value, EDIT = `value` instead
     (already coerce_field_value()d), RENAME_ALBUM = a songs.album value
     (`value`, or the phone's) given to the song's whole album, REJECT = keep
     the database's, MERGE_ARTIST = an artists.name correction that names
     another artist (`value` = that Artist, from artist_twins()): this one is
-    merged into it, the usual artist merge. The caller commits the music
+    merged into it, the usual artist merge. `by` = "auto" for the automatic
+    pass. The caller commits the music
     session (for MERGE_ARTIST it must be the global one, which the merge
     uses)."""
     if decision == ACCEPT:
         if case.error:
-            raise ValueError(f"The phone's value can't be stored: {case.error}")
+            raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
         value = case.new_value
     elif decision in (EDIT, RENAME_ALBUM):
         if decision == RENAME_ALBUM and value is None:
@@ -350,6 +353,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         "value": value if decision != REJECT else case.new_value,
         "decided_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "files": sorted({r.file_name for r in case.reports}),
+        **({"by": by} if by else {}),
     })
     case.status = DECIDED
     mlog(f"Inbox request: {case.table_name} {case.row_id} {case.column_name}: {old!r} -> {decision} {value!r}")

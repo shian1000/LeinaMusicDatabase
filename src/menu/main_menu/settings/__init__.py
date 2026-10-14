@@ -136,7 +136,7 @@ def submit_database_for_sharing():
     # Phones' changes to global moods go into tag.db first, so this copy has them
     applied = apply_global_mood_changes_quietly()
     if applied:
-        print(f"Applied {len(applied)} change(s) to global moods from the phones.")
+        print(f"Applied {len(applied)} change(s) to global moods from Leina Radio.")
     try:
         published = share_databases()
     except SharingUnavailableError as exc:
@@ -173,10 +173,10 @@ def setup_database_sharing():
     for step in steps:
         print(f"  {step}")
     address = tailscale_ipv4() or "<this PC's Tailscale IP>"
-    print(f"\nRemote address for the phone app: http://{address}:{SHARING_HTTP_PORT}/")
+    print(f"\nRemote address for Leina Radio: http://{address}:{SHARING_HTTP_PORT}/")
     if settings.sharing_lan_interface:
         lan_address = interface_ipv4(settings.sharing_lan_interface) or f"<{settings.sharing_lan_interface} address>"
-        print(f"Local network address for the phone app: http://{lan_address}:{SHARING_HTTP_PORT}/")
+        print(f"Local network address for Leina Radio: http://{lan_address}:{SHARING_HTTP_PORT}/")
     print("To turn it off:")
     print(sharing_service_disable_hint())
 

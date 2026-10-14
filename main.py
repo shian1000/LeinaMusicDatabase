@@ -11,12 +11,17 @@ from utils.database.albums import ALBUM_ID_MIGRATION, run_album_backfill
 from utils.database.sharing import share_databases_quietly
 from utils.database.files_index import scan_library_quietly
 from utils.database.song_references import apply_song_id_changes
-from utils.database.inbox_requests import count_new_requests
+from utils.database.app_lock import hold_app_lock
+from utils.database.inbox_requests import auto_report, count_new_requests, mark_auto_report_shown
+from utils.ui.inbox_request_review import show_auto_changes
 from utils.database.moods import apply_global_mood_changes_quietly
 from utils.ui.ytdlp_update_prompt import offer_ytdlp_update
 from utils.common.debug import slog
 
 def main():
+    # The background request check (auto_resolve_requests.py) never writes
+    # while the app is open; one that's running now finishes first
+    hold_app_lock(on_wait=lambda: print("Waiting for the automatic request check to finish..."))
     daily = bool(backup_if_needed_today())
     applied = run_all_pending_migrations()
     # songs.album_id just arrived: link the songs already in the database
@@ -32,8 +37,8 @@ def main():
     # on their phones - before the copy below, so the other phones get them
     mood_changes = apply_global_mood_changes_quietly()
     if mood_changes:
-        print(f"Applied {len(mood_changes)} change(s) to global moods from the phones - "
-              "Users -> Moods -> Changes from the phones")
+        print(f"Applied {len(mood_changes)} change(s) to global moods from Leina Radio - "
+              "Users -> Moods -> Changes from Leina Radio")
     # Once a day, after the backup: refresh the music library index, then
     # the copies the mobile app downloads (files.db included)
     if daily:
@@ -45,6 +50,15 @@ def main():
             offer_ytdlp_update()
         except Exception as exc:
             slog(f"yt-dlp update check failed (non-fatal): {exc}", priority=3)
+    # What the background request check changed since the last start
+    try:
+        changes = auto_report(unshown_only=True)
+        if changes:
+            print(f"Changed automatically from Leina Radio's requests ({len(changes)}):")
+            show_auto_changes(changes)
+            mark_auto_report_shown()
+    except OSError as exc:
+        slog(f"Reading the automatic request check's report failed (non-fatal): {exc}", priority=3)
     waiting = count_new_requests()
     if waiting:
         print(f"{waiting} new request(s) in the inbox - Enter database -> Manage database -> Resolve new requests")

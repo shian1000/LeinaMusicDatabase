@@ -301,6 +301,20 @@ def test_upload_already_processed_is_ok(inbox_server, tmp_path):
     assert not (inbox / "new" / REQUEST_NAME).exists()
 
 
+def test_upload_waiting_for_review_is_ok_and_review_counts_towards_the_limit(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    first, second = _sqlite_bytes(tmp_path, 1), _sqlite_bytes(tmp_path, 2)
+    base = start(inbox_limit_bytes=len(first) + len(second) - 1)
+    (inbox / "review").mkdir(parents=True)
+    (inbox / "review" / REQUEST_NAME).write_bytes(first)
+
+    # The automatic pass left it for the owner: a resend is still "already here"
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", first)[0] == 200
+    # ...and it still takes room until it's settled
+    assert _put(f"{base}/inbox/2026-10-12_23-45-00_002.db", second)[0] == 507
+    assert not (inbox / "new").exists() or not any((inbox / "new").iterdir())
+
+
 @pytest.mark.parametrize("name", [
     "music.db", "2026-10-12_23-44-05_01.db", "../2026-10-12_23-44-05_001.db", "Ola_2026-10-12_23-44-05_001.db",
     "a_2026-10-12_23-44-05_001.db", "_ola_2026-10-12_23-44-05_001.db",
@@ -712,8 +726,9 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     second = sorted((p.name, p.read_text()) for p in sharing.SYSTEMD_USER_DIR.iterdir())
 
     assert first == second
-    assert [name for name, _ in second] == ["musicdatabase-share.service", "musicdatabase-share.timer"]
-    service, timer = (text for _, text in second)
+    assert [name for name, _ in second] == ["musicdatabase-inbox.service", "musicdatabase-inbox.timer",
+                                           "musicdatabase-share.service", "musicdatabase-share.timer"]
+    inbox_service, inbox_timer, service, timer = (text for _, text in second)
     assert f"--port {sharing.SHARING_HTTP_PORT}" in service
     assert f"--dir {sharing.SHARING_DIR}" in service
     assert f"--inbox {sharing.PHONE_INBOX_DIR}" in service
@@ -725,8 +740,14 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert "Restart=always" in service
     assert "OnStartupSec=1min" in timer
     assert "WantedBy=timers.target" in timer
+    # The automatic request check: the venv's python (and yt-dlp on PATH), every 15 minutes
+    assert f"ExecStart={sys.executable} {sharing.INBOX_AUTO_SCRIPT}" in inbox_service
+    assert f"Environment=PATH={Path(sys.executable).parent}:" in inbox_service
+    assert "Type=oneshot" in inbox_service
+    assert "OnUnitActiveSec=15min" in inbox_timer and "WantedBy=timers.target" in inbox_timer
     assert calls == [
         ("daemon-reload",), ("enable", "musicdatabase-share.timer"), ("restart", "musicdatabase-share.service"),
+        ("enable", "--now", "musicdatabase-inbox.timer"),
     ] * 2
 
 

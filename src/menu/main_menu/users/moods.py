@@ -97,10 +97,10 @@ def _apply_phone_changes(tag_session) -> None:
         applied = apply_global_mood_changes(tag_session)
     except Exception as exc:
         slog(f"Applying global mood changes failed: {exc}", priority=3)
-        _error(f"Couldn't apply the phones' changes to global moods: {exc}")
+        _error(f"Couldn't apply Leina Radio's changes to global moods: {exc}")
         return
     if applied:
-        print(f"Applied {len(applied)} change(s) from the phones - see \"Changes from the phones\".")
+        print(f"Applied {len(applied)} change(s) from Leina Radio - see \"Changes from Leina Radio\".")
 
 
 # --------------------
@@ -146,7 +146,7 @@ def _rename(mood_id: int, name: str) -> str | None:
     except MoodError as exc:
         _error(exc)
         return None
-    print(f"Renamed to '{new_name.strip()}'. Phones see it after the next copy for sharing.")
+    print(f"Renamed to '{new_name.strip()}'. Leina Radio sees it after the next copy for sharing.")
     return _BACK
 
 
@@ -188,7 +188,7 @@ def _create() -> None:
     except MoodError as exc:
         _error(exc)
         return
-    print(f"Created '{name.strip()}'. Phones see it after the next copy for sharing.")
+    print(f"Created '{name.strip()}'. Leina Radio sees it after the next copy for sharing.")
 
 
 def global_moods() -> None:
@@ -226,7 +226,7 @@ def _promote(username: str, mood_id: int, name: str, count: int) -> str | None:
               "song(s) are merged into it.")
     else:
         print(f"This makes a new global mood '{name}' with {username}'s {count} song(s).")
-    print(f"The mood leaves {username}'s own moods; their phones switch to the global one at their next sync.")
+    print(f"The mood leaves {username}'s own moods; their Leina Radio switches to the global one at its next sync.")
     if not questionary.confirm("Promote it?", default=False).ask():
         return None
     try:
@@ -300,14 +300,14 @@ def show_phone_changes() -> None:
         print(f"{len(pending)} change(s) couldn't be applied yet and are still waiting.")
     history = global_mood_history()
     if not history:
-        print("No changes from the phones yet.")
+        print("No changes from Leina Radio yet.")
         return
     shown = history[:_HISTORY_SHOWN]
     ids = {r.get("song_id") for r in shown} | {r.get("requested_song_id") for r in shown}
     songs = {s.id: s for s in music_session.query(Song).filter(Song.id.in_([i for i in ids if i])).all()}
     moods = {mood_id: name for mood_id, name, _ in list_global_moods(tag_session)}
 
-    table = Table(title=f"Changes to global moods from the phones (newest first, {len(shown)} of {len(history)})")
+    table = Table(title=f"Changes to global moods from Leina Radio (newest first, {len(shown)} of {len(history)})")
     for column, style in (("Sent", None), ("Applied", None), ("User", "cyan"), ("Change", None),
                           ("Mood", "green"), ("Song", "magenta"), ("Result", None)):
         table.add_column(column, style=style)
@@ -326,7 +326,7 @@ def moods_menu() -> None:
     action_map = {
         "Global moods": global_moods,
         "Users' moods": users_moods,
-        "Changes from the phones": show_phone_changes,
+        "Changes from Leina Radio": show_phone_changes,
     }
     execute_menu_item("Moods", action_map, exit_label=_BACK)
 

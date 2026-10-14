@@ -51,8 +51,10 @@ When this file disagrees with the code, trust the code and fix this file.
 
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
+- The automatic pass over the phone's requests, by hand: `venv/bin/python auto_resolve_requests.py`
+  (normally the `musicdatabase-inbox` timer runs it; it does nothing while the app is open)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~680 tests, ~25s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~700 tests, ~45s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -107,9 +109,16 @@ non-trivial work in that area.
   endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
-  artist's origin, an album's title, ...); Manage database → "Resolve new requests"
-  (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value never lands without
-  review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
+  artist's origin, an album's title, ...). `inbox_auto.py` is the automatic pass: every 15 min a
+  systemd user timer (`musicdatabase-inbox`, `auto_resolve_requests.py` at the repo root, installed
+  with the sharing service) takes `Inbox/new/`. It replaces a dead link only when the phone's and
+  our search agree and the video plays. It saves a correction only from a user with the
+  `apply_corrections` permission and when nothing conflicts. The rest goes to `Inbox/review/` with
+  a note why. Manage database → "Resolve new requests" (`utils/ui/inbox_request_review.py`) runs the
+  same pass, then asks about `review/`. Otherwise a phone's value never lands without review. The
+  pass never runs while the app is open (`app_lock.py`: `main.py` holds an flock shared, the pass
+  needs it exclusive). What it changed is printed at the next start (`Inbox/auto_report.json`).
+  Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
   `additional_song_artists` schema and on `songs.youtube_video_id`'s values (video id = linked,
   `"N/A"` = confirmed no video, NULL/`""` = unknown, which the phone may search for itself) —
   coordinate schema or sentinel changes with the app
@@ -369,6 +378,9 @@ non-trivial work in that area.
   `print()` a plain colored line above the `questionary` call instead (see `seek_nonsense_names()`
   in `get_rid_of_rubish_data.py` for the pattern).
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
+- In user-facing text (prints, menu labels, prompts, review notes) the mobile client is "Leina
+  Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong
+  to a MusicDatabase user, not to a device.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
   interrupt per item. Eight places already do this: `run_import_batch()` (shared by every
@@ -402,7 +414,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~680 tests, ~25 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~700 tests, ~45 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

@@ -40,7 +40,8 @@ this index is the map of everything else.
 - [`handoffs/`](handoffs/) — notes for an agent working in another repo (passed on by the owner),
   e.g. [the inbox contract for MusicDatabaseApp](handoffs/inbox-for-musicdatabaseapp.md) and
   [the playlist sync contract](handoffs/playlists-for-musicdatabaseapp.md) and
-  [the moods contract](handoffs/moods-for-musicdatabaseapp.md). Once
+  [the moods contract](handoffs/moods-for-musicdatabaseapp.md) and
+  [the automatic request pass + `apply_corrections`](handoffs/automatic-requests-for-musicdatabaseapp.md). Once
   the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
 
 Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`

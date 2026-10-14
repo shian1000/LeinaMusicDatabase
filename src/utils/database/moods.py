@@ -252,7 +252,7 @@ def apply_global_mood_changes(tag_session=None, changes_dir: Path | None = None)
     global_mood_log.append_history(changes_dir, history)
     for path, _ in pending:
         path.unlink(missing_ok=True)
-    mlog(f"Applied {len(history)} change(s) to global moods from the phones")
+    mlog(f"Applied {len(history)} change(s) to global moods from Leina Radio")
     return history
 
 
