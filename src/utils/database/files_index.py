@@ -107,13 +107,21 @@ def ensure_files_db(db_path: Path = None) -> Path:
     return db_path
 
 
+def local_library_path() -> Path | None:
+    """The configured library folder as a local path, whether or not it's
+    there right now; None for a remote (smb://) library."""
+    root_str = Settings.local_library_dir_str
+    if "://" in root_str and not root_str.startswith("file://"):
+        return None
+    return Path(root_str.removeprefix("file://"))
+
+
 def library_root() -> Path:
     """The library folder, or LibraryUnavailableError. Only a local folder
     can be indexed (an smb:// library would have to be read over the network)."""
-    root_str = Settings.local_library_dir_str
-    if "://" in root_str and not root_str.startswith("file://"):
-        raise LibraryUnavailableError(f"{root_str} is not a local folder")
-    root = Path(root_str.removeprefix("file://"))
+    root = local_library_path()
+    if root is None:
+        raise LibraryUnavailableError(f"{Settings.local_library_dir_str} is not a local folder")
     if not root.is_dir():
         raise LibraryUnavailableError(f"{root} not found - is its drive plugged in?")
     return root

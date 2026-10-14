@@ -133,7 +133,25 @@ server. Tests: `tests/test_database_sharing.py`.
   to that list needs `systemctl --user restart musicdatabase-share` — the running server read
   the script at start. Everything else is a 404 with no
   directory listing; this is why plain `python -m http.server` is not used. `Cache-Control:
-  no-store` is set.
+  no-store` is set. The other files it serves are the library's audio files, below.
+- **Library files (2026-10-14):** `GET`/`HEAD /library/<files.id>` serves one file of the music
+  library, so Leina Radio can play a song from the server (its source "Serwer"). The service
+  gets `--library` = `Settings.local_library_dir` (`files_index.local_library_path()`; left out
+  for an `smb://` library, and then every `/library/...` is a 404). The id is looked up in the
+  **shared** `files.db` copy, the one the phone downloaded, opened read-only and `immutable` per
+  request. No token, the same reach as the databases (the owner's choice, 2026-10-14).
+  - Safety: the path never comes from the request. A row's path is resolved with `realpath`
+    and must stay under the library's real path, so a `..`, an absolute path or a symlink out
+    of the library is a 404 and is never opened. Only `LIBRARY_AUDIO_EXTENSIONS` (the server's own
+    copy, kept equal by a test) and only regular files. No directory listing.
+  - One byte range per request (`bytes=a-b`, `a-`, `-n`) → 206 + `Content-Range`. Several
+    ranges, or a malformed header, → 200 with the whole file. A range starting past the end →
+    416 with `Content-Range: bytes */<size>`. Copied in 64 KiB chunks.
+  - 404 unknown id, not an id, file gone / not audio / outside the library, no shared `files.db`;
+    503 T7 not mounted or the library folder missing. `Cache-Control: no-cache`, since a row keeps
+    its id when the file's contents change.
+  - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
+    quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
 - It listens on at most two addresses, one socket each, with the same handler and port 8002:
   - **Tailscale:** the address from `tailscale ip -4`. The phone uses this one away from home.
   - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`
@@ -442,8 +460,8 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
   with T7 unplugged at startup has no user backup.
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
-- **Not served as files.** The sharing server's whitelist is `music.db` / `tag.db` / `files.db`, so
-  `Users/` and everything in it is a 404. Playlists and moods reach the logged-in user's phones
+- **Not served as files.** The sharing server serves only `music.db` / `tag.db` / `files.db` and
+  the library's audio files by id, so `Users/` and everything in it is a 404. Playlists and moods reach the logged-in user's phones
   through their endpoints above; other private tags (kind `'marker'`) don't go anywhere.
 - **Deleted playlists** are copied to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json`
   first (see "Playlists on the phone" above). To recover one, read its tracks from that file.
@@ -462,8 +480,9 @@ maps each file in it to its song:
   but a future hand-set match can be rebuilt by deleting the file and scanning again.
 - T7 not mounted → the library folder is missing → the scan is skipped
   (`LibraryUnavailableError`), the index is left as it was.
-- Audio files themselves are **not served** yet; the phone only learns which songs have a file
-  and its relative path. Serving them is a separate step that widens the server's contract.
+- The sharing server serves the files themselves at `/library/<files.id>` (see "Sharing with the
+  mobile app"), using the ids in the shared copy. Ids are never reused, so a stale copy on the
+  phone at worst gets a 404 for a file that moved, never another song's file.
 
 ## Album covers directory
 

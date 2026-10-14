@@ -100,12 +100,14 @@ non-trivial work in that area.
   them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
   it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
-  `tag.db` / `files.db`, and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
+  `tag.db` / `files.db` and, with `--library`, the library's audio files by `files.id`
+  (`GET`/`HEAD /library/<id>`, looked up in the shared `files.db`, path checked to stay inside
+  the library, byte ranges for the player, no token), and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
   at most 1 MiB each, nothing while `new/` holds 100 MiB), syncs a logged-in user's playlists
   (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
+  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
   endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an

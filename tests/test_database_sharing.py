@@ -703,6 +703,23 @@ def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
 
 # ==================== systemd installer ====================
 
+@pytest.mark.parametrize("library, expected_flag", [
+    ("/media/owner/T7/Shared/Music/Library/", "--library /media/owner/T7/Shared/Music/Library"),
+    ("file:///srv/Music/", "--library /srv/Music"),
+    ("smb://user:pw@host/Shared/Music/", None),
+])
+def test_service_unit_library_flag(monkeypatch, library, expected_flag):
+    from settings import Settings
+    monkeypatch.setattr(Settings, "local_library_dir_str", library)
+
+    unit = sharing._service_unit("/usr/bin/python3")
+
+    if expected_flag:
+        assert expected_flag in unit
+    else:
+        assert "--library" not in unit and "smb://" not in unit
+
+
 @pytest.mark.parametrize("lan_interface, expected_flag", [("enp2s0", "--lan-interface enp2s0"), ("", None)])
 def test_service_unit_lan_interface_flag(monkeypatch, lan_interface, expected_flag):
     monkeypatch.setattr(sharing, "SHARING_LAN_INTERFACE", lan_interface)
@@ -1160,3 +1177,202 @@ def test_global_mood_covers(mood_server):
     assert _call("DELETE", f"{url}/1", token)[0] == 404
     assert _call("GET", url, tokens["bob"])[0] == 403
     assert _call("GET", f"{base}/users/bob/global-mood-covers", tokens["bob"])[0] == 503  # no user.db
+
+
+# ==================== library files ====================
+
+AUDIO = bytes(range(256)) * 40  # 10240 bytes
+
+
+@pytest.fixture
+def library_server(serve, tmp_path):
+    """--library with a shared files.db: 1 = a.mp3, 2 = gone.mp3 (missing),
+    3 = ../outside.mp3, 4 = link.mp3 (symlink out of the library), 5 = notes.txt,
+    6 = a folder named like audio, 7 = an absolute path."""
+    share = tmp_path / "share"
+    share.mkdir()
+    library = tmp_path / "Library"
+    (library / "Artist").mkdir(parents=True)
+    (library / "Artist" / "a.mp3").write_bytes(AUDIO)
+    (tmp_path / "outside.mp3").write_bytes(b"secret")
+    (library / "link.mp3").symlink_to(tmp_path / "outside.mp3")
+    (library / "notes.txt").write_text("not audio")
+    (library / "dir.mp3").mkdir()
+    rows = [(1, "Artist/a.mp3"), (2, "Artist/gone.mp3"), (3, "../outside.mp3"), (4, "link.mp3"),
+            (5, "notes.txt"), (6, "dir.mp3"), (7, str(tmp_path / "outside.mp3"))]
+    conn = sqlite3.connect(share / "files.db")
+    with conn:
+        conn.execute("CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT, size INTEGER, song_id INTEGER)")
+        conn.executemany("INSERT INTO files (id, path, size, song_id) VALUES (?, ?, 1, 1)", rows)
+    conn.close()
+
+    def start(mount: str = "/", library_dir=library):
+        handler = sharing_server.make_handler(str(share), mount, library_dir=str(library_dir) if library_dir else None)
+        return serve(share, mount, handler=handler)
+
+    return start, share, library
+
+
+def _get(url: str, method: str = "GET", headers: dict | None = None):
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method=method, headers=headers or {})) as resp:
+            return resp.status, resp.headers, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.headers, err.read()
+
+
+@pytest.mark.parametrize("header, expected", [
+    (None, None),
+    ("bytes=0-99", (0, 99)),
+    ("bytes=100-", (100, 999)),
+    ("bytes=-100", (900, 999)),
+    ("bytes=-5000", (0, 999)),
+    ("bytes=990-5000", (990, 999)),
+    ("bytes=0-0", (0, 0)),
+    ("BYTES = 5-6", (5, 6)),
+    ("bytes=0-9,20-29", None),   # several ranges: the whole file
+    ("bytes=9-0", None),         # malformed: ignored
+    ("bytes=-", None),
+    ("bytes=a-b", None),
+    ("bytes=١-٢", None),         # non-ASCII digits
+    ("items=0-9", None),
+])
+def test_parse_byte_range(header, expected):
+    assert sharing_server.parse_byte_range(header, 1000) == expected
+
+
+@pytest.mark.parametrize("header, size", [("bytes=1000-", 1000), ("bytes=1000-2000", 1000), ("bytes=-0", 1000),
+                                          ("bytes=0-", 0), ("bytes=-5", 0)])
+def test_parse_byte_range_past_the_end(header, size):
+    with pytest.raises(sharing_server.RangeNotSatisfiable):
+        sharing_server.parse_byte_range(header, size)
+
+
+def test_audio_extensions_match_the_app():
+    from config.constants import LIBRARY_AUDIO_EXTENSIONS
+    assert sharing_server.LIBRARY_AUDIO_EXTENSIONS == LIBRARY_AUDIO_EXTENSIONS
+
+
+def test_library_file_whole(library_server):
+    start, _, library = library_server
+    base = start()
+
+    status, headers, body = _get(f"{base}/library/1")
+
+    assert (status, body) == (200, AUDIO)
+    assert headers["Content-Type"] == "audio/mpeg"
+    assert headers["Content-Length"] == str(len(AUDIO))
+    assert headers["Accept-Ranges"] == "bytes"
+    assert headers["Cache-Control"] == "no-cache"
+    assert headers["Last-Modified"]
+    assert "Content-Range" not in headers
+
+
+def test_library_file_head_sends_no_body(library_server):
+    base = library_server[0]()
+
+    status, headers, body = _get(f"{base}/library/1", method="HEAD")
+
+    assert (status, body) == (200, b"")
+    assert headers["Content-Length"] == str(len(AUDIO))
+    status, headers, body = _get(f"{base}/library/1", method="HEAD", headers={"Range": "bytes=0-99"})
+    assert (status, body, headers["Content-Length"]) == (206, b"", "100")
+
+
+@pytest.mark.parametrize("header, first, last", [("bytes=0-99", 0, 99), ("bytes=10000-", 10000, 10239),
+                                                 ("bytes=-40", 10200, 10239), ("bytes=10200-99999", 10200, 10239)])
+def test_library_file_range(library_server, header, first, last):
+    base = library_server[0]()
+
+    status, headers, body = _get(f"{base}/library/1", headers={"Range": header})
+
+    assert status == 206
+    assert body == AUDIO[first:last + 1]
+    assert headers["Content-Range"] == f"bytes {first}-{last}/{len(AUDIO)}"
+    assert headers["Content-Length"] == str(last - first + 1)
+
+
+def test_library_file_several_ranges_get_the_whole_file(library_server):
+    base = library_server[0]()
+
+    status, _, body = _get(f"{base}/library/1", headers={"Range": "bytes=0-9,20-29"})
+
+    assert (status, body) == (200, AUDIO)
+
+
+def test_library_file_range_past_the_end_is_416(library_server):
+    base = library_server[0]()
+
+    status, headers, _ = _get(f"{base}/library/1", headers={"Range": f"bytes={len(AUDIO)}-"})
+
+    assert status == 416
+    assert headers["Content-Range"] == f"bytes */{len(AUDIO)}"
+
+
+@pytest.mark.parametrize("path", [
+    "/library/2",       # file gone
+    "/library/3",       # ".." out of the library
+    "/library/4",       # symlink out of the library
+    "/library/5",       # not audio
+    "/library/6",       # a folder
+    "/library/7",       # absolute path
+    "/library/99",      # unknown id
+    "/library/abc", "/library/0", "/library/01", "/library/-1", "/library/1/", "/library/",
+    "/library/1/../2", "/library/%31",
+])
+def test_library_file_404(library_server, path):
+    base = library_server[0]()
+
+    status, _, body = _get(base + path)
+
+    assert status == 404
+    assert b"secret" not in body
+
+
+def test_library_path_escaping_the_root_is_never_opened(library_server, monkeypatch):
+    _, share, library = library_server
+    opened = []
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda p, *a, **k: opened.append(p) or real_open(p, *a, **k))
+
+    for file_id in (3, 4, 7):
+        assert sharing_server.library_file_path(str(share / "files.db"), str(library), file_id) is None
+    assert opened == []
+
+
+def test_library_without_library_flag_is_404(library_server):
+    base = library_server[0](library_dir=None)
+
+    assert _get(f"{base}/library/1")[0] == 404
+
+
+def test_library_drive_unmounted_or_folder_missing_is_503(library_server, tmp_path):
+    start, _, _ = library_server
+    assert _get(f"{start(mount=str(tmp_path / 'not-a-mount-point'))}/library/1")[0] == 503
+    assert _get(f"{start(library_dir=tmp_path / 'no-library')}/library/1")[0] == 503
+
+
+def test_library_without_shared_files_db_is_404(library_server):
+    start, share, _ = library_server
+    (share / "files.db").unlink()
+
+    assert _get(f"{start()}/library/1")[0] == 404
+
+
+def test_library_client_hanging_up_mid_body_leaves_the_server_serving(library_server, monkeypatch, capsys):
+    import socket
+    from urllib.parse import urlsplit
+    monkeypatch.setattr(sharing_server, "LIBRARY_CHUNK_BYTES", 16)
+    base = library_server[0]()
+    url = urlsplit(base)
+
+    for _ in range(3):
+        sock = socket.create_connection((url.hostname, url.port))
+        sock.sendall(b"GET /library/1 HTTP/1.0\r\n\r\n")
+        sock.recv(64)
+        # RST instead of FIN, like a player dropping the stream
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+        sock.close()
+
+    assert _get(f"{base}/library/1")[2] == AUDIO
+    assert "Traceback" not in capsys.readouterr().err

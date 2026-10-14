@@ -803,6 +803,25 @@ def test_search_video_ytdlp_artist_relevance_folds_diacritics(monkeypatch):
     assert video_id == "F9gb9SsO_O8"
 
 
+def test_search_video_ytdlp_contains_title_ending_in_punctuation(monkeypatch):
+    # Real case: "Ørganek - O, matko!" (song #360). _text_containment()'s
+    # \b can't sit after the final "!", so every "Organek - O, matko!" upload
+    # fell back to similarity() (0.64), and the bare "O Matko (Live)" won on
+    # relevance (0.875) before quality was consulted. The stylized "Ø" also
+    # never matched "Organek" in artist_relevance (0.48 instead of 1.0).
+    candidates = [
+        {"id": "aNY3kuwnRrg", "title": "O Matko (Live)", "channel": "Tomasz Organek - Topic", "view_count": 27975, "track": "O Matko (Live)"},
+        {"id": "zFK8GqOUcGw", "title": "Organek - O, matko! (official video)", "channel": "Mystic Production TV", "view_count": 6554797},
+        {"id": "KmvqJcLX9Vg", "title": "Organek - O, matko!", "channel": "KYPAKY", "view_count": 241089},
+        {"id": "5A2HkHK5fm8", "title": 'ORGANEK "O Matko" / otwARTa scena Live', "channel": "otwARTa scena", "view_count": 201421},
+    ]
+    _mock_ytdlp_search(monkeypatch, candidates)
+
+    video_id = m.search_video_ytdlp("Ørganek", "O, matko!")
+
+    assert video_id == "zFK8GqOUcGw"
+
+
 def test_search_video_ytdlp_prefers_official_video_over_live_when_pool_has_both(monkeypatch):
     # Real case: "Koala Voice - Vest". A production run added the "(Live)"
     # upload instead of the real official video — reproduced against live
@@ -1207,6 +1226,7 @@ DB_REFERENCE_REGRESSION_CASES = [
     ("Koala Voice - Vest", "Koala Voice", "Vest", "Vv6fECSGkKg"),
     ("Krzysztof Zalewski - Milosc Milosc", "Krzysztof Zalewski", "Milosc Milosc", "7i1ggMU2JSQ"),
     ("La Vida Bohème - Radio Capital", "La Vida Bohème", "Radio Capital", "F9gb9SsO_O8"),
+    ("Ørganek - O, matko!", "Ørganek", "O, matko!", "zFK8GqOUcGw"),
     ("Drenchill ft. Indiiana - Freed From Desire", "Drenchill ft. Indiiana", "Freed From Desire", "6b6FBneAENQ"),
     ("Easy Life - Pockets", "Easy Life", "Pockets", "irruBdi_K3k"),
     # The one case where the without-DB-reference test above
@@ -1552,6 +1572,16 @@ FRESH_SEARCH_REGRESSION_CASES = [
             {"id": "F9gb9SsO_O8", "title": "La Vida Boheme - Radio Capital (Official Music Video)", "channel": "Nacional Records", "view_count": 1935147},
         ],
         ("F9gb9SsO_O8",), {},
+    ),
+    (
+        "Ørganek - O, matko!", "Ørganek", "O, matko!",
+        [
+            {"id": "aNY3kuwnRrg", "title": "O Matko (Live)", "channel": "Tomasz Organek - Topic", "view_count": 27975, "track": "O Matko (Live)"},
+            {"id": "zFK8GqOUcGw", "title": "Organek - O, matko! (official video)", "channel": "Mystic Production TV", "view_count": 6554797},
+            {"id": "KmvqJcLX9Vg", "title": "Organek - O, matko!", "channel": "KYPAKY", "view_count": 241089},
+            {"id": "5A2HkHK5fm8", "title": 'ORGANEK "O Matko" / otwARTa scena Live', "channel": "otwARTa scena", "view_count": 201421},
+        ],
+        ("zFK8GqOUcGw",), {},
     ),
     (
         "Drenchill ft. Indiiana - Freed From Desire", "Drenchill ft. Indiiana", "Freed From Desire",

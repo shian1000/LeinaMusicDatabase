@@ -38,6 +38,7 @@ from config.constants import (
 from settings import Settings
 from utils.common.debug import mlog, slog
 from utils.database.backup import DB_FILES
+from utils.database.files_index import local_library_path
 
 SHARING_DIR = Path(str(Settings.sharing_dir))
 SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
@@ -133,8 +134,12 @@ def _service_unit(python: str) -> str:
     command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
                 f" --inbox-limit-bytes {PHONE_INBOX_LIMIT_BYTES}")
     command += f" --users {USERS_DIR} --mood-changes {GLOBAL_MOOD_CHANGES_DIR}"
+    # The library's files for /library/<files.id>; an smb:// library isn't served
+    library = local_library_path()
+    if library is not None:
+        command += f" --library {library}"
     return f"""[Unit]
-Description=MusicDatabase - serve music.db/tag.db/files.db to the mobile app, log it in and take its requests, over Tailscale and the LAN
+Description=MusicDatabase - serve music.db/tag.db/files.db and the music library's files to the mobile app, log it in and take its requests, over Tailscale and the LAN
 
 [Service]
 ExecStart={command}

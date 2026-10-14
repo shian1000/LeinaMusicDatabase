@@ -42,7 +42,8 @@ this index is the map of everything else.
   [the playlist sync contract](handoffs/playlists-for-musicdatabaseapp.md) and
   [the moods contract](handoffs/moods-for-musicdatabaseapp.md) and
   [links found for songs without one](handoffs/found-links-for-musicdatabaseapp.md) and
-  [the videos found bad, in music.db](handoffs/bad-videos-for-musicdatabaseapp.md). Once
+  [the videos found bad, in music.db](handoffs/bad-videos-for-musicdatabaseapp.md) and
+  [the library's audio files at `/library/<id>`](handoffs/server-files-for-musicdatabaseapp.md). Once
   the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
 
 Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`

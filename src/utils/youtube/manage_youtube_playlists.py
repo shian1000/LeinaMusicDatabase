@@ -582,8 +582,9 @@ def _collapse_repeated_letters(text: str) -> str:
 
 # Letters that don't NFKD-decompose (see _fold_diacritics()'s docstring for
 # why NFKD alone can't fold these) but have one unambiguous plain-Latin
-# equivalent worth substituting directly.
-_NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L"})
+# equivalent worth substituting directly. "ø" too: "Ørganek" is the stylized
+# name of Organek, whose uploads all spell it with a plain "O".
+_NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O"})
 
 
 def _fold_diacritics(text: str) -> str:
@@ -659,7 +660,14 @@ def _text_containment(expected: str, candidate: str) -> float:
             0, len(expected), 0, len(candidate)
         )
         return match.size / len(expected)
-    pattern = r"\b" + re.escape(expected.lower()) + r"\b"
+    # Punctuation at either end is dropped first: \b next to it needs a word
+    # character on the other side, so a title ending in "!" ("O, matko!")
+    # could never contain-match and lost to a bare "O Matko (Live)" on
+    # similarity - and "Jr." shouldn't need the uploader's dot either.
+    core = re.sub(r"^\W+|\W+$", "", expected.lower())
+    if not core:
+        return 0.0
+    pattern = r"\b" + re.escape(core) + r"\b"
     return 1.0 if re.search(pattern, candidate.lower()) else 0.0
 
 

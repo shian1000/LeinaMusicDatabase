@@ -15,6 +15,7 @@ the app (no settings.py / venv imports), so it runs on the system python3
 with every path passed on the command line.
 
     python3 sharing_server.py --dir DIR --mount MOUNT --port 8002 [--lan-interface enp2s0] [--inbox DIR] [--users DIR]
+                              [--mood-changes DIR] [--library DIR]
 
 - Tailscale: waits (retrying forever) until `tailscale ip -4` returns an
   address and it can bind to it - right after boot Tailscale may not have
@@ -84,6 +85,20 @@ with every path passed on the command line.
   PUT /users/<name>/global-mood-covers/<mood id> sync the user's private
   covers of global moods like moods. After every applied write, blobs the
   user's rows no longer use are removed once a day old.
+- Library files (only with --library): GET / HEAD /library/<files.id> serve
+  one audio file of the music library, looked up in <dir>/files.db - the
+  copy the phone downloaded, so its ids are the ones the phone knows - and
+  read from <library>/<files.path>. No token, like the databases. Never a
+  path from the request, never a directory listing, only
+  LIBRARY_AUDIO_EXTENSIONS, and only a file whose real path (symlinks
+  resolved) is under the library's. One byte range per request
+  (bytes=a-b, a-, -n) -> 206 with Content-Range; several ranges -> 200 with
+  the whole file. Answers: 200/206, 404 unknown id / not an id / a row whose
+  file is gone, isn't audio or lies outside the library / no --library,
+  416 a range past the end, 503 drive not mounted or library folder
+  missing. Cache-Control: no-cache - a row keeps its id when the file's
+  contents change. The player drops connections on every seek or skip, so
+  a client hanging up mid-body is normal and not logged.
 """
 
 import argparse
@@ -93,6 +108,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -102,6 +118,7 @@ from email.utils import formatdate
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import urllib.parse
 from urllib.parse import parse_qs, urlsplit
 
 try:
@@ -155,6 +172,18 @@ GLOBAL_MOOD_COVER_MAX_BODY_BYTES = 4096
 COVER_CACHE_CONTROL = "private, max-age=31536000, immutable"
 # /global-moods/<mood id>/songs/<song id>
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
+# /library/<files.id>
+LIBRARY_PATH_RE = re.compile(r"^/library/(?P<id>[1-9][0-9]{0,17})$")
+# Copy of config.constants.LIBRARY_AUDIO_EXTENSIONS (this script can't import
+# it; a test keeps the two equal). Compared lowercased.
+LIBRARY_AUDIO_EXTENSIONS = (".mp3",)
+LIBRARY_CONTENT_TYPES = {".mp3": "audio/mpeg", ".flac": "audio/flac", ".m4a": "audio/mp4",
+                         ".ogg": "audio/ogg", ".opus": "audio/ogg"}
+LIBRARY_CHUNK_BYTES = 64 * 1024
+# One range only; anything with a comma (several ranges) doesn't match
+BYTE_RANGE_RE = re.compile(r"^\s*bytes\s*=\s*(?P<first>[0-9]*)\s*-\s*(?P<last>[0-9]*)\s*$", re.IGNORECASE)
+# A player that stops reading mustn't hold a server thread forever
+LIBRARY_SOCKET_TIMEOUT = 60
 
 
 class LoginLimiter:
@@ -203,6 +232,57 @@ def _dir_size(path: str) -> int:
     return total
 
 
+class RangeNotSatisfiable(Exception):
+    """A Range header none of whose bytes exist (-> 416)."""
+
+
+def parse_byte_range(value: str | None, size: int) -> tuple[int, int] | None:
+    """The inclusive (first, last) byte of a single-range "bytes=a-b",
+    "bytes=a-" or "bytes=-n" header for a file of `size` bytes, or None for
+    the whole file: no header, another unit, several ranges or a malformed
+    one (ignored, as RFC 9110 allows). RangeNotSatisfiable when it starts past
+    the end or asks for the last 0 bytes."""
+    match = BYTE_RANGE_RE.match(value or "")
+    if match is None or not (match.group("first") or match.group("last")):
+        return None
+    first, last = match.group("first"), match.group("last")
+    if not first:
+        suffix = int(last)
+        if suffix == 0 or size == 0:
+            raise RangeNotSatisfiable
+        return max(0, size - suffix), size - 1
+    start = int(first)
+    if last and int(last) < start:
+        return None
+    if start >= size:
+        raise RangeNotSatisfiable
+    return start, min(int(last), size - 1) if last else size - 1
+
+
+def library_file_path(files_db: str, library_dir: str, file_id: int) -> str | None:
+    """The real path of files.db row `file_id`'s audio file under
+    library_dir, or None: no such row, a path leading outside the library
+    (via "..", an absolute path or a symlink), or not an audio extension.
+    sqlite3.Error when files.db can't be read."""
+    # The shared copy is only ever swapped in with os.replace(), never
+    # written in place: immutable, so nothing (-shm, locks) is created beside it
+    uri = "file:" + urllib.parse.quote(os.path.abspath(files_db)) + "?mode=ro&immutable=1"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        row = conn.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None or not isinstance(row[0], str) or not row[0]:
+        return None
+    root = os.path.realpath(library_dir)
+    target = os.path.realpath(os.path.join(root, row[0]))
+    if os.path.commonpath([root, target]) != root or target == root:
+        return None
+    if os.path.splitext(target)[1].lower() not in LIBRARY_AUDIO_EXTENSIONS:
+        return None
+    return target
+
+
 def _same_content(path: str, data: bytes) -> bool:
     try:
         with open(path, "rb") as f:
@@ -215,7 +295,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                  max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
                  users_dir: str | None = None, limiter: LoginLimiter | None = None,
-                 max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES, mood_changes_dir: str | None = None):
+                 max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES, mood_changes_dir: str | None = None,
+                 library_dir: str | None = None):
     # One lock for "is there room / is the name free" + the write, so two
     # uploads at once can't both squeeze past the limit or take one name.
     inbox_lock = threading.Lock()
@@ -262,7 +343,11 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._reply(HTTPStatus.NOT_FOUND)
 
         def _serve(self, send_body: bool):
-            name = self.path.split("?", 1)[0].lstrip("/")
+            path = self.path.split("?", 1)[0]
+            if path.startswith("/library/"):
+                self._library_file(path, send_body)
+                return
+            name = path.lstrip("/")
             if name not in SHARED_FILES:
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
@@ -289,6 +374,76 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self.end_headers()
                 if send_body:
                     shutil.copyfileobj(f, self.wfile)
+
+        # ---- library files ----
+
+        def _library_file(self, path: str, send_body: bool):
+            match = LIBRARY_PATH_RE.match(path)
+            if library_dir is None or match is None:
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            if not os.path.ismount(mount) or not os.path.isdir(library_dir):
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            files_db = os.path.join(share_dir, "files.db")
+            if not os.path.isfile(files_db):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                target = library_file_path(files_db, library_dir, int(match.group("id")))
+            except sqlite3.Error as exc:
+                print(f"Reading {files_db} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            if target is None:
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                f = open(target, "rb")
+            except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            except OSError as exc:
+                print(f"Opening library file {match.group('id')} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            with f:
+                st = os.fstat(f.fileno())
+                if not stat.S_ISREG(st.st_mode):
+                    self._reply(HTTPStatus.NOT_FOUND)
+                    return
+                size = st.st_size
+                try:
+                    byte_range = parse_byte_range(self.headers.get("Range"), size)
+                except RangeNotSatisfiable:
+                    self._reply(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
+                                headers={"Content-Range": f"bytes */{size}"})
+                    return
+                start, end = byte_range or (0, size - 1)
+                length = end - start + 1
+                self.send_response(HTTPStatus.PARTIAL_CONTENT if byte_range else HTTPStatus.OK)
+                self.send_header("Content-Type", LIBRARY_CONTENT_TYPES.get(
+                    os.path.splitext(target)[1].lower(), "application/octet-stream"))
+                self.send_header("Content-Length", str(length))
+                if byte_range:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Last-Modified", formatdate(st.st_mtime, usegmt=True))
+                self.send_header("Cache-Control", "no-cache")
+                self.connection.settimeout(LIBRARY_SOCKET_TIMEOUT)
+                try:
+                    self.end_headers()
+                    if send_body:
+                        f.seek(start)
+                        while length > 0:
+                            chunk = f.read(min(LIBRARY_CHUNK_BYTES, length))
+                            if not chunk:
+                                break  # truncated while being read; the client sees a short body
+                            self.wfile.write(chunk)
+                            length -= len(chunk)
+                except (ConnectionError, TimeoutError):
+                    # Seek, skip, crossfade: the player hangs up all the time
+                    self.close_connection = True
 
         def _bearer_token(self) -> str | None:
             value = self.headers.get("Authorization")
@@ -968,11 +1123,12 @@ def main(argv=None) -> int:
     parser.add_argument("--max-playlist-bytes", type=int, default=DEFAULT_MAX_PLAYLIST_BYTES)
     parser.add_argument("--mood-changes", help="with --users: record permitted users' changes to global moods "
                                                "in this folder (on --mount)")
+    parser.add_argument("--library", help="serve the music library files indexed in --dir/files.db from this folder")
     args = parser.parse_args(argv)
 
     handler = make_handler(args.dir, args.mount, args.inbox, args.max_request_bytes, args.inbox_limit_bytes,
                            users_dir=args.users, max_playlist_bytes=args.max_playlist_bytes,
-                           mood_changes_dir=args.mood_changes)
+                           mood_changes_dir=args.mood_changes, library_dir=args.library)
 
     def bind_and_serve(label, get_address):
         server = bind_when_ready(handler, args.port, get_address, label)
@@ -980,6 +1136,7 @@ def main(argv=None) -> int:
         inbox = f", requests into {args.inbox}" if args.inbox else ""
         inbox += f", logins, playlists, moods and covers for {args.users}" if args.users else ""
         inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
+        inbox += f", library files from {args.library}" if args.library else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 
