@@ -19,9 +19,10 @@ Inbox (Settings.phone_inbox_dir, on T7):
 
 One request file is one SQLite file with a one-row `request` table and one
 table per request type (app ADR 0005; format described in the app's
-docs/handoffs/musicdatabase-outbox.md). Known types: dead_youtube_links. A
-file with a table this version doesn't know stays in new/, so a later
-version can still handle that part.
+docs/handoffs/musicdatabase-outbox.md). Known types: dead_youtube_links and
+field_corrections (handled in inbox_field_corrections.py). A file with a
+table this version doesn't know stays in new/, so a later version can still
+handle that part.
 
 A dead link report is settled without asking when:
 - its song was deleted since the phone downloaded music.db;
@@ -55,7 +56,8 @@ REJECTED = "rejected"
 DECISIONS_FILE = "decisions.json"
 
 DEAD_LINKS_TABLE = "dead_youtube_links"
-KNOWN_TABLES = {"request", DEAD_LINKS_TABLE}
+FIELD_CORRECTIONS_TABLE = "field_corrections"
+KNOWN_TABLES = {"request", DEAD_LINKS_TABLE, FIELD_CORRECTIONS_TABLE}
 # Android's SQLiteDatabase adds this to every file it creates (just the locale) -
 # not a request, so it never keeps a file in the inbox
 PLATFORM_TABLES = {"android_metadata"}
@@ -88,6 +90,22 @@ class DeadLinkReport:
 
 
 @dataclass
+class FieldCorrection:
+    """A value of music.db the user corrected on the phone (app handoff
+    musicdatabase-field-corrections.md)."""
+    file_name: str
+    table_name: str
+    row_id: int
+    column_name: str
+    old_value: object  # as the phone's music.db had it; None = empty
+    new_value: object  # None = the user emptied the field
+    song_id: int  # the song whose info it was corrected from
+    title: str
+    artist: str
+    corrected_at: str
+
+
+@dataclass
 class RequestFile:
     path: Path
     format: int | None = None
@@ -95,6 +113,7 @@ class RequestFile:
     user_name: str | None = None
     app: str | None = None
     dead_links: list[DeadLinkReport] = field(default_factory=list)
+    field_corrections: list[FieldCorrection] = field(default_factory=list)
     unknown_tables: list[str] = field(default_factory=list)
     error: str | None = None  # not a readable request file
 
@@ -133,6 +152,11 @@ class DeadLinkCase:
     @property
     def key(self) -> str:
         return _decision_key(self.song_id, self.dead_video_id)
+
+    @property
+    def pending(self) -> bool:
+        """Keeps its files in new/."""
+        return self.status == OPEN
 
     @property
     def replacements(self) -> list[Replacement]:
@@ -220,6 +244,15 @@ def read_request_file(path: Path) -> RequestFile:
             select = ", ".join(c if c in have else "NULL" for c in wanted)
             for row in conn.execute(f"SELECT {select} FROM {DEAD_LINKS_TABLE}"):
                 request.dead_links.append(DeadLinkReport(path.name, *row))
+        if FIELD_CORRECTIONS_TABLE in tables:
+            wanted = ["table_name", "row_id", "column_name", "old_value", "new_value",
+                      "song_id", "title", "artist", "corrected_at"]
+            missing = [c for c in wanted if c not in _columns(conn, FIELD_CORRECTIONS_TABLE)]
+            if missing:
+                request.error = f"{FIELD_CORRECTIONS_TABLE} lacks {', '.join(missing)}"
+                return request
+            for row in conn.execute(f"SELECT {', '.join(wanted)} FROM {FIELD_CORRECTIONS_TABLE}"):
+                request.field_corrections.append(FieldCorrection(path.name, *row))
     except sqlite3.Error as exc:
         request.error = f"unreadable: {exc}"
     finally:
@@ -257,7 +290,7 @@ def load_decisions() -> dict:
         return {}
 
 
-def _save_decision(key: str, entry: dict) -> None:
+def save_decision(key: str, entry: dict) -> None:
     decisions = load_decisions()
     decisions[key] = entry
     path = INBOX_DIR / DECISIONS_FILE
@@ -266,7 +299,7 @@ def _save_decision(key: str, entry: dict) -> None:
     os.replace(tmp, path)
 
 
-def _parse_time(value: str | None) -> datetime | None:
+def parse_time(value: str | None) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value)
     except (TypeError, ValueError):
@@ -278,8 +311,8 @@ def _parse_time(value: str | None) -> datetime | None:
 def _kept_after_reports(decision: dict | None, reports: list[DeadLinkReport]) -> bool:
     if not decision or decision.get("decision") != KEEP:
         return False
-    decided = _parse_time(decision.get("decided_at"))
-    detected = [t for t in (_parse_time(r.detected_at) for r in reports) if t]
+    decided = parse_time(decision.get("decided_at"))
+    detected = [t for t in (parse_time(r.detected_at) for r in reports) if t]
     # A report made after the user kept the link means it may have died since
     return decided is not None and all(t <= decided for t in detected)
 
@@ -394,7 +427,7 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
         case.song.youtube_video_id = NO_VIDEO_SENTINEL
     elif decision != KEEP:
         raise ValueError(f"Unknown decision {decision!r}")
-    _save_decision(case.key, {
+    save_decision(case.key, {
         "decision": decision,
         "video_id": video_id,
         "decided_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -404,16 +437,18 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
     mlog(f"Inbox request: song {case.song_id} dead link {case.dead_video_id} -> {decision} {video_id or ''}")
 
 
-def finish_request_files(requests: list[RequestFile], cases: list[DeadLinkCase]) -> tuple[list, list]:
-    """Move every file with nothing left to answer to processed/. Returns
-    (moved, kept in new/) as RequestFiles."""
-    open_reports = {id(report) for case in cases if case.status == OPEN for report in case.reports}
+def finish_request_files(requests: list[RequestFile], cases: list) -> tuple[list, list]:
+    """Move every file with nothing left to answer to processed/. `cases`:
+    every case of every type (anything with `.reports` and `.pending`).
+    Returns (moved, kept in new/) as RequestFiles."""
+    open_reports = {id(report) for case in cases if case.pending for report in case.reports}
     moved, left = [], []
     for request in requests:
         if request.error is not None:
             continue
         done = (request.supported and not request.unknown_tables
-                and not any(id(report) in open_reports for report in request.dead_links))
+                and not any(id(report) in open_reports
+                            for report in request.dead_links + request.field_corrections))
         if done:
             _move(request.path, PROCESSED)
             moved.append(request)

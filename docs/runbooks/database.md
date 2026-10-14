@@ -191,6 +191,21 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way. Answers go to `Inbox/decisions.json`; only "kept" is read
   back (it changes nothing in the database, so a pending or repeated report would otherwise be asked
   again, unless it was detected after the answer).
+- For `field_corrections` (`utils/database/inbox_field_corrections.py`, app handoff
+  `musicdatabase-field-corrections.md`, answer [`docs/handoffs/field-corrections-for-musicdatabaseapp.md`](../handoffs/field-corrections-for-musicdatabaseapp.md)):
+  rows are grouped by (table, current row, column), the newest `corrected_at` offered. Settled
+  without asking: the row is gone (a song through `song_id_changes`; an artist or album has no
+  such log, so a merged one just counts as gone), the database already has the value, or the
+  owner answered that field after the newest report (any answer is in `decisions.json` under
+  `field:<table>:<id>:<column>`, since a rejection changes nothing). Shown per field: phone's old
+  value, current value (flagged when it changed since), correction; then save / edit / keep the
+  current value / skip. Extras: a `songs.album` correction can rename the song's whole album
+  instead of moving just that song (`albums.rename_album()`); an `albums.title` that equals
+  another album of the artist merges the two (`merge_albums()`, the album with a cover, else the
+  older id, kept) and always rewrites the songs' `album` text; an `artists.name` that is another
+  artist's name offers merging into it (`merge_artists_in_db()`). A value that can't be stored
+  (not a number, an unknown album type, an empty title) can only be edited. Applied through the
+  ORM, so the album listener does what it does after any edit.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `new/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.

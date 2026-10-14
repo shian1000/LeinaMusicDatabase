@@ -433,6 +433,38 @@ def assign_songs_to_album(session, songs: list[Song], title: str, artist: Artist
     return album
 
 
+def album_twin(session, album: Album, title: str) -> Album | None:
+    """Another (non-single) album of the same artist already titled like
+    `title` - renaming `album` to it makes them one album."""
+    if album.type == ALBUM_TYPE_SINGLE:
+        return None
+    return next((a for a in _AlbumIndex(session).albums_for(album_key(title))
+                 if a is not album and _artist_key(a) == _artist_key(album)), None)
+
+
+def rename_album(session, album: Album, title: str) -> Album:
+    """Give an album a new title, and its songs the same `album` text (the
+    phone still reads songs.album). An album that becomes another album's
+    twin (album_twin()) is merged with it - the one with a cover, else the
+    older id, is kept. A one-song "Singles" album only changes its row: the
+    listener retitles it after its song on the song's next edit. Returns the
+    album kept. Caller commits."""
+    title = title.strip()
+    if album.type == ALBUM_TYPE_SINGLE:
+        album.title = title
+        return album
+    twin = album_twin(session, album, title)
+    if twin is not None:
+        keep, drop = sorted((album, twin), key=lambda a: (not a.covers, a.id or 0))
+        merge_albums(session, keep, drop)
+        album = keep
+    album.title = title
+    for song in album.songs:
+        song.album = title
+    session.flush()
+    return album
+
+
 def clear_album_text(songs: list[Song]) -> None:
     """Drop the album name from `songs` (album text NULL); the flush listener
     then takes them off their album rows. Rows left empty are kept, like any

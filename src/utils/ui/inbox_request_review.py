@@ -2,14 +2,31 @@
 only the phone sends them, through the sharing server; other sources may
 follow, so the screen never says where a request came from). The logic is utils/database/inbox_requests.py; this
 only shows it and asks. Like the other reviews, the slow YouTube checks run
-first for every report and the questions come after, in one go. Anything
-skipped stays in the inbox for next time."""
+first for every report and the questions come after, in one go: dead links
+first, then field corrections (inbox_field_corrections.py). Anything skipped
+stays in the inbox for next time."""
 
 import questionary
 from rich import print
 from rich.markup import escape
 
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
+from utils.database.inbox_field_corrections import (
+    ACCEPT,
+    EDIT,
+    MERGE_ARTIST,
+    REJECT,
+    RENAME_ALBUM,
+    album_title_twin,
+    apply_field_correction,
+    artist_twins,
+    coerce_field_value,
+    collect_field_correction_cases,
+    song_album_to_rename,
+)
+from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
+from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
+from utils.database.song_artists import count_artist_songs, song_artist_label
 from utils.database.inbox_requests import (
     INBOX_DIR,
     KEEP,
@@ -109,6 +126,143 @@ def _ask(case):
         print(f"'{escape(url)}' isn't a YouTube video link.")
 
 
+# ==================== field corrections ====================
+
+def _value(value) -> str:
+    if value is None or value == "":
+        return "[dim]empty[/dim]"
+    return f'"{escape(str(value))}"' if isinstance(value, str) else escape(str(value))
+
+
+def _row_label(session, case) -> str:
+    row = case.row
+    if case.table_name == "artists":
+        return f'artist #{row.id} "{escape(row.name)}", {count_artist_songs(session, row.id)} song(s)'
+    if case.table_name == "albums":
+        return f'album #{row.id} "{escape(row.title)}", {len(row.songs)} song(s)'
+    return f"song #{row.id}"
+
+
+def _show_correction(session, case, position: str) -> None:
+    report = case.latest
+    song = case.song
+    if song is not None:
+        print(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
+    else:
+        print(f"\n{position} [yellow]{escape(report.artist)} - {escape(report.title)}[/yellow]  [red](that song is gone)[/red]")
+    if case.title_differs:
+        shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
+        print(f"    [red]The request showed it as[/red] {escape(shown)}")
+    print(f"    Field:       {case.label}  [dim]({_row_label(session, case)})[/dim]")
+    if case.not_on_song:
+        kind = "artist" if case.table_name == "artists" else "album"
+        print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
+    print(f"    Phone had:   {_value(report.old_value)}")
+    changed = "  [yellow](changed since the phone's copy)[/yellow]" if case.changed_since else ""
+    print(f"    Now:         {_value(case.current)}{changed}")
+    error = f"  [red]can't be stored: {escape(case.error)}[/red]" if case.error else ""
+    print(f"    Correction:  {_value(report.new_value)}{error}")
+    if case.earlier_values:
+        print(f"    [dim]Earlier asked for: {', '.join(_value(v) for v in case.earlier_values)}[/dim]")
+    files = sorted({r.file_name for r in case.reports})
+    print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {', '.join(files)}[/dim]")
+
+
+def _value_notes(session, case, value) -> list:
+    """Warnings for one value the owner might store."""
+    notes = []
+    for twin in artist_twins(session, case, value):
+        notes.append(f'[yellow]Another artist is already called "{escape(twin.name)}" (#{twin.id}, '
+                     f"{count_artist_songs(session, twin.id)} song(s)) - the same artist spelt twice?[/yellow]")
+    twin = album_title_twin(session, case, value)
+    if twin is not None:
+        notes.append(f'[yellow]The artist already has an album "{escape(twin.title)}" (#{twin.id}) - '
+                     f"saving merges the two.[/yellow]")
+    return notes
+
+
+def _correction_choices(session, case) -> list:
+    choices = []
+    if not case.error:
+        choices.append(questionary.Choice(f"Save the correction ({_plain(case.new_value)})", (ACCEPT, None)))
+        album = song_album_to_rename(case)
+        if album is not None and case.new_value is not None:
+            choices.append(questionary.Choice(
+                f'Rename its whole album instead (#{album.id} "{album.title}", {len(album.songs)} songs)',
+                (RENAME_ALBUM, None)))
+        for twin in artist_twins(session, case, case.new_value):
+            choices.append(questionary.Choice(
+                f'Merge this artist into "{twin.name}" (#{twin.id}, which stays)', (MERGE_ARTIST, twin)))
+    choices += [
+        questionary.Choice("Edit the value before saving", EDIT),
+        questionary.Choice(f"Keep the current value ({_plain(case.current)})", (REJECT, None)),
+        questionary.Choice(_SKIP, _SKIP),
+        questionary.Choice(_STOP, _STOP),
+    ]
+    return choices
+
+
+def _plain(value) -> str:
+    return "empty" if value is None or value == "" else f'"{value}"' if isinstance(value, str) else str(value)
+
+
+def _ask_correction(session, case):
+    """(decision, value), _SKIP or _STOP."""
+    for note in _value_notes(session, case, case.new_value):
+        print(f"    {note}")
+    while True:
+        answer = questionary.select("What should the database do?", choices=_correction_choices(session, case)).ask()
+        if answer is None:
+            return _STOP
+        if answer != EDIT:
+            return answer
+        start = case.new_value if case.new_value is not None else (case.latest.new_value or "")
+        typed = questionary.text(f"New {case.label} (empty = no value):", default=str(start)).ask()
+        if typed is None:
+            continue
+        value, error = coerce_field_value(case.table_name, case.column_name, typed)
+        if error:
+            print(f"[red]{escape(error)}[/red]")
+            continue
+        notes = _value_notes(session, case, value)
+        for note in notes:
+            print(f"    {note}")
+        if notes and not questionary.confirm(f"Save {_plain(value)} anyway?").ask():
+            continue
+        return EDIT, value
+
+
+def _review_field_corrections(session, requests) -> tuple[list, bool]:
+    """Returns (cases, stopped)."""
+    cases = collect_field_correction_cases(session, requests)
+    settled = [c for c in cases if not c.pending]
+    unsupported = [c for c in cases if c.status == FIELD_UNSUPPORTED]
+    open_cases = [c for c in cases if c.status == FIELD_OPEN]
+    if settled:
+        print(f"\n{len(settled)} field correction(s) need no answer:")
+        for case in settled:
+            report = case.latest
+            print(f"    {escape(report.artist)} - {escape(report.title)}, {case.label} -> "
+                  f"{_value(report.new_value)}: {case.status}")
+    if unsupported:
+        names = sorted({f"{c.table_name}.{c.column_name}" for c in unsupported})
+        print(f"[yellow]{len(unsupported)} correction(s) of {', '.join(names)}, which this version can't correct - "
+              f"their files stay in the inbox.[/yellow]")
+    if open_cases:
+        print(f"\n{len(open_cases)} field correction(s) to look at:")
+    for i, case in enumerate(open_cases, 1):
+        _show_correction(session, case, f"[{i}/{len(open_cases)}]")
+        answer = _ask_correction(session, case)
+        if answer == _STOP:
+            return cases, True
+        if answer == _SKIP:
+            continue
+        decision, value = answer
+        apply_field_correction(session, case, decision, value)
+        submit_global_database_session()
+    return cases, False
+
+
 def resolve_new_requests() -> None:
     if not inbox_available():
         print(f"The inbox ({INBOX_DIR}) is on a drive that isn't mounted - is T7 plugged in?")
@@ -135,6 +289,7 @@ def resolve_new_requests() -> None:
     cases = collect_dead_link_cases(session, requests)
     settled = [c for c in cases if c.status != OPEN]
     open_cases = [c for c in cases if c.status == OPEN]
+    stopped = False
     if settled:
         print(f"\n{len(settled)} dead link report(s) need no answer:")
         for case in settled:
@@ -158,12 +313,20 @@ def resolve_new_requests() -> None:
             _show_case(case, f"[{i}/{len(open_cases)}]")
             answer = _ask(case)
             if answer == _STOP:
+                stopped = True
                 break
             if answer == _SKIP:
                 continue
             decision, video_id = answer
             apply_dead_link_decision(case, decision, video_id)
             submit_global_database_session()
+
+    if not stopped:
+        field_cases, stopped = _review_field_corrections(session, requests)
+        cases = cases + field_cases
+    else:
+        # Not asked this time, but they still keep their files in new/
+        cases = cases + collect_field_correction_cases(session, requests)
 
     moved, left = finish_request_files(requests, cases)
     if moved:

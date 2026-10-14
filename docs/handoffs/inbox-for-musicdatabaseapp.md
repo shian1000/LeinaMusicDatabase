@@ -50,6 +50,7 @@ changed are closed without asking. For the rest MusicDatabase checks with yt-dlp
 whether the dead link and the phone's replacement play, runs its own matcher,
 and the owner picks: the phone's video, its own, a pasted link, "N/A", keep the
 current link, or later. The result reaches the phone the usual way, in the next
-downloaded `music.db`. Format 1 and `dead_youtube_links` are understood; a file
+downloaded `music.db`. Format 1, `dead_youtube_links` and (since 2026-10-14)
+`field_corrections` are understood — see `field-corrections-for-musicdatabaseapp.md`; a file
 with another `format` or an unknown table is kept unprocessed for a later version
 (Android's own `android_metadata` doesn't count as one).

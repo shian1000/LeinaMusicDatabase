@@ -52,7 +52,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
 - Run the app: `python main.py`
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~580 tests, ~25s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~680 tests, ~25s, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -105,9 +105,11 @@ non-trivial work in that area.
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally (nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
   endpoints and their JSON, nor the permission names).
-  `inbox_requests.py` reads that inbox and settles dead YouTube link reports; Manage database →
-  "Resolve new requests" (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value
-  never lands without review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
+  `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
+  `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
+  artist's origin, an album's title, ...); Manage database → "Resolve new requests"
+  (`utils/ui/inbox_request_review.py`) asks about the rest — a phone's value never lands without
+  review. Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
   `additional_song_artists` schema and on `songs.youtube_video_id`'s values (video id = linked,
   `"N/A"` = confirmed no video, NULL/`""` = unknown, which the phone may search for itself) —
   coordinate schema or sentinel changes with the app
@@ -400,7 +402,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~580 tests, ~25 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~680 tests, ~25 seconds, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

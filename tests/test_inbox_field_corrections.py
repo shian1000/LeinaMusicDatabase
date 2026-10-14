@@ -1,0 +1,301 @@
+"""Field corrections from the phone (utils/database/inbox_field_corrections.py):
+reading the field_corrections table, grouping repeats (newest wins), settling
+what needs no answer (row gone, value already there, answered earlier),
+following song merges, flags (changed since, artist no longer on the song),
+value checks, applying answers (song album text vs renaming the whole album,
+album title twins merged, artist merge) and finishing the files. Temp-file
+SQLite with the album listener on, no mocking of SQL."""
+
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+repo_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(repo_root))
+sys.path.insert(0, str(repo_root / "src"))
+
+from utils.database import albums as al
+from utils.database import inbox_field_corrections as fc
+from utils.database import inbox_requests as pr
+from utils.database.datatables import Album, Artist, Base, Song
+
+REQUEST_SQL = """
+CREATE TABLE request (format INTEGER NOT NULL, created_at TEXT NOT NULL, user_name TEXT, app TEXT NOT NULL);
+CREATE TABLE field_corrections (
+  table_name TEXT NOT NULL, row_id INTEGER NOT NULL, column_name TEXT NOT NULL, old_value, new_value,
+  song_id INTEGER NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, corrected_at TEXT NOT NULL,
+  PRIMARY KEY (table_name, row_id, column_name));
+"""
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    inbox = tmp_path / "Inbox"
+    (inbox / "new").mkdir(parents=True)
+    monkeypatch.setattr(pr, "INBOX_DIR", inbox)
+    monkeypatch.setattr(pr, "inbox_available", lambda: True)
+    changes = []
+    monkeypatch.setattr(fc, "load_changes", lambda: list(changes))
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    al.register_album_sync(factory)
+    session = factory()
+    artist = Artist(id=10, name="Elise Trouw", origin="USA")
+    other = Artist(id=11, name="Vulfpeck")
+    # Artists first: the album listener looks a pending artist's explicit id up in the DB
+    session.add_all([artist, other])
+    session.commit()
+    songs = [Song(id=4601 + i, title=t, artist=artist, album="Unravel", year=2023)
+             for i, t in enumerate(["Chromatic", "Losing Sleep"])]
+    songs.append(Song(id=4603, title="Dean Town", artist=other, album="The Beautiful Game", year=2016))
+    session.add_all(songs)
+    session.commit()
+    return {"inbox": inbox, "session": session, "songs": songs, "changes": changes,
+            "album": songs[0].album_entry}
+
+
+def _request(inbox: Path, name: str, rows, extra_sql: str = "") -> Path:
+    path = inbox / "new" / name
+    conn = sqlite3.connect(str(path))
+    with conn:
+        conn.executescript(REQUEST_SQL + extra_sql)
+        conn.execute("INSERT INTO request VALUES (1, '2026-10-14T10:00:00+02:00', 'shian', 'Leina Radio')")
+        for row in rows:
+            row = {"song_id": 4601, "title": "Chromatic", "artist": "Elise Trouw",
+                   "corrected_at": "2026-10-01T09:00:00+02:00", **row}
+            conn.execute(
+                "INSERT INTO field_corrections VALUES (:table_name, :row_id, :column_name, :old_value, "
+                ":new_value, :song_id, :title, :artist, :corrected_at)", row)
+    conn.close()
+    return path
+
+
+def _row(table="songs", row_id=4601, column="year", old=2023, new=2022, **extra):
+    return {"table_name": table, "row_id": row_id, "column_name": column, "old_value": old,
+            "new_value": new, **extra}
+
+
+def _cases(env):
+    requests = pr.read_new_requests()
+    return requests, fc.collect_field_correction_cases(env["session"], requests)
+
+
+# ==================== reading ====================
+
+def test_reads_corrections_and_knows_the_table(env):
+    _request(env["inbox"], "shian_2026-10-14_10-00-00_001.db", [_row(), _row("artists", 10, "origin", "USA", None)])
+
+    [request] = pr.read_new_requests()
+
+    assert request.supported and request.unknown_tables == [] and request.dead_links == []
+    assert [(c.table_name, c.column_name, c.old_value, c.new_value) for c in request.field_corrections] == [
+        ("songs", "year", 2023, 2022), ("artists", "origin", "USA", None)]
+
+
+def test_missing_column_is_an_unreadable_file(env):
+    path = env["inbox"] / "new" / "2026-10-14_10-00-00_001.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript("CREATE TABLE request (format, created_at, user_name, app);"
+                       "INSERT INTO request VALUES (1, 'x', NULL, 'a');"
+                       "CREATE TABLE field_corrections (table_name, row_id);")
+    conn.close()
+
+    [request] = pr.read_new_requests()
+
+    assert "field_corrections lacks" in request.error
+
+
+# ==================== cases ====================
+
+def test_settles_what_needs_no_answer(env):
+    env["changes"].append((1, 9999, None))
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row(),                                                   # open
+        _row(row_id=4602, old=2023, new=2023),                    # already set
+        _row(row_id=9999, old=1999, new=2000),                    # song deleted
+        _row("artists", 77, "name", "Gone", "Gone!"),             # artist merged or deleted
+        _row("songs", 4601, "mood", "x", "y"),                    # not a correctable field
+    ])
+
+    _, cases = _cases(env)
+
+    assert sorted((c.table_name, c.row_id, c.status) for c in cases if c.row_id is not None) == [
+        ("artists", 77, fc.ROW_GONE), ("songs", 4601, fc.UNSUPPORTED), ("songs", 4601, fc.OPEN),
+        ("songs", 4602, fc.ALREADY_SET)]
+    assert [c.status for c in cases if c.row_id is None] == [fc.ROW_GONE]
+
+
+def test_follows_song_merges(env):
+    env["changes"].extend([(1, 500, 501), (2, 501, 4601)])
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db",
+             [_row(row_id=500, song_id=500, title="Chromatic (live)")])
+
+    [case] = _cases(env)[1]
+
+    assert case.row_id == 4601 and case.row is env["songs"][0] and case.status == fc.OPEN
+    assert case.title_differs
+
+
+def test_newest_correction_wins_and_repeats_are_one_case(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(new=2019, corrected_at="2026-10-01T09:00:00+02:00")])
+    _request(env["inbox"], "2026-10-13_10-00-00_001.db", [_row(new=2022, corrected_at="2026-10-01T11:00:00+02:00")])
+
+    [case] = _cases(env)[1]
+
+    assert len(case.reports) == 2
+    assert case.new_value == 2022 and case.earlier_values == [2019]
+
+
+def test_flags_changed_since_and_an_artist_no_longer_on_the_song(env):
+    env["songs"][0].year = 2021
+    env["songs"][0].artist = env["session"].get(Artist, 11)
+    env["session"].commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(), _row("artists", 10, "origin", "USA", "US")])
+
+    year, origin = _cases(env)[1]
+
+    assert year.changed_since and not origin.changed_since
+    assert origin.not_on_song and not year.not_on_song
+
+
+@pytest.mark.parametrize("table, column, value, expected, error", [
+    ("songs", "year", "1999", 1999, None),
+    ("songs", "year", 1999.0, 1999, None),
+    ("songs", "year", "199x", None, "whole number"),
+    ("songs", "title", "  ", None, "can't be empty"),
+    ("songs", "album", "  ", None, None),
+    ("albums", "type", "ep", "ep", None),
+    ("albums", "type", "LP", None, "isn't one of"),
+])
+def test_values_are_checked(table, column, value, expected, error):
+    stored, problem = fc.coerce_field_value(table, column, value)
+
+    assert stored == expected
+    assert (problem is None) if error is None else (error in problem)
+
+
+# ==================== answers ====================
+
+def test_accepting_changes_the_value_and_finishes_the_file(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row()])
+    requests, [case] = _cases(env)
+
+    fc.apply_field_correction(env["session"], case, fc.ACCEPT)
+    env["session"].commit()
+    moved, left = pr.finish_request_files(requests, [case])
+
+    assert env["songs"][0].year == 2022
+    assert len(moved) == 1 and left == []
+    decision = json.loads((env["inbox"] / "decisions.json").read_text())["field:songs:4601:year"]
+    assert decision["decision"] == fc.ACCEPT and decision["value"] == 2022
+
+
+def test_rejected_is_not_asked_again_unless_corrected_later(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(), _row(row_id=4602)])
+    requests, cases = _cases(env)
+    fc.apply_field_correction(env["session"], cases[0], fc.REJECT)
+    pr.finish_request_files(requests, cases)  # stays: the second row is unanswered
+
+    _, cases = _cases(env)
+    assert [c.status for c in cases] == [fc.ANSWERED_EARLIER, fc.OPEN]
+    assert env["songs"][0].year == 2023
+
+    _request(env["inbox"], "2099-01-01_00-00-00_001.db", [_row(new=2020, corrected_at="2099-01-01T00:00:00+00:00")])
+    _, cases = _cases(env)
+    assert [c.status for c in cases if c.row_id == 4601] == [fc.OPEN]
+
+
+def test_an_invalid_value_can_only_be_edited(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(new="two thousand")])
+    _, [case] = _cases(env)
+
+    assert case.error and case.status == fc.OPEN
+    with pytest.raises(ValueError):
+        fc.apply_field_correction(env["session"], case, fc.ACCEPT)
+    fc.apply_field_correction(env["session"], case, fc.EDIT, "2000")
+    assert env["songs"][0].year == 2000
+
+
+def test_song_album_moves_just_that_song(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(column="album", old="Unravel", new="Unravel (Deluxe)")])
+    _, [case] = _cases(env)
+    album = env["album"]
+
+    assert fc.song_album_to_rename(case) is album
+    fc.apply_field_correction(env["session"], case, fc.ACCEPT)
+    env["session"].commit()
+
+    first, second = env["songs"][:2]
+    assert first.album == "Unravel (Deluxe)" and first.album_entry is not album
+    assert second.album_entry is album and album.title == "Unravel"
+
+
+def test_song_album_can_rename_the_whole_album(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(column="album", old="Unravel", new="Unravel EP")])
+    _, [case] = _cases(env)
+    album = env["album"]
+
+    fc.apply_field_correction(env["session"], case, fc.RENAME_ALBUM)
+    env["session"].commit()
+
+    assert album.title == "Unravel EP"
+    assert [(s.album, s.album_entry) for s in env["songs"][:2]] == [("Unravel EP", album)] * 2
+
+
+def test_album_title_renames_its_songs_and_merges_a_twin(env):
+    s = env["session"]
+    album = env["album"]
+    twin = Album(title="Unravel EP", artist_id=10)
+    s.add(twin)
+    s.commit()
+    assert twin.id > album.id
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row("albums", album.id, "title", "Unravel", "Unravel EP")])
+    _, [case] = _cases(env)
+
+    assert fc.album_title_twin(s, case, "unravel ep") is twin
+    fc.apply_field_correction(s, case, fc.ACCEPT)
+    s.commit()
+
+    assert s.get(Album, twin.id) is None  # the older id is kept
+    assert album.title == "Unravel EP"
+    assert all(song.album == "Unravel EP" and song.album_entry is album for song in env["songs"][:2])
+
+
+def test_artist_name_twin_can_be_merged(env, monkeypatch):
+    from utils.database import database_management as dm
+    s = env["session"]
+    monkeypatch.setattr(dm, "get_global_database_sessions", lambda: (s, None))
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db",
+             [_row("artists", 11, "name", "Vulfpeck", "Elise trouw", song_id=4603, title="Dean Town")])
+    _, [case] = _cases(env)
+
+    [twin] = fc.artist_twins(s, case, case.new_value)
+    assert twin.id == 10
+    fc.apply_field_correction(s, case, fc.MERGE_ARTIST, twin)
+    s.commit()
+    s.expire_all()
+
+    assert s.get(Artist, 11) is None
+    assert s.get(Song, 4603).artist_id == 10
+
+
+def test_a_file_with_dead_links_and_corrections_waits_for_both(env):
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row()], extra_sql="""
+        CREATE TABLE dead_youtube_links (song_id, title, artist, dead_video_id, detected_at);
+        INSERT INTO dead_youtube_links VALUES (4602, 'Losing Sleep', 'Elise Trouw', 'dead1', '2026-10-14T09:00:00+02:00');
+    """)
+    requests = pr.read_new_requests()
+    dead = pr.collect_dead_link_cases(env["session"], requests)
+    [case] = fc.collect_field_correction_cases(env["session"], requests)
+
+    fc.apply_field_correction(env["session"], case, fc.ACCEPT)
+    moved, left = pr.finish_request_files(requests, dead + [case])
+
+    assert moved == [] and len(left) == 1
