@@ -13,7 +13,9 @@ from utils.database.song_artists import (
     set_additional_artist_role,
     song_artist_label,
 )
-from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT
+from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
+from utils.database.latin_names import latin_of
+from utils.ui.latin_forms_review import edit_latin_form
 import time
 
 def swap_title_and_artist(song: Song):
@@ -125,11 +127,24 @@ def edit_entry_menu(mode: str = None, db_object = None):
     displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
     swap_option = "Swap title and artist"
     extras_option = None
+    # Latin forms of names in another alphabet (utils/database/latin_names.py):
+    # menu label -> the Song / Artist / Album it sets
+    latin_options = {}
     if mode == "Song":
         extras = additional_artists(db_object)
         extras_label = ", ".join(f"{a.name} ({additional_artist_role(db_object, a)})" for a in extras) or "—"
         extras_option = f"additional artists ({extras_label})"
         displayed_list.append(extras_option)
+        latin_options[f"title in Latin letters ({latin_of(db_object) or '—'})"] = db_object
+        latin_options[f"artist name in Latin letters ({latin_of(db_object.artist) or '—'})"] = db_object.artist
+        album = db_object.album_entry
+        # A "Singles" album copies the song's own form
+        if album is not None and album.type != ALBUM_TYPE_SINGLE:
+            latin_options[f"album title in Latin letters ({latin_of(album) or '—'})"] = album
+    else:
+        latin_options[f"name in Latin letters ({latin_of(db_object) or '—'})"] = db_object
+    displayed_list.extend(latin_options)
+    if mode == "Song":
         displayed_list.append(swap_option)
     delete_option = "Delete from database"
     displayed_list.append(delete_option)
@@ -144,6 +159,9 @@ def edit_entry_menu(mode: str = None, db_object = None):
         return
     if choice == extras_option:
         edit_additional_artists_menu(db_object)
+        return
+    if choice in latin_options:
+        edit_latin_form(latin_options[choice])
         return
     if choice == delete_option:
         label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
@@ -169,6 +187,9 @@ def edit_entry_menu(mode: str = None, db_object = None):
         slog(db_object.artist.id)
     edit_db_entry(db_object, category, new_data)
     submit_global_database_session()
+    renamed = {song_categories[0]: db_object, artist_categories[0]: getattr(db_object, "artist", db_object)}.get(category)
+    if renamed is not None and latin_of(renamed):
+        print(f'Its Latin form "{latin_of(renamed)}" stays as it is - change it here if it no longer fits.')
             
 
 def remove_song_menu(mode: str = None):

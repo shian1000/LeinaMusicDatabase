@@ -18,6 +18,7 @@ class Artist(Base):
     name = Column(String, nullable=False)
     origin = Column(String)
     synonyms = Column(String)
+    name_latin = Column(String)  # Latin form of a non-Latin name (migration 0011), see latin_names.py
 
     songs = relationship("Song", back_populates="artist")
     albums = relationship("Album", back_populates="artist")
@@ -34,6 +35,7 @@ class Song(Base):
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
+    title_latin = Column(String)  # Latin form of a non-Latin title (migration 0011)
     album = Column(String)   # NEW
     year = Column(Integer)
     language = Column(String)
@@ -91,6 +93,7 @@ class Album(Base):
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
+    title_latin = Column(String)  # Latin form of a non-Latin title (migration 0011)
     artist_id = Column(Integer, ForeignKey("artists.id"), index=True)  # NULL = various artists
     year = Column(Integer)
     type = Column(String)  # ALBUM_TYPES in constants.py, NULL = not known

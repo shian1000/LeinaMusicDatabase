@@ -299,3 +299,49 @@ def test_a_file_with_dead_links_and_corrections_waits_for_both(env):
     moved, left = pr.finish_request_files(requests, dead + [case])
 
     assert moved == [] and len(left) == 1
+
+
+# ==================== Latin forms ====================
+
+def test_latin_forms_are_correctable_and_can_be_emptied(env):
+    album = env["album"]
+    album.title_latin = "Old form"
+    env["session"].commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        # sent before music.db had the columns: old_value NULL
+        _row("songs", 4601, "title_latin", None, "  Chromatic (Latin) "),
+        _row("artists", 10, "name_latin", None, "Elise"),
+        _row("albums", album.id, "title_latin", "Old form", ""),
+    ])
+    requests, cases = _cases(env)
+
+    assert [c.status for c in cases] == [fc.OPEN] * 3
+    assert not any(c.changed_since for c in cases)
+    assert [c.label for c in cases] == [
+        "song title in Latin letters", "artist's name in Latin letters", "album title in Latin letters"]
+    for case in cases:
+        fc.apply_field_correction(env["session"], case, fc.ACCEPT)
+    env["session"].commit()
+
+    assert env["songs"][0].title_latin == "Chromatic (Latin)"
+    assert env["session"].get(Artist, 10).name_latin == "Elise"
+    assert album.title_latin is None
+    moved, left = pr.finish_request_files(requests, cases)
+    assert len(moved) == 1 and left == []
+
+
+def test_a_renamed_row_points_at_its_latin_form(env):
+    env["songs"][0].title_latin = "Khromatik"
+    env["session"].commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row("songs", 4601, "title", "Chromatic", "Chromatica"),
+        _row("songs", 4602, "title", "Losing Sleep", "Losing Sleep!"),  # no form: nothing to point at
+    ])
+    _, [with_form, without] = _cases(env)
+
+    assert fc.latin_form_to_check(with_form, with_form.new_value) == "Khromatik"
+    assert fc.latin_form_to_check(with_form, "Chromatic") is None  # unchanged value
+    assert fc.latin_form_to_check(without, without.new_value) is None
+
+    fc.apply_field_correction(env["session"], with_form, fc.ACCEPT)
+    assert env["songs"][0].title_latin == "Khromatik"  # kept as it was

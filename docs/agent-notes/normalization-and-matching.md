@@ -30,7 +30,16 @@ this looser path. Years and album lookups also get one extra search stage with
 rest of the entry (artist, other titles) has Cyrillic, and search engines
 tolerate the rest ("НєФормат"). The scope was deliberately narrowed: Cyrillic,
 Greek, Georgian, Hangul and kana are covered without new dependencies.
-Kanji/hanzi (pykakasi/pypinyin) and Arabic wait for a first real case. `name_key()` is one such extension: an artist-name key for exact-equality
+Kanji/hanzi (pykakasi/pypinyin) and Arabic wait for a first real case.
+The owner's stored Latin forms (`title_latin` / `name_latin`, `latin_names.py`) are a separate,
+exact layer on top: search and matching treat them as one more name, no key involved. Their
+*suggestions* come from `romanize.suggest_latin()`, which is a different tool from
+`matching_key()` on purpose: it aims at what a person would write (scheme per language, case
+kept, "Alyona" not "alona"), so it can't serve as a comparison key, and `matching_key()`'s folds
+make it unfit to show. Its Cyrillic language guess goes language field → letters only one
+alphabet has (ў / жы-шэ pairs = Belarusian, ї є ґ = Ukrainian, і with ы/э/ё = Belarusian, і with
+и/щ = Ukrainian) → artist origin → і alone Ukrainian, else Russian. Bare "і without и" was tried
+as a Belarusian signal and misread Ukrainian titles ("Зелені очі"). `name_key()` is one such extension: an artist-name key for exact-equality
 checks ("The S.O.S. Band" == "SOS Band"), see `discovery-modules.md`.
 
 Invisible format characters (Unicode category `Cf`: zero-width space U+200B,

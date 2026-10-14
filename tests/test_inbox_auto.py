@@ -217,6 +217,29 @@ def test_correction_left_for_review_with_a_note(env, name, row, note):
     assert note in cases[0].auto_note
 
 
+def test_latin_form_correction_from_a_permitted_user_is_saved(env):
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db",
+             corrections=[("artists", 10, "name_latin", None, "Eliza Trou", 1, "Chromatic")])
+
+    _run(env)
+
+    assert env["session"].get(Artist, 10).name_latin == "Eliza Trou"
+
+
+def test_renaming_a_row_with_a_latin_form_is_left_for_review(env):
+    env["songs"][0].title_latin = "Khromatik"
+    env["session"].commit()
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db",
+             corrections=[("songs", 1, "title", "Chromatic", "Chromatica", 1, "Chromatic")])
+
+    result = _run(env)
+
+    assert result.changes == [] and env["songs"][0].title == "Chromatic"
+    cases = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
+    pr.load_case_checks(cases, max_age_hours=24)
+    assert "Latin form" in cases[0].auto_note
+
+
 def test_conflicting_reports_are_left_for_review(env):
     _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db", corrections=[_year(new=2020)])
     _request(env["inbox"], "ania_2026-10-14_10-00-00_002.db", corrections=[_year(new=2021)])

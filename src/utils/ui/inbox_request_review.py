@@ -30,12 +30,15 @@ from utils.database.inbox_field_corrections import (
     artist_twins,
     coerce_field_value,
     collect_field_correction_cases,
+    latin_form_to_check,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
+from utils.database.latin_names import LATIN_COLUMNS, name_of
 from utils.database.song_artists import count_artist_songs, song_artist_label
+from utils.common.romanize import suggest_latin
 from utils.database.inbox_requests import (
     INBOX_DIR,
     KEEP,
@@ -273,6 +276,11 @@ def _show_correction(session, case, position: str) -> None:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
         print(f"    [red]The request showed it as[/red] {escape(shown)}")
     print(f"    Field:           {case.label}  [dim]({_row_label(session, case)})[/dim]")
+    if case.row is not None and case.column_name == LATIN_COLUMNS[type(case.row)][1]:
+        name = name_of(case.row)
+        suggestion = suggest_latin(name, getattr(case.row, "language", None))
+        hint = f"  [dim](suggested: {escape(suggestion)})[/dim]" if suggestion else ""
+        print(f"    Written as:      {escape(name)}{hint}")
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
         print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
@@ -294,6 +302,10 @@ def _value_notes(session, case, value) -> list:
     for twin in artist_twins(session, case, value):
         notes.append(f'[yellow]Another artist is already called "{escape(twin.name)}" (#{twin.id}, '
                      f"{count_artist_songs(session, twin.id)} song(s)) - the same artist spelt twice?[/yellow]")
+    latin = latin_form_to_check(case, value)
+    if latin:
+        notes.append(f'[yellow]Its Latin form "{escape(latin)}" stays as it is - change it in the editor '
+                     f"if it no longer fits.[/yellow]")
     twin = album_title_twin(session, case, value)
     if twin is not None:
         notes.append(f'[yellow]The artist already has an album "{escape(twin.title)}" (#{twin.id}) - '

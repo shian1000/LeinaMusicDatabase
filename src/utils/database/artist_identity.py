@@ -16,6 +16,7 @@ from utils.common.text_utils import resembles_across_scripts, similarity
 from utils.database.albums import reassign_artist_albums
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.datatables import Artist, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import count_artist_songs, reassign_additional_artist_links
 
 # Cyrillic letters drawn like Latin ones, for a name typed with one of them by
@@ -31,7 +32,7 @@ _JOINING_WORDS = {"i", "and", "&", "x", "feat", "feat.", "ft", "ft.", "featuring
 
 
 def _synonyms(artist: Artist) -> list[str]:
-    return [s.strip() for s in (artist.synonyms or "").split(",") if s.strip()]
+    return [s.strip() for s in (artist_match_synonyms(artist) or "").split(",") if s.strip()]
 
 
 def _fix_lookalikes(name: str) -> str:

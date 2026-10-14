@@ -128,6 +128,14 @@ non-trivial work in that area.
   coordinate schema or sentinel changes with the app
   ([ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md)). The service also lives outside
   the repo, so record changes to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
+  `latin_names.py` — Latin forms of names in other alphabets (`songs.title_latin`,
+  `artists.name_latin`, `albums.title_latin`, migration 0011; "Кино" → "Kino"), which Leina Radio
+  shows as "Кино (Kino)" and sends as field corrections. Only the owner writes them (song/artist
+  editor, Manage database → "Fill in Latin forms of names in other alphabets" =
+  `utils/ui/latin_forms_review.py`, or a reviewed correction); suggestions come from
+  `utils/common/romanize.py`. Search treats them as names, matching as synonyms / second titles:
+  code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
+  `artist.synonyms`. Details: `docs/data-model.md`.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
@@ -238,6 +246,11 @@ non-trivial work in that area.
   query a Cyrillic spelling for one more search when the rest of the entry is Cyrillic. Separate
   from `utils/youtube/transliteration.py`, the precise Belarusian Lacinka used for YouTube search.
   `docs/agent-notes/normalization-and-matching.md`.
+- `src/utils/common/romanize.py` — `suggest_latin()`: a readable Latin form to *offer* for a
+  name (English-style Russian "Alyona"/"Zhuki", Ukrainian national system, Belarusian Lacinka
+  via `transliteration.py`, Serbian Latin, Greek, Georgian, Hangul, Hepburn kana; kanji/Arabic →
+  None). Never stored without the owner accepting it. Not a matching key — that's
+  `script_utils.matching_key()`.
 - `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
   scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
 - `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):
@@ -314,7 +327,8 @@ non-trivial work in that area.
   its cover cache on album ids, so they must stay stable (merge, never renumber). It also still
   reads `songs.album`, so that text column stays filled until the user says the app has moved to
   `album_id`. It also reads `bad_youtube_videos` (`song_id` NULL = bad for every song, else
-  wrong for that song; `reason` codes from `constants.BAD_VIDEO_REASONS`, only shown there).
+  wrong for that song; `reason` codes from `constants.BAD_VIDEO_REASONS`, only shown there), and
+  the Latin forms `songs.title_latin` / `artists.name_latin` / `albums.title_latin`.
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →

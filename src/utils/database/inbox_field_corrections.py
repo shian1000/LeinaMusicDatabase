@@ -22,6 +22,10 @@ Applying is an ordinary edit through the ORM, so the album listener does
 what it does after any edit: a corrected songs.album moves the song to the
 album row of the new name (or the owner renames the whole album instead,
 rename_album()), and a corrected albums.title retitles its songs' album text.
+Latin forms (title_latin / name_latin, utils/database/latin_names.py) are
+plain text fields; a one-song "Singles" album copies its song's form through
+the same listener. A renamed title or name keeps its Latin form -
+latin_form_to_check() lets the review point at it.
 """
 
 from dataclasses import dataclass, field
@@ -41,6 +45,7 @@ from utils.database.inbox_requests import (
     resolve_song_id,
     save_decision,
 )
+from utils.database.latin_names import LATIN_COLUMNS, latin_of
 from utils.database.song_artists import song_all_artists
 from utils.database.song_references import load_changes
 
@@ -54,30 +59,36 @@ ALBUM_TYPE = "album type"
 # Nothing else is ever sent; anything else is kept for a later version.
 FIELDS = {
     ("songs", "title"): (TEXT, False),
+    ("songs", "title_latin"): (TEXT, True),
     ("songs", "album"): (TEXT, True),
     ("songs", "language"): (TEXT, True),
     ("songs", "year"): (INTEGER, True),
     ("songs", "track_number"): (INTEGER, True),
     ("songs", "disc_number"): (INTEGER, True),
     ("artists", "name"): (TEXT, False),
+    ("artists", "name_latin"): (TEXT, True),
     ("artists", "origin"): (TEXT, True),
     ("artists", "synonyms"): (TEXT, True),
     ("albums", "title"): (TEXT, False),
+    ("albums", "title_latin"): (TEXT, True),
     ("albums", "year"): (INTEGER, True),
     ("albums", "type"): (ALBUM_TYPE, True),
 }
 
 FIELD_LABELS = {
     ("songs", "title"): "title",
+    ("songs", "title_latin"): "song title in Latin letters",
     ("songs", "album"): "album",
     ("songs", "language"): "language",
     ("songs", "year"): "year",
     ("songs", "track_number"): "track number",
     ("songs", "disc_number"): "disc number",
     ("artists", "name"): "artist's name",
+    ("artists", "name_latin"): "artist's name in Latin letters",
     ("artists", "origin"): "artist's origin",
     ("artists", "synonyms"): "artist's synonyms",
     ("albums", "title"): "album's title",
+    ("albums", "title_latin"): "album title in Latin letters",
     ("albums", "year"): "album's year",
     ("albums", "type"): "album's type",
 }
@@ -286,6 +297,16 @@ def album_title_twin(session, case: FieldCorrectionCase, title) -> Album | None:
     if case.table_name != "albums" or case.column_name != "title" or not title:
         return None
     return album_twin(session, case.row, title)
+
+
+def latin_form_to_check(case: FieldCorrectionCase, value) -> str | None:
+    """For a title / name correction: the row's Latin form, which stays as
+    it is - the owner may want to change it too. None when there's none."""
+    if case.row is None or case.column_name not in ("title", "name") or value is None:
+        return None
+    if same_value(case.current, value):
+        return None
+    return latin_of(case.row) if type(case.row) in LATIN_COLUMNS else None
 
 
 def song_album_to_rename(case: FieldCorrectionCase) -> Album | None:

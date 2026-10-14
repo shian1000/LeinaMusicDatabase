@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import datetime
 
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
+from utils.database.latin_names import artist_match_synonyms
 
 
 CACHE_FILE = Path("yt_playlist_cache.json")
@@ -42,7 +43,8 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
             # "A x B" for a multi-artist song - what YouTube gets queried with
             "artist": song_main_artist_label(song),
             "title": title,
-            "synonyms": song.artist.synonyms,
+            "title_latin": getattr(song, "title_latin", None),  # retried after the title, see search_video()
+            "synonyms": artist_match_synonyms(song.artist),  # Latin form included
             "language": song.language,
             # None for a single-artist song; see song_artist_credits()
             "credits": song_artist_credits(song),

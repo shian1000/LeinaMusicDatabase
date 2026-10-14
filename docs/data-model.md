@@ -17,8 +17,9 @@ Artist                          Song
 ------                          ----
 id            PK                id             PK
 name          NOT NULL          title          NOT NULL
-origin                          album
-synonyms                        year
+origin                          title_latin    (migration 0011)
+synonyms                        album
+name_latin    (migration 0011)  year
                                  language
                                  artist_id      FK -> Artist.id, NOT NULL
                                  nostalgic
@@ -34,6 +35,7 @@ Album  (table albums, migration 0005)    AlbumCover  (table album_covers, migrat
 -----                                    ----------
 id            PK                         album_id    PK, FK -> Album.id
 title         NOT NULL                   source      PK, 'file'|'itunes'|'deezer'|'musicbrainz'|'youtube'|'manual'
+title_latin   (migration 0011)           (see below)
 artist_id     FK -> Artist.id, NULL =    url         remote sources
               various artists            path        'file'/'manual': relative to <database_dir>/covers/
 year                                     width, height, bytes
@@ -58,6 +60,18 @@ role          NOT NULL, 'main' | 'feat'
 - `Artist.synonyms` — comma-separated alternate names for the same artist (e.g. a fan channel using
   a translated name). Consumed by the YouTube matching layer; see
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
+- Latin forms (migration 0011): `songs.title_latin`, `artists.name_latin`, `albums.title_latin` —
+  the owner's Latin spelling of a name in another alphabet ("Кино" → "Kino"), free text, NULL =
+  none. Leina Radio shows them as "Кино (Kino)" (album via `songs.album_id`; `songs.album` has no
+  column) and sends them as field corrections. Written only by the owner: the song editor, Manage
+  database → "Fill in Latin forms of names in other alphabets" (a checkbox list of suggestions
+  from `utils/common/romanize.py`, then the rest typed one by one), or a reviewed correction.
+  Search counts them like a name (`database_getter`, `artist_name_or_synonym_contains()`),
+  matching like a synonym (`latin_names.artist_match_synonyms()`) or a second title
+  (`find_existing_song()`, the YouTube retry `title_latin`). Merges keep the kept row's form, else
+  the other's (`merge_artist_synonyms()`, `merge_albums()`, song dedup); a rename keeps it and the
+  review/editor point at it. A one-song "Singles" album copies its song's form. Rules:
+  `utils/database/latin_names.py`.
 - `Song.nostalgic` / `melancholic` / `party` — integer mood flags, set through the terminal UI.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.
 - Multi-artist songs: `Song.artist_id` is always the **primary** artist; each extra one is a row in
@@ -224,8 +238,8 @@ with `music.db` / `tag.db`.
   filename) as a fallback; `duration_s`; `indexed_at` (UTC). Several files may share a song.
 - `match_source`: `auto` rows without a song are matched again (`LocalSongMatcher`, local only);
   `manual` rows are never touched by a scan. Nothing sets `manual` yet.
-- `index_state` (key/value): `catalog_fingerprint`, a hash of artist names/synonyms and song
-  titles. Old unmatched files are rematched only when it changes (~45 s for ~700 files, because
+- `index_state` (key/value): `catalog_fingerprint`, a hash of artist names/Latin forms/synonyms
+  and song titles (with their Latin forms). Old unmatched files are rematched only when it changes (~45 s for ~700 files, because
   the shared artist search reloads every artist per lookup); new or changed files always are.
 - `applied_song_changes`: the replay cursor, as in tag.db.
 

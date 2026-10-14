@@ -183,6 +183,7 @@ def _link_single(session, song: Song) -> None:
         session.add(album)
         song.album_entry = album
     album.title = song.title
+    album.title_latin = song.title_latin
     album.year = song.year
     if _artist_key(album) != _artist_key(song):
         _set_album_artist(session, album, _artist_key(song))
@@ -266,7 +267,7 @@ def _keeps_current_album(song: Song, index: _AlbumIndex) -> bool:
 
 
 _ALBUM_ATTRS = ("album", "artist_id", "artist")
-_SINGLE_ATTRS = ("title", "year")
+_SINGLE_ATTRS = ("title", "title_latin", "year")
 
 
 def _changed(song: Song, attrs) -> bool:
@@ -487,10 +488,11 @@ def unlink_songs(session, songs: list[Song]) -> None:
 def merge_albums(session, keep: Album, drop: Album) -> None:
     """Move everything of `drop` onto `keep` and delete `drop`: its songs,
     any cover source `keep` lacks (the image file is renamed to keep's id),
-    and external ids / year `keep` doesn't have. Caller commits."""
+    and the Latin form, external ids and year `keep` doesn't have. Caller
+    commits."""
     for song in list(drop.songs):
         song.album_entry = keep
-    for attr in ("year", "musicbrainz_release_group_id", "itunes_collection_id",
+    for attr in ("title_latin", "year", "musicbrainz_release_group_id", "itunes_collection_id",
                  "deezer_album_id", "spotify_album_id"):
         if getattr(keep, attr) is None and getattr(drop, attr) is not None:
             setattr(keep, attr, getattr(drop, attr))
@@ -556,8 +558,9 @@ def artist_has_album(artist_name: str, title: str) -> bool:
         return False
     with get_music_session() as session:
         artist_ids = [
-            artist_id for artist_id, name, synonyms in session.execute(select(Artist.id, Artist.name, Artist.synonyms))
-            if artist_norm in {normalize(n) for n in [name, *(synonyms or "").split(",")] if n and n.strip()}
+            artist_id for artist_id, name, name_latin, synonyms
+            in session.execute(select(Artist.id, Artist.name, Artist.name_latin, Artist.synonyms))
+            if artist_norm in {normalize(n) for n in [name, name_latin, *(synonyms or "").split(",")] if n and n.strip()}
         ]
         if not artist_ids:
             return False

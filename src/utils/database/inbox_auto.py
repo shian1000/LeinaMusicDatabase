@@ -42,6 +42,7 @@ from utils.database.inbox_field_corrections import (
     apply_field_correction,
     artist_twins,
     collect_field_correction_cases,
+    latin_form_to_check,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import (
@@ -135,6 +136,8 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
         return "the artist already has an album of that title (saving merges the two)"
     if song_album_to_rename(case) is not None:
         return "its whole album could be renamed instead"
+    if latin_form_to_check(case, case.new_value):
+        return "it has a Latin form that may need changing too"
     return None
 
 

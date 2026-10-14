@@ -595,7 +595,13 @@ transliteration scheme), not an arbitrary alias.
 `transliteration.py`'s `TRANSLITERABLE_LANGUAGES` registry (keyed by the `songs.language` column,
 lowercased) maps a language to a `to_latin`/`to_native` function pair; currently only
 `"belarusian"` is registered (`belarusian_to_latin()` / `latin_to_belarusian()`, an
-Instruction-2000-style Cyrillic↔Lacinka table). `transliterate(title, language)` picks the
+Instruction-2000-style Cyrillic↔Lacinka table). For every other language the per-song escape
+hatch does exist after all: the owner's `songs.title_latin` (migration 0011, see
+`utils/database/latin_names.py`). `_alternative_titles()` retries with the transliteration first,
+then `title_latin` (passed through `search_video()` / `search_video_ytdlp()`'s `title_latin`, the
+playlist cache entry and the inbox check); an official hit on any retry wins, otherwise the first
+pick found is kept. Artists get the same treatment: `artist_match_synonyms()` puts `name_latin`
+first in the synonyms string every matcher receives. `transliterate(title, language)` picks the
 direction automatically by detecting which script `title` is already in. The letter-level rules
 have real, non-obvious phonological gotchas — regressive softness assimilation cascades *backward*
 through a whole consonant cluster to whatever я/е/ё/ю/і/ь follows it (`сне` → `śnie`, `смерць` →

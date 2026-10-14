@@ -4,7 +4,7 @@ from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
 from sqlalchemy import func, inspect, or_, select
 from sqlalchemy.orm import selectinload
 import os
-from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist
+from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist, Album
 import time
 from utils.common.debug import mlog, slog
 from utils.common.text_utils import is_soundtrack_artist, normalize_text
@@ -25,8 +25,11 @@ class SongSearchFilters:
 
     @staticmethod
     def title(query: str):
-        """Filter songs by title containing the query."""
-        return func.lower(Song.title).contains(query.lower())
+        """Filter songs by title or its Latin form containing the query."""
+        return or_(
+            func.lower(Song.title).contains(query.lower()),
+            func.lower(func.coalesce(Song.title_latin, "")).contains(query.lower()),
+        )
 
     @staticmethod
     def artist_name(query: str):
@@ -38,8 +41,13 @@ class SongSearchFilters:
 
     @staticmethod
     def album(query: str):
-        """Filter songs by album name containing the query."""
-        return func.lower(Song.album).contains(query.lower())
+        """Filter songs by album name, or its album row's Latin form, containing the query."""
+        return or_(
+            func.lower(Song.album).contains(query.lower()),
+            Song.album_id.in_(
+                select(Album.id).where(func.lower(func.coalesce(Album.title_latin, "")).contains(query.lower()))
+            ),
+        )
 
     @staticmethod
     def year(query: str):
@@ -63,9 +71,9 @@ class SongSearchFilters:
 
     @staticmethod
     def general_search(query: str):
-        """Search in title and artist name or synonym (general search)."""
+        """Search in title (or its Latin form) and artist name or synonym (general search)."""
         return or_(
-            func.lower(Song.title).contains(query.lower()),
+            SongSearchFilters.title(query),
             artist_name_or_synonym_contains(Artist, query),
             additional_artist_name_contains(query),
         )
@@ -90,7 +98,11 @@ _EAGER_ADDITIONAL_ARTISTS = selectinload(Song.additional_artist_links).selectinl
 
 
 def _artist_name_and_synonyms(artist: Artist) -> str:
-    return normalize_text(f"{artist.name or ''} {artist.synonyms or ''}")
+    return normalize_text(f"{artist.name or ''} {artist.name_latin or ''} {artist.synonyms or ''}")
+
+
+def _title_and_latin(song: Song) -> str:
+    return normalize_text(f"{song.title or ''} {song.title_latin or ''}")
 
 
 def _all_artist_names(song: Song) -> str:
@@ -103,8 +115,8 @@ class SongNormalizedFields:
 
     @staticmethod
     def title(song: Song) -> str:
-        """Extract and normalize song title."""
-        return normalize_text(song.title or "")
+        """Extract and normalize song title and its Latin form."""
+        return _title_and_latin(song)
 
     @staticmethod
     def artist_name(song: Song) -> str:
@@ -113,8 +125,9 @@ class SongNormalizedFields:
 
     @staticmethod
     def album(song: Song) -> str:
-        """Extract and normalize album name."""
-        return normalize_text(song.album or "")
+        """Extract and normalize album name and its album row's Latin form."""
+        latin = song.album_entry.title_latin if song.album_entry is not None else None
+        return normalize_text(f"{song.album or ''} {latin or ''}")
 
     @staticmethod
     def year(song: Song) -> str:
@@ -139,10 +152,7 @@ class SongNormalizedFields:
     @staticmethod
     def general_search(song: Song) -> str:
         """Combine title and artist name for general search."""
-        return (
-            f"{normalize_text(song.title or '')} "
-            f"{_all_artist_names(song)}"
-        )
+        return f"{_title_and_latin(song)} {_all_artist_names(song)}"
 
 
 # Map categories to their corresponding field extraction functions
@@ -403,6 +413,8 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     # Python fallback for difficult characters - requires loading the db into the memory
     slog("Falling back to Python-side normalized filtering")
     get_field = CATEGORY_NORMALIZED_FIELDS[category]
+    if category == song_categories[2]:
+        base_query = base_query.options(selectinload(Song.album_entry))
     candidates = base_query.all()
     filtered = _normalized_python_filter(candidates, words, get_field)
 

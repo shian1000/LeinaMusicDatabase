@@ -7,6 +7,7 @@ from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
+from utils.database.latin_names import artist_match_synonyms, keep_latin_on_merge
 from utils.database.song_references import apply_song_id_changes, record_song_merge
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
@@ -43,7 +44,9 @@ def remove_duplicate_songs():
 
     for song in duplicates:
         # Its tags, and users' playlist entries, move to the song kept
-        record_song_merge(session, song.id, seen[(song.artist_id, song.title.lower())].id)
+        kept = seen[(song.artist_id, song.title.lower())]
+        keep_latin_on_merge(kept, song)
+        record_song_merge(session, song.id, kept.id)
         session.delete(song)
 
     session.commit()
@@ -91,7 +94,7 @@ def remove_duplicate_artists():
     for artist in all_artists:
         if artist.id in already_flagged_ids:
             continue
-        for synonym in _parse_synonyms(artist.synonyms):
+        for synonym in _parse_synonyms(artist_match_synonyms(artist)):
             match = seen.get(_artist_key(synonym.strip()))
             if match and match.id != artist.id and match.id not in already_flagged_ids:
                 duplicates.append((artist, match))

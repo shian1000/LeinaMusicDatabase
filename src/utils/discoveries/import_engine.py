@@ -9,6 +9,7 @@ from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix
 from utils.database.artist_splitting import propose_artist_split
+from utils.database.latin_names import song_titles
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
@@ -189,6 +190,12 @@ def _match_artist_locally(name: str) -> tuple:
     ).all()
     if candidates:
         return candidates[0], True
+    # The owner's Latin form of a name in another alphabet: "Kino" is "Кино"
+    candidates = music_session.query(Artist).filter(
+        func.lower(Artist.name_latin) == name.lower()
+    ).order_by(Artist.id).all()
+    if candidates:
+        return candidates[0], True
 
     existing_artists = get_artists_from_db_session(artist_categories[0], normalize(name))
     if not existing_artists:
@@ -204,9 +211,9 @@ def _match_artist_locally(name: str) -> tuple:
     filtered_candidates = (filtered_candidates or existing_artists)[:50]  # Cap at 50 candidates
 
     for similar_artist in filtered_candidates:
-        similarity_percent = similarity(name, similar_artist.name)
-        if similarity_percent > scaled_similarity_threshold(name, similar_artist.name, SPELLING_CHECK_THRESHOLD):
-            return similar_artist, True
+        for known in filter(None, (similar_artist.name, getattr(similar_artist, "name_latin", None))):
+            if similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD):
+                return similar_artist, True
 
     return None, True
 
@@ -317,11 +324,14 @@ def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
 
 def find_existing_song(title: str, artist_songs: list) -> Song | None:
     """The song among one artist's `artist_songs` that `title` already is:
-    same normalized title, else the first whose title contains it ("Song"
-    vs "Song (Remastered)"). Shared by resolve_song() and the cover import
+    same normalized title (or the owner's Latin form of it: "Gruppa krovi"
+    is "Группа крови"), else the first whose title contains it ("Song" vs
+    "Song (Remastered)"). Shared by resolve_song() and the cover import
     (utils/discoveries/mp3_covers.py)."""
     key = normalize(title)
     exact = next((s for s in artist_songs if normalize(s.title) == key), None)
+    if exact is None and key:
+        exact = next((s for s in artist_songs if normalize(getattr(s, "title_latin", None) or "") == key), None)
     if exact is not None:
         return exact
     return next((s for s in artist_songs if key in normalize(s.title)), None)
@@ -372,7 +382,7 @@ class LocalSongMatcher:
         songs = self._songs[artist.id]
         song = find_existing_song(title, songs)
         if song is None and (core := _title_core(title)):
-            song = next((s for s in songs if _title_core(s.title) == core), None)
+            song = next((s for s in songs if core in map(_title_core, song_titles(s))), None)
         return song
 
 
@@ -386,12 +396,10 @@ def find_songs_by_title(session, title: str, limit: int = 15) -> list:
         return []
     exact, partial = [], []
     for song in session.query(Song).all():
-        candidate = _title_core(song.title)
-        if not candidate:
-            continue
-        if candidate == core:
+        candidates = [c for c in map(_title_core, song_titles(song)) if c]
+        if core in candidates:
             exact.append(song)
-        elif min(len(candidate), len(core)) >= 4 and (core in candidate or candidate in core):
+        elif any(min(len(c), len(core)) >= 4 and (core in c or c in core) for c in candidates):
             partial.append(song)
     by_label = lambda s: (s.artist.name.lower(), s.title.lower())
     return (sorted(exact, key=by_label) + sorted(partial, key=by_label))[:limit]

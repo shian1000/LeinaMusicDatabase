@@ -17,6 +17,7 @@ from utils.youtube.manage_youtube_playlists import (
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
+from utils.database.latin_names import artist_match_synonyms
 from utils.common.text_utils import strip_trailing_junk_suffix
 
 # What YouTube reports as the title for a playlist entry that's no longer
@@ -949,7 +950,7 @@ def _resolve_artist_synonyms(metadata_list: list) -> None:
     """
     synonym_to_canonical = {}
     for artist in get_artists_from_db_session():
-        for synonym in _parse_synonyms(artist.synonyms):
+        for synonym in _parse_synonyms(artist_match_synonyms(artist)):
             synonym_to_canonical[synonym.strip().lower()] = artist.name
 
     if not synonym_to_canonical:

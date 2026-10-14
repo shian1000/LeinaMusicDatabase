@@ -15,6 +15,7 @@ from utils.discoveries.discoveries_manager import (
 )
 from utils.common.text_utils import copy_to_clipboard
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
+from utils.database.latin_names import artist_match_synonyms
 from config.constants import SINGLES_ALBUM, MANUAL_YEAR_SAMPLE_SONGS
 from utils.common.normalizer import compare, normalize
 from utils.common.script_utils import cyrillic_search_variant
@@ -92,7 +93,7 @@ def fill_missing_years():
             print(f"Checking release year for \033[93m{label}\033[0m")
             result = (release_year_from_stored_link(songs)
                       or discover_release_year_result(
-                          artist_name, album_name, False, modules, songs[0].artist.synonyms,
+                          artist_name, album_name, False, modules, artist_match_synonyms(songs[0].artist),
                           alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
                           album_songs=songs,
                       ))
@@ -104,7 +105,7 @@ def fill_missing_years():
             print(f"Checking release year for single \033[93m{label}\033[0m")
             result = (release_year_from_stored_link([song])
                       or discover_release_year_result(
-                          song.artist.name, song.title, True, modules, song.artist.synonyms, song=song,
+                          song.artist.name, song.title, True, modules, artist_match_synonyms(song.artist), song=song,
                           alt_script_query=cyrillic_search_variant(song.title, [song.artist.name, song.album]),
                       ))
             _collect(label, result, [song], results, review_results)

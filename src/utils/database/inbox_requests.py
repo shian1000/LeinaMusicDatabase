@@ -72,6 +72,7 @@ from settings import Settings
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
 from utils.database.datatables import BadYoutubeVideo, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.song_references import load_changes
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
@@ -647,8 +648,8 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
         try:
             found = search_video_ytdlp(
                 song_main_artist_label(song), song.title,
-                artist_synonyms=song.artist.synonyms, language=song.language,
-                artist_credits=song_artist_credits(song),
+                artist_synonyms=artist_match_synonyms(song.artist), language=song.language,
+                artist_credits=song_artist_credits(song), title_latin=song.title_latin,
             )
         except Exception as exc:
             flog(f"Search for inbox request {song.artist.name} - {song.title} failed: {exc}")

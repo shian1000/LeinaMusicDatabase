@@ -233,7 +233,12 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   older id, kept) and always rewrites the songs' `album` text; an `artists.name` that is another
   artist's name offers merging into it (`merge_artists_in_db()`). A value that can't be stored
   (not a number, an unknown album type, an empty title) can only be edited. Applied through the
-  ORM, so the album listener does what it does after any edit.
+  ORM, so the album listener does what it does after any edit. Latin forms (`songs.title_latin`,
+  `artists.name_latin`, `albums.title_latin`, 2026-10-14, app handoff
+  `musicdatabase-latin-names.md`, answer [`docs/handoffs/latin-names-for-musicdatabaseapp.md`](../handoffs/latin-names-for-musicdatabaseapp.md))
+  are plain text fields; the review shows the name and a suggestion next to them. A title / name
+  correction on a row that has a Latin form is flagged (the form stays), and the automatic pass
+  leaves it for review.
 - For `found_youtube_links` (2026-10-14, `utils/database/inbox_found_links.py`, app handoff
   `musicdatabase-found-youtube-links.md`, answer [`docs/handoffs/found-links-for-musicdatabaseapp.md`](../handoffs/found-links-for-musicdatabaseapp.md)):
   a video Leina Radio found and plays for a song music.db has no link for (NULL or `""`, not "N/A").

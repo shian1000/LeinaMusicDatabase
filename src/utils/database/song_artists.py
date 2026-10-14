@@ -19,6 +19,7 @@ from config.constants import (
     MULTI_ARTIST_MAIN_SEPARATOR,
 )
 from utils.database.datatables import AdditionalSongArtist, Artist, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.common.normalizer import normalize
 
 
@@ -62,8 +63,8 @@ def song_artist_credits(song: Song) -> dict | None:
     if not additional_artists(song):
         return None
     return {
-        "main": [[a.name, a.synonyms] for a in song_main_artists(song)],
-        "feat": [[a.name, a.synonyms] for a in song_feat_artists(song)],
+        "main": [[a.name, artist_match_synonyms(a)] for a in song_main_artists(song)],
+        "feat": [[a.name, artist_match_synonyms(a)] for a in song_feat_artists(song)],
     }
 
 
@@ -73,11 +74,13 @@ def song_main_artist_label(song: Song) -> str:
 
 
 def artist_name_or_synonym_contains(artist, word: str):
-    """SQL filter: `artist`'s (an Artist or an aliased one) name or synonyms
-    contain `word`. Searching "Okean Elzy" has to find "Океан Ельзи", whose
-    synonyms hold the Latin spelling."""
+    """SQL filter: `artist`'s (an Artist or an aliased one) name, Latin form
+    or synonyms contain `word`. Searching "Okean Elzy" has to find "Океан
+    Ельзи", whose synonyms hold the Latin spelling, and "Kino" "Кино", whose
+    name_latin is "Kino"."""
     return or_(
         func.lower(artist.name).contains(word.lower()),
+        func.lower(func.coalesce(artist.name_latin, "")).contains(word.lower()),
         func.lower(func.coalesce(artist.synonyms, "")).contains(word.lower()),
     )
 
@@ -114,14 +117,19 @@ def merge_artist_synonyms(merge_to: Artist, merge_from: Artist) -> None:
     """Carry `merge_from`'s synonyms - and its own name, if it differs - over
     to `merge_to` when merging two artists, so a Latin spelling or a channel
     name isn't lost with the deleted row (Бумбокс lost "familyboombox,
-    Bumboks" this way). Duplicates are dropped after normalize(). Caller
-    commits."""
+    Bumboks" this way). Duplicates are dropped after normalize(). The Latin
+    form (name_latin) is `merge_to`'s, else `merge_from`'s; a different one
+    of `merge_from`'s becomes a synonym. Caller commits."""
     def split(value):
         return [s.strip() for s in (value or "").split(",") if s.strip()]
 
+    from_latin = getattr(merge_from, "name_latin", None)
+    if from_latin and not getattr(merge_to, "name_latin", None):
+        merge_to.name_latin = from_latin
+        from_latin = None
     target_key = normalize(merge_to.name)
-    merged, seen = [], {target_key}
-    for name in split(merge_to.synonyms) + split(merge_from.synonyms) + [merge_from.name or ""]:
+    merged, seen = [], {target_key, normalize(getattr(merge_to, "name_latin", None) or "")}
+    for name in split(merge_to.synonyms) + split(merge_from.synonyms) + [merge_from.name or "", from_latin or ""]:
         key = normalize(name)
         if key and key not in seen:
             seen.add(key)

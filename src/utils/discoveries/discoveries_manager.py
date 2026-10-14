@@ -29,6 +29,7 @@ from pathlib import Path
 from utils.common.debug import flog, slog
 from utils.common.normalizer import name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.artist_splitting import propose_artist_split
 from utils.common.script_utils import cyrillic_search_variant
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
@@ -315,7 +316,7 @@ def discover_album_name(song, modules):
     # nothing-stripped artist/title.
     raw_differs = art_cln_full != art_full or son_cln_full != son_full
 
-    synonyms = split_synonyms(song.artist.synonyms)
+    synonyms = split_synonyms(artist_match_synonyms(song.artist))
     # A Latin-transliterated title the sources only know in Cyrillic ("V Krayu
     # Magnoliy" -> "В краю магнолий"). A Cyrillic artist synonym ("Ариэль")
     # counts as context, see script_utils.cyrillic_search_variant()
@@ -404,7 +405,7 @@ def album_from_stored_youtube_link(song, credited_artists: list[str] | None = No
     album, track, artist = found
     print(f"Looking for the album in the song's YouTube link [{song.youtube_video_id}]")
     result = DiscoveryResult(album=album, matched_title=track or None, matched_artist=artist or None)
-    for name in [song.artist.name, *split_synonyms(song.artist.synonyms)]:
+    for name in [song.artist.name, *split_synonyms(artist_match_synonyms(song.artist))]:
         validated = _validate_result(result, name, song.title, "YouTube link", credited_artists)
         if validated:
             return validated

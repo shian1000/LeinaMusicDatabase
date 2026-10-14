@@ -12,6 +12,7 @@ from utils.ui.display_utils import display_songs
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.inbox_request_review import resolve_new_requests
+from utils.ui.latin_forms_review import fill_latin_forms
 from utils.database.inbox_requests import count_new_requests
 import questionary
 from utils.database.database_sessions import submit_global_database_session
@@ -177,6 +178,7 @@ def manage_database():
         "Divide artists": divide_artists_menu,
         "Split joined artist names": review_artist_splits,
         "Resolve albums with several artists": review_multi_artist_albums,
+        "Fill in Latin forms of names in other alphabets": fill_latin_forms,
         "Spell check existing data": check_spelling_menu,
         "Get rid of rubish data": get_rid_of_rubish_data
     }

@@ -22,7 +22,7 @@ from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
 from utils.youtube.yt_cache import save_cache
 from utils.youtube.yt_cache import make_song_key
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
-from utils.common.normalizer import APOSTROPHES
+from utils.common.normalizer import APOSTROPHES, normalize
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import flog
@@ -1315,6 +1315,22 @@ def _search_video_ytdlp_once(
     return _select_best_candidate(candidates, title)
 
 
+def _alternative_titles(title: str, language: str | None, title_latin: str | None) -> list[str]:
+    """Other spellings of `title` to retry a search with: the
+    transliteration for a registered language, then the owner's Latin form
+    (songs.title_latin, "Gruppa krovi" for "Группа крови")."""
+    alternatives = []
+    if is_transliterable(language):
+        alternatives.append(transliterate(title, language))
+    alternatives.append(title_latin)
+    seen, result = {normalize(title)}, []
+    for alt in alternatives:
+        if alt and alt.strip() and normalize(alt) not in seen:
+            seen.add(normalize(alt))
+            result.append(alt.strip())
+    return result
+
+
 def search_video_ytdlp(
     artist: str,
     title: str,
@@ -1323,6 +1339,7 @@ def search_video_ytdlp(
     max_attempts: int = 2,
     language: str | None = None,
     artist_credits: dict | None = None,
+    title_latin: str | None = None,
 ) -> str | None:
     """Search YouTube using yt-dlp (no API quota used). See
     _search_video_ytdlp_once() for the actual search-and-score logic.
@@ -1337,7 +1354,8 @@ def search_video_ytdlp(
     Cyrillic-titled upload scored too low against the Lacinka DB title to
     even be considered, leaving only live reuploads to pick from). If the
     alt attempt also fails to find an official release, the original pick
-    (if any) is kept — it's still better than nothing.
+    (if any) is kept — it's still better than nothing. `title_latin` (the
+    owner's Latin form of the title) is retried the same way, after it.
     """
     video_id, best_relevance, is_official = _search_video_ytdlp_once(
         artist, title, max_results, artist_synonyms, max_attempts, artist_credits
@@ -1345,15 +1363,15 @@ def search_video_ytdlp(
     if video_id and is_official:
         return video_id
 
-    if is_transliterable(language):
-        alt_title = transliterate(title, language)
-        if alt_title and alt_title != title:
-            print(f"  ↩ Retrying yt-dlp with transliterated title: {alt_title}")
-            alt_video_id, _, alt_official = _search_video_ytdlp_once(
-                artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits
-            )
-            if alt_video_id and (alt_official or not video_id):
-                return alt_video_id
+    for alt_title in _alternative_titles(title, language, title_latin):
+        print(f"  ↩ Retrying yt-dlp with the title written as: {alt_title}")
+        alt_video_id, _, alt_official = _search_video_ytdlp_once(
+            artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits
+        )
+        if alt_video_id and alt_official:
+            return alt_video_id
+        if alt_video_id and not video_id:
+            video_id = alt_video_id
 
     return video_id
 
@@ -1411,7 +1429,7 @@ def _search_video_api_once(
 
 def search_video(
     youtube, artist: str, title: str, artist_synonyms: str | None = None, language: str | None = None,
-    artist_credits: dict | None = None,
+    artist_credits: dict | None = None, title_latin: str | None = None,
 ) -> str | None:
     """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback.
 
@@ -1424,7 +1442,8 @@ def search_video(
 
     # Try yt-dlp first — free, no quota
     video_id = search_video_ytdlp(
-        artist, title, artist_synonyms=artist_synonyms, language=language, artist_credits=artist_credits
+        artist, title, artist_synonyms=artist_synonyms, language=language, artist_credits=artist_credits,
+        title_latin=title_latin,
     )
     if video_id:
         return video_id
@@ -1435,13 +1454,13 @@ def search_video(
     if video_id and is_official:
         return video_id
 
-    if is_transliterable(language):
-        alt_title = transliterate(title, language)
-        if alt_title and alt_title != title:
-            print(f"  ↩ Retrying YouTube API with transliterated title: {alt_title}")
-            alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms, artist_credits)
-            if alt_video_id and (alt_official or not video_id):
-                return alt_video_id
+    for alt_title in _alternative_titles(title, language, title_latin):
+        print(f"  ↩ Retrying YouTube API with the title written as: {alt_title}")
+        alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms, artist_credits)
+        if alt_video_id and alt_official:
+            return alt_video_id
+        if alt_video_id and not video_id:
+            video_id = alt_video_id
 
     return video_id
 
@@ -1814,6 +1833,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             artist_synonyms = entry.get("synonyms")
             language = entry.get("language")
             artist_credits = entry.get("credits")
+            title_latin = entry.get("title_latin")
 
             # Step 1: a video_id already on the cache entry (pre-filled from
             # Song.youtube_video_id at init_cache() time, or left over from a
@@ -1843,7 +1863,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             if not video_id:
                 video_id = search_video(
                     youtube, artist, title, artist_synonyms=artist_synonyms, language=language,
-                    artist_credits=artist_credits,
+                    artist_credits=artist_credits, title_latin=title_latin,
                 )
                 if not video_id:
                     _logger.info(f"No video found for {artist} - {title}")

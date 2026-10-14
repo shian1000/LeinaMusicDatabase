@@ -21,6 +21,7 @@ from utils.common.normalizer import normalize
 from utils.common.text_utils import is_soundtrack_artist
 from utils.database.albums import link_songs
 from utils.database.datatables import Artist, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import add_additional_artist
 
 _IGNORE_PATH = Path(__file__).resolve().parents[3] / ARTIST_SPLIT_IGNORE_FILE
@@ -149,7 +150,7 @@ def _artists_by_name(session) -> dict[str, Artist]:
     by_name, by_synonym = {}, {}
     for artist in session.query(Artist).order_by(Artist.id).all():
         by_name.setdefault(normalize(artist.name), artist)
-        for syn in (artist.synonyms or "").split(","):
+        for syn in (artist_match_synonyms(artist) or "").split(","):
             if syn.strip():
                 by_synonym.setdefault(normalize(syn), artist)
     return {**by_synonym, **by_name}
