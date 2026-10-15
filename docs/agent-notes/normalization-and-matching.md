@@ -159,4 +159,10 @@ improvement like this reaches those rows only after the next catalog change.
 Title cores (`import_engine._title_core()`) also drop a leading track number
 (`strip_track_number_prefix()`: "T03: ", "03. ", "03 - ", "Track 5) "). It
 needs a separator *and* a space after the digits so titles that are numbers
-("1979", "7 Rings", "2:00 AM", "99 Luftballons") stay whole.
+("1979", "7 Rings", "2:00 AM", "99 Luftballons") stay whole. They also drop
+the words in `TITLE_AMPERSAND_WORDS` ("and", "i", "und", "et", "y", "n"):
+`normalize()` removes "&" as punctuation but keeps "And", so "Angel of Small
+Death & the Codeine Scene" never met "... And The Codeine Scene". This lives in
+`_title_core()` only, not in `normalize()` - changing the canonical normalizer
+would shift every search and cache key in the app. When added, no two songs of
+one artist in the real database collapsed into the same core.

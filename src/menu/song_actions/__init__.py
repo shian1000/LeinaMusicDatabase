@@ -71,6 +71,26 @@ def set_youtube_link(songs_objects):
     print(f"Set YouTube video {video_id} on {len(songs_objects)} song(s).")
 
 
+def set_music_video_link(songs_objects):
+    """Store the song's music video (official clip) by hand, apart from the
+    YouTube link above - only a link Leina Radio offers to open, never played
+    or searched for (Song.music_video_youtube_id)."""
+    print("About to set a music video link for these songs:")
+    display_songs(songs_objects)
+    url = input("YouTube link of the music video (put nothing to cancel): ").strip()
+    if not url:
+        print("Aborted")
+        return
+    video_id = extract_video_id(url)
+    if video_id is None:
+        print(f"'{url}' isn't a YouTube video link, nothing changed.")
+        return
+    for song in songs_objects:
+        song.music_video_youtube_id = video_id
+    submit_global_database_session()
+    print(f"Set music video {video_id} on {len(songs_objects)} song(s).")
+
+
 def set_spotify_link(songs_objects):
     """Store a Spotify album/track page on the selected songs, for a release
     Spotify's search never surfaces - "Fill missing data -> Years" then reads
@@ -119,6 +139,7 @@ def swap_artist_with_title(songs_objects):
 # Link kind -> the Song attribute holding it, for "Remove links".
 _SONG_LINK_FIELDS = {
     "YouTube": "youtube_video_id",
+    "Music video": "music_video_youtube_id",
     "Spotify": "spotify_url",
 }
 
@@ -183,6 +204,7 @@ def song_actions(songs_objects):
         "Remove check protection": lambda: remove_check_protection(songs_objects),
         "Report no YouTube video": lambda: report_no_yt_video(songs_objects),
         "Set YouTube link": lambda: set_youtube_link(songs_objects),
+        "Set music video link": lambda: set_music_video_link(songs_objects),
         "Set Spotify link": lambda: set_spotify_link(songs_objects),
         "Swap artist with title": lambda: swap_artist_with_title(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),

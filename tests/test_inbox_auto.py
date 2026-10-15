@@ -69,6 +69,14 @@ def env(tmp_path, monkeypatch):
         return {"api": True, "blocked": 0}
     monkeypatch.setattr(ia, "check_link_cases", fake_check)
 
+    def fake_correction_check(cases):
+        youtube["corrections"] = youtube.get("corrections", 0) + 1
+        for case in cases:
+            case.plays = {case.video_id: youtube["plays"].get(case.video_id, True)}
+            case.checked_at = pr.now_iso()
+        return {"api": True, "blocked": 0}
+    monkeypatch.setattr(ia, "check_correction_videos", fake_correction_check)
+
     engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
@@ -329,3 +337,82 @@ def test_has_pending_migrations(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     assert not migrations.has_pending_migrations("music")
+
+
+# ==================== YouTube links set by hand ====================
+
+def _link(old="dead1", new="handVideo01", column="youtube_video_id"):
+    return ("songs", 1, column, old, new, 1, "Chromatic")
+
+
+def test_link_set_by_hand_is_saved_when_it_plays(env):
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db",
+             corrections=[_link(), _link(None, "clipVideo01", "music_video_youtube_id")])
+
+    result = _run(env)
+
+    assert env["songs"][0].youtube_video_id == "handVideo01"
+    assert env["songs"][0].music_video_youtube_id == "clipVideo01"
+    assert len(result.changes) == 2 and env["youtube"]["corrections"] == 1
+    assert _names(env["inbox"], "processed") == ["ania_2026-10-14_10-00-00_001.db"]
+
+
+def test_no_video_needs_no_check(env):
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db", corrections=[_link(new="N/A")])
+
+    _run(env)
+
+    assert env["songs"][0].youtube_video_id == "N/A" and "corrections" not in env["youtube"]
+
+
+@pytest.mark.parametrize("name, plays, note", [
+    ("ania_2026-10-14_10-00-00_001.db", False, "doesn't play"),
+    ("ania_2026-10-14_10-00-00_001.db", None, "YouTube blocked"),
+    ("bob_2026-10-14_10-00-00_001.db", True, "no permission"),
+])
+def test_link_set_by_hand_left_for_review(env, name, plays, note):
+    env["youtube"]["plays"]["handVideo01"] = plays
+    _request(env["inbox"], name, corrections=[_link()])
+
+    result = _run(env)
+
+    assert result.changes == [] and env["songs"][0].youtube_video_id == "dead1"
+    cases = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
+    pr.load_case_checks(cases, max_age_hours=24)
+    assert note in cases[0].auto_note
+    if name.startswith("bob"):
+        assert "corrections" not in env["youtube"]  # nothing worth asking YouTube about
+    else:
+        assert cases[0].plays == {"handVideo01": plays}  # the review reuses the check
+
+
+def test_link_found_bad_before_is_left_for_review(env):
+    from utils.database.datatables import BadYoutubeVideo
+    env["session"].add(BadYoutubeVideo(video_id="handVideo01", song_id=1, reason="wrong_for_song", marked_at="x"))
+    env["session"].commit()
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db", corrections=[_link()])
+
+    result = _run(env)
+
+    assert result.changes == [] and "corrections" not in env["youtube"]
+    [case] = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
+    pr.load_case_checks([case], max_age_hours=24)
+    assert "found bad before" in case.auto_note
+
+
+def test_a_newer_link_set_by_hand_settles_older_dead_link_reports(env):
+    env["youtube"]["ours"]["dead1"] = "good1"
+    _request(env["inbox"], "bob_2026-10-14_09-00-00_001.db", links=[(1, "Chromatic", "dead1", "good1")])
+    path = _request(env["inbox"], "bob_2026-10-14_10-00-00_001.db", corrections=[_link()])
+    conn = sqlite3.connect(str(path))
+    with conn:
+        conn.execute("UPDATE field_corrections SET corrected_at = '2026-10-14T12:00:00+02:00'")
+    conn.close()
+
+    result = _run(env)
+
+    assert env["youtube"]["calls"] == 0  # the dead link report needed no search
+    assert env["songs"][0].youtube_video_id == "dead1"  # bob's correction waits for review
+    assert _names(env["inbox"], "processed") == ["bob_2026-10-14_09-00-00_001.db"]
+    assert _names(env["inbox"], "review") == ["bob_2026-10-14_10-00-00_001.db"]
+    assert result.to_review == 1

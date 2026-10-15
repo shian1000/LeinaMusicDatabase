@@ -16,6 +16,8 @@ newest `found_at` first (the phone's current pick). Settled without asking:
 - the song has a link or "N/A" now;
 - every video named was found bad before (bad_youtube_videos) - turned down
   without asking YouTube again;
+- a newer youtube_video_id correction of the song (its user set the link by
+  hand) is in the same batch - the correction is asked about instead;
 - (automatic pass) none of the videos plays here.
 The automatic pass saves a link only when our own search found one of the
 phone's videos and it plays here, as for dead link replacements.
@@ -31,6 +33,7 @@ from utils.database.datatables import Song
 from utils.database.inbox_requests import (
     DECIDED,
     LINK_ALREADY_CHANGED,
+    LINK_SET_BY_HAND,
     NO_VIDEO,
     OPEN,
     SONG_DELETED,
@@ -43,8 +46,10 @@ from utils.database.inbox_requests import (
     merged_song_ids,
     now_iso,
     parse_time,
+    links_set_by_hand,
     resolve_song_id,
     save_decision,
+    superseded_by_hand,
     unmark_bad_video,
 )
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
@@ -83,6 +88,7 @@ def collect_found_link_cases(session, requests: list[RequestFile]) -> list[Found
     what needs no answer. Order: first report first."""
     merged_into = merged_song_ids()
     bad_videos = load_bad_videos(session)
+    set_by_hand = links_set_by_hand(requests, merged_into)
     cases: dict = {}
     for request in requests:
         if not request.supported:
@@ -101,6 +107,8 @@ def collect_found_link_cases(session, requests: list[RequestFile]) -> list[Found
             case.status = SONG_DELETED
         elif case.song.youtube_video_id:
             case.status = LINK_ALREADY_CHANGED
+        elif superseded_by_hand(set_by_hand, case.song_id, [r.found_at for r in case.reports]):
+            case.status = LINK_SET_BY_HAND
         else:
             case.find_bad(bad_videos)
             if not case.replacements:

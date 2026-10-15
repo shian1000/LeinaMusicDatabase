@@ -111,7 +111,7 @@ non-trivial work in that area.
   endpoints and their JSON, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
-  artist's origin, an album's title, ...), and `inbox_found_links.py` for links the phone found for
+  artist's origin, an album's title, a YouTube link or music video set by hand, ...), and `inbox_found_links.py` for links the phone found for
   songs without one. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
@@ -215,8 +215,9 @@ non-trivial work in that area.
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
   "which existing song is this file?" lookup, shared by the cover import and playlists from a
   folder. It's deliberately looser than the import's own `find_existing_song()` check: it matches
-  the main artist of "A ft. B", and titles with brackets, trailing junk and a leading track number
-  ("T03: ", `text_utils.strip_track_number_prefix()`) stripped. Don't swap one
+  the main artist of "A ft. B", and titles with brackets, trailing junk, a leading track number
+  ("T03: ", `text_utils.strip_track_number_prefix()`) and words standing for "&"
+  (`TITLE_AMPERSAND_WORDS`: "and", "i", "und", ...; `normalize()` drops the "&" itself) stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
   `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts
   every mp3 in alphabetical path order. Files with no song are walked through one by one (name,
@@ -341,7 +342,9 @@ non-trivial work in that area.
   reads `songs.album`, so that text column stays filled until the user says the app has moved to
   `album_id`. It also reads `bad_youtube_videos` (`song_id` NULL = bad for every song, else
   wrong for that song; `reason` codes from `constants.BAD_VIDEO_REASONS`, only shown there), and
-  the Latin forms `songs.title_latin` / `artists.name_latin` / `albums.title_latin`.
+  the Latin forms `songs.title_latin` / `artists.name_latin` / `albums.title_latin`, and
+  `songs.music_video_youtube_id` (migration 0012: the official clip, a video id or NULL, only a
+  link to open — never played, matched, put in playlists or in `bad_youtube_videos`).
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →

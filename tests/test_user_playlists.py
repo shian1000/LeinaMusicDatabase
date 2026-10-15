@@ -496,3 +496,15 @@ def test_adding_a_song_reuses_the_artist_and_an_existing_song(users_env, tmp_pat
     new = add_song_for_file(music_session, "Hey", "Moja i twoja nadzieja")
     assert new.id is not None and new.artist is hey
     assert music_session.query(Artist).filter(Artist.name == "Hey").count() == 1
+
+
+def test_and_in_tag_title_matches_ampersand_in_database(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher, find_existing_song
+
+    angel = Song(title="Angel of Small Death & the Codeine Scene", artist=Artist(name="Hozier"))
+    music_session.add(angel)
+    music_session.commit()
+    tag = {"artist_name": "Hozier", "title": "Angel Of Small Death And The Codeine Scene"}
+    assert LocalSongMatcher(music_session).match_exact(tag) is angel
+    # Only the loose match: the import's own "already exists?" check stays strict
+    assert find_existing_song(tag["title"], [angel]) is None

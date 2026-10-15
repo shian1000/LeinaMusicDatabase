@@ -26,12 +26,30 @@ Latin forms (title_latin / name_latin, utils/database/latin_names.py) are
 plain text fields; a one-song "Singles" album copies its song's form through
 the same listener. A renamed title or name keeps its Latin form -
 latin_form_to_check() lets the review point at it.
+
+YouTube links set by hand (app handoff musicdatabase-youtube-links-by-hand.md):
+songs.youtube_video_id (a video id, "N/A" or empty) and
+songs.music_video_youtube_id (a video id or empty, migration 0012). The phone
+plays / opens its user's link at once and keeps doing so until music.db's
+value stops being the old_value - a rejected one keeps that phone on the
+user's link. Accepting a youtube_video_id is a manual pick: the video comes
+off bad_youtube_videos, and the owner may have the replaced video remembered
+as wrong for the song. check_correction_videos() asks YouTube whether the
+new videos play, for the automatic pass and the review. A newer
+youtube_video_id correction settles older dead link / found link reports of
+that song (inbox_requests.links_set_by_hand()).
+
+Taking a correction back: the phone sends a newer report with new_value ==
+old_value. It's ALREADY_SET, and that is recorded in decisions.json as of the
+newest report, so an older report of the field waiting in another file (in
+review/ while the takeback is in new/) is then ANSWERED_EARLIER, never
+offered on its own.
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES
+from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
 from utils.database.albums import album_key, album_twin, rename_album
@@ -40,20 +58,28 @@ from utils.database.inbox_requests import (
     DECIDED,
     FieldCorrection,
     RequestFile,
+    load_bad_videos,
     load_decisions,
+    mark_bad_videos,
+    now_iso,
     parse_time,
     resolve_song_id,
     save_decision,
+    unmark_bad_video,
 )
 from utils.database.latin_names import LATIN_COLUMNS, latin_of
 from utils.database.song_artists import song_all_artists
 from utils.database.song_references import load_changes
+from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
 
 TABLES = {"songs": Song, "artists": Artist, "albums": Album}
 
 TEXT = "text"
 INTEGER = "integer"
 ALBUM_TYPE = "album type"
+YOUTUBE_LINK = "youtube link"  # a video id or NO_VIDEO_SENTINEL
+MUSIC_VIDEO = "music video"  # a video id
+VIDEO_KINDS = (YOUTUBE_LINK, MUSIC_VIDEO)
 
 # What the phone may correct: (table, column) -> (kind, may be emptied).
 # Nothing else is ever sent; anything else is kept for a later version.
@@ -65,6 +91,8 @@ FIELDS = {
     ("songs", "year"): (INTEGER, True),
     ("songs", "track_number"): (INTEGER, True),
     ("songs", "disc_number"): (INTEGER, True),
+    ("songs", "youtube_video_id"): (YOUTUBE_LINK, True),
+    ("songs", "music_video_youtube_id"): (MUSIC_VIDEO, True),
     ("artists", "name"): (TEXT, False),
     ("artists", "name_latin"): (TEXT, True),
     ("artists", "origin"): (TEXT, True),
@@ -83,6 +111,8 @@ FIELD_LABELS = {
     ("songs", "year"): "year",
     ("songs", "track_number"): "track number",
     ("songs", "disc_number"): "disc number",
+    ("songs", "youtube_video_id"): "YouTube video",
+    ("songs", "music_video_youtube_id"): "music video",
     ("artists", "name"): "artist's name",
     ("artists", "name_latin"): "artist's name in Latin letters",
     ("artists", "origin"): "artist's origin",
@@ -130,6 +160,14 @@ def coerce_field_value(table: str, column: str, value):
             return None, f"{value!r} isn't a whole number"
         return value, None
     value = str(value)
+    if kind in VIDEO_KINDS:
+        if kind == YOUTUBE_LINK and value == NO_VIDEO_SENTINEL:
+            return value, None
+        # The phone sends bare ids; a link is accepted for the owner's own edit
+        video_id = extract_video_id(value)
+        if video_id is None:
+            return None, f"{value!r} isn't a YouTube video id or link"
+        return video_id, None
     if kind == ALBUM_TYPE and value not in ALBUM_TYPES:
         return None, f"{value!r} isn't one of {', '.join(ALBUM_TYPES)}"
     return value, None
@@ -162,6 +200,11 @@ class FieldCorrectionCase:
     song: Song | None = None  # where the newest report was made from, after merges
     status: str = OPEN
     auto_note: str | None = None  # why the automatic pass left it to the owner
+    # YouTube columns: why the new video was found bad before (for this song)
+    bad: str | None = None
+    # Filled by check_correction_videos(): {video id: True plays / False gone / None unknown}
+    plays: dict = field(default_factory=dict)
+    checked_at: str | None = None
 
     @property
     def latest(self) -> FieldCorrection:
@@ -192,6 +235,19 @@ class FieldCorrectionCase:
     def error(self) -> str | None:
         """The phone's value can't be stored as it is (only editing is offered)."""
         return coerce_field_value(self.table_name, self.column_name, self.latest.new_value)[1]
+
+    @property
+    def is_video(self) -> bool:
+        """One of the YouTube link columns."""
+        return FIELDS.get((self.table_name, self.column_name), (None,))[0] in VIDEO_KINDS
+
+    @property
+    def video_id(self) -> str | None:
+        """The video the correction sets (not "N/A" or empty), else None."""
+        if not self.is_video or self.error:
+            return None
+        value = self.new_value
+        return value if value and value != NO_VIDEO_SENTINEL else None
 
     @property
     def changed_since(self) -> bool:
@@ -262,6 +318,7 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
                 case = cases[key] = FieldCorrectionCase(report.table_name, row_id, report.column_name, [])
             case.reports.append(report)
 
+    bad_videos = None
     for case in cases.values():
         case.reports.sort(key=_report_order)
         model = TABLES.get(case.table_name)
@@ -275,9 +332,73 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
             case.status = ROW_GONE
         elif case.error is None and same_value(case.current, case.new_value):
             case.status = ALREADY_SET
+            _record_already_set(decisions, case)
         elif _answered_after(decisions.get(case.key), case.reports):
             case.status = ANSWERED_EARLIER
+        elif case.column_name == "youtube_video_id" and case.video_id:
+            if bad_videos is None:
+                bad_videos = load_bad_videos(session)
+            case.bad = bad_videos.why(case.video_id, case.row_id)
     return list(cases.values())
+
+
+def _record_already_set(decisions: dict, case: FieldCorrectionCase) -> None:
+    """Remember that the database held the newest report's value, as of that
+    report: an older report of the field in a file read another time (a
+    taken-back correction waiting in review/) is then answered earlier."""
+    made = parse_time(case.latest.corrected_at)
+    if made is None:
+        return
+    when = made.isoformat(timespec="seconds")
+    previous = decisions.get(case.key) or {}
+    previous_time = parse_time(previous.get("decided_at"))
+    if previous_time is not None and previous_time >= made:
+        return
+    entry = {"decision": ALREADY_SET, "value": case.new_value, "decided_at": when,
+             "files": sorted({r.file_name for r in case.reports})}
+    decisions[case.key] = entry
+    save_decision(case.key, entry)
+
+
+# ==================== YouTube links ====================
+
+def check_correction_videos(cases: list[FieldCorrectionCase]) -> dict:
+    """Whether the videos open YouTube link corrections set play: one Data
+    API call for all (its "gone" is final), yt-dlp for the rest, once per
+    video - as check_link_cases() does. Fills plays / checked_at. Returns
+    {"api": bool, "blocked": n} for the screen."""
+    from utils.youtube.manage_youtube_playlists import video_playability, videos_exist_via_api
+
+    cases = [c for c in cases if c.video_id]
+    if not cases:
+        return {"api": False, "blocked": 0}
+    api = videos_exist_via_api([c.video_id for c in cases])
+    known, blocked = {}, 0
+    for case in cases:
+        video_id = case.video_id
+        if video_id not in known:
+            if api is not None and api.get(video_id) is False:
+                known[video_id] = False
+            else:
+                answer = video_playability(video_id)
+                if answer is None:
+                    blocked += 1
+                    answer = True if api is not None and api.get(video_id) else None
+                known[video_id] = answer
+        case.plays = {video_id: known[video_id]}
+        case.checked_at = now_iso()
+    return {"api": api is not None, "blocked": blocked}
+
+
+def replaced_video(case: FieldCorrectionCase, value) -> str | None:
+    """For a youtube_video_id answer: the video it replaces (one to maybe
+    remember as wrong for the song), or None (none, "N/A", the same one)."""
+    if case.column_name != "youtube_video_id" or case.row is None:
+        return None
+    current = case.current
+    if not current or current == NO_VIDEO_SENTINEL or same_value(current, value):
+        return None
+    return current
 
 
 # ==================== what an answer would touch ====================
@@ -326,14 +447,16 @@ def song_album_to_rename(case: FieldCorrectionCase) -> Album | None:
 # ==================== answers ====================
 
 def apply_field_correction(session, case: FieldCorrectionCase, decision: str, value=None,
-                           by: str | None = None) -> None:
+                           by: str | None = None, old_video_wrong: bool = False) -> None:
     """Store the answer: ACCEPT the phone's value, EDIT = `value` instead
     (already coerce_field_value()d), RENAME_ALBUM = a songs.album value
     (`value`, or the phone's) given to the song's whole album, REJECT = keep
     the database's, MERGE_ARTIST = an artists.name correction that names
     another artist (`value` = that Artist, from artist_twins()): this one is
     merged into it, the usual artist merge. `by` = "auto" for the automatic
-    pass. The caller commits the music
+    pass. A youtube_video_id set is a manual pick: the video comes off
+    bad_youtube_videos, and with `old_video_wrong` the replaced one goes on
+    it as wrong for the song. The caller commits the music
     session (for MERGE_ARTIST it must be the global one, which the merge
     uses)."""
     if decision == ACCEPT:
@@ -367,6 +490,11 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
             case.row = rename_album(session, case.row, value)
         else:
             setattr(case.row, case.column_name, value)
+        if case.column_name == "youtube_video_id":
+            if value and value != NO_VIDEO_SENTINEL:
+                unmark_bad_video(session, value, case.row.id)
+            if old_video_wrong and old and old != NO_VIDEO_SENTINEL and old != value:
+                mark_bad_videos(session, [old], BAD_VIDEO_WRONG_FOR_SONG, case.row.id)
         session.flush()
 
     save_decision(case.key, {
@@ -375,6 +503,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         "decided_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
+        **({"old_video_wrong": old} if old_video_wrong and decision != REJECT else {}),
     })
     case.status = DECIDED
     mlog(f"Inbox request: {case.table_name} {case.row_id} {case.column_name}: {old!r} -> {decision} {value!r}")

@@ -41,6 +41,8 @@ class Song(Base):
     language = Column(String)
     youtube_video_id = Column(String)  # NEW — manual override, see search_video()
     spotify_url = Column(String)  # album/track page set by hand, read by Years - see spotify_fetcher
+    # The official music video, only a link to open (migration 0012) - never played or matched
+    music_video_youtube_id = Column(String)
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
     # Album row of `album` (migrations 0006/0007). Kept in step with `album` by

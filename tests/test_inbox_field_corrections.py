@@ -173,6 +173,14 @@ def test_flags_changed_since_and_an_artist_no_longer_on_the_song(env):
     ("songs", "album", "  ", None, None),
     ("albums", "type", "ep", "ep", None),
     ("albums", "type", "LP", None, "isn't one of"),
+    ("songs", "youtube_video_id", "dQw4w9WgXcQ", "dQw4w9WgXcQ", None),
+    ("songs", "youtube_video_id", "https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ", None),
+    ("songs", "youtube_video_id", "N/A", "N/A", None),
+    ("songs", "youtube_video_id", None, None, None),
+    ("songs", "youtube_video_id", "not a video", None, "isn't a YouTube video"),
+    ("songs", "music_video_youtube_id", "dQw4w9WgXcQ", "dQw4w9WgXcQ", None),
+    ("songs", "music_video_youtube_id", "N/A", None, "isn't a YouTube video"),
+    ("songs", "music_video_youtube_id", "", None, None),
 ])
 def test_values_are_checked(table, column, value, expected, error):
     stored, problem = fc.coerce_field_value(table, column, value)
@@ -345,3 +353,67 @@ def test_a_renamed_row_points_at_its_latin_form(env):
 
     fc.apply_field_correction(env["session"], with_form, fc.ACCEPT)
     assert env["songs"][0].title_latin == "Khromatik"  # kept as it was
+
+
+# ==================== YouTube links set by hand ====================
+
+def test_youtube_link_correction_is_a_manual_pick(env):
+    from utils.database.datatables import BadYoutubeVideo
+    session = env["session"]
+    env["songs"][0].youtube_video_id = "oldVideo123"
+    session.add_all([BadYoutubeVideo(video_id="newVideo123", song_id=None, reason="unplayable", marked_at="x")])
+    session.commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row("songs", 4601, "youtube_video_id", "oldVideo123", "newVideo123"),
+        _row("songs", 4601, "music_video_youtube_id", None, "clipVideo12"),
+    ])
+    _, [link, clip] = _cases(env)
+
+    assert link.label == "YouTube video" and clip.label == "music video"
+    assert link.video_id == "newVideo123" and link.bad  # found bad before, shown to the owner
+    assert fc.replaced_video(link, link.new_value) == "oldVideo123"
+    assert fc.replaced_video(clip, clip.new_value) is None
+    fc.apply_field_correction(session, link, fc.ACCEPT, old_video_wrong=True)
+    fc.apply_field_correction(session, clip, fc.ACCEPT)
+    session.commit()
+
+    assert env["songs"][0].youtube_video_id == "newVideo123"
+    assert env["songs"][0].music_video_youtube_id == "clipVideo12"
+    assert [(b.video_id, b.song_id, b.reason) for b in session.query(BadYoutubeVideo)] == [
+        ("oldVideo123", 4601, "wrong_for_song")]
+
+
+def test_no_video_and_no_link_are_values(env):
+    env["songs"][0].youtube_video_id = "oldVideo123"
+    env["session"].commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row("songs", 4601, "youtube_video_id", "oldVideo123", "N/A"),
+        _row("songs", 4602, "youtube_video_id", None, None),  # already empty
+    ])
+    _, [na, empty] = _cases(env)
+
+    assert na.status == fc.OPEN and na.error is None and na.video_id is None
+    assert empty.status == fc.ALREADY_SET
+
+
+def test_a_taken_back_correction_settles_the_older_one_too(env):
+    older = _request(env["inbox"], "2026-10-14_10-00-00_001.db",
+                     [_row(new=2022, corrected_at="2026-10-01T09:00:00+02:00")])
+    _request(env["inbox"], "2026-10-14_11-00-00_001.db",
+             [_row(old=2023, new=2023, corrected_at="2026-10-02T09:00:00+02:00")])
+
+    requests, [case] = _cases(env)
+
+    assert case.status == fc.ALREADY_SET and len(case.reports) == 2
+    moved, left = pr.finish_request_files(requests, [case])
+    assert len(moved) == 2 and left == []
+
+    # The older one read again on its own (e.g. it waited in review/ while
+    # the takeback was settled from new/): answered, not offered
+    review = env["inbox"] / "review"
+    review.mkdir()
+    again = review / older.name
+    (env["inbox"] / "processed" / older.name).rename(again)
+    [case] = fc.collect_field_correction_cases(env["session"], [pr.read_request_file(again)])
+    assert case.status == fc.ANSWERED_EARLIER
+    assert env["songs"][0].year == 2023

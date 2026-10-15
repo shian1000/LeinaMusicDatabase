@@ -257,6 +257,22 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   are plain text fields; the review shows the name and a suggestion next to them. A title / name
   correction on a row that has a Latin form is flagged (the form stays), and the automatic pass
   leaves it for review.
+  YouTube links set by hand (2026-10-15, app handoff `musicdatabase-youtube-links-by-hand.md`,
+  answer [`docs/handoffs/youtube-links-by-hand-for-musicdatabaseapp.md`](../handoffs/youtube-links-by-hand-for-musicdatabaseapp.md)):
+  `songs.youtube_video_id` (a video id, `"N/A"` or NULL = search again) and
+  `songs.music_video_youtube_id` (a video id or NULL, migration 0012). Leina Radio plays / opens
+  its user's link at once and keeps it while music.db still has the `old_value`, so a rejected one
+  leaves that copy on the user's link (the review says so). Accepting a `youtube_video_id` is a
+  manual pick: the video comes off `bad_youtube_videos`, and the review asks (default no) whether
+  the replaced video goes on it as `wrong_for_song`. `check_correction_videos()` asks YouTube
+  whether the new video plays (Data API, then yt-dlp); the automatic pass saves a link from a user
+  with `apply_corrections` only when it plays and isn't in `bad_youtube_videos` for the song
+  ("N/A" / NULL need no check), and the review reuses that check. A newer `youtube_video_id`
+  correction of a song settles older dead link / found link reports of it in the same batch
+  (`inbox_requests.links_set_by_hand()`). Taking a correction back (any column: a newer report
+  with `new_value` = `old_value`) is "already set"; that's recorded in `decisions.json` as of the
+  newest report, so an older report of the field waiting in another file is answered too, never
+  offered on its own.
 - For `found_youtube_links` (2026-10-14, `utils/database/inbox_found_links.py`, app handoff
   `musicdatabase-found-youtube-links.md`, answer [`docs/handoffs/found-links-for-musicdatabaseapp.md`](../handoffs/found-links-for-musicdatabaseapp.md)):
   a video Leina Radio found and plays for a song music.db has no link for (NULL or `""`, not "N/A").

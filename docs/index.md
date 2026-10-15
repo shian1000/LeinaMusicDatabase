@@ -44,7 +44,8 @@ this index is the map of everything else.
   [links found for songs without one](handoffs/found-links-for-musicdatabaseapp.md) and
   [the videos found bad, in music.db](handoffs/bad-videos-for-musicdatabaseapp.md) and
   [the library's audio files at `/library/<id>`](handoffs/server-files-for-musicdatabaseapp.md) and
-  [tracks removed from imported playlists](handoffs/excluded-tracks-for-musicdatabaseapp.md). Once
+  [tracks removed from imported playlists](handoffs/excluded-tracks-for-musicdatabaseapp.md) and
+  [YouTube links set by hand, music videos](handoffs/youtube-links-by-hand-for-musicdatabaseapp.md). Once
   the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
 
 Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`

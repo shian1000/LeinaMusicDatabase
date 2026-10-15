@@ -103,6 +103,7 @@ def display_song_links(songs: Optional[List[Song]]) -> None:
         ("Year", None, "right"),
         ("DB path", None, None),
         ("YouTube", None, None),
+        ("Music video", None, None),
         ("Spotify", None, None),
     ])
     # Paths and URLs have no spaces to wrap at - fold them instead of cutting them off with "…"
@@ -130,6 +131,7 @@ def display_song_links(songs: Optional[List[Song]]) -> None:
             str(song.year) if song.year else "—",
             "\n".join(paths.get(song.id, [])) or "—",
             youtube,
+            f"https://www.youtube.com/watch?v={song.music_video_youtube_id}" if song.music_video_youtube_id else "—",
             song.spotify_url or "—",
         )
 

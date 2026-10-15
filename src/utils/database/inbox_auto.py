@@ -20,7 +20,9 @@ What it does with the files in new/:
   the phone had, no other report asked for another value, the song still
   has that title / artist / album, and saving would merge nothing (another
   artist of that name, an album twin) nor leave the choice of renaming a
-  whole album;
+  whole album; a YouTube link correction (songs.youtube_video_id /
+  music_video_youtube_id) also needs its video to play here and not to be
+  one found bad before for the song ("N/A" and empty need no check);
 - every case left over gets an auto_note (why), and its YouTube check is
   kept in auto_checks.json, so the review shows both without searching
   YouTube again;
@@ -41,6 +43,7 @@ from utils.database.inbox_field_corrections import (
     album_title_twin,
     apply_field_correction,
     artist_twins,
+    check_correction_videos,
     collect_field_correction_cases,
     latin_form_to_check,
     song_album_to_rename,
@@ -138,6 +141,15 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
         return "its whole album could be renamed instead"
     if latin_form_to_check(case, case.new_value):
         return "it has a Latin form that may need changing too"
+    if case.video_id:
+        if case.bad:
+            return f"the video was found bad before: {case.bad}"
+        if not case.checked_at:
+            return "not checked on YouTube"
+        plays = case.plays.get(case.video_id)
+        if plays is not True:
+            return ("the video doesn't play here" if plays is False
+                    else "couldn't check whether the video plays (YouTube blocked it)")
     return None
 
 
@@ -196,10 +208,18 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
 
     field_cases = collect_field_correction_cases(session, requests)
     permitted = {}
-    for case in [c for c in field_cases if c.status == FIELD_OPEN]:
+    open_fields = [c for c in field_cases if c.status == FIELD_OPEN]
+    for case in open_fields:
         sender = senders.get(case.latest.file_name)
         if sender is not None and sender not in permitted:
             permitted[sender] = PERMISSION_APPLY_CORRECTIONS in user_permissions(Path(str(Settings.users_dir)), sender)
+    # Only links that could be saved are worth asking YouTube about
+    to_play = [c for c in open_fields if c.video_id and not c.bad
+               and permitted.get(senders.get(c.latest.file_name), False)]
+    if to_play:
+        check_correction_videos(to_play)
+    for case in open_fields:
+        sender = senders.get(case.latest.file_name)
         case.auto_note = field_correction_verdict(session, case, sender, permitted.get(sender, False))
         if case.auto_note is not None:
             continue

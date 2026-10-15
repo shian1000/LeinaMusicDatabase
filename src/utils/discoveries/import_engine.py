@@ -11,7 +11,7 @@ from utils.common.text_utils import normalize, check_spelling, similarity, are_a
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.latin_names import artist_match_synonyms, song_titles
 from utils.database.song_artists import song_all_artists
-from config.constants import SPELLING_CHECK_THRESHOLD
+from config.constants import SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
@@ -341,8 +341,10 @@ def find_existing_song(title: str, artist_songs: list) -> Song | None:
 def _title_core(title: str) -> str:
     """A title without brackets, trailing junk ("Official Video", "HD") or a
     leading track number ("T03: "), normalized: "Pay Your Respect (Official
-    Lyric Video)" -> "pay your respect"."""
-    return normalize(strip_track_number_prefix(strip_trailing_junk_suffix(remove_brackets(title or ""))))
+    Lyric Video)" -> "pay your respect". Words standing for "&" are dropped
+    too, since normalize() drops the "&" itself."""
+    core = normalize(strip_track_number_prefix(strip_trailing_junk_suffix(remove_brackets(title or ""))))
+    return " ".join(w for w in core.split() if w not in TITLE_AMPERSAND_WORDS) or core
 
 
 def find_song_loosely(title: str, artist_songs: list) -> Song | None:

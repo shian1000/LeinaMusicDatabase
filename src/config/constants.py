@@ -363,6 +363,12 @@ DIALOG_NO_RESULT = -1
 # bracketed or not; add new phrases here as they come up. Longer phrases are listed before the shorter phrases they
 # contain (e.g. "official music video" before "music video") so the whole
 # annotation is stripped in one go.
+# Words that stand for "&" in a title ("Angel of Small Death & the Codeine
+# Scene" vs "... And The Codeine Scene"). normalize() drops "&" as punctuation,
+# so the loose title match (import_engine._title_core()) drops these words too,
+# on both sides. Never used for the strict "already exists?" check.
+TITLE_AMPERSAND_WORDS = frozenset({"and", "und", "et", "i", "y", "n"})
+
 TITLE_JUNK_SUFFIXES = [
     "official music video",
     "official lyric video",

@@ -43,7 +43,9 @@ handle that part.
 A dead link report is settled without asking when:
 - its song was deleted since the phone downloaded music.db;
 - songs.youtube_video_id already holds another link or "N/A";
-- the user kept that link after the report was made.
+- the user kept that link after the report was made;
+- a newer youtube_video_id correction of the song is in the same batch (the
+  phone's user set the link by hand; that correction is asked about instead).
 song_id follows merges through song_id_changes. Reports of the same
 (song, dead video) from several files are asked about once. Suggestions
 found bad before are left out (LinkCase.bad).
@@ -103,6 +105,7 @@ OPEN = "open"
 SONG_DELETED = "song deleted"
 LINK_ALREADY_CHANGED = "link already changed"
 ALREADY_KEPT = "link kept earlier"
+LINK_SET_BY_HAND = "a newer link was set by hand"
 DECIDED = "decided"
 
 # Answers
@@ -426,20 +429,22 @@ def save_decision(key: str, entry: dict) -> None:
 # ==================== the automatic pass's notes ====================
 
 def save_case_checks(cases: list) -> None:
-    """Remember each case's YouTube check (dead links) and auto_note, for
-    the review. `cases`: dead link and field correction cases."""
+    """Remember each case's YouTube check (links, and YouTube link
+    corrections) and auto_note, for the review. `cases`: link and field
+    correction cases."""
     checks = _load_json(CHECKS_FILE, {})
     for case in cases:
         entry = {"note": getattr(case, "auto_note", None)}
+        if getattr(case, "checked_at", None):
+            entry.update(checked_at=case.checked_at, plays=case.plays)
         if isinstance(case, LinkCase) and case.checked_at:
-            entry.update(checked_at=case.checked_at, our_video_id=case.our_video_id,
-                         plays=case.plays, dead_still_plays=case.dead_still_plays)
+            entry.update(our_video_id=case.our_video_id, dead_still_plays=case.dead_still_plays)
         checks[case.key] = entry
     _save_json(CHECKS_FILE, checks)
 
 
 def load_case_checks(cases: list, max_age_hours: float) -> None:
-    """Fill auto_note, and a dead link case's check while it's younger than
+    """Fill auto_note, and a case's YouTube check while it's younger than
     `max_age_hours` (an older one is left unchecked, to be checked again)."""
     checks = _load_json(CHECKS_FILE, {})
     for case in cases:
@@ -447,15 +452,16 @@ def load_case_checks(cases: list, max_age_hours: float) -> None:
         if not isinstance(entry, dict):
             continue
         case.auto_note = entry.get("note")
-        if not isinstance(case, LinkCase) or not entry.get("checked_at"):
+        if not hasattr(case, "checked_at") or not entry.get("checked_at"):
             continue
         checked = parse_time(entry["checked_at"])
         if checked is None or (datetime.now().astimezone() - checked).total_seconds() > max_age_hours * 3600:
             continue
         case.checked_at = entry["checked_at"]
-        case.our_video_id = entry.get("our_video_id")
         case.plays = entry.get("plays") or {}
-        case.dead_still_plays = entry.get("dead_still_plays")
+        if isinstance(case, LinkCase):
+            case.our_video_id = entry.get("our_video_id")
+            case.dead_still_plays = entry.get("dead_still_plays")
 
 
 def add_auto_report(entries: list[dict], shown: bool = False) -> None:
@@ -581,12 +587,45 @@ def resolve_song_id(song_id: int, merged_into: dict) -> int | None:
     return song_id
 
 
+def links_set_by_hand(requests: list[RequestFile], merged_into: dict) -> dict:
+    """{current song id: when its newest songs.youtube_video_id correction
+    was made (None = unreadable time)} from these files - the phone's user
+    set the link by hand, which says more than an older dead link or found
+    link report of that song (app handoff musicdatabase-youtube-links-by-hand.md)."""
+    newest = {}
+    for request in requests:
+        if not request.supported:
+            continue
+        for report in request.field_corrections:
+            if report.table_name != "songs" or report.column_name != "youtube_video_id" or report.row_id is None:
+                continue
+            song_id = resolve_song_id(report.row_id, merged_into)
+            if song_id is None:
+                continue
+            made = parse_time(report.corrected_at)
+            if song_id not in newest or (newest[song_id] is not None and (made is None or made > newest[song_id])):
+                newest[song_id] = made
+    return newest
+
+
+def superseded_by_hand(set_at: dict, song_id, report_times) -> bool:
+    """A link report of this song is older than the link its user set by
+    hand (an unreadable time counts as older than the correction)."""
+    if song_id not in set_at:
+        return False
+    corrected = set_at[song_id]
+    if corrected is None:
+        return True
+    return all(t is None or t <= corrected for t in (parse_time(x) for x in report_times))
+
+
 def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLinkCase]:
     """Group every supported file's dead link reports by (current song, dead
     video) and settle what needs no answer. Order: first report first."""
     merged_into = merged_song_ids()
     bad_videos = load_bad_videos(session)
     decisions = load_decisions()
+    set_by_hand = links_set_by_hand(requests, merged_into)
     cases: dict[tuple, DeadLinkCase] = {}
     for request in requests:
         if not request.supported:
@@ -609,6 +648,9 @@ def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLi
             case.status = LINK_ALREADY_CHANGED
         elif _kept_after_reports(decisions.get(case.key), case.reports):
             case.status = ALREADY_KEPT
+        elif superseded_by_hand(set_by_hand, case.song_id,
+                                [r.replacement_found_at or r.detected_at for r in case.reports]):
+            case.status = LINK_SET_BY_HAND
         else:
             case.find_bad(bad_videos)
     return list(cases.values())

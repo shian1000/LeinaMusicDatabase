@@ -109,10 +109,9 @@ def test_no_suggestion_for_kanji_arabic_or_latin_names(text):
 
 def test_migration_adds_the_model_columns():
     conn = sqlite3.connect(":memory:")
+    # Every migration up to the newest, which must leave the model's shape
     for path in sorted((repo_root / "migrations" / "music").glob("*.sql")):
-        if path.name < "0011":
-            conn.executescript(path.read_text())
-    conn.executescript((repo_root / "migrations" / "music" / "0011_latin_names.sql").read_text())
+        conn.executescript(path.read_text())
 
     for table, model in (("songs", Song), ("artists", Artist), ("albums", Album)):
         columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}

@@ -28,9 +28,11 @@ from utils.database.inbox_field_corrections import (
     album_title_twin,
     apply_field_correction,
     artist_twins,
+    check_correction_videos,
     coerce_field_value,
     collect_field_correction_cases,
     latin_form_to_check,
+    replaced_video,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
@@ -256,6 +258,15 @@ def _value(value) -> str:
     return f'"{escape(str(value))}"' if isinstance(value, str) else escape(str(value))
 
 
+def _field_value(case, value) -> str:
+    """A value as shown: a YouTube column's video as a link."""
+    if case.is_video and value and value != NO_VIDEO_SENTINEL:
+        return _url(str(value))
+    if case.is_video and value == NO_VIDEO_SENTINEL:
+        return f'"{NO_VIDEO_SENTINEL}" [dim](not on YouTube)[/dim]'
+    return _value(value)
+
+
 def _row_label(session, case) -> str:
     row = case.row
     if case.table_name == "artists":
@@ -284,13 +295,20 @@ def _show_correction(session, case, position: str) -> None:
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
         print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
-    print(f"    Leina Radio had: {_value(report.old_value)}")
+    print(f"    Leina Radio had: {_field_value(case, report.old_value)}")
     changed = "  [yellow](changed since Leina Radio's copy)[/yellow]" if case.changed_since else ""
-    print(f"    Now:             {_value(case.current)}{changed}")
+    print(f"    Now:             {_field_value(case, case.current)}{changed}")
     error = f"  [red]can't be stored: {escape(case.error)}[/red]" if case.error else ""
-    print(f"    Correction:      {_value(report.new_value)}{error}")
+    shown = case.new_value if case.is_video and not case.error else report.new_value
+    plays = f"  {_plays(case.plays.get(case.video_id))}" if case.video_id and case.checked_at else ""
+    print(f"    Correction:      {_field_value(case, shown)}{plays}{error}")
+    if case.bad:
+        print(f"    [yellow]That video was found bad before: {escape(case.bad)}[/yellow]")
     if case.earlier_values:
-        print(f"    [dim]Earlier asked for: {', '.join(_value(v) for v in case.earlier_values)}[/dim]")
+        print(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
+    if case.is_video:
+        print("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
+              "until the database's value changes.[/dim]")
     files = sorted({r.file_name for r in case.reports})
     print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {', '.join(files)}[/dim]")
     _show_auto_note(case)
@@ -349,7 +367,9 @@ def _ask_correction(session, case):
         if answer != EDIT:
             return answer
         start = case.new_value if case.new_value is not None else (case.latest.new_value or "")
-        typed = questionary.text(f"New {case.label} (empty = no value):", default=str(start)).ask()
+        hint = (f'link or id, "{NO_VIDEO_SENTINEL}" = not on YouTube, ' if case.column_name == "youtube_video_id"
+                else "link or id, " if case.is_video else "")
+        typed = questionary.text(f"New {case.label} ({hint}empty = no value):", default=str(start)).ask()
         if typed is None:
             continue
         value, error = coerce_field_value(case.table_name, case.column_name, typed)
@@ -381,8 +401,12 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         print(f"[yellow]{len(unsupported)} correction(s) of {', '.join(names)}, which this version can't correct - "
               f"their files stay in the inbox.[/yellow]")
     if open_cases:
-        print(f"\n{len(open_cases)} field correction(s) to look at:")
         load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
+        unchecked = [c for c in open_cases if c.video_id and not c.checked_at]
+        if unchecked:
+            print(f"\nChecking {len(unchecked)} YouTube link(s) set in Leina Radio...")
+            _print_check_stats(check_correction_videos(unchecked))
+        print(f"\n{len(open_cases)} field correction(s) to look at:")
     for i, case in enumerate(open_cases, 1):
         _show_correction(session, case, f"[{i}/{len(open_cases)}]")
         answer = _ask_correction(session, case)
@@ -391,7 +415,14 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         if answer == _SKIP:
             continue
         decision, value = answer
-        apply_field_correction(session, case, decision, value)
+        old_video_wrong = False
+        if decision in (ACCEPT, EDIT):
+            old = replaced_video(case, case.new_value if decision == ACCEPT else value)
+            if old:
+                old_video_wrong = bool(questionary.confirm(
+                    f"Also remember the replaced video ({old}) as wrong for this song? "
+                    "(It won't be used for it again, here or in Leina Radio.)", default=False).ask())
+        apply_field_correction(session, case, decision, value, old_video_wrong=old_video_wrong)
         submit_global_database_session()
     return cases, False
 

@@ -27,6 +27,7 @@ name_latin    (migration 0011)  year
                                  party
                                  youtube_video_id
                                  spotify_url
+                                 music_video_youtube_id (migration 0012)
                                  album_id       FK -> Album.id (NULL = see below)
                                  track_number   NULL = unknown
                                  disc_number    NULL = 1 / unknown
@@ -146,6 +147,11 @@ role          NOT NULL, 'main' | 'feat'
   own search never surfaces (Cypis' 2016 "Sprawdzian Z Chemii", buried under dozens of newer
   singles). "Fill missing data -> Years" reads the release date straight off it before trying any
   module: `discoveries_manager.release_year_from_stored_link()`. Migration `0004`.
+- `Song.music_video_youtube_id` — the song's music video (official clip), apart from
+  `youtube_video_id` (the audio Leina Radio plays, often a "Topic" upload). A bare video id or NULL,
+  no "N/A". Set by hand (Song actions → "Set music video link") or from a reviewed Leina Radio
+  correction; Leina Radio offers it to open from its player. Only a link: never played, put in a
+  YouTube playlist, matched or recorded in `bad_youtube_videos`. Migration `0012` (2026-10-15).
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually (Song
   actions → "Set YouTube link", id parsed by `manage_youtube_playlists.extract_video_id()`) for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
