@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 
 from utils.common.debug import mlog
@@ -23,6 +24,11 @@ def read_file_metadata(file: Path) -> dict:
         else:
             metadata["artist_name"] = artist
             metadata["title"] = title
+    # Some download sites write HTML entities into tags and file names:
+    # "Major Lazer &amp; DJ Snake"
+    for key in ("artist_name", "title", "album"):
+        if isinstance(metadata.get(key), str):
+            metadata[key] = html.unescape(metadata[key])
     return metadata
 
 

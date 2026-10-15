@@ -24,6 +24,7 @@ discovery_modules_config_years.json
 discovery_fetcher_stats.json
 discovery_fetcher_stats_years.json
 database_location_config.json
+file_matching_config.json
 /.agents/local.md
 
 # Databases (runtime / user data)

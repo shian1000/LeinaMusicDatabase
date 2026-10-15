@@ -235,9 +235,14 @@ non-trivial work in that area.
   `song_id` NULL), or leave it out of the playlist (the file itself is never touched). Only "Stop"
   leaves the playlist unsaved. A file whose tag artist the artist search can't find (a typo: "Liiquid tension
   experiment" — the search is substring-based, so it gets no candidates at all) gets
-  `LocalSongMatcher.match_similar()`'s suggestion first (the tags' artist and title swapped, else a
+  `LocalSongMatcher.match_similar()`'s suggestion first — unless it's the same title with an artist
+  spelt at least `load_auto_accept_artist_similarity()` alike (Settings → "Auto-accept similar
+  artist names", `utils/discoveries/file_matching_settings.py`, default 0.9, 1 = always ask;
+  `match_confident()`), which is matched without asking, listed after matching and offered the
+  name/tag fix — (the tags' artist and title swapped, else a
   similar title of the tag artist — `FILE_TITLE_SIMILARITY_THRESHOLD`, "Losing TimeGrande Finale",
-  never taken by `match()` since nobody confirms there — else
+  never taken by `match()` since nobody confirms there; for a file with no artist, the one song
+  with its title, also not in `match()` — else
   same title by a resembling artist — its name, a synonym, or one part of a joined name not split
   yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms; `match()` (files.db, covers) takes it without
   asking. After saving, files whose song was confirmed or picked are offered "Fix the names and

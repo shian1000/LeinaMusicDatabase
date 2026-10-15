@@ -25,6 +25,13 @@ from utils.database.user_playlists import list_playlists, save_playlist
 from utils.discoveries import folder_playlist as fp
 
 
+@pytest.fixture(autouse=True)
+def file_matching_config(tmp_path, monkeypatch):
+    """Never the user's own file_matching_config.json: the default applies."""
+    from utils.discoveries import file_matching_settings
+    monkeypatch.setattr(file_matching_settings, "FILE_MATCHING_CONFIG_FILE", str(tmp_path / "file_matching_config.json"))
+
+
 @pytest.fixture
 def music_session(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
@@ -328,6 +335,7 @@ def test_similar_song_confirmed_then_file_renamed_and_tagged(users_env, tmp_path
     monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
     monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
     monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer("Mix"))
+    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)  # always ask
     monkeypatch.setattr(menu.questionary, "select", lambda message, **k: _Answer(menu._CONFIRM_SONG))
     monkeypatch.setattr(menu.questionary, "confirm",
                         lambda message, **k: questions.append(message) or _Answer(True))
@@ -354,6 +362,7 @@ def test_similar_song_rejected_shows_the_other_options(users_env, tmp_path, musi
     old = _id3_file(folder / "x.mp3")
     monkeypatch.setattr(fp, "read_file_metadata",
                         lambda f: {"artist_name": "Liiquid tension experiment", "title": "Acid Rain"})
+    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)  # always ask
     selects = iter([menu._SIMILAR_OTHER, menu._UNMATCHED_STOP])
     monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
     monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
@@ -565,3 +574,122 @@ def test_two_similar_titles_suggest_nothing(music_session):
     music_session.commit()
     assert LocalSongMatcher(music_session).match_similar(
         {"artist_name": "Dream Theater", "title": "Metropolis Pt 3"}) is None
+
+
+def test_file_without_artist_is_suggested_the_one_song_with_its_title(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    top25 = Song(title="The Top 25 Final Fantasy Songs of All Time", artist=Artist(name="Unknown Artist"))
+    hey = music_session.query(Artist).filter(Artist.name == "Hey").one()
+    music_session.add_all([top25, Song(title="Intro", artist=hey),
+                           Song(title="Intro", artist=Artist(name="Afina"))])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    no_artist = {"artist_name": None, "title": "The Top 25 Final Fantasy Songs of All Time"}
+    assert matcher.match_similar(no_artist) is top25
+    assert matcher.match(no_artist) is None  # files.db / covers: no guess by title alone
+    assert matcher.match_similar({"artist_name": None, "title": "Intro"}) is None  # two of them
+
+
+def test_auto_accept_artist_similarity_setting(tmp_path, monkeypatch):
+    from utils.discoveries import file_matching_settings as fms
+
+    assert fms.load_auto_accept_artist_similarity() == 0.9  # default, no file yet
+    fms.save_auto_accept_artist_similarity(0.95)
+    assert fms.load_auto_accept_artist_similarity() == 0.95
+    for bad in (0.5, 1.2):
+        with pytest.raises(ValueError):
+            fms.save_auto_accept_artist_similarity(bad)
+    (tmp_path / "file_matching_config.json").write_text("not json")
+    assert fms.load_auto_accept_artist_similarity() == 0.9
+
+
+def test_confidently_misspelt_artist_is_matched_without_asking(tmp_path, music_session, monkeypatch):
+    acid_rain = _add_liquid_tension(music_session)
+    hero = Song(title="A Real Hero", artist=Artist(name="College & Electric Youth"))
+    music_session.add(hero)
+    music_session.commit()
+    tags = {"1.mp3": ("Liiquid tension experiment", "Acid Rain"),
+            "2.mp3": ("College", "A Real Hero (feat. Electric Youth)"),  # a part of a name: only suggested
+            "3.mp3": ("Hej", "Karma")}  # short names need more than 0.9
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    playlist = fp.build_folder_playlist(music_session, folder, 0.9)
+    first = playlist.tracks[0]
+    assert first.song_id == acid_rain.id and first.picked  # offered the name/tag fix
+    assert playlist.auto_accepted == [(first, "Liiquid tension experiment")]
+    assert [t.file.name for t in playlist.unmatched] == ["2.mp3", "3.mp3"]
+    assert playlist.unmatched[0].similar_song is hero
+
+    # 1 = always ask; the default argument never auto-accepts
+    for kwargs in ({"min_artist_similarity": 1.0}, {}):
+        playlist = fp.build_folder_playlist(music_session, folder, **kwargs)
+        assert playlist.auto_accepted == [] and playlist.unmatched[0].similar_song is acid_rain
+
+
+def test_auto_accepted_file_is_listed_and_offered_the_fix(users_env, tmp_path, music_session, monkeypatch, capsys):
+    users.create_user("ania", "secret1")
+    _add_liquid_tension(music_session)
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Acid Rain - dscom.it.mp3")
+    menu, asked = _menu_for_folder(monkeypatch, music_session, folder,
+                                   {"Acid Rain - dscom.it.mp3": {"artist_name": "Liiquid tension experiment",
+                                                                 "title": "Acid Rain"}},
+                                   selects=[])  # no "Is this the right song?" asked
+
+    menu._create_playlist_from_folder("ania")
+
+    assert "matched automatically" in capsys.readouterr().out
+    assert asked == ["Fix the names and tags of these mp3 files?"]
+    assert (folder / "Liquid Tension Experiment - Acid Rain.mp3").exists()
+    ((_, _, count, missing, _),) = list_playlists("ania")
+    assert (count, missing) == (1, 0)
+
+
+def test_file_with_no_tags_and_no_separator_is_matched_by_its_name(tmp_path, music_session, monkeypatch):
+    """read_file_metadata() gives no title at all for such a file; its name
+    is the title (as the user is shown it), so the one song with it is
+    suggested."""
+    top25 = Song(title="The Top 25 Final Fantasy Songs of All Time", artist=Artist(name="Unknown Artist"))
+    music_session.add(top25)
+    music_session.commit()
+    folder = _folder(tmp_path, {"The Top 25 Final Fantasy Songs of All Time.mp3": None})
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: {"artist_name": None, "title": None})
+
+    (track,) = fp.build_folder_playlist(music_session, folder).unmatched
+    assert track.title == "The Top 25 Final Fantasy Songs of All Time"
+    assert track.similar_song is top25
+
+
+def test_tag_artist_that_is_a_synonym_finds_the_artist(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher, find_matching_artist
+
+    konkret = Artist(name="Konkret", synonyms="I nad kropką")
+    ocean = Song(title="Ocean Drive (Duke Dumont cover)", artist=konkret)
+    music_session.add(ocean)
+    music_session.commit()
+    assert find_matching_artist("I nad kropką") is konkret
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_exact({"artist_name": "I nad kropką", "title": "Ocean Drive (Duke Dumont cover)"}) is ocean
+    # A typo in the title too: only suggested
+    typo = {"artist_name": "I nad kropką", "title": "Ocea Drive (Duke Dumont cover)"}
+    assert matcher.match_exact(typo) is None and matcher.match_similar(typo) is ocean
+
+
+def test_html_entities_in_tags_are_read_as_characters(tmp_path, music_session):
+    """Some download sites write "&amp;" into tags and file names; the real
+    read_file_metadata() turns it back into "&"."""
+    lean_on = Song(title="Lean On", artist=Artist(name="Major Lazer"))
+    music_session.add(lean_on)
+    music_session.commit()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Major Lazer &amp; DJ Snake - Lean On (feat. MØ).mp3",
+              artist="Major Lazer &amp; DJ Snake", title="Lean On")
+    _id3_file(folder / "Ty &amp; ja.mp3")  # no tags, no separator: the name is the title
+
+    playlist = fp.build_folder_playlist(music_session, folder)
+    assert playlist.tracks[0].song_id == lean_on.id
+    assert playlist.unmatched[0].title == "Ty & ja"

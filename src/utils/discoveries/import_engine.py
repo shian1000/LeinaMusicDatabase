@@ -204,15 +204,21 @@ def _match_artist_locally(name: str) -> tuple:
 
     # Pre-filter: only check artists that are somewhat similar in length -
     # avoids expensive similarity calculations on obviously different names.
+    # The search finds artists by their synonyms too ("I nad kropką" is
+    # Konkret's), so they're compared like the name.
+    def known_names(artist):
+        synonyms = (artist_match_synonyms(artist) or "").split(",")
+        return [n for n in (artist.name, *(s.strip() for s in synonyms)) if n]
+
     name_length = len(name)
     filtered_candidates = [
         a for a in existing_artists
-        if abs(len(a.name) - name_length) <= max(name_length * 0.5, 3)  # Allow 50% length variance
+        if any(abs(len(n) - name_length) <= max(name_length * 0.5, 3) for n in known_names(a))  # Allow 50% length variance
     ]
     filtered_candidates = (filtered_candidates or existing_artists)[:50]  # Cap at 50 candidates
 
     for similar_artist in filtered_candidates:
-        for known in filter(None, (similar_artist.name, getattr(similar_artist, "name_latin", None))):
+        for known in known_names(similar_artist):
             if similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD):
                 return similar_artist, True
 
@@ -390,9 +396,9 @@ class LocalSongMatcher:
 
     def match(self, metadata: dict) -> Song | None:
         """The exact match, else the similar one - taken without asking, so
-        without the similar-title guess, which could pick "Part 2" for a
-        "Part 1" file."""
-        return self.match_exact(metadata) or self.match_similar(metadata, similar_title=False)
+        without the guesses by title alone: a similar title could pick
+        "Part 2" for a "Part 1" file, a file with no artist any "Intro"."""
+        return self.match_exact(metadata) or self.match_similar(metadata, title_guesses=False)
 
     def match_exact(self, metadata: dict) -> Song | None:
         """The song by the tag's own artist (as the database knows it)."""
@@ -409,34 +415,57 @@ class LocalSongMatcher:
             self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
         return self._songs[artist.id]
 
-    def match_similar(self, metadata: dict, similar_title: bool = True) -> Song | None:
+    def match_confident(self, metadata: dict, min_artist_similarity: float) -> Song | None:
+        """The one song with the file's title core whose artist's name (or
+        Latin form, or a synonym) is at least `min_artist_similarity` like
+        the tag artist the artist search didn't find - a misspelling sure
+        enough to take without asking ("Liiquid tension experiment", 0.98).
+        Short names need more, as everywhere (scaled_similarity_threshold()).
+        Parts of joined names don't count: "College" is only suggested."""
+        name, title = metadata.get("artist_name"), metadata.get("title")
+        if not name or not title or self._artist(name) is not None:
+            return None
+        found = [s for s in self._songs_by_title_core(title)
+                 if any(similarity(name, known) >= scaled_similarity_threshold(name, known, min_artist_similarity)
+                        for known in _artist_names(s, split_parts=False))]
+        return found[0] if len(found) == 1 else None
+
+    def match_similar(self, metadata: dict, title_guesses: bool = True) -> Song | None:
         """For a file match_exact() found nothing for: the song its tags name
         with artist and title swapped ("N.I.B." by "Black Sabbath" tagged as
         "Black Sabbath" by "N.I.B."), else - the artist found - the one
         song of theirs with a similar title ("Losing TimeGrande Finale"),
         else - no artist found - the one song with its title
         (brackets/junk ignored) by an artist whose name, Latin form or synonym
-        resembles the tag's; None when there is none or more than one. A
+        resembles the tag's; for a file with no artist, the one song with
+        its title by anyone. None when there is none or more than one. A
         guess - the folder playlist asks the user about it."""
         name, title = metadata.get("artist_name"), metadata.get("title")
-        if not name or not title:
+        if not title:
             return None
+        if not name:
+            found = self._songs_by_title_core(title) if title_guesses else []
+            return found[0] if len(found) == 1 else None
         swapped = self.match_exact({"artist_name": title, "title": name})
         if swapped is not None:
             return swapped
         artist = self._artist(name)
         if artist is not None:
-            return self._similar_title(artist, title) if similar_title else None
+            return self._similar_title(artist, title) if title_guesses else None
+        found = [s for s in self._songs_by_title_core(title) if _artist_resembles(name, s)]
+        return found[0] if len(found) == 1 else None
+
+    def _songs_by_title_core(self, title: str) -> list:
+        """Every song, any artist, whose title core is `title`'s."""
         core = _title_core(title)
         if not core:
-            return None
+            return []
         if self._by_title is None:
             self._by_title = {}
             for song in self.session.query(Song).all():
                 for song_core in {c for c in map(_title_core, song_titles(song)) if c}:
                     self._by_title.setdefault(song_core, []).append(song)
-        found = [s for s in self._by_title.get(core, []) if _artist_resembles(name, s)]
-        return found[0] if len(found) == 1 else None
+        return self._by_title.get(core, [])
 
     def _similar_title(self, artist: Artist, title: str) -> Song | None:
         """The one song of `artist` whose whole title, bracket text
@@ -451,18 +480,22 @@ class LocalSongMatcher:
         return found[0] if len(found) == 1 else None
 
 
-def _artist_resembles(name: str, song: Song) -> bool:
-    """Does `name` resemble one of the song's artists - its name, Latin form,
-    a synonym, or one part of a joined name not split yet ("College" of
-    "College & Electric Youth")?"""
+def _artist_names(song: Song, split_parts: bool = True):
+    """The song's artists' names, Latin forms, synonyms and - with
+    `split_parts` - the parts of joined names not split yet ("College" of
+    "College & Electric Youth")."""
     for artist in song_all_artists(song):
         synonyms = (artist_match_synonyms(artist) or "").split(",")
-        split = propose_artist_split(artist.name)
+        split = propose_artist_split(artist.name) if split_parts else None
         parts = [*split.main, *split.feat] if split else []
-        for known in filter(None, (artist.name, *(s.strip() for s in synonyms), *parts)):
-            if similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD):
-                return True
-    return False
+        yield from filter(None, (artist.name, *(s.strip() for s in synonyms), *parts))
+
+
+def _artist_resembles(name: str, song: Song) -> bool:
+    """Does `name` resemble one of _artist_names(song)?"""
+    return any(similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD)
+               for known in _artist_names(song))
+
 
 
 def find_songs_by_title(session, title: str, limit: int = 15) -> list:

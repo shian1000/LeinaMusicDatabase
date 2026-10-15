@@ -9,6 +9,7 @@ a song (the user picks one for each file that didn't match), and
 mp3_utils.write_song_tags() / rename_to_song() can then copy the database's
 data into the files' tags and names."""
 
+import html
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +39,9 @@ class FolderPlaylist:
     folder: Path
     tracks: list = field(default_factory=list)     # FolderTrack, in playlist order
     unmatched: list = field(default_factory=list)  # the FolderTracks with no song in the database
+    # Matched without asking though the tag artist is spelt differently
+    # (LocalSongMatcher.match_confident()): (FolderTrack, tag artist) pairs
+    auto_accepted: list = field(default_factory=list)
 
 
 def assign_song(track: FolderTrack, song) -> None:
@@ -88,7 +92,9 @@ def audio_duration(file: Path) -> int | None:
         return None
 
 
-def build_folder_playlist(session, folder: Path) -> FolderPlaylist:
+def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1) -> FolderPlaylist:
+    """`min_artist_similarity`: see LocalSongMatcher.match_confident() -
+    the user's setting; the default (above 1) never auto-accepts."""
     playlist = FolderPlaylist(folder=Path(folder))
     matcher = LocalSongMatcher(session)
     for file in folder_mp3_files(folder):
@@ -96,12 +102,22 @@ def build_folder_playlist(session, folder: Path) -> FolderPlaylist:
             metadata = read_file_metadata(file)
         except ValueError:
             metadata = {}
+        if not metadata.get("title"):
+            # No title tag and no "Artist - Title" name: the name is the title,
+            # as the user is shown it
+            metadata = {**metadata, "title": html.unescape(file.stem)}
         song = matcher.match_exact(metadata)
+        confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
         if song is not None:
             track = FolderTrack(file=file, title=song.title, artist=None)
             assign_song(track, song)
+        elif confident is not None:
+            # Its tags are wrong, so it's offered the name/tag fix like a pick
+            track = FolderTrack(file=file, title=confident.title, artist=None, picked=True)
+            assign_song(track, confident)
+            playlist.auto_accepted.append((track, metadata.get("artist_name")))
         else:
-            track = FolderTrack(file=file, title=metadata.get("title") or file.stem,
+            track = FolderTrack(file=file, title=metadata["title"],
                                 artist=metadata.get("artist_name"),
                                 similar_song=matcher.match_similar(metadata))
             playlist.unmatched.append(track)

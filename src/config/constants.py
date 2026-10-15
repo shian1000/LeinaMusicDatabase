@@ -44,6 +44,15 @@ DISCOVERY_STATS_YEAR_FILE = "discovery_fetcher_stats_years.json"
 FETCH_DATA_CONFIG_FILE = "fetch_data_config.json"
 DEFAULT_MAX_SONGS_PER_FETCH = 50
 
+# "Create playlist from folder": a file whose title matches a song exactly but
+# whose tag artist is only spelt like the song's ("Liiquid tension experiment",
+# 0.98) is matched without asking when the artist similarity reaches this;
+# below it, it's only suggested. Settings -> "Auto-accept similar artist
+# names" (persisted as JSON); 1.0 turns it off.
+FILE_MATCHING_CONFIG_FILE = "file_matching_config.json"
+DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY = 0.9
+MIN_AUTO_ACCEPT_ARTIST_SIMILARITY = 0.8
+
 # Database sharing for the MusicDatabaseApp mobile client (see
 # docs/runbooks/database.md -> "Sharing with the mobile app"). The phone
 # downloads <folder URL>/music.db and <folder URL>/tag.db from this port over

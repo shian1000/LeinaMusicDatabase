@@ -148,7 +148,10 @@ name, and that search is substring-based. A typo inside the name ("Liiquid
 Tension Experiment" vs "Liquid Tension Experiment") therefore yields no
 candidates at all, and the fuzzy step never runs - however close the spelling.
 The import survives this by falling back to MusicBrainz; local-only lookups
-don't. `LocalSongMatcher.match_similar()` works around it from the other side:
+don't. The search does find artists by their synonyms, so the fuzzy step (and
+its length pre-filter) compares the name *and* `artist_match_synonyms()` -
+before that, a tag naming an artist by a synonym ("I nad kropką", Konkret's)
+was found by the search and then thrown away, so nothing local matched it. `LocalSongMatcher.match_similar()` works around it from the other side:
 songs with the same title core, filtered to artists whose name / Latin form /
 synonym - or one part of a joined name not split yet, via
 `propose_artist_split()` ("College" of "College & Electric Youth") - passes
@@ -157,10 +160,16 @@ Before that it tries the tags with artist and title swapped ("N.I.B." /
 "Black Sabbath"), and when the artist *is* found but no title matches, a
 whole-title similarity (bracket text kept) of `FILE_TITLE_SIMILARITY_THRESHOLD`
 among that artist's songs ("Losing TimeGrande Finale" ~ "Losing Time (Grand
-Finale)"). `match()` (files.db, cover import) takes these guesses silently
-*except* that similar-title one: within one artist it would happily pick
-"Pt. 2" for a "Pt. 1" file, so it runs only where a user confirms (the folder
-playlist offers every `match_similar()` result for confirmation). Note that `files.db` rematches
+Finale)"); a file with no artist at all gets the one song with its title core
+by anyone. `match()` (files.db, cover import) takes these guesses silently
+*except* those two by title alone (`title_guesses=False`): within one artist
+the similar title would happily pick "Pt. 2" for a "Pt. 1" file, and a
+nameless "Intro" could be anyone's, so they run only where a user confirms (the folder
+playlist offers every `match_similar()` result for confirmation, except
+the misspelt-artist case at or above the user's "Auto-accept similar artist
+names" setting, which `match_confident()` takes without asking; it compares
+whole names only, never parts of joined ones, and short names need more as
+usual via `scaled_similarity_threshold()`). Note that `files.db` rematches
 old unmatched rows only when the catalog fingerprint changes, so a matching
 improvement like this reaches those rows only after the next catalog change.
 
@@ -174,3 +183,12 @@ Death & the Codeine Scene" never met "... And The Codeine Scene". This lives in
 `_title_core()` only, not in `normalize()` - changing the canonical normalizer
 would shift every search and cache key in the app. When added, no two songs of
 one artist in the real database collapsed into the same core.
+
+## Tags can carry HTML entities
+
+Files from some download sites have `&amp;` (and the like) literally in their
+ID3 tags and names: "Major Lazer &amp; DJ Snake". `normalize()` would keep the
+"amp" as a word, so `read_file_metadata()` - shared by the mp3 import, the
+cover import, `files.db` and folder playlists - runs `html.unescape()` on the
+artist, title and album it returns; the folder playlist does the same for a
+file name used as the title.

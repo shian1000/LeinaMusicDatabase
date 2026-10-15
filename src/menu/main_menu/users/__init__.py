@@ -29,6 +29,7 @@ from utils.database.datatables import Song
 from menu.main_menu.users.moods import moods_menu, permissions_menu
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.folder_playlist import add_song_for_file, assign_song, build_folder_playlist, song_for_file_plan
+from utils.discoveries.file_matching_settings import load_auto_accept_artist_similarity
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
 from utils.ui.display_utils import display_song_links, display_songs
@@ -215,7 +216,7 @@ def _offer_file_fix(music_session, tracks: list) -> None:
     "Artist - Title.mp3" and copy the database's data into their tags."""
     if not tracks:
         return
-    print(f"\n{len(tracks)} file(s) had their song picked by hand:")
+    print(f"\n{len(tracks)} file(s) whose tags don't match their song in the database:")
     songs = {id(t): music_session.get(Song, t.song_id) for t in tracks}
     for track in tracks:
         print(f"  {track.file.name}  ->  {song_file_name(songs[id(track)], track.file.suffix)}")
@@ -268,10 +269,14 @@ def _create_playlist_from_folder(username: str) -> None:
 
     music_session, _ = open_and_set_global_database_sessions()
     print(f"Matching the mp3 files in {folder} with the database...")
-    playlist = build_folder_playlist(music_session, folder)
+    playlist = build_folder_playlist(music_session, folder, load_auto_accept_artist_similarity())
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
+    if playlist.auto_accepted:
+        print(f"\n{len(playlist.auto_accepted)} file(s) matched automatically though the artist is spelt differently:")
+        for track, tag_artist in playlist.auto_accepted:
+            print(f"  {track.file.name}  ({tag_artist})  ->  {track.artist} - {track.title}")
 
     if playlist.unmatched:
         print(f"\n{len(playlist.unmatched)} of {len(playlist.tracks)} file(s) have no song in the database.")

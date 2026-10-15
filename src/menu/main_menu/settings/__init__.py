@@ -29,7 +29,11 @@ from utils.database.sharing import (
 from utils.database.sharing_server import interface_ipv4, tailscale_ipv4
 from utils.discoveries.discovery_stats import reset_discovery_stats
 from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
-from config.constants import SHARING_HTTP_PORT
+from utils.discoveries.file_matching_settings import (
+    load_auto_accept_artist_similarity,
+    save_auto_accept_artist_similarity,
+)
+from config.constants import MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import settings
 
 
@@ -38,6 +42,7 @@ def settings_menu():
         "Server": server_menu,
         "Discovery modules": discovery_modules_menu,
         "Max songs to process per fetch": set_max_songs_per_fetch,
+        "Auto-accept similar artist names": set_auto_accept_artist_similarity,
         "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
@@ -79,6 +84,29 @@ def set_max_songs_per_fetch():
 
     save_max_songs_per_fetch(value)
     print(f"Max songs per fetch set to: {value}")
+
+
+def set_auto_accept_artist_similarity():
+    """How similar a file's tag artist must be to the song's artist (the
+    title matching exactly) for "Create playlist from folder" to match it
+    without asking."""
+    current = load_auto_accept_artist_similarity()
+    print("Create playlist from folder: a file whose title matches a song but whose artist is spelt")
+    print('differently ("Liiquid tension experiment" = 0.98 like "Liquid Tension Experiment") is matched')
+    print("without asking from this similarity up; below it you're asked. 1 = always ask.")
+    print(f"Current: {current}\n")
+
+    typed = questionary.text(f"New value ({MIN_AUTO_ACCEPT_ARTIST_SIMILARITY}-1):").ask()
+    if not typed:
+        print("Cancelled.")
+        return
+    try:
+        value = float(typed.replace(",", "."))
+        save_auto_accept_artist_similarity(value)
+    except ValueError:
+        print(f"\033[91m'{typed}' is not a number between {MIN_AUTO_ACCEPT_ARTIST_SIMILARITY} and 1.\033[0m")
+        return
+    print(f"Auto-accept similar artist names from: {value}")
 
 
 def reset_statistics_records():
