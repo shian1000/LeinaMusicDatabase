@@ -19,6 +19,10 @@ phone"; the app's docs/handoffs/musicdatabase-playlists.md):
   cover picture to archive/covers/ (covers.py).
 - A cover is part of the playlist: its `cover` is the sha256 of a picture
   stored by covers.py. A PUT without the key keeps the stored one.
+- So is `excluded_source_tracks`: the ids in the playlist's source (YouTube
+  video ids, Spotify track ids) of tracks the user removed, which a phone
+  leaves out when it imports the playlist again. Only the whole list, with
+  the winning side, never merged; a PUT without the key keeps the stored one.
 
 Standard-library only and free of the app's config, because the sharing
 server (sharing_server.py, run on the system python3) imports it as well as
@@ -49,6 +53,9 @@ SOURCES = ("folder", "youtube", "spotify", "spotifyAlbum")
 # The migration that added the sync columns; without it the server answers
 # 503 instead of migrating (that stays the app's job at startup)
 REQUIRED_MIGRATION = "0004_playlist_sync.sql"
+# The newest one the sync code reads (connect()'s default): every column of
+# playlists, moods and covers, and excluded_source_tracks
+EXCLUDED_TRACKS_MIGRATION = "0007_excluded_source_tracks.sql"
 ARCHIVE_SUBDIR = Path("archive") / "playlists"
 # Same stamp as the database backups (backup.py)
 ARCHIVE_STAMP_FORMAT = "%y%m%d-%H%M"
@@ -59,6 +66,8 @@ UID_RE = re.compile(r"^[0-9A-Za-z-]{8,64}$")
 # A PUT body without the "cover" key: keep the stored cover (an older app
 # version must not wipe covers it doesn't know about); null removes it
 KEEP_COVER = object()
+# The same for "excluded_source_tracks"
+KEEP_EXCLUDED = object()
 
 
 class NotMigratedError(Exception):
@@ -77,10 +86,9 @@ def new_uid() -> str:
     return str(uuid.uuid4())
 
 
-def connect(db_path, required_migration: str = covers.REQUIRED_MIGRATION) -> sqlite3.Connection:
+def connect(db_path, required_migration: str = EXCLUDED_TRACKS_MIGRATION) -> sqlite3.Connection:
     """A connection to a user.db that has `required_migration` (by default
-    the newest one the sync code reads - every column of playlists, moods
-    and covers), in autocommit mode (the write functions open their own transactions).
+    the newest one the sync code reads), in autocommit mode (the write functions open their own transactions).
     Raises NotMigratedError."""
     if not os.path.exists(db_path):
         raise NotMigratedError(f"{db_path} doesn't exist")
@@ -158,6 +166,7 @@ def playlist_json(conn, row, with_tracks: bool = True) -> dict:
         "source": row["source"], "source_id": row["source_id"], "source_owner": row["source_owner"],
         "created_at": row["created_at"], "updated_at": row["updated_at"], "deleted": False,
         "cover": row["cover_sha256"],
+        "excluded_source_tracks": json.loads(row["excluded_source_tracks"] or "[]"),
     }
     if with_tracks:
         payload["tracks"] = _tracks_json(conn, row["id"])
@@ -212,6 +221,17 @@ def parse_cover(body: dict, required: bool = False):
     return value
 
 
+def parse_excluded(body: dict):
+    """The body's "excluded_source_tracks": a list of non-empty strings, or
+    KEEP_EXCLUDED when the key is missing."""
+    if "excluded_source_tracks" not in body:
+        return KEEP_EXCLUDED
+    value = body["excluded_source_tracks"]
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise BadPlaylistError("excluded_source_tracks: expected a list of non-empty strings")
+    return value
+
+
 def parse_playlist(body) -> dict:
     """A PUT body (or the menu's playlist) checked and reduced to what's
     stored. Raises BadPlaylistError."""
@@ -249,6 +269,7 @@ def parse_playlist(body) -> dict:
         "updated_at": updated_at,
         "tracks": parsed_tracks,
         "cover": parse_cover(body),
+        "excluded_source_tracks": parse_excluded(body),
     }
 
 
@@ -330,9 +351,11 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
     `merge_same_source` a live playlist with the same source + source_id
     (two phones imported the same YouTube/Spotify playlist) is updated
     instead, keeping its uid. Its cover: the newer side's, or the other
-    side's when the newer has none. A `cover` must already be stored as a
+    side's when the newer has none; its excluded_source_tracks go with the
+    winning side, like the tracks. A `cover` must already be stored as a
     blob (the caller checks, covers.require_blob())."""
     incoming_cover = playlist.get("cover", KEEP_COVER)
+    incoming_excluded = playlist.get("excluded_source_tracks", KEEP_EXCLUDED)
     with _transaction(conn):
         row = _row_by_uid(conn, uid)
         same_source = False
@@ -354,21 +377,26 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
             cover = row["cover_sha256"] if row is not None else None
         else:
             cover = incoming_cover
+        if incoming_excluded is KEEP_EXCLUDED:
+            excluded = row["excluded_source_tracks"] if row is not None else None
+        else:
+            excluded = json.dumps(incoming_excluded, ensure_ascii=False) if incoming_excluded else None
         revision = next_revision(conn)
         values = (playlist["name"], username, playlist["source"], playlist["source_id"], playlist["source_owner"],
-                  playlist["updated_at"], revision, song_ids_checked_to, cover)
+                  playlist["updated_at"], revision, song_ids_checked_to, cover, excluded)
         if row is None:
             created_at = playlist["created_at"] if playlist["created_at"] is not None else playlist["updated_at"]
             playlist_id = conn.execute(
                 "INSERT INTO playlists (name, owner, source, source_id, source_owner, updated_at, revision, "
-                "song_ids_checked_to, cover_sha256, uid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "song_ids_checked_to, cover_sha256, excluded_source_tracks, uid, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 values + (uid, created_at)).lastrowid
         else:
             playlist_id = row["id"]
             conn.execute(
                 "UPDATE playlists SET name = ?, owner = ?, source = ?, source_id = ?, source_owner = ?, "
-                "updated_at = ?, revision = ?, song_ids_checked_to = ?, cover_sha256 = ?, deleted_at = NULL, "
-                "created_at = COALESCE(?, created_at) WHERE id = ?",
+                "updated_at = ?, revision = ?, song_ids_checked_to = ?, cover_sha256 = ?, "
+                "excluded_source_tracks = ?, deleted_at = NULL, created_at = COALESCE(?, created_at) WHERE id = ?",
                 values + (playlist["created_at"], playlist_id))
         _write_tracks(conn, playlist_id, playlist["tracks"])
         stored = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
@@ -417,6 +445,7 @@ def delete_playlist(conn, user_folder, uid: str, base_revision: int,
         covers.archive_blob(user_folder, row["cover_sha256"])
         conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (row["id"],))
         conn.execute("UPDATE playlists SET deleted_at = ?, updated_at = ?, revision = ?, "
-                     "song_ids_checked_to = NULL, cover_sha256 = NULL WHERE id = ?",
+                     "song_ids_checked_to = NULL, cover_sha256 = NULL, excluded_source_tracks = NULL "
+                     "WHERE id = ?",
                      (deleted_at, deleted_at, next_revision(conn), row["id"]))
         return True, playlist_json(conn, _row_by_uid(conn, uid)), archived

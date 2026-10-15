@@ -835,14 +835,18 @@ def test_playlist_round_trip(playlist_server):
     # Song ids resolved against the shared music.db: merged -> kept, deleted -> NULL
     assert [(t["song_id"], t["title"]) for t in stored["tracks"]] == [(4, "merged"), (None, "deleted"), (4, "kept")]
     assert stored["tracks"][0]["duration_s"] == 215 and stored["source_owner"] == "Someone"
+    assert stored["excluded_source_tracks"] == []
     assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "playlists": [stored]})
     assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 1, "playlists": []})
+    status, stored = _call("PUT", f"{base}/{UID}", token, _body(1, 1100, excluded_source_tracks=["vX"]))
+    assert status == 200 and stored["excluded_source_tracks"] == ["vX"]
+    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 2, "playlists": [stored]})
 
-    status, deleted = _call("DELETE", f"{base}/{UID}?base_revision=1&deleted_at=1791839796631", token)
-    assert (status, deleted) == (200, {"uid": UID, "revision": 2, "updated_at": 1791839796631, "deleted": True})
+    status, deleted = _call("DELETE", f"{base}/{UID}?base_revision=2&deleted_at=1791839796631", token)
+    assert (status, deleted) == (200, {"uid": UID, "revision": 3, "updated_at": 1791839796631, "deleted": True})
     (archived,) = (users_dir / "ola_k" / "archive" / "playlists").iterdir()
     assert json.loads(archived.read_text())["tracks"][2]["title"] == "kept"
-    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 2, "playlists": [deleted]})
+    assert _call("GET", f"{base}?since=2", token) == (200, {"revision": 3, "playlists": [deleted]})
     # Deleting again, or something never seen, is done
     assert _call("DELETE", f"{base}/{UID}?base_revision=0&deleted_at=1", token) == (200, deleted)
     db = sqlite3.connect(users_dir / "ola_k" / "user.db")
@@ -905,6 +909,7 @@ def test_bad_playlist_parameters_and_bodies(playlist_server):
     url = f"{base}/users/ola_k/playlists"
     token = tokens["ola_k"]
     assert _call("PUT", f"{url}/{UID}", token, raw=b"{not json")[0] == 400
+    assert _call("PUT", f"{url}/{UID}", token, _body(excluded_source_tracks="v1"))[0] == 400
     assert _call("GET", f"{url}?since=-1", token)[0] == 400
     assert _call("DELETE", f"{url}/{UID}?deleted_at=5", token)[0] == 400
     assert _call("GET", f"{url}/{UID}", token)[0] == 404

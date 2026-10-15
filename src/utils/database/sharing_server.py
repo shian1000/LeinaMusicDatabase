@@ -57,7 +57,8 @@ with every path passed on the command line.
   PUT /users/<name>/playlists/<uid> (JSON body, base_revision),
   DELETE /users/<name>/playlists/<uid>?base_revision=<n>&deleted_at=<ms>.
   Every request needs <name>'s token (none/unknown -> 401, another user's ->
-  403). 200 / 409 answer with JSON; 400 bad body or parameters, 411 no
+  403). A playlist carries "cover" and "excluded_source_tracks"; a PUT
+  without either keeps the stored one. 200 / 409 answer with JSON; 400 bad body or parameters, 411 no
   Content-Length, 413 body over --max-playlist-bytes, 503 drive not mounted
   or that user.db not migrated yet (the server never migrates). It writes
   user.db itself, one BEGIN IMMEDIATE transaction per request, and resolves

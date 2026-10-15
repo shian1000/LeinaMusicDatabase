@@ -1,7 +1,8 @@
 """Syncing users' playlists with the phones (utils/database/playlist_sync.py,
 shared by the sharing server and user_playlists.py): migration 0004 on an
 existing user.db, revisions, the conflict rules (equal base, stale base
-newer/older, delete vs edit, a resend), the source + source_id merge, the
+newer/older, delete vs edit, a resend), the source + source_id merge,
+excluded_source_tracks (kept without the key, whole list, merge, deletion), the
 archive written before a deletion, song ids from a phone's older music.db,
 and the menu's writes (save/delete/list). Temp-file SQLite, no mocking of
 SQL; the replay side (apply_song_id_changes() bumping revisions, catching up
@@ -94,6 +95,7 @@ def test_new_playlist_and_changes_since(conn):
     assert stored == {
         "uid": "uid-0001", "revision": 1, "name": "Mix", "source": "youtube", "source_id": "PL1",
         "source_owner": "Someone", "created_at": 1000, "updated_at": 1000, "deleted": False, "cover": None,
+        "excluded_source_tracks": [],
         "tracks": [
             {"song_id": 1, "title": "Karma", "artist": "Hey", "youtube_video_id": "v1",
              "spotify_track_id": None, "youtube_removed": True, "duration_s": 215},
@@ -149,6 +151,47 @@ def test_source_merge_ignores_deleted_and_can_be_switched_off(conn, user_folder)
     applied, stored = ps.store_playlist(conn, "ania", "third-uid", _playlist(source="folder", source_id="/m"), 0,
                                         merge_same_source=False)
     assert stored["uid"] == "third-uid"
+
+
+
+def test_excluded_source_tracks_kept_without_the_key_and_replaced_whole(conn):
+    _, stored = _put(conn, source="youtube", source_id="PL1", excluded_source_tracks=["v1", "v2"])
+    assert stored["excluded_source_tracks"] == ["v1", "v2"]
+    _, stored = _put(conn, base=1, updated_at=2000, name="Renamed by an old app")
+    assert stored["excluded_source_tracks"] == ["v1", "v2"]
+    _, stored = _put(conn, base=2, updated_at=3000, excluded_source_tracks=["v3"])
+    assert stored["excluded_source_tracks"] == ["v3"]  # the whole list, never merged
+    _, stored = _put(conn, base=3, updated_at=4000, excluded_source_tracks=[])
+    assert stored["excluded_source_tracks"] == []
+    assert ps.parse_playlist({"name": "x", "updated_at": 1, "tracks": []})["excluded_source_tracks"] \
+        is ps.KEEP_EXCLUDED
+
+
+@pytest.mark.parametrize("value", ["v1", None, [""], ["v1", 5], [None], {"v1": 1}])
+def test_bad_excluded_source_tracks_are_refused(value):
+    with pytest.raises(ps.BadPlaylistError):
+        ps.parse_playlist({"name": "x", "updated_at": 1, "tracks": [], "excluded_source_tracks": value})
+
+
+def test_same_import_excluded_tracks_go_with_the_winning_side(conn):
+    def imported(uid, updated_at, **extra):
+        return _put(conn, uid=uid, source="youtube", source_id="PL1", updated_at=updated_at, **extra)
+
+    imported("phone-a-uid", 1000, excluded_source_tracks=["v1"])
+    applied, stored = imported("phone-b-uid", 2000, excluded_source_tracks=["v2"])
+    assert applied and stored["uid"] == "phone-a-uid" and stored["excluded_source_tracks"] == ["v2"]
+    applied, stored = imported("phone-c-uid", 1500, excluded_source_tracks=["v3"])
+    assert not applied and stored["excluded_source_tracks"] == ["v2"]
+    assert imported("phone-d-uid", 3000)[1]["excluded_source_tracks"] == ["v2"]  # an older app
+
+
+def test_deleted_playlist_drops_its_excluded_tracks_but_the_archive_keeps_them(conn, user_folder):
+    _put(conn, excluded_source_tracks=["v1"])
+    applied, stored, archived = ps.delete_playlist(conn, user_folder, "uid-0001", 1, 5000)
+    assert applied and "excluded_source_tracks" not in stored
+    assert json.loads(archived.read_text())["excluded_source_tracks"] == ["v1"]
+    # Brought back by an older app's edit: whole again
+    assert _put(conn, base=2, updated_at=6000)[1]["excluded_source_tracks"] == []
 
 
 def test_delete_archives_first_then_keeps_a_marker(conn, user_folder):

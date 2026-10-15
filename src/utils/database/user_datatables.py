@@ -28,6 +28,8 @@ class Playlist(UserBase):
     deleted_at = Column(Integer)  # Unix ms; NULL = live, else a marker without tracks
     song_ids_checked_to = Column(Integer)
     cover_sha256 = Column(String)  # the phone-picked cover (covers.py); NULL = none
+    # JSON list of source ids (video / Spotify track) the user removed; NULL = none
+    excluded_source_tracks = Column(String)
 
     tracks = relationship(
         "PlaylistTrack", back_populates="playlist", order_by="PlaylistTrack.position",

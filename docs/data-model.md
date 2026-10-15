@@ -259,6 +259,7 @@ owner       (the username)        title            NOT NULL
 source, source_id, source_owner   artist, youtube_video_id, spotify_track_id, duration_s
 created_at, updated_at  (Unix ms) youtube_removed  0/1 (video gone, the phone finds another)
 revision, deleted_at, song_ids_checked_to
+excluded_source_tracks  JSON list of source ids the user removed (migration 0007), NULL = none
 
 playlist_revision: one row, last_revision = the user's revision counter
 
@@ -305,6 +306,10 @@ revision, updated_at
   stored in the database; a deleted playlist or mood has none. `global_mood_covers` holds the
   user's private covers of global moods. Rules: [runbooks/database.md](runbooks/database.md) →
   "Covers on the phone".
+- `excluded_source_tracks` (user migration 0007): the ids in an imported playlist's source
+  (YouTube video ids, Spotify track ids) of tracks the user removed on a phone, so a re-import
+  leaves them out. Written only by `playlist_sync.py`, whole list; NULL on a deleted playlist.
+  Rules: [runbooks/database.md](runbooks/database.md) → "Playlists on the phone".
 
 ## Categories: the search vocabulary, not schema columns
 

@@ -329,6 +329,17 @@ because the server and the app's own writes (`user_playlists.py`) both use it.
   same way. A resend after a lost answer gets a 409 that matches what it sent.
 - **Same import on two phones:** a PUT of an unknown uid whose `source` + `source_id` match a live
   playlist updates that one instead, and the answer carries the existing uid.
+- **Tracks removed from an imported playlist (2026-10-15):** `excluded_source_tracks`, a JSON list of
+  the ids in the playlist's source (YouTube video ids, Spotify track ids) of tracks the user removed,
+  so importing the playlist again on any phone leaves them out. It is part of the playlist, like the
+  cover: user migration 0007 (`playlists.excluded_source_tracks`, NULL = `[]`), always in the answers,
+  a PUT without the key keeps the stored list, anything but a list of non-empty strings is 400. The
+  whole list goes with the winning side (also in the same-import merge), never merged. A deleted
+  playlist drops it; the archive JSON keeps it. The app's request:
+  `docs/handoffs/musicdatabase-excluded-tracks.md`; the answer:
+  [`docs/handoffs/excluded-tracks-for-musicdatabaseapp.md`](../handoffs/excluded-tracks-for-musicdatabaseapp.md).
+  The menu only makes folder playlists, so it never writes the list; a future menu re-import of a
+  YouTube/Spotify playlist into an existing one must leave those ids out too.
 - **Song ids** from a phone's older `music.db` are run through `song_id_changes` of the *shared
   copy* in `--dir` before they're stored (merged → kept song, chains followed, deleted → NULL; an
   id that's neither a song nor in the log → NULL). That copy can be a day behind, so the playlist
@@ -416,8 +427,8 @@ and mood lists.
   200 already stored, 400 hash mismatch, 413, 415; `GET` serves it with `Cache-Control: immutable`.
   Same token rules as playlists.
 - **References** are `cover_sha256` on `playlists`, on mood `tags` rows and in
-  `global_mood_covers` (user migration 0006; until a user.db has it, every playlist / mood /
-  cover call for that user is 503). Playlist and mood JSON carry `"cover"`: a PUT without the key
+  `global_mood_covers` (user migration 0006; until a user.db has it - now 0007, see "Playlists on
+  the phone" - every playlist / mood / cover call for that user is 503). Playlist and mood JSON carry `"cover"`: a PUT without the key
   keeps the stored one (older app versions), `null` removes it, a hash with no blob is 400
   `{"error": "cover_missing", "cover": …}`. Merges: the side with the newer `updated_at` keeps its
   cover, or the other side's when it has none (same import on two phones, same mood name).

@@ -177,7 +177,10 @@ non-trivial work in that area.
   `docs/runbooks/database.md` → "Playlists on the phone".
   Covers of playlists and moods (picked on the phone): `covers.py` (standard-library) stores the
   pictures as files `Users/<name>/covers/<sha256>.png|.jpg`, never in a DB; rows hold only
-  `cover_sha256` (user migration 0006, which every sync `connect()` now requires). Served and
+  `cover_sha256` (user migration 0006). Every sync `connect()` requires the newest user migration
+  the sync code reads (`playlist_sync.EXCLUDED_TRACKS_MIGRATION`, 0007: `playlists.excluded_source_tracks`,
+  the tracks removed from an imported playlist; a PUT without it keeps the stored list); bump that
+  constant when a new one adds a synced column, or the server writes a column a user.db lacks. Served and
   uploaded at `/users/<name>/covers/<sha256>`; private covers of global moods sync through
   `/users/<name>/global-mood-covers` (`mood_sync.py`). A PUT without `cover` keeps the stored one.
   Unreferenced blobs go only after 24 h (the phone uploads before the PUT naming it). Details:
