@@ -11,7 +11,7 @@ from utils.common.text_utils import normalize, check_spelling, similarity, are_a
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.latin_names import artist_match_synonyms, song_titles
 from utils.database.song_artists import song_all_artists
-from config.constants import SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
+from config.constants import FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
@@ -389,8 +389,10 @@ class LocalSongMatcher:
         return self._artists[name]
 
     def match(self, metadata: dict) -> Song | None:
-        """The exact match, else the similar one."""
-        return self.match_exact(metadata) or self.match_similar(metadata)
+        """The exact match, else the similar one - taken without asking, so
+        without the similar-title guess, which could pick "Part 2" for a
+        "Part 1" file."""
+        return self.match_exact(metadata) or self.match_similar(metadata, similar_title=False)
 
     def match_exact(self, metadata: dict) -> Song | None:
         """The song by the tag's own artist (as the database knows it)."""
@@ -400,18 +402,31 @@ class LocalSongMatcher:
         artist = self._artist(name)
         if artist is None:
             return None
+        return find_song_loosely(title, self._artist_songs(artist))
+
+    def _artist_songs(self, artist: Artist) -> list:
         if artist.id not in self._songs:
             self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
-        return find_song_loosely(title, self._songs[artist.id])
+        return self._songs[artist.id]
 
-    def match_similar(self, metadata: dict) -> Song | None:
-        """For a file match_exact() found nothing for: the one song with its
-        title (brackets/junk ignored) by an artist whose name, Latin form or
-        synonym resembles the tag's; None when there is none or more than
-        one. A guess - the folder playlist asks the user about it."""
+    def match_similar(self, metadata: dict, similar_title: bool = True) -> Song | None:
+        """For a file match_exact() found nothing for: the song its tags name
+        with artist and title swapped ("N.I.B." by "Black Sabbath" tagged as
+        "Black Sabbath" by "N.I.B."), else - the artist found - the one
+        song of theirs with a similar title ("Losing TimeGrande Finale"),
+        else - no artist found - the one song with its title
+        (brackets/junk ignored) by an artist whose name, Latin form or synonym
+        resembles the tag's; None when there is none or more than one. A
+        guess - the folder playlist asks the user about it."""
         name, title = metadata.get("artist_name"), metadata.get("title")
-        if not name or not title or self._artist(name) is not None:
+        if not name or not title:
             return None
+        swapped = self.match_exact({"artist_name": title, "title": name})
+        if swapped is not None:
+            return swapped
+        artist = self._artist(name)
+        if artist is not None:
+            return self._similar_title(artist, title) if similar_title else None
         core = _title_core(title)
         if not core:
             return None
@@ -423,11 +438,28 @@ class LocalSongMatcher:
         found = [s for s in self._by_title.get(core, []) if _artist_resembles(name, s)]
         return found[0] if len(found) == 1 else None
 
+    def _similar_title(self, artist: Artist, title: str) -> Song | None:
+        """The one song of `artist` whose whole title, bracket text
+        included, is at least FILE_TITLE_SIMILARITY_THRESHOLD similar to
+        `title`."""
+        wanted = normalize(title)
+        found = [
+            song for song in self._artist_songs(artist)
+            if any(similarity(wanted, known) >= scaled_similarity_threshold(wanted, known, FILE_TITLE_SIMILARITY_THRESHOLD)
+                   for known in map(normalize, song_titles(song)))
+        ]
+        return found[0] if len(found) == 1 else None
+
 
 def _artist_resembles(name: str, song: Song) -> bool:
+    """Does `name` resemble one of the song's artists - its name, Latin form,
+    a synonym, or one part of a joined name not split yet ("College" of
+    "College & Electric Youth")?"""
     for artist in song_all_artists(song):
         synonyms = (artist_match_synonyms(artist) or "").split(",")
-        for known in filter(None, (artist.name, *(s.strip() for s in synonyms))):
+        split = propose_artist_split(artist.name)
+        parts = [*split.main, *split.feat] if split else []
+        for known in filter(None, (artist.name, *(s.strip() for s in synonyms), *parts)):
             if similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD):
                 return True
     return False

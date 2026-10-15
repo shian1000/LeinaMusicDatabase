@@ -229,8 +229,11 @@ non-trivial work in that area.
   `song_id` NULL), or leave it out of the playlist (the file itself is never touched). Only "Stop"
   leaves the playlist unsaved. A file whose tag artist the artist search can't find (a typo: "Liiquid tension
   experiment" — the search is substring-based, so it gets no candidates at all) gets
-  `LocalSongMatcher.match_similar()`'s suggestion first (same title, resembling artist, only when
-  exactly one song fits), which the user confirms; `match()` (files.db, covers) takes it without
+  `LocalSongMatcher.match_similar()`'s suggestion first (the tags' artist and title swapped, else a
+  similar title of the tag artist — `FILE_TITLE_SIMILARITY_THRESHOLD`, "Losing TimeGrande Finale",
+  never taken by `match()` since nobody confirms there — else
+  same title by a resembling artist — its name, a synonym, or one part of a joined name not split
+  yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms; `match()` (files.db, covers) takes it without
   asking. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).

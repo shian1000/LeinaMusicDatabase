@@ -150,9 +150,17 @@ candidates at all, and the fuzzy step never runs - however close the spelling.
 The import survives this by falling back to MusicBrainz; local-only lookups
 don't. `LocalSongMatcher.match_similar()` works around it from the other side:
 songs with the same title core, filtered to artists whose name / Latin form /
-synonym passes `scaled_similarity_threshold()`, accepted only when exactly one
-song fits. `match()` (files.db, cover import) takes that guess silently; the
-folder playlist only offers it for confirmation. Note that `files.db` rematches
+synonym - or one part of a joined name not split yet, via
+`propose_artist_split()` ("College" of "College & Electric Youth") - passes
+`scaled_similarity_threshold()`, accepted only when exactly one song fits.
+Before that it tries the tags with artist and title swapped ("N.I.B." /
+"Black Sabbath"), and when the artist *is* found but no title matches, a
+whole-title similarity (bracket text kept) of `FILE_TITLE_SIMILARITY_THRESHOLD`
+among that artist's songs ("Losing TimeGrande Finale" ~ "Losing Time (Grand
+Finale)"). `match()` (files.db, cover import) takes these guesses silently
+*except* that similar-title one: within one artist it would happily pick
+"Pt. 2" for a "Pt. 1" file, so it runs only where a user confirms (the folder
+playlist offers every `match_similar()` result for confirmation). Note that `files.db` rematches
 old unmatched rows only when the catalog fingerprint changes, so a matching
 improvement like this reaches those rows only after the next catalog change.
 

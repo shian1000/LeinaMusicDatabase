@@ -508,3 +508,60 @@ def test_and_in_tag_title_matches_ampersand_in_database(music_session):
     assert LocalSongMatcher(music_session).match_exact(tag) is angel
     # Only the loose match: the import's own "already exists?" check stays strict
     assert find_existing_song(tag["title"], [angel]) is None
+
+
+def test_swapped_artist_and_title_in_tags_is_suggested(tmp_path, music_session, monkeypatch):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    nib = Song(title="N.I.B.", artist=Artist(name="Black Sabbath"))
+    music_session.add(nib)
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    swapped = {"artist_name": "N.I.B.", "title": "Black Sabbath"}
+    assert matcher.match_exact(swapped) is None
+    assert matcher.match_similar(swapped) is nib
+
+    tags = {"Black Sabath - N.I.B.- HD Sound.mp3": ("N.I.B.", "Black Sabbath")}
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+    (track,) = fp.build_folder_playlist(music_session, folder).unmatched
+    assert track.similar_song is nib  # asked about, then offered "Fix the names and tags"
+
+
+def test_one_part_of_a_joined_artist_name_is_suggested(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    hero = Song(title="A Real Hero", artist=Artist(name="College & Electric Youth"))
+    music_session.add(hero)
+    music_session.commit()
+    tag = {"artist_name": "College", "title": "A Real Hero (feat. Electric Youth)"}
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_exact(tag) is None
+    assert matcher.match_similar(tag) is hero
+    assert matcher.match_similar({"artist_name": "Hey", "title": "A Real Hero"}) is None
+
+
+def test_similar_title_of_the_tag_artist_is_only_suggested(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    dream = Artist(name="Dream Theater")
+    losing = Song(title="Losing Time (Grand Finale)", artist=dream)
+    music_session.add_all([losing, Song(title="The Spirit Carries On", artist=dream)])
+    music_session.commit()
+    tag = {"artist_name": "Dream Theater", "title": "Losing TimeGrande Finale"}
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_exact(tag) is None
+    assert matcher.match_similar(tag) is losing
+    # files.db / covers take match() without asking: no title guess there
+    assert matcher.match(tag) is None
+    assert matcher.match_similar({"artist_name": "Dream Theater", "title": "Closing Time"}) is None
+
+
+def test_two_similar_titles_suggest_nothing(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    dream = Artist(name="Dream Theater")
+    music_session.add_all([Song(title="Metropolis Pt. 1", artist=dream), Song(title="Metropolis Pt. 2", artist=dream)])
+    music_session.commit()
+    assert LocalSongMatcher(music_session).match_similar(
+        {"artist_name": "Dream Theater", "title": "Metropolis Pt 3"}) is None

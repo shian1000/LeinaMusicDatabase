@@ -367,6 +367,12 @@ DIALOG_NO_RESULT = -1
 # Scene" vs "... And The Codeine Scene"). normalize() drops "&" as punctuation,
 # so the loose title match (import_engine._title_core()) drops these words too,
 # on both sides. Never used for the strict "already exists?" check.
+# Matching a library file to a song of its tag artist when no title matches
+# exactly: a title at least this similar (whole titles, bracket text kept, e.g.
+# "Losing TimeGrande Finale" ~ "Losing Time (Grand Finale)", 0.96) is only
+# *suggested* (LocalSongMatcher.match_similar()); "Closing Time" scores 0.61.
+FILE_TITLE_SIMILARITY_THRESHOLD = 0.85
+
 TITLE_AMPERSAND_WORDS = frozenset({"and", "und", "et", "i", "y", "n"})
 
 TITLE_JUNK_SUFFIXES = [
