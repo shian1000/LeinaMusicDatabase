@@ -28,9 +28,9 @@ from utils.database.users import (
 from utils.database.datatables import Song
 from menu.main_menu.users.moods import moods_menu, permissions_menu
 from utils.database.song_artists import song_artist_label
-from utils.discoveries.folder_playlist import assign_song, build_folder_playlist
+from utils.discoveries.folder_playlist import add_song_for_file, assign_song, build_folder_playlist, song_for_file_plan
 from utils.discoveries.import_engine import find_songs_by_title
-from utils.discoveries.mp3_utils import write_song_tags
+from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 
@@ -78,10 +78,13 @@ def _ask_new_password(question: str = "New password:") -> str | None:
 # Per-file choices for a file with no song in the database
 _UNMATCHED_BY_TITLE = "Search by title (any artist)"
 _UNMATCHED_SEARCH = "Search the database"
-_UNMATCHED_NEXT = "Next (leave it without a song)"
-_UNMATCHED_STOP = "Stop"
+_UNMATCHED_ADD = "Add it to the database as a new song"
+_UNMATCHED_KEEP = "Keep it in the playlist without a song"
+_UNMATCHED_LEAVE_OUT = "Leave it out of the playlist"
+_UNMATCHED_STOP = "Stop (don't save the playlist)"
 _CONFIRM_SONG = "Yes, this is the song"
 _SEARCH_INSTEAD = "No - search the database by hand"
+_SIMILAR_OTHER = "No - show the other options"
 _BACK_TO_OPTIONS = "Back to the options for this file"
 
 
@@ -132,34 +135,110 @@ def _pick_by_search():
     return song
 
 
-def _review_unmatched_files(music_session, folder: Path, unmatched: list) -> None:
+def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
     """One file at a time: its name, folder and what was read from it, then
-    the options for it. A song picked for a file goes into its track; a file
-    left without one stays in `unmatched` - the caller won't save then."""
+    the options for it: a song picked or added for it goes into its track, or
+    it stays in the playlist without a song, or is left out of it. A file
+    still in `playlist.unmatched` afterwards (Stop) means don't save."""
+    unmatched = playlist.unmatched
     for i, track in enumerate(list(unmatched), 1):
         print(f"\n[{i}/{len(unmatched)}] {track.file.name}")
         print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
         print(f"  Read as: {track.artist or '?'} - {track.title or '?'}")
+        if track.similar_song is not None:
+            print(f"  Similar song in the database: {_song_choice_label(track.similar_song)}")
+            verdict = questionary.select("Is this the right song?", choices=[_CONFIRM_SONG, _SIMILAR_OTHER]).ask()
+            if verdict is None:
+                return
+            if verdict == _CONFIRM_SONG:
+                _pick_for_track(track, track.similar_song, unmatched)
+                continue
         while True:
             choice = questionary.select(
                 "What should happen with this file?",
-                choices=[_UNMATCHED_BY_TITLE, _UNMATCHED_SEARCH, _UNMATCHED_NEXT, _UNMATCHED_STOP],
+                choices=[_UNMATCHED_BY_TITLE, _UNMATCHED_SEARCH, _UNMATCHED_ADD, _UNMATCHED_KEEP,
+                         _UNMATCHED_LEAVE_OUT, _UNMATCHED_STOP],
             ).ask()
             if choice is None or choice == _UNMATCHED_STOP:
                 return
-            if choice == _UNMATCHED_NEXT:
-                break
-            song = _pick_by_title(music_session, track) if choice == _UNMATCHED_BY_TITLE else _pick_by_search()
-            if song is not None:
-                assign_song(track, song)
+            if choice == _UNMATCHED_KEEP:
                 unmatched.remove(track)
-                print(f"  -> {_song_choice_label(song)}")
+                print("  -> kept without a song")
                 break
+            if choice == _UNMATCHED_LEAVE_OUT:
+                unmatched.remove(track)
+                playlist.tracks.remove(track)
+                print("  -> left out of the playlist (the file itself stays)")
+                break
+            if choice == _UNMATCHED_ADD:
+                song = _add_song_for_file(music_session, track)
+            elif choice == _UNMATCHED_BY_TITLE:
+                song = _pick_by_title(music_session, track)
+            else:
+                song = _pick_by_search()
+            if song is not None:
+                _pick_for_track(track, song, unmatched)
+                break
+
+
+def _add_song_for_file(music_session, track):
+    """Ask for the new song's artist and title (the tags' as defaults), show
+    whether the artist / song is already there, and add it once confirmed."""
+    artist_name = (questionary.text("Artist:", default=track.artist or "").ask() or "").strip()
+    title = (questionary.text("Title:", default=track.title or track.file.stem).ask() or "").strip()
+    if not artist_name or not title:
+        print("An artist and a title are both needed - nothing added.")
+        return None
+    artist, existing = song_for_file_plan(music_session, artist_name, title)
+    if existing is not None:
+        print(f"  Already in the database: {_song_choice_label(existing)}")
+        return existing if questionary.confirm("Use this song?", default=True).ask() else None
+    print(f"  Artist: {artist.name} (already in the database)" if artist else f"  Artist: {artist_name} (new)")
+    print(f"  Title:  {title}")
+    if not questionary.confirm("Add this song to the database?", default=True).ask():
+        return None
+    song = add_song_for_file(music_session, artist.name if artist else artist_name, title)
+    print(f"Added song '{song.title}' with id {song.id}.")
+    return song
+
+
+def _pick_for_track(track, song, unmatched: list) -> None:
+    assign_song(track, song)
+    track.picked = True
+    unmatched.remove(track)
+    print(f"  -> {_song_choice_label(song)}")
+
+
+def _offer_file_fix(music_session, tracks: list) -> None:
+    """After a playlist is saved: the files whose song the user confirmed or
+    picked had tags the database didn't recognise - offer to rename them to
+    "Artist - Title.mp3" and copy the database's data into their tags."""
+    if not tracks:
+        return
+    print(f"\n{len(tracks)} file(s) had their song picked by hand:")
+    songs = {id(t): music_session.get(Song, t.song_id) for t in tracks}
+    for track in tracks:
+        print(f"  {track.file.name}  ->  {song_file_name(songs[id(track)], track.file.suffix)}")
+    if not questionary.confirm("Fix the names and tags of these mp3 files?", default=True).ask():
+        return
+    failed = []
+    for track in tracks:
+        song = songs[id(track)]
+        try:
+            write_song_tags(track.file, song)
+            track.file = rename_to_song(track.file, song)
+        except Exception as exc:
+            failed.append((track.file, exc))
+    print(f"Fixed {len(tracks) - len(failed)} file(s).")
+    for file, exc in failed:
+        _error(f"  Couldn't fix {file}: {exc}")
 
 
 def _offer_tag_update(music_session, tracks: list) -> None:
     """After a playlist is saved: copy the database's title/artist/album/year
     into each file's tags, if the user wants."""
+    if not tracks:
+        return
     if not questionary.confirm(
         f"Update the mp3 tags of these {len(tracks)} file(s) with the data from the database?",
         default=False,
@@ -196,16 +275,22 @@ def _create_playlist_from_folder(username: str) -> None:
 
     if playlist.unmatched:
         print(f"\n{len(playlist.unmatched)} of {len(playlist.tracks)} file(s) have no song in the database.")
-        _review_unmatched_files(music_session, folder, playlist.unmatched)
+        _review_unmatched_files(music_session, folder, playlist)
         if playlist.unmatched:
-            # A playlist is only saved complete, every file with its song
-            print(f"\n{len(playlist.unmatched)} file(s) still without a song - playlist not saved.")
+            # Stopped before every file was decided on
+            print(f"\n{len(playlist.unmatched)} file(s) not decided on - playlist not saved.")
             return
+    if not playlist.tracks:
+        print("Every file was left out - playlist not saved.")
+        return
 
     playlist_id = save_playlist(username, name, playlist.tracks,
                                 source=USER_PLAYLIST_SOURCE_FOLDER, source_id=str(folder))
-    print(f"Saved playlist '{name}' (#{playlist_id}) with {len(playlist.tracks)} track(s).")
-    _offer_tag_update(music_session, playlist.tracks)
+    without_song = sum(1 for t in playlist.tracks if t.song_id is None)
+    print(f"Saved playlist '{name}' (#{playlist_id}) with {len(playlist.tracks)} track(s)"
+          + (f", {without_song} of them without a song in the database." if without_song else "."))
+    _offer_file_fix(music_session, [t for t in playlist.tracks if t.picked])
+    _offer_tag_update(music_session, [t for t in playlist.tracks if t.song_id is not None and not t.picked])
 
 
 _BACK = "Back"

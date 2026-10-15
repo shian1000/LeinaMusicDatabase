@@ -7,9 +7,10 @@ from utils.common.debug import slog, mlog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix
 from utils.database.artist_splitting import propose_artist_split
-from utils.database.latin_names import song_titles
+from utils.database.latin_names import artist_match_synonyms, song_titles
+from utils.database.song_artists import song_all_artists
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
@@ -338,9 +339,19 @@ def find_existing_song(title: str, artist_songs: list) -> Song | None:
 
 
 def _title_core(title: str) -> str:
-    """A title without brackets or trailing junk ("Official Video", "HD"),
-    normalized: "Pay Your Respect (Official Lyric Video)" -> "pay your respect"."""
-    return normalize(strip_trailing_junk_suffix(remove_brackets(title or "")))
+    """A title without brackets, trailing junk ("Official Video", "HD") or a
+    leading track number ("T03: "), normalized: "Pay Your Respect (Official
+    Lyric Video)" -> "pay your respect"."""
+    return normalize(strip_track_number_prefix(strip_trailing_junk_suffix(remove_brackets(title or ""))))
+
+
+def find_song_loosely(title: str, artist_songs: list) -> Song | None:
+    """find_existing_song(), else the song whose title is `title` without
+    brackets, trailing junk or a track number on either side."""
+    song = find_existing_song(title, artist_songs)
+    if song is None and (core := _title_core(title)):
+        song = next((s for s in artist_songs if core in map(_title_core, song_titles(s))), None)
+    return song
 
 
 class LocalSongMatcher:
@@ -354,12 +365,17 @@ class LocalSongMatcher:
     artist may be the main one of a joined "A ft. B" name, and titles are
     also compared without brackets or trailing junk on either side - the
     files still carry what the import or the rubbish cleanup later removed
-    from the database copy."""
+    from the database copy. When the artist lookup finds nothing (the shared
+    artist search is substring-based, so a typo in the tag - "Liiquid
+    Tension Experiment" - leaves it no candidates at all), the song is
+    looked up by title instead, among songs whose artist resembles the
+    tag's."""
 
     def __init__(self, session):
         self.session = session
         self._artists = {}
         self._songs = {}
+        self._by_title = None
 
     def _artist(self, name: str) -> Artist | None:
         if name not in self._artists:
@@ -371,6 +387,11 @@ class LocalSongMatcher:
         return self._artists[name]
 
     def match(self, metadata: dict) -> Song | None:
+        """The exact match, else the similar one."""
+        return self.match_exact(metadata) or self.match_similar(metadata)
+
+    def match_exact(self, metadata: dict) -> Song | None:
+        """The song by the tag's own artist (as the database knows it)."""
         name, title = metadata.get("artist_name"), metadata.get("title")
         if not name or not title:
             return None
@@ -379,11 +400,35 @@ class LocalSongMatcher:
             return None
         if artist.id not in self._songs:
             self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
-        songs = self._songs[artist.id]
-        song = find_existing_song(title, songs)
-        if song is None and (core := _title_core(title)):
-            song = next((s for s in songs if core in map(_title_core, song_titles(s))), None)
-        return song
+        return find_song_loosely(title, self._songs[artist.id])
+
+    def match_similar(self, metadata: dict) -> Song | None:
+        """For a file match_exact() found nothing for: the one song with its
+        title (brackets/junk ignored) by an artist whose name, Latin form or
+        synonym resembles the tag's; None when there is none or more than
+        one. A guess - the folder playlist asks the user about it."""
+        name, title = metadata.get("artist_name"), metadata.get("title")
+        if not name or not title or self._artist(name) is not None:
+            return None
+        core = _title_core(title)
+        if not core:
+            return None
+        if self._by_title is None:
+            self._by_title = {}
+            for song in self.session.query(Song).all():
+                for song_core in {c for c in map(_title_core, song_titles(song)) if c}:
+                    self._by_title.setdefault(song_core, []).append(song)
+        found = [s for s in self._by_title.get(core, []) if _artist_resembles(name, s)]
+        return found[0] if len(found) == 1 else None
+
+
+def _artist_resembles(name: str, song: Song) -> bool:
+    for artist in song_all_artists(song):
+        synonyms = (artist_match_synonyms(artist) or "").split(",")
+        for known in filter(None, (artist.name, *(s.strip() for s in synonyms))):
+            if similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD):
+                return True
+    return False
 
 
 def find_songs_by_title(session, title: str, limit: int = 15) -> list:

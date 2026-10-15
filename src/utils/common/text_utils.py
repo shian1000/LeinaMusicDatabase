@@ -401,6 +401,18 @@ _TITLE_JUNK_SUFFIX_RE = re.compile(
 )
 
 
+# "T03: Song", "03. Song", "03 - Song", "Track 5) Song": a track number with
+# a separator *and* a space after it, so "1979", "7 Rings" or "2:00 AM" stay
+_TRACK_NUMBER_PREFIX_RE = re.compile(r"^(?:(?:track|t)\s*)?\d{1,3}\s*[.:)\-–]\s+", re.IGNORECASE)
+
+
+def strip_track_number_prefix(title: str) -> str:
+    """`title` without a leading track number ("T03: Mimiga Town" ->
+    "Mimiga Town"), unchanged when nothing would be left."""
+    title = (title or "").strip()
+    return _TRACK_NUMBER_PREFIX_RE.sub("", title, count=1).strip() or title
+
+
 def strip_trailing_junk_suffix(title: str) -> str:
     """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
     end of `title`, handling more than one stacked suffix (e.g. "Song Music

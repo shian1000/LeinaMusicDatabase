@@ -139,3 +139,24 @@ compared are the identical `(prod. Rumak)` suffix.
 content with `remove_brackets()` from both titles before calling `similarity()`
 for exactly this reason. Any other duplicate-song check comparing raw titles
 should do the same rather than comparing `song.title` strings directly.
+
+## The local artist lookup's fuzzy step only sees substring candidates
+
+`import_engine._match_artist_locally()` (behind `find_matching_artist()`) runs
+`similarity()` only over what `get_artists_from_db_session()` returned for the
+name, and that search is substring-based. A typo inside the name ("Liiquid
+Tension Experiment" vs "Liquid Tension Experiment") therefore yields no
+candidates at all, and the fuzzy step never runs - however close the spelling.
+The import survives this by falling back to MusicBrainz; local-only lookups
+don't. `LocalSongMatcher.match_similar()` works around it from the other side:
+songs with the same title core, filtered to artists whose name / Latin form /
+synonym passes `scaled_similarity_threshold()`, accepted only when exactly one
+song fits. `match()` (files.db, cover import) takes that guess silently; the
+folder playlist only offers it for confirmation. Note that `files.db` rematches
+old unmatched rows only when the catalog fingerprint changes, so a matching
+improvement like this reaches those rows only after the next catalog change.
+
+Title cores (`import_engine._title_core()`) also drop a leading track number
+(`strip_track_number_prefix()`: "T03: ", "03. ", "03 - ", "Track 5) "). It
+needs a separator *and* a space after the digits so titles that are numbers
+("1979", "7 Rings", "2:00 AM", "99 Luftballons") stay whole.

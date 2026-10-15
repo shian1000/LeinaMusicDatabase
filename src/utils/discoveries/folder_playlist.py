@@ -2,10 +2,12 @@
 under a folder, in alphabetical order of its path within the folder, matched
 to the song already in the database the way the tag import matches files
 (read_file_metadata() + import_engine.LocalSongMatcher - local only, nothing
-created). Nothing is written here; utils/database/user_playlists.py saves
-the result once every file has a song (the user picks one for each file
-that didn't match), and mp3_utils.write_song_tags() can then copy the
-database's data into the files' tags."""
+created). A file whose tag artist is misspelt only gets a suggestion
+(LocalSongMatcher.match_similar()) the user confirms. Nothing is written
+here; utils/database/user_playlists.py saves the result once every file has
+a song (the user picks one for each file that didn't match), and
+mp3_utils.write_song_tags() / rename_to_song() can then copy the database's
+data into the files' tags and names."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,9 +15,10 @@ from pathlib import Path
 from mutagen.mp3 import MP3
 
 from utils.common.debug import flog
+from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
-from utils.discoveries.import_engine import LocalSongMatcher
+from utils.discoveries.import_engine import LocalSongMatcher, find_matching_artist, find_song_loosely
 
 
 @dataclass
@@ -26,6 +29,8 @@ class FolderTrack:
     song_id: int | None = None
     youtube_video_id: str | None = None
     duration_s: int | None = None
+    similar_song: object | None = None  # a Song suggested for an unmatched file
+    picked: bool = False                # its song was confirmed/picked by the user
 
 
 @dataclass
@@ -42,6 +47,31 @@ def assign_song(track: FolderTrack, song) -> None:
     track.title = song.title
     track.artist = song_artist_label(song)
     track.youtube_video_id = song.youtube_video_id or None
+
+
+def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
+    """(artist, song) a new song for a file would get: the database's
+    artist matching `artist_name` (None = a new one is made), and the song
+    of that artist the title already is, as loosely as files are matched
+    (None = a new one is made)."""
+    artist = find_matching_artist(artist_name)
+    if artist is None:
+        return None, None
+    songs = session.query(Song).filter(Song.artist_id == artist.id).all()
+    return artist, find_song_loosely(title, songs)
+
+
+def add_song_for_file(session, artist_name: str, title: str) -> Song:
+    """Add a song by `artist_name` titled `title` for a file the database
+    has nothing for - the existing artist (and song) when there is one, as
+    song_for_file_plan() shows it. Commits."""
+    artist, song = song_for_file_plan(session, artist_name, title)
+    if song is not None:
+        return song
+    song = Song(title=title, artist=artist or Artist(name=artist_name))
+    session.add(song)
+    session.commit()
+    return song
 
 
 def folder_mp3_files(folder: Path) -> list[Path]:
@@ -66,13 +96,14 @@ def build_folder_playlist(session, folder: Path) -> FolderPlaylist:
             metadata = read_file_metadata(file)
         except ValueError:
             metadata = {}
-        song = matcher.match(metadata)
+        song = matcher.match_exact(metadata)
         if song is not None:
             track = FolderTrack(file=file, title=song.title, artist=None)
             assign_song(track, song)
         else:
             track = FolderTrack(file=file, title=metadata.get("title") or file.stem,
-                                artist=metadata.get("artist_name"))
+                                artist=metadata.get("artist_name"),
+                                similar_song=matcher.match_similar(metadata))
             playlist.unmatched.append(track)
             flog(f"Playlist from folder: no song in the database for {file}")
         track.duration_s = audio_duration(file)

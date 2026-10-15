@@ -136,3 +136,30 @@ def write_song_tags(file: Path, song) -> bool:
     if changed:
         tags.save(file)
     return changed
+
+
+# Not allowed in a file name here or on the Windows side of the Samba share
+_FILE_NAME_FORBIDDEN = str.maketrans({c: "_" for c in '/\\:*?"<>|'})
+
+
+def song_file_name(song, suffix: str = ".mp3") -> str:
+    """"Artist - Title.mp3" from the database's data (the whole artist
+    credit), characters a file name can't hold replaced by "_"."""
+    from utils.database.song_artists import song_artist_label
+
+    stem = f"{song_artist_label(song)} - {song.title}".translate(_FILE_NAME_FORBIDDEN).strip(" .")
+    return stem + suffix
+
+
+def rename_to_song(file: Path, song) -> Path:
+    """Rename `file` to song_file_name() in its own folder; returns the new
+    path (the old one when it already has that name). Raises FileExistsError
+    rather than overwrite another file."""
+    target = file.with_name(song_file_name(song, file.suffix))
+    if target == file:
+        return file
+    # Same name in other case only: a case-insensitive filesystem sees one file
+    if target.exists() and target.name.casefold() != file.name.casefold():
+        raise FileExistsError(f"{target} already exists")
+    file.rename(target)
+    return target

@@ -212,16 +212,24 @@ non-trivial work in that area.
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
   "which existing song is this file?" lookup, shared by the cover import and playlists from a
   folder. It's deliberately looser than the import's own `find_existing_song()` check: it matches
-  the main artist of "A ft. B", and titles with brackets and trailing junk stripped. Don't swap one
+  the main artist of "A ft. B", and titles with brackets, trailing junk and a leading track number
+  ("T03: ", `text_utils.strip_track_number_prefix()`) stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
   `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts
   every mp3 in alphabetical path order. Files with no song are walked through one by one (name,
   folder, what was read). For each, the user can search by title across all artists
   (`import_engine.find_songs_by_title()`, for files with no usable artist). Picking a candidate
   isn't final: the user confirms it or switches to the manual search. They can also search the
-  database (`search_and_pick_db_object()`), or skip. A playlist is only saved once every file has
-  a song. After that it offers to copy the database's title/artist/album/year into the files' tags
-  (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
+  database (`search_and_pick_db_object()`), add it as a new song (`folder_playlist.add_song_for_file()`,
+  the existing artist/song reused), keep it in the playlist without a song (a track with
+  `song_id` NULL), or leave it out of the playlist (the file itself is never touched). Only "Stop"
+  leaves the playlist unsaved. A file whose tag artist the artist search can't find (a typo: "Liiquid tension
+  experiment" — the search is substring-based, so it gets no candidates at all) gets
+  `LocalSongMatcher.match_similar()`'s suggestion first (same title, resembling artist, only when
+  exactly one song fits), which the user confirms; `match()` (files.db, covers) takes it without
+  asking. After saving, files whose song was confirmed or picked are offered "Fix the names and
+  tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
+  tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
   `mp3_covers.py` is Fetch database data → "Import covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
   `<database_dir>/covers/`, matched to songs like the tag import (`read_file_metadata()`,
   `find_existing_song()`), non-square video frames skipped; see its docstring and
@@ -487,8 +495,9 @@ non-trivial work in that area.
   canonical `normalizer`, the three ordered fallback stages of `split_artist_title()` (used for mp3
   filename parsing via `extract_unknown_data()`, and directly for YouTube video titles), the three
   distinct `text_utils` similarity functions (and the `TypeError` from
-  confusing them), and why artist-name matching uses `scaled_similarity_threshold()` for short
-  strings.
+  confusing them), why artist-name matching uses `scaled_similarity_threshold()` for short
+  strings, and why a typo inside an artist name defeats the local fuzzy lookup (substring-only
+  candidates) and how `LocalSongMatcher.match_similar()` works around it.
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
