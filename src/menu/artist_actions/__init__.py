@@ -30,6 +30,31 @@ def add_synonym_menu(artist_objects):
     print(f"Added '{synonym}' as a synonym of {artist.name}")
 
 
+def remove_synonym_menu(artist_objects):
+    with_synonyms = [a for a in artist_objects if a.synonyms and a.synonyms.strip()]
+    if not with_synonyms:
+        print("None of these artists has synonyms")
+        return
+    if len(with_synonyms) > 1:
+        artist = pick_from_db_objects(with_synonyms, question="Which artist do you want to remove a synonym from?")
+        if artist is None:
+            return
+    else:
+        artist = with_synonyms[0]
+
+    existing_synonyms = [s.strip() for s in artist.synonyms.split(",") if s.strip()]
+    to_remove = questionary.checkbox(f"Which synonyms of {artist.name} do you want to remove?",
+                                     choices=existing_synonyms).ask()
+    if not to_remove:
+        print("Aborted")
+        return
+
+    remaining = [s for s in existing_synonyms if s not in to_remove]
+    artist.synonyms = ", ".join(remaining) or None
+    submit_global_database_session()
+    print(f"Removed {', '.join(repr(s) for s in to_remove)} from the synonyms of {artist.name}")
+
+
 def remove_artists(artist_objects):
     print("About to delete these artists from the database:")
     display_artists(artist_objects)
@@ -61,6 +86,7 @@ def artist_actions(artist_objects):
     action_map = {
         "Edit": lambda: edit_artist_menu(artist_objects),
         "Add synonym": lambda: add_synonym_menu(artist_objects),
+        "Remove synonym": lambda: remove_synonym_menu(artist_objects),
         "Remove from the database": lambda: remove_artists(artist_objects),
     }
 
