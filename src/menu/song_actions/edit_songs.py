@@ -16,38 +16,13 @@ from utils.database.song_artists import (
 from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
 from utils.database.latin_names import latin_of
 from utils.ui.latin_forms_review import edit_latin_form
+from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
 import time
-
-def swap_title_and_artist(song: Song):
-    print(f"About to swap title and artist name for \"{song.artist.name} - {song.title}\":")
-    confirmation = questionary.confirm(f"Swap \"{song.title}\" and \"{song.artist.name}\"?").ask()
-    if not confirmation:
-        print("Aborted")
-        return
-
-    artist_name = song.artist.name
-    title = song.title
-    song.artist.name = title
-    song.title = artist_name
-    submit_global_database_session()
-    print(f"Swapped title and artist name. Now: \"{song.artist.name} - {song.title}\".")
-
 
 _ROLE_CHOICES = {
     f"{ADDITIONAL_ARTIST_ROLE_MAIN} (co-artist, \"A x B\")": ADDITIONAL_ARTIST_ROLE_MAIN,
     f"{ADDITIONAL_ARTIST_ROLE_FEAT} (guest, \"A feat. B\")": ADDITIONAL_ARTIST_ROLE_FEAT,
 }
-
-
-def _pick_or_create_artist(name: str) -> Artist | None:
-    existing = get_artists_from_db_session(artist_categories[0], name)
-    if existing:
-        picked = pick_from_db_objects(existing, question="Pick the artist", back_label="Add new")
-        if picked:
-            return picked
-    if not questionary.confirm(f"Add new artist '{name}' to the database?").ask():
-        return None
-    return add_db_entry(Artist(name=name))
 
 
 def _pick_additional_artist(song: Song, question: str) -> Artist | None:
@@ -78,7 +53,7 @@ def edit_additional_artists_menu(song: Song):
                 name = input("Type the name of the artist to add: ").strip()
                 if not name:
                     continue
-                artist = _pick_or_create_artist(name)
+                artist = pick_or_create_artist(name)
                 if artist is None:
                     continue
                 role_label = questionary.select("Role of this artist:", choices=list(_ROLE_CHOICES)).ask()
@@ -124,8 +99,19 @@ def edit_entry_menu(mode: str = None, db_object = None):
 
 
     properties_list = get_list_of_properties_from_db_object(db_object)
-    displayed_list = [f"{menu_item} ({property})" for menu_item, property in zip(action_map, properties_list)]
-    swap_option = "Swap title and artist"
+    fields = list(zip(action_map, properties_list))
+    artist_option = None
+    if mode == "Song":
+        # The artist row's own fields (name, origin, ...) are edited from
+        # Artist actions; here "artist" credits the song to another artist
+        fields = [(category, value) for category, value in fields if category not in artist_categories]
+        artist_option = f"artist ({db_object.artist.name})"
+    # menu label -> category edited by typing a new value
+    field_options = {f"{category} ({value})": category for category, value in fields}
+    displayed_list = list(field_options)
+    if artist_option:
+        displayed_list.insert(1, artist_option)
+    swap_option = "Swap title and artist names"
     extras_option = None
     # Latin forms of names in another alphabet (utils/database/latin_names.py):
     # menu label -> the Song / Artist / Album it sets
@@ -136,7 +122,6 @@ def edit_entry_menu(mode: str = None, db_object = None):
         extras_option = f"additional artists ({extras_label})"
         displayed_list.append(extras_option)
         latin_options[f"title in Latin letters ({latin_of(db_object) or '—'})"] = db_object
-        latin_options[f"artist name in Latin letters ({latin_of(db_object.artist) or '—'})"] = db_object.artist
         album = db_object.album_entry
         # A "Singles" album copies the song's own form
         if album is not None and album.type != ALBUM_TYPE_SINGLE:
@@ -155,7 +140,10 @@ def edit_entry_menu(mode: str = None, db_object = None):
     if choice == back_option:
         return
     if choice == swap_option:
-        swap_title_and_artist(db_object)
+        swap_titles_and_artist_names([db_object])
+        return
+    if choice == artist_option:
+        change_songs_artist([db_object])
         return
     if choice == extras_option:
         edit_additional_artists_menu(db_object)
@@ -172,12 +160,15 @@ def edit_entry_menu(mode: str = None, db_object = None):
         else:
             print("Aborted")
         return
-    choosen_index = (displayed_list.index(choice))
-    category = action_map[choosen_index]
+    category = field_options.get(choice)
+    if category is None:
+        return
     label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
     new_data = input(f"Type {category} for {label}: ")
     if not new_data:
         print("Aborted")
+        return
+    if category == artist_categories[0] and rename_artist(db_object, new_data.strip()):
         return
 
     slog(db_object)

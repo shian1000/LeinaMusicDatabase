@@ -54,7 +54,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - The automatic pass over the phone's requests, by hand: `venv/bin/python auto_resolve_requests.py`
   (normally the `musicdatabase-inbox` timer runs it; it does nothing while the app is open)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~700 tests, ~45s, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~900 tests, ~1.5 min, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -138,6 +138,9 @@ non-trivial work in that area.
   `utils/common/romanize.py`. Search treats them as names, matching as synonyms / second titles:
   code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
   `artist.synonyms`. Details: `docs/data-model.md`.
+  `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
+  instead of renaming the shared row, removing an artist left without songs (album rows go to its
+  heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
@@ -145,7 +148,10 @@ non-trivial work in that area.
   `albums.py` owns `albums` / `album_covers` and keeps `songs.album_id` in step with the
   `songs.album` text through a `before_flush` listener on the music session factory. Change the
   text and the row follows; never set `album_id` by hand. Raw-SQL artist merges bypass the listener,
-  so every artist merge must also call `reassign_artist_albums()`. Titles several main artists
+  so every artist merge must also call `reassign_artist_albums()`. The listener only relinks the
+  songs being flushed: when a song leaves a title it shared with another artist, the songs left
+  behind keep `album_id` NULL until someone calls `link_songs()` on them (`artist_reassignment`'s
+  `_link_album_title()` does). Titles several main artists
   share stay NULL for Manage database → "Resolve albums with several artists"
   (`utils/ui/album_resolution_review.py`), which first offers to merge one artist spelt twice and
   to fix swapped artist/title songs (`artist_identity.py`), the usual reason a title looks shared. Rules, the "Singles" one-song albums, stable ids:
@@ -440,20 +446,26 @@ non-trivial work in that area.
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
   included) and follow the same shape for a new one rather than inventing another. That's for
   candidates *discovered* by scanning; a bulk `song_actions` op invoked directly on an
-  already-selected list (e.g. `swap_artist_with_title()`) instead asks one upfront confirm for the
+  already-selected list (e.g. `swap_titles_and_artist_names()`) instead asks one upfront confirm for the
   whole batch, since there's nothing to discover — but still needs the same
   dedup-by-`song.artist.id` gotcha if it mutates the shared `Artist` row (first song to hit a given
   artist wins, later ones by the same artist are skipped with a message, not silently re-applied).
-  `edit_entry_menu()` (single-song category editor, in `edit_songs.py`) also offers its own "Swap
-  title and artist" choice (`swap_title_and_artist()`) alongside the bulk `swap_artist_with_title()`
-  in `song_actions` — a deliberate second entry point for the single-song case, not leftover
-  duplication to consolidate; being single-song, it needs no artist-id dedup. The same editor's "additional
-  artists" entry (`edit_additional_artists_menu()`) is the only UI for multi-artist credits so
-  far; the "artist name" entry still edits only the primary `songs.artist_id` artist.
+  An `Artist` row is shared by all its songs, so the song side never renames it: the song editor
+  (`edit_entry_menu()` in `edit_songs.py`) and Song actions offer "artist" / "Change artist"
+  (`utils/ui/artist_change.change_songs_artist()` → `artist_reassignment.set_primary_artist()`:
+  the song is credited to another, found or new, artist; an artist left without songs can be
+  merged into it or deleted), while the artist's name / origin / Latin form are edited only from
+  Artist actions → Edit (renaming onto an existing name offers a merge). "Swap title and artist
+  names" (`swap_titles_and_artist_names()`, the single-song editor and Song actions share it)
+  renames the artist row only when it has no other song, or when the user picks "for all its
+  songs"; otherwise the song moves to an artist named like its old title
+  (`artist_reassignment.move_swapped_song()`, also behind `artist_identity.fix_swapped_song()`).
+  The editor's "additional artists" entry (`edit_additional_artists_menu()`) is the only UI for
+  multi-artist credits so far.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~700 tests, ~45 seconds, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~900 tests, ~1.5 minutes, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - Don't claim a check passed unless you ran it in this workspace.

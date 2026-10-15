@@ -13,11 +13,10 @@ from config.constants import SAME_ARTIST_SIMILARITY_THRESHOLD
 from utils.common.normalizer import name_key, normalize
 from utils.common.script_utils import scripts_in
 from utils.common.text_utils import resembles_across_scripts, similarity
-from utils.database.albums import reassign_artist_albums
+from utils.database.artist_reassignment import move_swapped_song
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
-from utils.database.song_artists import count_artist_songs, reassign_additional_artist_links
 
 # Cyrillic letters drawn like Latin ones, for a name typed with one of them by
 # mistake ("Вjörk" - Cyrillic В - is "Bjork"). Only applied to a name mixing
@@ -140,20 +139,8 @@ def find_swapped_songs(songs: list[Song]) -> list[tuple[Song, Artist]]:
 
 def fix_swapped_song(session, song: Song, artist: Artist) -> Artist | None:
     """Make `song` the existing `artist`'s, with its old artist name as the
-    title ("Renegade - Styx" -> "Styx - Renegade"). Unlike edit_songs'
-    swap_title_and_artist() this doesn't rename the artist row, which would
-    make a second Styx. The old artist is deleted when it has no song left;
-    returns it if so (already deleted), else None."""
-    old = song.artist
-    song.title = old.name
-    song.artist = artist
-    session.flush()
-    if count_artist_songs(session, old.id):
-        return None
-    # Nothing should point at it any more, but an album row or extra-artist
-    # link may still; hand those over before the row goes
-    reassign_additional_artist_links(session, old.id, artist.id)
-    reassign_artist_albums(session, old.id, artist.id)
-    session.delete(old)
-    session.flush()
-    return old
+    title ("Renegade - Styx" -> "Styx - Renegade"). Unlike renaming the
+    artist row, this doesn't make a second Styx. The old artist is deleted
+    when it has no song left; returns it if so (already deleted), else None."""
+    _, removed = move_swapped_song(session, song, artist)
+    return removed

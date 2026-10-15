@@ -3,6 +3,7 @@ from utils.ui.menu_utils import execute_menu_item, pick_from_db_objects
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
 from utils.ui.display_utils import display_artists
+from menu.song_actions.edit_songs import edit_entry_menu
 
 
 def add_synonym_menu(artist_objects):
@@ -44,8 +45,21 @@ def remove_artists(artist_objects):
     print(f"Deleted {len(artist_objects)} artist(s).")
 
 
+def edit_artist_menu(artist_objects):
+    """The artist row itself - its name, origin, Latin form - for all its
+    songs. Crediting one song to another artist is in Song actions."""
+    if len(artist_objects) > 1:
+        artist = pick_from_db_objects(artist_objects, question="Which artist do you want to edit?")
+        if artist is None:
+            return
+    else:
+        artist = artist_objects[0]
+    edit_entry_menu(db_object=artist)
+
+
 def artist_actions(artist_objects):
     action_map = {
+        "Edit": lambda: edit_artist_menu(artist_objects),
         "Add synonym": lambda: add_synonym_menu(artist_objects),
         "Remove from the database": lambda: remove_artists(artist_objects),
     }

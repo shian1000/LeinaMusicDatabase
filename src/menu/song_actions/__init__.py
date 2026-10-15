@@ -10,6 +10,7 @@ from utils.database.datatables import artist_categories, song_categories
 from utils.database.tags_management import remove_tag_from_song
 from utils.youtube.manage_youtube_playlists import create_yt_playlist, extract_video_id, NO_VIDEO_SENTINEL
 from utils.ui.display_utils import display_songs, display_song_links
+from utils.ui.artist_change import change_songs_artist, swap_titles_and_artist_names
 from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
@@ -111,31 +112,6 @@ def set_spotify_link(songs_objects):
     print(f"Set {normalized} on {len(songs_objects)} song(s).")
 
 
-def swap_artist_with_title(songs_objects):
-    print("About to swap artist name and title for these songs:")
-    display_songs(songs_objects)
-    confirmation = questionary.confirm(f"Swap artist name and title for {len(songs_objects)} song(s)?").ask()
-    if not confirmation:
-        print("Aborted")
-        return
-
-    seen_artist_ids = set()
-    swapped_count = 0
-    for song in songs_objects:
-        if song.artist_id in seen_artist_ids:
-            print(f"Skipped \"{song.artist.name} - {song.title}\": artist \"{song.artist.name}\" was already swapped for another selected song.")
-            continue
-        seen_artist_ids.add(song.artist_id)
-        artist_name = song.artist.name
-        title = song.title
-        song.artist.name = title
-        song.title = artist_name
-        swapped_count += 1
-
-    submit_global_database_session()
-    print(f"Swapped artist name and title for {swapped_count} song(s).")
-
-
 # Link kind -> the Song attribute holding it, for "Remove links".
 _SONG_LINK_FIELDS = {
     "YouTube": "youtube_video_id",
@@ -206,7 +182,8 @@ def song_actions(songs_objects):
         "Set YouTube link": lambda: set_youtube_link(songs_objects),
         "Set music video link": lambda: set_music_video_link(songs_objects),
         "Set Spotify link": lambda: set_spotify_link(songs_objects),
-        "Swap artist with title": lambda: swap_artist_with_title(songs_objects),
+        "Change artist": lambda: change_songs_artist(songs_objects),
+        "Swap title and artist names": lambda: swap_titles_and_artist_names(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),
         "Remove from the database": lambda: remove_songs_from_database(songs_objects)
     }
