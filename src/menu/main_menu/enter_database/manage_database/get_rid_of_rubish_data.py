@@ -3,11 +3,11 @@ from utils.common.text_utils import is_blacklisted_album
 import time
 import questionary
 from utils.database.database_management import edit_db_entry
-from utils.database.database_sessions import submit_global_database_session
-from utils.database.tags_management import add_tag_to_song, has_tag_on_song
+from utils.database.database_sessions import get_global_database_sessions, submit_global_database_session
+from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
 from config.constants import TITLE_JUNK_SUFFIXES
-from utils.database.datatables import song_categories, artist_categories
+from utils.database.datatables import Artist, song_categories, artist_categories
 from utils.common.debug import slog
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
@@ -173,7 +173,7 @@ def fix_lookalike_letters(songs):
     if any(entries[i][0][0] == "artist" for i in selected):
         print('An artist may now share its name with another one - run "Resolve duplicated artists" to merge them.')
 
-def seek_nonsense_names(songs):
+def seek_nonsense_names(songs, checked_ids):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
     # away, per song. Now the scan just tags and queues them, and the questions
     # (plus the free-text replacement each "yes" needs) are asked in one batch
@@ -182,7 +182,7 @@ def seek_nonsense_names(songs):
     pending_rubbish_corrections = []
     auto_fixed_titles = []
     for song in songs:
-        if not has_tag_on_song(song, "album_checked"):
+        if song.id not in checked_ids:
             if is_blacklisted_album(song.album):
                 pending_rubbish_corrections.append({
                     "song": song,
@@ -255,7 +255,7 @@ def seek_nonsense_names(songs):
             else:
                 print("Can't delete title name entirely")
 
-def resolve_unknown_artist(songs):
+def resolve_unknown_artist(songs, checked_ids):
         # Editing an unknown-artist/title split is unconditional (there's no
         # yes/no decision to defer) - the per-song "Press anything to continue"
         # was only there to pause and show what changed, one song at a time.
@@ -263,7 +263,7 @@ def resolve_unknown_artist(songs):
         # print it as a single summary at the end instead of blocking per song.
         changes = []
         for song in songs:
-            if not has_tag_on_song(song, "album_checked"):
+            if song.id not in checked_ids:
                 lowered_artist = song.artist.name.strip().lower()
                 lowered_title = song.title.strip().lower()
                 slog(lowered_artist)
@@ -297,15 +297,21 @@ def resolve_unknown_artist(songs):
 def get_rid_of_rubish_data():
     print("Looking for sus album titles . . . . . ")
     songs = get_songs_from_db_session()
+    # Every step reads song.artist; loading all artists once puts them in the
+    # session, so those lookups need no query per song (~4 s otherwise).
+    music_session, _ = get_global_database_sessions()
+    music_session.query(Artist).all()
+    # One query instead of has_tag_on_song() per song, twice (~26 s).
+    checked_ids = song_ids_with_tag("album_checked")
     convert_characters_encoding(songs)
     remove_invisible_characters(songs)
     strip_leading_spaces(songs)
     replace_double_spaces(songs)
-    resolve_unknown_artist(songs)
+    resolve_unknown_artist(songs, checked_ids)
     submit_global_database_session()
     fix_lookalike_letters(songs)
     submit_global_database_session()
-    seek_nonsense_names(songs)
+    seek_nonsense_names(songs, checked_ids)
     submit_global_database_session()
 
 

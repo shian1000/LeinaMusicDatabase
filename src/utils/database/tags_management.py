@@ -86,6 +86,23 @@ def add_tag_to_song(song, tag: str) -> bool:
         return False
 
 
+def song_ids_with_tag(tag: str) -> set[int]:
+    """Ids of every song carrying `tag`, in one query. Use it instead of
+    has_tag_on_song() in a loop over the whole catalog (two queries per song,
+    ~13 s for 5.7k songs)."""
+    sessions = get_global_database_sessions()
+    if sessions is None or not tag or not tag.strip():
+        return set()
+    _, tag_session = sessions
+    rows = (
+        tag_session.query(SongTag.song_id)
+        .join(Tag, SongTag.tag_id == Tag.id)
+        .filter(Tag.name == tag.strip())
+        .all()
+    )
+    return {song_id for (song_id,) in rows}
+
+
 def has_tag_on_song(song, tag: str) -> bool:
     slog("has_tag_on_song activatd")
     """
