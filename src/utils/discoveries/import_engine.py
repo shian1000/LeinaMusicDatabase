@@ -7,11 +7,11 @@ from utils.common.debug import slog, mlog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix, similarity_at_least
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.latin_names import artist_match_synonyms, song_titles
 from utils.database.song_artists import song_all_artists
-from config.constants import FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
+from config.constants import FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
@@ -384,6 +384,8 @@ class LocalSongMatcher:
         self._artists = {}
         self._songs = {}
         self._by_title = None
+        self._scoring = None       # [(song, title forms)] for best_guesses()
+        self._artist_forms = {}    # song id -> normalized _artist_names()
 
     def _artist(self, name: str) -> Artist | None:
         if name not in self._artists:
@@ -451,9 +453,69 @@ class LocalSongMatcher:
             return swapped
         artist = self._artist(name)
         if artist is not None:
-            return self._similar_title(artist, title) if title_guesses else None
+            if not title_guesses:
+                return None
+            return self._similar_title(artist, title) or self._title_prefix(artist, title)
         found = [s for s in self._songs_by_title_core(title) if _artist_resembles(name, s)]
         return found[0] if len(found) == 1 else None
+
+    def match_score(self, metadata: dict, song: Song) -> float:
+        """0-1, how well the file's tags fit `song`: the title's similarity
+        (whole and core, the better) and, when the file has an artist, the
+        artist's (FILE_MATCH_SCORE_TITLE_WEIGHT : the rest). Shown with every
+        guess; best_guesses() ranks by it."""
+        return self._score(*self._wanted(metadata), self._title_forms(song), song, 0.0)
+
+    def best_guesses(self, metadata: dict, limit: int, min_score: float) -> list:
+        """The `limit` songs scoring at least `min_score`, best first, as
+        (song, score) - for a file nothing else found a song for. The title
+        alone must reach `min_score` too, or a perfect artist would bring
+        any of their songs over it ("Hymn to Virgil" for a Hozier file whose
+        song isn't in the database)."""
+        wanted = self._wanted(metadata)
+        if not wanted[0]:
+            return []
+        if self._scoring is None:
+            self._scoring = [(song, self._title_forms(song)) for song in self.session.query(Song).all()]
+        scored = [(song, score) for song, forms in self._scoring
+                  if (score := self._score(*wanted, forms, song, min_score)) >= min_score]
+        scored.sort(key=lambda pair: (-pair[1], pair[0].id))
+        return scored[:limit]
+
+    @staticmethod
+    def _wanted(metadata: dict) -> tuple:
+        title = metadata.get("title") or ""
+        forms = [f for f in {normalize(title), _title_core(title)} if f]
+        return forms, normalize(metadata.get("artist_name") or "")
+
+    @staticmethod
+    def _title_forms(song: Song) -> list:
+        return list({f for t in song_titles(song) for f in (normalize(t), _title_core(t)) if f})
+
+    def _score(self, title_forms: list, artist: str, song_forms: list, song: Song, floor: float) -> float:
+        if not title_forms:
+            return 0.0
+        weight = FILE_MATCH_SCORE_TITLE_WEIGHT if artist else 1.0
+        title = max((similarity_at_least(a, b, floor) for a in title_forms for b in song_forms), default=0.0)
+        if not artist:
+            return title
+        if title < floor:
+            return 0.0
+        if song.id not in self._artist_forms:
+            self._artist_forms[song.id] = list({normalize(n) for n in _artist_names(song)} - {""})
+        artist_score = max((similarity_at_least(artist, known, 0.0) for known in self._artist_forms[song.id]), default=0.0)
+        return weight * title + (1 - weight) * artist_score
+
+    def title_candidates(self, metadata: dict, limit: int) -> list:
+        """For a file with no artist: the songs (any artist) with its title
+        core when there are 2 to `limit` of them - match_similar() takes
+        a single one - by artist; else []."""
+        if metadata.get("artist_name") or not metadata.get("title"):
+            return []
+        found = self._songs_by_title_core(metadata["title"])
+        if not 2 <= len(found) <= limit:
+            return []
+        return sorted(found, key=lambda s: ((s.artist.name or "").lower(), s.id))
 
     def _songs_by_title_core(self, title: str) -> list:
         """Every song, any artist, whose title core is `title`'s."""
@@ -478,6 +540,24 @@ class LocalSongMatcher:
                    for known in map(normalize, song_titles(song)))
         ]
         return found[0] if len(found) == 1 else None
+
+    def _title_prefix(self, artist: Artist, title: str) -> Song | None:
+        """The song of `artist` whose title (core) the file's title starts
+        with, as whole words - junk the cleanup lists don't know trailing it
+        ("Tubthumping  Officiel official Soundtrack World Cup 98"). The
+        longest such title wins ("Song 2" over "Song"); None on a tie."""
+        wanted = _title_core(title)
+        found = []
+        for song in self._artist_songs(artist):
+            cores = [c for c in map(_title_core, song_titles(song))
+                     if len(c) >= FILE_TITLE_PREFIX_MIN_LENGTH and wanted.startswith(c + " ")]
+            if cores:
+                found.append((max(map(len, cores)), song))
+        if not found:
+            return None
+        longest = max(length for length, _ in found)
+        best = [song for length, song in found if length == longest]
+        return best[0] if len(best) == 1 else None
 
 
 def _artist_names(song: Song, split_parts: bool = True):

@@ -15,6 +15,8 @@ from pathlib import Path
 
 from mutagen.mp3 import MP3
 
+from config.constants import FILE_BEST_GUESSES_MAX, FILE_TITLE_CANDIDATES_MAX
+
 from utils.common.debug import flog
 from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
@@ -31,6 +33,14 @@ class FolderTrack:
     youtube_video_id: str | None = None
     duration_s: int | None = None
     similar_song: object | None = None  # a Song suggested for an unmatched file
+    # Songs to pick from for an unmatched file with no artist whose title
+    # several songs have (LocalSongMatcher.title_candidates())
+    title_candidates: list = field(default_factory=list)
+    # When neither of those: the closest songs by score, (Song, score) pairs
+    # (LocalSongMatcher.best_guesses())
+    best_guesses: list = field(default_factory=list)
+    # song id -> LocalSongMatcher.match_score() of every song suggested above
+    scores: dict = field(default_factory=dict)
     picked: bool = False                # its song was confirmed/picked by the user
     # The video of the YouTube playlist it was paired with
     # (folder_youtube_playlist.py), which wins over its song's own link
@@ -96,12 +106,13 @@ def audio_duration(file: Path) -> int | None:
 
 
 def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: FolderTrack, metadata: dict,
-                min_artist_similarity: float = 1.1) -> None:
+                min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1) -> None:
     """Give `track` its database song from `metadata` (artist_name, title)
     the way build_folder_playlist() does, or put it in `playlist.unmatched`
     with a suggestion. `min_artist_similarity`: see
-    LocalSongMatcher.match_confident() - the user's setting; the default
-    (above 1) never auto-accepts."""
+    LocalSongMatcher.match_confident(), `best_guess_min_score`: see
+    best_guesses() - the user's settings; the defaults (above 1) never
+    auto-accept nor guess."""
     song = matcher.match_exact(metadata)
     confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
     if song is not None:
@@ -114,11 +125,18 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
     else:
         track.title, track.artist = metadata["title"], metadata.get("artist_name")
         track.similar_song = matcher.match_similar(metadata)
+        if track.similar_song is None:
+            track.title_candidates = matcher.title_candidates(metadata, FILE_TITLE_CANDIDATES_MAX)
+        if track.similar_song is None and not track.title_candidates:
+            track.best_guesses = matcher.best_guesses(metadata, FILE_BEST_GUESSES_MAX, best_guess_min_score)
+        suggested = [track.similar_song, *track.title_candidates, *(song for song, _ in track.best_guesses)]
+        track.scores = {song.id: matcher.match_score(metadata, song) for song in suggested if song is not None}
         playlist.unmatched.append(track)
         flog(f"Playlist from folder: no song in the database for {track.file or metadata.get('_label')}")
 
 
-def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1) -> FolderPlaylist:
+def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1,
+                          best_guess_min_score: float = 1.1) -> FolderPlaylist:
     """`min_artist_similarity`: see match_track()."""
     playlist = FolderPlaylist(folder=Path(folder))
     matcher = LocalSongMatcher(session)
@@ -132,7 +150,7 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
             # as the user is shown it
             metadata = {**metadata, "title": html.unescape(file.stem)}
         track = FolderTrack(file=file, title=metadata["title"], artist=None)
-        match_track(playlist, matcher, track, metadata, min_artist_similarity)
+        match_track(playlist, matcher, track, metadata, min_artist_similarity, best_guess_min_score)
         track.duration_s = audio_duration(file)
         playlist.tracks.append(track)
     return playlist

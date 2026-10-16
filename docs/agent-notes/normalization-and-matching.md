@@ -160,7 +160,9 @@ Before that it tries the tags with artist and title swapped ("N.I.B." /
 "Black Sabbath"), and when the artist *is* found but no title matches, a
 whole-title similarity (bracket text kept) of `FILE_TITLE_SIMILARITY_THRESHOLD`
 among that artist's songs ("Losing TimeGrande Finale" ~ "Losing Time (Grand
-Finale)"); a file with no artist at all gets the one song with its title core
+Finale)") or else the title the file's starts with, whole words (junk no list
+knows trailing it: "Tubthumping  Officiel official Soundtrack World Cup 98"
+scores only ~0.26 as a whole title, far below any threshold); a file with no artist at all gets the one song with its title core
 by anyone. `match()` (files.db, cover import) takes these guesses silently
 *except* those two by title alone (`title_guesses=False`): within one artist
 the similar title would happily pick "Pt. 2" for a "Pt. 1" file, and a
@@ -183,6 +185,25 @@ Death & the Codeine Scene" never met "... And The Codeine Scene". This lives in
 `_title_core()` only, not in `normalize()` - changing the canonical normalizer
 would shift every search and cache key in the app. When added, no two songs of
 one artist in the real database collapsed into the same core.
+
+## Closest songs by score - the last resort
+
+When no rule above finds anything, the folder playlist offers the top 3 of
+`LocalSongMatcher.best_guesses()`, scored by `match_score()`: the title's
+similarity (whole and core, the better), weighted 0.65 against the artist's
+when the file has one. Two choices that aren't obvious:
+
+- The **title alone** must reach the minimum score, not just the weighted
+  sum. Otherwise a perfect artist (0.35) needs a title of only ~0.38 to pass
+  0.6, and every file whose song isn't in the database gets a random song of
+  that artist ("Hymn to Virgil" for Hozier's "Take Me to Church").
+- A best song always exists, so these guesses are offered with the cursor on
+  "None of these", never taken by `match()` or auto-accepted.
+
+It compares against every song (~5.7k), so it uses
+`text_utils.similarity_at_least()` (SequenceMatcher's cheap upper bounds
+first, no `slog()` per call) and caches each song's normalized titles and
+artist names per matcher: ~0.1-0.5 s per unmatched file on the real database.
 
 ## Tags can carry HTML entities
 

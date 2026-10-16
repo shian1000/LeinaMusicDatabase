@@ -38,9 +38,10 @@ from utils.discoveries.folder_youtube_playlist import (
     youtube_only_track,
 )
 from utils.discoveries.import_engine import LocalSongMatcher
-from utils.discoveries.file_matching_settings import load_auto_accept_artist_similarity
+from utils.discoveries.file_matching_settings import load_auto_accept_artist_similarity, load_best_guess_min_score
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
+from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
@@ -96,6 +97,7 @@ _UNMATCHED_STOP = "Stop (don't save the playlist)"
 _CONFIRM_SONG = "Yes, this is the song"
 _SEARCH_INSTEAD = "No - search the database by hand"
 _SIMILAR_OTHER = "No - show the other options"
+_NONE_OF_THESE = "None of these - show the other options"
 _BACK_TO_OPTIONS = "Back to the options for this file"
 
 
@@ -107,9 +109,27 @@ def _default_title(track) -> str:
     return track.title or (track.file.stem if track.file else "")
 
 
-def _song_choice_label(song) -> str:
+def _song_tokens(song, score: float | None = None) -> list:
+    """The song's coloured label as questionary tokens (song_colors): artist,
+    title, album and year, and how well the file's tags fit it ("(87%)")."""
     details = ", ".join(str(v) for v in (song.album, song.year) if v)
-    return f"{song_artist_label(song)} - {song.title}" + (f"  ({details})" if details else "")
+    tokens = song_tokens(song_artist_label(song), song.title, details)
+    if score is not None:
+        tokens += [("", "  "), (DETAIL_STYLE, f"({score:.0%})")]
+    return tokens
+
+
+def _song_choice_label(song) -> str:
+    """The coloured label for print()."""
+    return as_ansi(_song_tokens(song))
+
+
+def _scored_tokens(track, song) -> list:
+    return _song_tokens(song, track.scores.get(song.id))
+
+
+def _song_choices(songs, track=None) -> list:
+    return [questionary.Choice(title=_scored_tokens(track, s) if track else _song_tokens(s), value=s) for s in songs]
 
 
 def _pick_by_title(music_session, track):
@@ -125,7 +145,7 @@ def _pick_by_title(music_session, track):
             return _pick_by_search()
         return None
 
-    choices = [questionary.Choice(title=_song_choice_label(s), value=s) for s in songs]
+    choices = _song_choices(songs)
     picked = questionary.select("Which song is this file?",
                                 choices=choices + [_SEARCH_INSTEAD, _BACK_TO_OPTIONS]).ask()
     if picked is None or picked == _BACK_TO_OPTIONS:
@@ -149,7 +169,8 @@ def _pick_by_search():
     if song is None:
         print("Nothing picked.")
         return None
-    if not questionary.confirm(f"Use \"{_song_choice_label(song)}\"?", default=True).ask():
+    print(f"  Song:  {_song_choice_label(song)}")
+    if not questionary.confirm("Use this song?", default=True).ask():
         return None
     return song
 
@@ -167,14 +188,34 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
         else:
             print(f"\n[{i}/{total}] {track.file.name}")
             print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
-        print(f"  Read as: {track.artist or '?'} - {track.title or '?'}")
+        print(f"  Read as: {colored_song(track.artist, track.title)}")
         if track.similar_song is not None:
-            print(f"  Similar song in the database: {_song_choice_label(track.similar_song)}")
+            print(f"  Similar song in the database: {as_ansi(_scored_tokens(track, track.similar_song))}")
             verdict = questionary.select("Is this the right song?", choices=[_CONFIRM_SONG, _SIMILAR_OTHER]).ask()
             if verdict is None:
                 return
             if verdict == _CONFIRM_SONG:
                 _pick_for_track(track, track.similar_song, unmatched)
+                continue
+        if track.title_candidates:
+            print("  Songs with this title in the database:")
+            choices = _song_choices(track.title_candidates, track)
+            picked = questionary.select("Which song is this file?", choices=choices + [_NONE_OF_THESE]).ask()
+            if picked is None:
+                return
+            if picked != _NONE_OF_THESE:
+                _pick_for_track(track, picked, unmatched)
+                continue
+        if track.best_guesses:
+            # Only the closest by score - often none of them, so that's the default
+            print("  Closest songs in the database:")
+            choices = _song_choices([s for s, _ in track.best_guesses], track)
+            picked = questionary.select("Is one of these the song?", choices=choices + [_NONE_OF_THESE],
+                                        default=_NONE_OF_THESE).ask()
+            if picked is None:
+                return
+            if picked != _NONE_OF_THESE:
+                _pick_for_track(track, picked, unmatched)
                 continue
         while True:
             choice = questionary.select(
@@ -291,7 +332,8 @@ def _create_playlist_from_folder(username: str) -> None:
 
     music_session, _ = open_and_set_global_database_sessions()
     print(f"Matching the mp3 files in {folder} with the database...")
-    playlist = build_folder_playlist(music_session, folder, load_auto_accept_artist_similarity())
+    playlist = build_folder_playlist(music_session, folder, load_auto_accept_artist_similarity(),
+                                     load_best_guess_min_score())
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
@@ -305,7 +347,7 @@ def _finish_folder_playlist(music_session, username: str, name: str, folder: Pat
         print(f"\n{len(playlist.auto_accepted)} file(s) matched automatically though the artist is spelt differently:")
         for track, tag_artist in playlist.auto_accepted:
             source = track.file.name if track.file else _video_url(track.youtube_video_id)
-            print(f"  {source}  ({tag_artist})  ->  {track.artist} - {track.title}")
+            print(f"  {source}  ({tag_artist})  ->  {colored_song(track.artist, track.title)}")
 
     if playlist.unmatched:
         print(f"\n{len(playlist.unmatched)} of {len(playlist.tracks)} file(s) have no song in the database.")
@@ -349,7 +391,7 @@ def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | Non
     for i, track in enumerate(files, 1):
         print(f"\n[{i}/{len(files)}] {track.file.name}")
         print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
-        print(f"  Read as: {track.artist or '?'} - {track.title or '?'}")
+        print(f"  Read as: {colored_song(track.artist, track.title)}")
         unpaired = rank_entries_for(track, [e for e in entries if all(e is not p for _, p in pairs)])
         choices = [questionary.Choice(title=_entry_label(e), value=e) for e in unpaired]
         picked = questionary.select(
@@ -377,7 +419,7 @@ def _review_unpaired_videos(entries: list) -> list | None:
     for i, entry in enumerate(entries, 1):
         print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
         print(f"  {_video_url(entry.video_id)}")
-        print(f"  Read as: {entry.metadata.get('artist_name') or '?'} - {entry.metadata.get('title') or '?'}")
+        print(f"  Read as: {colored_song(entry.metadata.get('artist_name'), entry.metadata.get('title'))}")
         choice = questionary.select("No file is this video - what should happen with it?",
                                     choices=[_VIDEO_ADD, _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
         if choice is None or choice == _PAIR_STOP:
@@ -412,9 +454,9 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
         return
 
     music_session, _ = open_and_set_global_database_sessions()
-    min_similarity = load_auto_accept_artist_similarity()
+    min_similarity, min_score = load_auto_accept_artist_similarity(), load_best_guess_min_score()
     print(f"Matching the mp3 files in {folder} with the database...")
-    playlist = build_folder_playlist(music_session, folder, min_similarity)
+    playlist = build_folder_playlist(music_session, folder, min_similarity, min_score)
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
@@ -450,9 +492,9 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
             return
 
     for track, entry in pairs:
-        link_track(track, entry)
+        link_track(track, entry, matcher)
     by_entry = {id(e): t for t, e in pairs}
-    by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity) for e in added})
+    by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity, min_score) for e in added})
     linked = {id(t) for t in by_entry.values()}
     gone = {id(t) for t in left_out}
     set_tracks(playlist, [by_entry[id(e)] for e in entries if id(e) in by_entry]

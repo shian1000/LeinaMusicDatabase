@@ -31,9 +31,11 @@ from utils.discoveries.discovery_stats import reset_discovery_stats
 from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
 from utils.discoveries.file_matching_settings import (
     load_auto_accept_artist_similarity,
+    load_best_guess_min_score,
     save_auto_accept_artist_similarity,
+    save_best_guess_min_score,
 )
-from config.constants import MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
+from config.constants import BEST_GUESS_MIN_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import settings
 
 
@@ -43,6 +45,7 @@ def settings_menu():
         "Discovery modules": discovery_modules_menu,
         "Max songs to process per fetch": set_max_songs_per_fetch,
         "Auto-accept similar artist names": set_auto_accept_artist_similarity,
+        "Closest songs: minimum score": set_best_guess_min_score,
         "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
@@ -107,6 +110,28 @@ def set_auto_accept_artist_similarity():
         print(f"\033[91m'{typed}' is not a number between {MIN_AUTO_ACCEPT_ARTIST_SIMILARITY} and 1.\033[0m")
         return
     print(f"Auto-accept similar artist names from: {value}")
+
+
+def set_best_guess_min_score():
+    """The lowest score of the closest songs "Create playlist from folder"
+    offers for a file nothing else matched."""
+    lowest, highest = BEST_GUESS_MIN_SCORE_RANGE
+    print("Create playlist from folder: for a file nothing else found a song for, up to 3 of the")
+    print("closest songs are offered, with how well they fit (title, and the artist when the file has")
+    print("one). Only songs from this score up are offered - higher means fewer, surer guesses.")
+    print(f"Current: {load_best_guess_min_score()}\n")
+
+    typed = questionary.text(f"New minimum score ({lowest}-{highest}):").ask()
+    if not typed:
+        print("Cancelled.")
+        return
+    try:
+        value = float(typed.replace(",", "."))
+        save_best_guess_min_score(value)
+    except ValueError:
+        print(f"\033[91m'{typed}' is not a number between {lowest} and {highest}.\033[0m")
+        return
+    print(f"Closest songs offered from score: {value}")
 
 
 def reset_statistics_records():

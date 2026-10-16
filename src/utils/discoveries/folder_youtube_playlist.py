@@ -75,12 +75,16 @@ def pair_score(track: FolderTrack, entry: YouTubeEntry) -> float | None:
     return None
 
 
-def link_track(track: FolderTrack, entry: YouTubeEntry) -> None:
+def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatcher | None = None) -> None:
     """Pair `track` with `entry`: the video becomes its link, and a song the
-    video matched while the file didn't is suggested for the file."""
+    video matched while the file didn't is suggested for the file - with
+    how well the file's tags fit it, given the `matcher`."""
     track.youtube_link = track.youtube_video_id = entry.video_id
     if track.song_id is None and entry.song is not None:
         track.similar_song = entry.song
+        if matcher is not None:
+            track.scores[entry.song.id] = matcher.match_score(
+                {"artist_name": track.artist, "title": track.title}, entry.song)
     if track.duration_s is None:
         track.duration_s = entry.duration_s
 
@@ -112,7 +116,7 @@ def rank_entries_for(track: FolderTrack, entries: list) -> list:
 
 
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,
-                       min_artist_similarity: float = 1.1) -> FolderTrack:
+                       min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1) -> FolderTrack:
     """A track for a video no file was paired with, matched to the
     database like a file (folder_playlist.match_track())."""
     track = FolderTrack(file=None, title=entry.metadata.get("title") or entry.label,
@@ -122,7 +126,8 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
         assign_song(track, entry.song)
     else:
         match_track(playlist, matcher, track,
-                    {**entry.metadata, "title": track.title, "_label": entry.label}, min_artist_similarity)
+                    {**entry.metadata, "title": track.title, "_label": entry.label}, min_artist_similarity,
+                    best_guess_min_score)
     return track
 
 

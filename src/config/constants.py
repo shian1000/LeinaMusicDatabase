@@ -419,6 +419,27 @@ DIALOG_NO_RESULT = -1
 # "Losing TimeGrande Finale" ~ "Losing Time (Grand Finale)", 0.96) is only
 # *suggested* (LocalSongMatcher.match_similar()); "Closing Time" scores 0.61.
 FILE_TITLE_SIMILARITY_THRESHOLD = 0.85
+# ... or whose title the file's starts with, whole words ("Tubthumping
+# Officiel official Soundtrack World Cup 98" -> "Tubthumping"), when that
+# title (its core) is at least this long - "Ja" mustn't claim every "Ja ...".
+FILE_TITLE_PREFIX_MIN_LENGTH = 4
+
+# A file with no artist whose title several songs have ("Toccata and Fugue in
+# D Minor": Bach, Vanessa-Mae) is offered them to pick from, up to this many;
+# more and the user searches by title instead.
+FILE_TITLE_CANDIDATES_MAX = 5
+
+# A file nothing else found a song for is offered up to this many of the
+# closest songs by score (LocalSongMatcher.match_score(): title, and the
+# artist when the file has one), if they score at least the "Closest songs:
+# minimum score" setting (Settings, persisted with the auto-accept one).
+FILE_BEST_GUESSES_MAX = 3
+DEFAULT_BEST_GUESS_MIN_SCORE = 0.6
+BEST_GUESS_MIN_SCORE_RANGE = (0.3, 0.95)
+# Weight of the title in match_score() when the file has an artist (the
+# artist's similarity gets the rest): a wrong artist spelling matters less
+# than a different title.
+FILE_MATCH_SCORE_TITLE_WEIGHT = 0.65
 
 TITLE_AMPERSAND_WORDS = frozenset({"and", "und", "et", "i", "y", "n"})
 

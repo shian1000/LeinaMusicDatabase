@@ -261,11 +261,17 @@ non-trivial work in that area.
   `match_confident()`), which is matched without asking, listed after matching and offered the
   name/tag fix — (the tags' artist and title swapped, else a
   similar title of the tag artist — `FILE_TITLE_SIMILARITY_THRESHOLD`, "Losing TimeGrande Finale",
+  or one the file's title starts with, `FILE_TITLE_PREFIX_MIN_LENGTH`, "Tubthumping  Officiel …",
   never taken by `match()` since nobody confirms there; for a file with no artist, the one song
-  with its title, also not in `match()` — else
+  with its title, also not in `match()`, and when 2–5 songs share it, a list to pick from
+  (`title_candidates()`, `FILE_TITLE_CANDIDATES_MAX`) — else
   same title by a resembling artist — its name, a synonym, or one part of a joined name not split
-  yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms; `match()` (files.db, covers) takes it without
-  asking. After saving, files whose song was confirmed or picked are offered "Fix the names and
+  yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms.
+  When none of those fits, up to 3 closest songs by `LocalSongMatcher.best_guesses()` /
+  `match_score()` are offered (title, and the artist when the file has one; the title alone must
+  reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
+  `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score. `match()` (files.db, covers) takes
+  `match_similar()`'s safe guesses without asking, never the title-only ones nor these. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
   `folder_youtube_playlist.py` is "Create playlist from folder and compare with YT playlist": the
@@ -454,7 +460,9 @@ non-trivial work in that area.
   tokens and renders them through prompt_toolkit's formatted-text machinery, so a literal
   `\033[93m...\033[0m` shows up as garbage instead of color. To highlight something in a prompt,
   `print()` a plain colored line above the `questionary` call instead (see `seek_nonsense_names()`
-  in `get_rid_of_rubish_data.py` for the pattern).
+  in `get_rid_of_rubish_data.py` for the pattern). A `questionary.Choice` title can be coloured,
+  though, given as prompt_toolkit `(style, text)` tokens: `utils/ui/song_colors.py` builds artist
+  (cyan) / title (yellow) labels that way and turns them into ANSI only for `print()`.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - In user-facing text (prints, menu labels, prompts, review notes) the mobile client is "Leina
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong

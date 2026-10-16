@@ -323,6 +323,16 @@ def similarity(a: str, b: str) -> float:
     return result
 
 
+def similarity_at_least(a: str, b: str, floor: float) -> float:
+    """similarity(a, b) when it can reach `floor`, else 0.0 - without
+    logging, and SequenceMatcher's cheap upper bounds first, for comparing
+    one string against thousands (LocalSongMatcher.best_guesses())."""
+    matcher = SequenceMatcher(None, a.lower(), b.lower())
+    if matcher.real_quick_ratio() < floor or matcher.quick_ratio() < floor:
+        return 0.0
+    return matcher.ratio()
+
+
 def title_resembles(query: str, candidate: str, allow_subtitle: bool = True) -> bool:
     """Is `candidate` (a title a fetcher matched) the `query` we searched for?
     Equal after normalize() always counts - a short title with a stray mark

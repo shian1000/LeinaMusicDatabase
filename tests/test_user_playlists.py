@@ -779,8 +779,9 @@ def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, t
     (entry,) = fyp.youtube_entries(LocalSongMatcher(music_session),
                                    [{"video_id": "ytK", "title": "Afina - Pay Your Respect", "channel": "Afina"}])
     assert fyp.pair_automatically([track], [entry]) == [(track, entry)]
-    fyp.link_track(track, entry)
+    fyp.link_track(track, entry, LocalSongMatcher(music_session))
     assert (track.song_id, track.similar_song.title, track.youtube_video_id) == (None, "Pay Your Respect", "ytK")
+    assert track.scores[track.similar_song.id] > 0.9  # shown with the suggestion, like the file's own
     fp.assign_song(track, track.similar_song)
     assert track.youtube_video_id == "ytK"
 
@@ -789,3 +790,141 @@ def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, t
                            lambda message, choices: "Stop (don't save the playlist)")
     menu._create_playlist_from_folder_and_youtube("ania")
     assert list_playlists("ania") == []
+
+
+def test_file_without_artist_is_offered_the_songs_sharing_its_title(users_env, tmp_path, music_session, monkeypatch):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    users.create_user("ania", "secret1")
+    bach = Song(title="Toccata and Fugue in d minor", artist=Artist(name="Johann Sebastian Bach"))
+    mae = Song(title="Toccata and Fugue in D Minor", artist=Artist(name="Vanessa-Mae"))
+    music_session.add_all([bach, mae])
+    music_session.commit()
+    name = "Toccata and Fugue in D Minor (Best Version Ever).mp3"
+    tag = {"artist_name": None, "title": "Toccata and Fugue in D Minor (Best Version Ever)"}
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_similar(tag) is None
+    assert matcher.title_candidates(tag, 5) == [bach, mae]  # by artist
+    assert matcher.title_candidates(tag, 1) == []  # more than the limit: search by title instead
+    assert matcher.title_candidates({**tag, "artist_name": "Hey"}, 5) == []  # only for files with no artist
+
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / name)
+    menu, asked = _menu_for_folder(monkeypatch, music_session, folder, {name: tag}, [mae])
+    menu._create_playlist_from_folder("ania")
+
+    from utils.database.user_playlists import playlist_songs
+    ((playlist_id, _, _, _, _),) = list_playlists("ania")
+    assert [s.id for s in playlist_songs(music_session, "ania", playlist_id)[0]] == [mae.id]
+    assert asked == ["Fix the names and tags of these mp3 files?"]
+    assert (folder / "Vanessa-Mae - Toccata and Fugue in D Minor.mp3").exists()
+
+
+def test_none_of_the_title_candidates_shows_the_other_options(users_env, tmp_path, music_session, monkeypatch):
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    users.create_user("ania", "secret1")
+    music_session.add_all([Song(title="Intro", artist=Artist(name="Afina")),
+                           Song(title="Intro", artist=music_session.query(Artist).filter(Artist.name == "Hey").one())])
+    music_session.commit()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Intro.mp3")
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, {"Intro.mp3": {"artist_name": None, "title": "Intro"}},
+                               [menu._NONE_OF_THESE, "Keep it in the playlist without a song"])
+    menu._create_playlist_from_folder("ania")
+    ((_, _, count, missing, _),) = list_playlists("ania")
+    assert (count, missing) == (1, 1)
+
+
+def test_best_guesses_rank_by_score_and_need_the_title_to_reach_it(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    garbage, radiohead = Artist(name="Garbage"), Artist(name="Radiohead")
+    paranoid = Song(title="I Think I'm Paranoid", artist=garbage)
+    music_session.add_all([paranoid, Song(title="Stupid Girl", artist=garbage),
+                           Song(title="Paranoid Android", artist=radiohead)])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+
+    guesses = matcher.best_guesses({"artist_name": "Garbadge", "title": "I think im paranoyd"}, 3, 0.6)
+    assert guesses[0][0] is paranoid and guesses[0][1] > 0.9
+    assert matcher.match_score({"artist_name": "Garbadge", "title": "I think im paranoyd"}, paranoid) == guesses[0][1]
+    # A perfect artist doesn't bring a different title over the bar
+    assert matcher.best_guesses({"artist_name": "Garbage", "title": "Queer"}, 3, 0.6) == []
+    assert matcher.best_guesses({"artist_name": "Nobody", "title": "Completely Unknown"}, 3, 0.6) == []
+    # No artist: the title alone
+    (top, score), *_ = matcher.best_guesses({"artist_name": None, "title": "Paranoid Androyd"}, 3, 0.6)
+    assert top.title == "Paranoid Android" and score > 0.9
+    assert len(matcher.best_guesses({"artist_name": None, "title": "Paranoid"}, 1, 0.3)) == 1  # the limit
+
+
+def test_closest_song_picked_with_its_score_shown(users_env, tmp_path, music_session, monkeypatch, capsys):
+    from utils.discoveries.file_matching_settings import save_best_guess_min_score
+
+    users.create_user("ania", "secret1")
+    paranoid = Song(title="I Think I'm Paranoid", artist=Artist(name="Garbage"))
+    music_session.add(paranoid)
+    music_session.commit()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "x.mp3")
+    menu, asked = _menu_for_folder(monkeypatch, music_session, folder,
+                                   {"x.mp3": {"artist_name": "Garbadge", "title": "I think im paranoyd"}},
+                                   [paranoid])
+    defaults = []
+    select = menu.questionary.select
+    monkeypatch.setattr(menu.questionary, "select", lambda message, **k: defaults.append(k.get("default")) or select(message, **k))
+
+    menu._create_playlist_from_folder("ania")
+
+    out = capsys.readouterr().out
+    assert "Closest songs in the database:" in out
+    assert defaults == [menu._NONE_OF_THESE]  # a reflex Enter picks nothing
+    assert asked == ["Fix the names and tags of these mp3 files?"]
+    assert (folder / "Garbage - I Think I'm Paranoid.mp3").exists()
+
+    # Score shown next to every suggestion; a higher minimum offers nothing
+    track = fp.FolderTrack(file=None, title="x", artist=None, scores={paranoid.id: 0.874})
+    from utils.ui.song_colors import ARTIST_STYLE, DETAIL_STYLE, TITLE_STYLE, as_ansi
+    tokens = menu._scored_tokens(track, paranoid)
+    # Coloured as questionary tokens (ANSI codes would show as garbage in a choice)
+    assert tokens[0] == (ARTIST_STYLE, "Garbage") and tokens[2] == (TITLE_STYLE, "I Think I'm Paranoid")
+    assert tokens[-1] == (DETAIL_STYLE, "(87%)")
+    assert as_ansi(tokens) == "\033[96mGarbage\033[0m - \033[93mI Think I'm Paranoid\033[0m  \033[90m(87%)\033[0m"
+    save_best_guess_min_score(0.95)
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, {
+        "Garbage - I Think I'm Paranoid.mp3": {"artist_name": "Garbadge", "title": "I think im paranoyd x"}}, [])
+    playlist = fp.build_folder_playlist(music_session, folder, 1.1, 0.95)
+    assert playlist.unmatched[0].best_guesses == []
+
+
+def test_file_matching_settings_keep_each_other(tmp_path):
+    from utils.discoveries import file_matching_settings as fms
+
+    assert fms.load_best_guess_min_score() == 0.6
+    fms.save_auto_accept_artist_similarity(0.95)
+    fms.save_best_guess_min_score(0.7)
+    assert (fms.load_auto_accept_artist_similarity(), fms.load_best_guess_min_score()) == (0.95, 0.7)
+    for bad in (0.1, 0.99):
+        with pytest.raises(ValueError):
+            fms.save_best_guess_min_score(bad)
+
+
+def test_title_starting_with_a_song_of_the_tag_artist_is_suggested(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    chumba, blur = Artist(name="Chumbawamba"), Artist(name="Blur")
+    tub = Song(title="Tubthumping", artist=chumba)
+    song, song2 = Song(title="Song", artist=blur), Song(title="Song 2", artist=blur)
+    music_session.add_all([tub, song, song2])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    tag = {"artist_name": "Chumbawamba",
+           "title": "Tubthumping  Officiel official Soundtrack World Cup 98 Coupe du monde 98"}
+    assert matcher.match_exact(tag) is None
+    assert matcher.match_similar(tag) is tub
+    assert matcher.match(tag) is None  # a title guess: never taken unconfirmed
+    # The longest title the file's starts with wins; whole words only
+    assert matcher.match_similar({"artist_name": "Blur", "title": "Song 2 Blur Remastered Wembley 1999"}) is song2
+    assert matcher.match_similar({"artist_name": "Blur", "title": "Songbird remix"}) is None
