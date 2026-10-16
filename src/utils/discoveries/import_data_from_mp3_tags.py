@@ -2,7 +2,7 @@ import html
 from pathlib import Path
 
 from utils.common.debug import mlog
-from utils.discoveries.mp3_utils import extract_metadata_with_fallback, extract_unknown_data
+from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
 from utils.discoveries.import_engine import run_import_batch
 from rich import print
 
@@ -29,6 +29,8 @@ def read_file_metadata(file: Path) -> dict:
     for key in ("artist_name", "title", "album"):
         if isinstance(metadata.get(key), str):
             metadata[key] = html.unescape(metadata[key])
+    # Tells a whole-album file from a track when matching (song_kinds.songs_for_entry())
+    metadata["duration_s"] = audio_duration(file)
     return metadata
 
 

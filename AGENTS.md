@@ -142,7 +142,11 @@ non-trivial work in that area.
   comma-separated, main one first, **one spelling per genre** across the database (the phone only
   matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
-  spelling music.db already uses); never assign `song.genre` raw text. Filled by Fill missing data
+  spelling music.db already uses); never assign `song.genre` raw text.
+  `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
+  written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
+  a track never matches the full album of its name. Details: `docs/data-model.md`,
+  `docs/agent-notes/normalization-and-matching.md`. Filled by Fill missing data
   → "Genres" (`utils/discoveries/genre_lookup.py`, MusicBrainz: song tags → album → artist, the
   artist level ticked by the owner first; `utils/ui/genre_review.py`), the editor, Song actions →
   "Set genre", or a reviewed correction. Details: `docs/data-model.md`.
@@ -392,7 +396,12 @@ non-trivial work in that area.
   the Latin forms `songs.title_latin` / `artists.name_latin` / `albums.title_latin`, and
   `songs.music_video_youtube_id` (migration 0012: the official clip, a video id or NULL, only a
   link to open — never played, matched, put in playlists or in `bad_youtube_videos`), and
-  `songs.genre` (migration 0013, its radio; keep one spelling per genre, see `genres.py`).
+  `songs.genre` (migration 0013, its radio; keep one spelling per genre, see `genres.py`), and
+  `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
+  kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
+  out of its radio). Matching keeps a track apart from the full album of the same name
+  (`song_kinds.songs_for_entry()`, entries carry `duration_s`); candidates are reviewed in Manage
+  database → "Find full albums".
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →

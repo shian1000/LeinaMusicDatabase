@@ -27,7 +27,8 @@ from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import flog
 from settings import Settings
-from config.constants import YOUTUBE_REGION
+from config.constants import FULL_ALBUM_MIN_DURATION_S, YOUTUBE_REGION
+from utils.database.song_kinds import strip_full_album_marker
 import json
 
 
@@ -1231,7 +1232,7 @@ def _log_ytdlp_errors(query: str, result) -> None:
 
 def _search_video_ytdlp_once(
     artist: str, title: str, max_results: int, artist_synonyms: str | None, max_attempts: int,
-    artist_credits: dict | None = None,
+    artist_credits: dict | None = None, full_album: bool = False,
 ) -> tuple[str | None, float, bool]:
     """One yt-dlp search-and-score attempt for one exact title string.
 
@@ -1274,7 +1275,13 @@ def _search_video_ytdlp_once(
     candidate (a lyrics-translation channel, not the song) from winning by
     default once nothing better is available.
     """
-    query = f"{artist} - {title}"
+    if full_album:
+        # A whole album (songs.kind): its title without "(Full Album)", the
+        # words in the query instead, and only videos as long as an album
+        title = strip_full_album_marker(title)
+        query = f"{artist} - {title} full album"
+    else:
+        query = f"{artist} - {title}"
     print(f"\nSearching via yt-dlp for: {query}")
 
     result = None
@@ -1302,6 +1309,8 @@ def _search_video_ytdlp_once(
             view_count = info.get("view_count")
             tags = info.get("tags")
             track = info.get("track")
+            if full_album and (info.get("duration") or 0) < FULL_ALBUM_MIN_DURATION_S:
+                continue
             if video_id:
                 candidates.append(
                     (
@@ -1348,9 +1357,12 @@ def search_video_ytdlp(
     language: str | None = None,
     artist_credits: dict | None = None,
     title_latin: str | None = None,
+    full_album: bool = False,
 ) -> str | None:
     """Search YouTube using yt-dlp (no API quota used). See
     _search_video_ytdlp_once() for the actual search-and-score logic.
+    `full_album`: the song is a whole album (songs.kind) - a "full album"
+    video at least FULL_ALBUM_MIN_DURATION_S long is searched for.
 
     `language` (the songs table's `language` column) enables a second
     attempt with the title transliterated into the other script — triggered
@@ -1366,7 +1378,7 @@ def search_video_ytdlp(
     owner's Latin form of the title) is retried the same way, after it.
     """
     video_id, best_relevance, is_official = _search_video_ytdlp_once(
-        artist, title, max_results, artist_synonyms, max_attempts, artist_credits
+        artist, title, max_results, artist_synonyms, max_attempts, artist_credits, full_album
     )
     if video_id and is_official:
         return video_id
@@ -1374,7 +1386,7 @@ def search_video_ytdlp(
     for alt_title in _alternative_titles(title, language, title_latin):
         print(f"  ↩ Retrying yt-dlp with the title written as: {alt_title}")
         alt_video_id, _, alt_official = _search_video_ytdlp_once(
-            artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits
+            artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits, full_album
         )
         if alt_video_id and alt_official:
             return alt_video_id
@@ -1437,9 +1449,11 @@ def _search_video_api_once(
 
 def search_video(
     youtube, artist: str, title: str, artist_synonyms: str | None = None, language: str | None = None,
-    artist_credits: dict | None = None, title_latin: str | None = None,
+    artist_credits: dict | None = None, title_latin: str | None = None, full_album: bool = False,
 ) -> str | None:
     """Search for a video, preferring HQ audio. Uses yt-dlp first, YT API as fallback.
+    A `full_album` (songs.kind) is searched for with yt-dlp only: the API's
+    search results carry no length to tell an album from a track by.
 
     `language` (the songs table's `language` column) enables a second search
     attempt, with the title transliterated into the other script, for
@@ -1451,9 +1465,9 @@ def search_video(
     # Try yt-dlp first — free, no quota
     video_id = search_video_ytdlp(
         artist, title, artist_synonyms=artist_synonyms, language=language, artist_credits=artist_credits,
-        title_latin=title_latin,
+        title_latin=title_latin, full_album=full_album,
     )
-    if video_id:
+    if video_id or full_album:
         return video_id
 
     # Fallback: YouTube Data API
@@ -1590,6 +1604,35 @@ def videos_exist_via_api(video_ids) -> dict | None:
                 )
     except Exception as exc:
         flog(f"[YouTube API] videos.list failed: {exc}")
+        return None
+    return result
+
+
+_ISO_DURATION = re.compile(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$")
+
+
+def video_durations_via_api(video_ids) -> dict | None:
+    """{video id: length in seconds} from the YouTube Data API, batched (one
+    quota unit per 50 videos); a video it doesn't list is left out. None
+    when the API can't be used."""
+    ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
+    if not ids:
+        return {}
+    service = _read_only_youtube_service()
+    if service is None:
+        return None
+    result = {}
+    try:
+        for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
+            chunk = ids[start:start + _API_VIDEOS_PER_CALL]
+            response = service.videos().list(part="contentDetails", id=",".join(chunk), maxResults=50).execute()
+            for item in response.get("items", []):
+                match = _ISO_DURATION.match(item.get("contentDetails", {}).get("duration") or "")
+                if match:
+                    days, hours, minutes, seconds = (int(g or 0) for g in match.groups())
+                    result[item["id"]] = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+    except Exception as exc:
+        flog(f"[YouTube API] videos.list (durations) failed: {exc}")
         return None
     return result
 
@@ -1842,6 +1885,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             language = entry.get("language")
             artist_credits = entry.get("credits")
             title_latin = entry.get("title_latin")
+            full_album = entry.get("full_album", False)
 
             # Step 1: a video_id already on the cache entry (pre-filled from
             # Song.youtube_video_id at init_cache() time, or left over from a
@@ -1871,7 +1915,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             if not video_id:
                 video_id = search_video(
                     youtube, artist, title, artist_synonyms=artist_synonyms, language=language,
-                    artist_credits=artist_credits, title_latin=title_latin,
+                    artist_credits=artist_credits, title_latin=title_latin, full_album=full_album,
                 )
                 if not video_id:
                     _logger.info(f"No video found for {artist} - {title}")

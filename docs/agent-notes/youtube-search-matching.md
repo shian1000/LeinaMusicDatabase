@@ -1308,3 +1308,14 @@ simplified:
 above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism
 was built. `Stray Kids - 특(S-Class)` (Hangul, not Cyrillic) stays fully open — see
 `transliteration.py`'s section above for why.
+
+## Full albums (`songs.kind`) are searched as albums
+
+A song row marked `full_album` is a whole album in one video. Its search
+(`search_video(..., full_album=True)`, passed by `create_yt_playlist()`
+through the cache entry and by the dead-link search in `inbox_requests.py`)
+drops the marker from the title, queries `"<artist> - <title> full album"`,
+and skips every yt-dlp result shorter than `FULL_ALBUM_MIN_DURATION_S`
+(20 min), so the title track can't win. The Data API fallback is skipped for
+these: its search results carry no length. `score_result()` itself is
+unchanged.

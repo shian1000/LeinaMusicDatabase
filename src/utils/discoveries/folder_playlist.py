@@ -13,7 +13,6 @@ import html
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mutagen.mp3 import MP3
 
 from config.constants import FILE_BEST_GUESSES_MAX, FILE_TITLE_CANDIDATES_MAX
 
@@ -21,6 +20,7 @@ from utils.common.debug import flog
 from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+from utils.discoveries.mp3_utils import audio_duration
 from utils.discoveries.import_engine import LocalSongMatcher, find_matching_artist, find_song_loosely
 
 
@@ -97,14 +97,6 @@ def folder_mp3_files(folder: Path) -> list[Path]:
     return sorted(folder.rglob("*.mp3"), key=lambda f: str(f.relative_to(folder)).casefold())
 
 
-def audio_duration(file: Path) -> int | None:
-    """Length in whole seconds, or None when mutagen can't read it."""
-    try:
-        return round(MP3(file).info.length)
-    except Exception:
-        return None
-
-
 def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: FolderTrack, metadata: dict,
                 min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1) -> None:
     """Give `track` its database song from `metadata` (artist_name, title)
@@ -150,7 +142,9 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
             # as the user is shown it
             metadata = {**metadata, "title": html.unescape(file.stem)}
         track = FolderTrack(file=file, title=metadata["title"], artist=None)
+        track.duration_s = metadata.get("duration_s") or audio_duration(file)
+        # The length tells a whole-album file from a track (song_kinds.songs_for_entry())
+        metadata = {**metadata, "duration_s": track.duration_s}
         match_track(playlist, matcher, track, metadata, min_artist_similarity, best_guess_min_score)
-        track.duration_s = audio_duration(file)
         playlist.tracks.append(track)
     return playlist

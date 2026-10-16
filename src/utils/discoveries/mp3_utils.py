@@ -13,6 +13,14 @@ from utils.common.debug import slog
 from utils.common.normalizer import normalize, extract_unknown_data
 
 
+def audio_duration(file: Path) -> int | None:
+    """Length in whole seconds, or None when mutagen can't read it."""
+    try:
+        return round(MP3(file).info.length)
+    except Exception:
+        return None
+
+
 def extract_mp3_metadata(file: Path) -> dict:
     """Extract metadata from an MP3 file.
 

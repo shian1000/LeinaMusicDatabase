@@ -16,7 +16,7 @@ import questionary
 from rich import print
 from rich.markup import escape
 
-from config.constants import INBOX_CHECK_MAX_AGE_HOURS
+from config.constants import INBOX_CHECK_MAX_AGE_HOURS, SONG_KIND_FULL_ALBUM
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.inbox_auto import auto_resolve
 from utils.database.inbox_field_corrections import (
@@ -368,7 +368,8 @@ def _ask_correction(session, case):
             return answer
         start = case.new_value if case.new_value is not None else (case.latest.new_value or "")
         hint = (f'link or id, "{NO_VIDEO_SENTINEL}" = not on YouTube, ' if case.column_name == "youtube_video_id"
-                else "link or id, " if case.is_video else "")
+                else "link or id, " if case.is_video
+                else f'"{SONG_KIND_FULL_ALBUM}" = a whole album, ' if case.column_name == "kind" else "")
         typed = questionary.text(f"New {case.label} ({hint}empty = no value):", default=str(start)).ask()
         if typed is None:
             continue

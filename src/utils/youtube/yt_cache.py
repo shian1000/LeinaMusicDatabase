@@ -4,6 +4,7 @@ from datetime import datetime
 
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.latin_names import artist_match_synonyms
+from config.constants import SONG_KIND_FULL_ALBUM
 
 
 CACHE_FILE = Path("yt_playlist_cache.json")
@@ -44,6 +45,7 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
             "artist": song_main_artist_label(song),
             "title": title,
             "title_latin": getattr(song, "title_latin", None),  # retried after the title, see search_video()
+            "full_album": getattr(song, "kind", None) == SONG_KIND_FULL_ALBUM,  # songs.kind, see search_video()
             "synonyms": artist_match_synonyms(song.artist),  # Latin form included
             "language": song.language,
             # None for a single-artist song; see song_artist_credits()

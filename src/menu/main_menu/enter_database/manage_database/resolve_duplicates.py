@@ -17,8 +17,9 @@ from utils.common.script_utils import fix_mixed_script_words
 
 def remove_duplicate_songs():
     """
-    Finds and removes duplicate songs (same artist_id + title),
-    keeping the entry with the lowest id.
+    Finds and removes duplicate songs (same artist_id + title + kind),
+    keeping the entry with the lowest id. A full album and its title track
+    share a title but aren't duplicates.
     """
     session = get_music_session()
 
@@ -28,7 +29,7 @@ def remove_duplicate_songs():
     duplicates = []
 
     for song in all_songs:
-        key = (song.artist_id, song.title.lower())
+        key = (song.artist_id, song.title.lower(), song.kind)
         if key in seen:
             duplicates.append(song)
         else:
@@ -45,7 +46,7 @@ def remove_duplicate_songs():
 
     for song in duplicates:
         # Its tags, and users' playlist entries, move to the song kept
-        kept = seen[(song.artist_id, song.title.lower())]
+        kept = seen[(song.artist_id, song.title.lower(), song.kind)]
         keep_latin_on_merge(kept, song)
         keep_genre_on_merge(kept, song)
         record_song_merge(session, song.id, kept.id)

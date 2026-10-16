@@ -31,6 +31,11 @@ A genre (songs.genre, migration 0013) is stored in the database's spelling
 (genres.clean_genres(): trimmed, repeats dropped, known synonyms mapped), so
 "Synthpop , Indie Pop" is offered and saved as "synth-pop, indie pop".
 
+A song's kind (songs.kind, migration 0014): "full_album" marks a row that is
+really a whole album, empty makes it a song again (app handoff
+song-kind-for-musicdatabaseapp.md). Applied through song_kinds.set_song_kind(),
+which also files a full album with no album under its own title.
+
 YouTube links set by hand (app handoff musicdatabase-youtube-links-by-hand.md):
 songs.youtube_video_id (a video id, "N/A" or empty) and
 songs.music_video_youtube_id (a video id or empty, migration 0012). The phone
@@ -53,7 +58,7 @@ offered on its own.
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG
+from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG, SONG_KINDS
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
 from utils.database.albums import album_key, album_twin, rename_album
@@ -74,6 +79,7 @@ from utils.database.inbox_requests import (
 )
 from utils.database.latin_names import LATIN_COLUMNS, latin_of
 from utils.database.song_artists import song_all_artists
+from utils.database.song_kinds import set_song_kind
 from utils.database.song_references import load_changes
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
 
@@ -85,6 +91,7 @@ ALBUM_TYPE = "album type"
 YOUTUBE_LINK = "youtube link"  # a video id or NO_VIDEO_SENTINEL
 MUSIC_VIDEO = "music video"  # a video id
 GENRE = "genre"  # comma-separated genres, see utils/database/genres.py
+SONG_KIND = "song kind"  # constants.SONG_KINDS, empty = an ordinary song
 VIDEO_KINDS = (YOUTUBE_LINK, MUSIC_VIDEO)
 
 # What the phone may correct: (table, column) -> (kind, may be emptied).
@@ -100,6 +107,7 @@ FIELDS = {
     ("songs", "youtube_video_id"): (YOUTUBE_LINK, True),
     ("songs", "music_video_youtube_id"): (MUSIC_VIDEO, True),
     ("songs", "genre"): (GENRE, True),
+    ("songs", "kind"): (SONG_KIND, True),
     ("artists", "name"): (TEXT, False),
     ("artists", "name_latin"): (TEXT, True),
     ("artists", "origin"): (TEXT, True),
@@ -121,6 +129,7 @@ FIELD_LABELS = {
     ("songs", "youtube_video_id"): "YouTube video",
     ("songs", "music_video_youtube_id"): "music video",
     ("songs", "genre"): "song genre",
+    ("songs", "kind"): "song or full album",
     ("artists", "name"): "artist's name",
     ("artists", "name_latin"): "artist's name in Latin letters",
     ("artists", "origin"): "artist's origin",
@@ -180,6 +189,8 @@ def coerce_field_value(table: str, column: str, value):
         return video_id, None
     if kind == ALBUM_TYPE and value not in ALBUM_TYPES:
         return None, f"{value!r} isn't one of {', '.join(ALBUM_TYPES)}"
+    if kind == SONG_KIND and value not in SONG_KINDS:
+        return None, f"{value!r} isn't one of {', '.join(SONG_KINDS)} (or empty for a song)"
     return value, None
 
 
@@ -502,6 +513,8 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
             # Against the spellings music.db already uses
             set_song_genre(session, case.row, value)
             value = case.row.genre
+        elif case.column_name == "kind":
+            set_song_kind([case.row], value)
         else:
             setattr(case.row, case.column_name, value)
         if case.column_name == "youtube_video_id":

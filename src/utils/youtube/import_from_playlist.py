@@ -840,6 +840,8 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         "language": "Unknown",
         "origin": None,
         "youtube_video_id": item.get("video_id"),
+        # Tells a full-album video from a track (song_kinds.songs_for_entry()); flat-playlist only
+        "duration_s": item.get("duration"),
         "_label": title or item.get("video_id"),
     }
 

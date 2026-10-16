@@ -163,6 +163,22 @@ def song_file_paths(song_ids, db_path: Path = None) -> dict:
     return found
 
 
+def long_song_files(min_duration_s: int, db_path: Path = None) -> dict:
+    """{song id: longest duration_s} of the songs with an indexed file at
+    least `min_duration_s` long - full album candidates. Empty when files.db
+    doesn't exist yet."""
+    db_path = Path(db_path or FILES_DB_PATH)
+    if not db_path.exists():
+        return {}
+    found = {}
+    with files_db_session(db_path) as session:
+        rows = (session.query(LibraryFile.song_id, LibraryFile.duration_s)
+                .filter(LibraryFile.song_id.isnot(None), LibraryFile.duration_s >= min_duration_s))
+        for song_id, duration in rows:
+            found[song_id] = max(duration, found.get(song_id, 0))
+    return found
+
+
 def link_file_to_song(rel_path: str, song_id: int, db_path: Path = None) -> None:
     """Pin a library file to a song by hand: match_source 'manual', which no
     scan rematches - for a file whose tags won't find its song again (a
@@ -179,8 +195,8 @@ def link_file_to_song(rel_path: str, song_id: int, db_path: Path = None) -> None
 
 def _read_tags(file: Path) -> tuple:
     """(artist, title, duration_s) - tags, else the filename, like the tag import."""
-    from utils.discoveries.folder_playlist import audio_duration
     from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+    from utils.discoveries.mp3_utils import audio_duration
     # read_file_metadata() prints a warning per file without tags - fine for
     # one import, thousands of lines for a whole library
     with contextlib.redirect_stdout(io.StringIO()):
@@ -189,7 +205,7 @@ def _read_tags(file: Path) -> tuple:
         except Exception as exc:
             slog(f"[FILES INDEX] can't read tags of {file}: {exc}")
             metadata = {}
-    return metadata.get("artist_name") or None, metadata.get("title") or file.stem, audio_duration(file)
+    return metadata.get("artist_name") or None, metadata.get("title") or file.stem, metadata.get("duration_s") or audio_duration(file)
 
 
 def catalog_fingerprint(music_session) -> str:
@@ -272,7 +288,7 @@ def scan_library(music_session, root: Path = None, db_path: Path = None, progres
                     .order_by(LibraryFile.path)):
             song = None
             if catalog_changed or row.path in read_now:
-                song = matcher.match({"artist_name": row.artist, "title": row.title})
+                song = matcher.match({"artist_name": row.artist, "title": row.title, "duration_s": row.duration_s})
             if song is not None:
                 row.song_id = song.id
                 report.matched_now += 1

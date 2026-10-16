@@ -77,6 +77,7 @@ from utils.database.datatables import BadYoutubeVideo, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.song_references import load_changes
+from utils.database.song_kinds import is_full_album
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
 
 INBOX_DIR = Path(str(Settings.phone_inbox_dir))
@@ -692,6 +693,7 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
                 song_main_artist_label(song), song.title,
                 artist_synonyms=artist_match_synonyms(song.artist), language=song.language,
                 artist_credits=song_artist_credits(song), title_latin=song.title_latin,
+                full_album=is_full_album(song),
             )
         except Exception as exc:
             flog(f"Search for inbox request {song.artist.name} - {song.title} failed: {exc}")

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from utils.common.debug import slog
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
+from utils.database.song_kinds import is_full_album
 
 
 def _create_table(title: str, columns: List[Tuple[str, Optional[str], Optional[str]]]) -> Table:
@@ -69,7 +70,7 @@ def display_songs(songs: Optional[List[Song]]) -> None:
     for song in songs:
         table.add_row(
             song_artist_label(song),
-            song.title,
+            f"{song.title} [full album]" if is_full_album(song) else song.title,
             song.album or "—",
             str(song.year) if song.year else "—",
             song.language or "—",

@@ -222,6 +222,41 @@ ALBUM_TYPE_COMPILATION = "compilation"
 ALBUM_TYPE_SOUNDTRACK = "soundtrack"
 ALBUM_TYPES = (ALBUM_TYPE_ALBUM, ALBUM_TYPE_EP, ALBUM_TYPE_SINGLE, ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK)
 
+# songs.kind (migration 0014). NULL = an ordinary song. SONG_KIND_FULL_ALBUM =
+# the row is a whole album played through (one video / one mp3 of the album);
+# Leina Radio labels it and leaves it out of its song radio.
+SONG_KIND_FULL_ALBUM = "full_album"
+SONG_KINDS = (SONG_KIND_FULL_ALBUM,)
+SONG_KIND_LABELS = {None: "song", SONG_KIND_FULL_ALBUM: "full album"}
+# A recording at least this long (a library file, a YouTube video) may be a
+# whole album: a candidate in the review, and a full album's YouTube search
+# takes only videos this long. A file or video this long may match a song too
+# (mixes, live sets); a shorter one never matches a full album.
+FULL_ALBUM_MIN_DURATION_S = 20 * 60
+# Words in a title saying the recording is a whole album ("Migration (Full
+# Album)", "Legenda - cały album"). Compared after normalize(), as whole
+# words. Such a title makes a new song a full album at import, and is how
+# the review spots candidates; marking one offers the title without them.
+FULL_ALBUM_TITLE_MARKERS = [
+    "full album",
+    "full album stream",
+    "full lp",
+    "full ep",
+    "full length album",
+    "full interslavic album",
+    "cały album",
+    "pełny album",
+    "весь альбом",
+    "полный альбом",
+    "увесь альбом",
+    "album completo",
+    "álbum completo",
+    "album complet",
+    "ganzes album",
+]
+# Songs the owner said aren't full albums, never offered again by the review
+FULL_ALBUM_IGNORE_FILE = "data/full_album_ignore.json"
+
 # album_covers (migration 0008)
 ALBUM_COVER_SOURCE_FILE = "file"  # embedded in the user's mp3s (APIC)
 ALBUM_COVER_SOURCES = (ALBUM_COVER_SOURCE_FILE, "itunes", "deezer", "musicbrainz", "youtube", "manual")

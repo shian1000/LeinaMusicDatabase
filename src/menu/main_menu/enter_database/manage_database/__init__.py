@@ -13,6 +13,8 @@ from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.latin_forms_review import fill_latin_forms
+from utils.database.song_kinds import is_full_album
+from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
 import questionary
 from utils.database.database_sessions import submit_global_database_session
@@ -91,6 +93,9 @@ def check_spelling_menu():
 
     for song in songs:
         if has_tag_on_song(song, "spellchecked"):
+            continue
+        # MusicBrainz is asked about recordings; a whole album's title isn't one
+        if is_full_album(song):
             continue
 
         if local_match := _find_local_spellcheck_match(song):
@@ -177,6 +182,7 @@ def manage_database():
         "Merge artists": merge_artists_menu,
         "Divide artists": divide_artists_menu,
         "Split joined artist names": review_artist_splits,
+        "Find full albums": review_full_albums,
         "Resolve albums with several artists": review_multi_artist_albums,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
         "Spell check existing data": check_spelling_menu,

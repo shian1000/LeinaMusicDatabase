@@ -213,3 +213,28 @@ ID3 tags and names: "Major Lazer &amp; DJ Snake". `normalize()` would keep the
 cover import, `files.db` and folder playlists - runs `html.unescape()` on the
 artist, title and album it returns; the folder playlist does the same for a
 file name used as the title.
+
+## Full albums vs. tracks of the same name
+
+A full album (`songs.kind = 'full_album'`) is usually titled like its album,
+and so like its title track: "Migration" the album and "Migration" the song.
+`_title_core()` also drops "(Full Album)" with the other brackets. Without a
+rule, a track's file would be matched to the album row (and the import would
+skip a genuinely new track as "already there"). So every matching entry point
+in `import_engine` (`find_existing_song()`, `find_song_loosely()`, every
+`LocalSongMatcher` path) first passes the candidates through
+`song_kinds.songs_for_entry(songs, title, duration_s)`:
+
+- an entry that doesn't look like an album (no `FULL_ALBUM_TITLE_MARKERS`
+  in its title, and shorter than 20 min **or of unknown length**) never
+  matches a full album;
+- one that does tries full albums (and rows whose own title has a marker)
+  first, then the rest — a long file may be a mix kept as an ordinary song.
+
+The length comes in the metadata as `duration_s`: `read_file_metadata()`
+reads it from the mp3, `files.db` passes its stored one, the YouTube
+playlist import takes yt-dlp's flat-playlist `duration`. Unknown length
+counts as a track on purpose: an import of "Bonobo - Migration" must create
+the track even when the album row exists. `find_existing_song()` also
+matches "Migration (Full Album)" to the full album "Migration" (the title
+with the marker cut out, `strip_full_album_marker()`).

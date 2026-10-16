@@ -45,6 +45,8 @@ class Song(Base):
     music_video_youtube_id = Column(String)
     # Genres, comma-separated, main one first (migration 0013) - see utils/database/genres.py
     genre = Column(String)
+    # NULL = a song, else constants.SONG_KINDS (migration 0014) - see utils/database/song_kinds.py
+    kind = Column(String)
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
     # Album row of `album` (migrations 0006/0007). Kept in step with `album` by
@@ -185,7 +187,8 @@ song_categories = [
 ]
 
 search_only_categories = [
-    "name"
+    "name",
+    "full album",  # rows with songs.kind = full_album; the query may be empty
 ]
 
 artist_categories = [

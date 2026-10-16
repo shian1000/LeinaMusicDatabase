@@ -261,6 +261,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   [`docs/handoffs/genres-for-musicdatabaseapp.md`](../handoffs/genres-for-musicdatabaseapp.md)) is
   a text field stored in the database's spelling (`genres.clean_genres()`: "Synthpop , Indie Pop"
   is offered and saved as "synth-pop, indie pop"); empty clears it.
+  A song's kind (`songs.kind`, migration 0014, 2026-10-16, handoff
+  [`docs/handoffs/song-kind-for-musicdatabaseapp.md`](../handoffs/song-kind-for-musicdatabaseapp.md)):
+  `full_album` or empty (a song); applied through `song_kinds.set_song_kind()`, which files a full
+  album with no album under its own title.
   YouTube links set by hand (2026-10-15, app handoff `musicdatabase-youtube-links-by-hand.md`,
   answer [`docs/handoffs/youtube-links-by-hand-for-musicdatabaseapp.md`](../handoffs/youtube-links-by-hand-for-musicdatabaseapp.md)):
   `songs.youtube_video_id` (a video id, `"N/A"` or NULL = search again) and

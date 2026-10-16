@@ -18,6 +18,7 @@ from utils.database.song_artists import (
     song_artist_label,
     song_has_artist_id,
 )
+from utils.database.song_kinds import full_album_filter
 
 
 class SongSearchFilters:
@@ -89,6 +90,7 @@ CATEGORY_DB_FILTERS = {
     song_categories[5]: SongSearchFilters.origin,  # "artist origin"
     song_categories[7]: SongSearchFilters.artist_id,  # "artist id"
     search_only_categories[0]: SongSearchFilters.general_search,  # "name"
+    search_only_categories[1]: SongSearchFilters.general_search,  # "full album" (+ full_album_filter())
 }
 
 
@@ -165,6 +167,7 @@ CATEGORY_NORMALIZED_FIELDS = {
     song_categories[5]: SongNormalizedFields.origin,  # "artist origin"
     song_categories[7]: SongNormalizedFields.artist_id,  # "artist id"
     search_only_categories[0]: SongNormalizedFields.general_search,  # "name"
+    search_only_categories[1]: SongNormalizedFields.general_search,  # "full album"
 }
 
 
@@ -392,8 +395,14 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in (query or ""))
 
     category = _validate_category(category, song_categories + search_only_categories)
-    words = [w for w in query.strip().split() if w]
+    words = [w for w in (query or "").strip().split() if w]
     slog(category, words)
+
+    if category == search_only_categories[1]:
+        # Full albums only, searched by title / artist like "name"; no words = all of them
+        base_query = base_query.filter(full_album_filter())
+        if not words:
+            return base_query.all()
 
     if not words:
         return []

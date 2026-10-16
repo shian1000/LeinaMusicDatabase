@@ -29,6 +29,7 @@ name_latin    (migration 0011)  year
                                  spotify_url
                                  music_video_youtube_id (migration 0012)
                                  genre          (migration 0013) "indie pop, synth-pop"
+                                 kind           (migration 0014) NULL = song, 'full_album'
                                  album_id       FK -> Album.id (NULL = see below)
                                  track_number   NULL = unknown
                                  disc_number    NULL = 1 / unknown
@@ -168,6 +169,27 @@ role          NOT NULL, 'main' | 'feat'
   later. Duplicate-song merges keep the kept song's genre, else the other's. Migration `0013`
   (2026-10-16), app handoff `musicdatabase-genres.md`, answer
   [`handoffs/genres-for-musicdatabaseapp.md`](handoffs/genres-for-musicdatabaseapp.md).
+- `Song.kind` — what kind of recording the row is: NULL = a song, `'full_album'` = a whole album
+  played through (a "full album" video, an mp3 of the whole album). Values in
+  `constants.SONG_KINDS`, set only through `utils/database/song_kinds.set_song_kind()`. Still a
+  song row on purpose: files.db, playlists, tags, listens and `bad_youtube_videos` point at
+  `songs.id`. A full album is filed under the album it plays; marking one whose album is empty or
+  "Singles" sets its album text to its own title (the album listener then links the row). Set from
+  the song editor ("song or full album"), Song actions → "Song or full album", or a reviewed Leina
+  Radio correction (`("songs", "kind")`); found with Fetch songs → "full album" (empty query = all).
+  Leina Radio labels such rows and keeps them out of its song radio. Manage database → "Find full
+  albums" (`utils/database/full_album_candidates.py`, `utils/ui/full_album_review.py`) offers
+  candidates in one ticked list: a title with `FULL_ALBUM_TITLE_MARKERS` ("(Full Album)", "cały
+  album", pre-ticked), a library file or a YouTube video (Data API) at least
+  `FULL_ALBUM_MIN_DURATION_S` (20 min — also mixes, so not pre-ticked); it offers taking the marker
+  out of the titles, and remembers unticked songs in `data/full_album_ignore.json`. An imported
+  entry whose title has a marker becomes a full album at once (`create_song_entry()`). Matching
+  keeps tracks and albums apart (`song_kinds.songs_for_entry()`, see
+  `agent-notes/normalization-and-matching.md`); spellcheck skips full albums, duplicate removal
+  keys on the kind too, and their YouTube search looks for a "full album" video of 20 min or more
+  (yt-dlp only — the API's search results carry no length).
+  Migration `0014` (2026-10-16), handoff to the app
+  [`handoffs/song-kind-for-musicdatabaseapp.md`](handoffs/song-kind-for-musicdatabaseapp.md).
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually (Song
   actions → "Set YouTube link", id parsed by `manage_youtube_playlists.extract_video_id()`) for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted
