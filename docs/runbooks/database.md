@@ -257,6 +257,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   are plain text fields; the review shows the name and a suggestion next to them. A title / name
   correction on a row that has a Latin form is flagged (the form stays), and the automatic pass
   leaves it for review.
+  A song's genre (`songs.genre`, 2026-10-16, app handoff `musicdatabase-genres.md`, answer
+  [`docs/handoffs/genres-for-musicdatabaseapp.md`](../handoffs/genres-for-musicdatabaseapp.md)) is
+  a text field stored in the database's spelling (`genres.clean_genres()`: "Synthpop , Indie Pop"
+  is offered and saved as "synth-pop, indie pop"); empty clears it.
   YouTube links set by hand (2026-10-15, app handoff `musicdatabase-youtube-links-by-hand.md`,
   answer [`docs/handoffs/youtube-links-by-hand-for-musicdatabaseapp.md`](../handoffs/youtube-links-by-hand-for-musicdatabaseapp.md)):
   `songs.youtube_video_id` (a video id, `"N/A"` or NULL = search again) and

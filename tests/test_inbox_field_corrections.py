@@ -181,6 +181,8 @@ def test_flags_changed_since_and_an_artist_no_longer_on_the_song(env):
     ("songs", "music_video_youtube_id", "dQw4w9WgXcQ", "dQw4w9WgXcQ", None),
     ("songs", "music_video_youtube_id", "N/A", None, "isn't a YouTube video"),
     ("songs", "music_video_youtube_id", "", None, None),
+    ("songs", "genre", " Synthpop ;indie Pop, synth pop ", "synth-pop, indie pop", None),
+    ("songs", "genre", " , ", None, None),
 ])
 def test_values_are_checked(table, column, value, expected, error):
     stored, problem = fc.coerce_field_value(table, column, value)
@@ -417,3 +419,21 @@ def test_a_taken_back_correction_settles_the_older_one_too(env):
     [case] = fc.collect_field_correction_cases(env["session"], [pr.read_request_file(again)])
     assert case.status == fc.ANSWERED_EARLIER
     assert env["songs"][0].year == 2023
+
+
+def test_genre_is_correctable_in_the_databases_spelling(env):
+    env["songs"][2].genre = "Funk Rock"  # a spelling music.db already uses
+    env["session"].commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row("songs", 4601, "genre", None, "funk rock, R&B"),
+        _row("songs", 4602, "genre", None, "", song_id=4602, title="Losing Sleep"),
+    ])
+    requests, cases = _cases(env)
+
+    assert [c.label for c in cases] == ["song genre", "song genre"]
+    # an empty value for a song with no genre is nothing to do
+    assert [c.status for c in cases] == [fc.OPEN, fc.ALREADY_SET]
+    fc.apply_field_correction(env["session"], cases[0], fc.ACCEPT)
+    env["session"].commit()
+
+    assert env["songs"][0].genre == "Funk Rock, r&b"

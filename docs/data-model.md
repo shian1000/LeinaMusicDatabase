@@ -28,6 +28,7 @@ name_latin    (migration 0011)  year
                                  youtube_video_id
                                  spotify_url
                                  music_video_youtube_id (migration 0012)
+                                 genre          (migration 0013) "indie pop, synth-pop"
                                  album_id       FK -> Album.id (NULL = see below)
                                  track_number   NULL = unknown
                                  disc_number    NULL = 1 / unknown
@@ -152,6 +153,21 @@ role          NOT NULL, 'main' | 'feat'
   no "N/A". Set by hand (Song actions → "Set music video link") or from a reviewed Leina Radio
   correction; Leina Radio offers it to open from its player. Only a link: never played, put in a
   YouTube playlist, matched or recorded in `bad_youtube_videos`. Migration `0012` (2026-10-15).
+- `Song.genre` — the song's genres, comma-separated, the main one first (`"indie pop, synth-pop"`),
+  no commas inside a genre name, NULL = none known. Read by Leina Radio's song radio (a shared
+  genre counts like a shared mood). One spelling per genre across the database: every write goes
+  through `genres.clean_genres()` — MusicBrainz's genre names (`src/config/musicbrainz_genres.txt`,
+  lowercase: "hip hop", "synth-pop", "r&b"), `GENRE_SYNONYMS`, and the spelling music.db already
+  uses for that genre (`genre_key()`: no case, diacritics, punctuation or spaces, "&" = "and").
+  Song-level on purpose (a band's songs differ), though an album's or artist's genre may fill it.
+  Filled by Fetch database data → Fill missing data → "Genres" (MusicBrainz: the recordings' genre
+  tags, else the album's release group, saved; else the artist's, ticked in one list first —
+  `utils/discoveries/genre_lookup.py`, `utils/ui/genre_review.py`), the song editor, Song actions
+  → "Set genre", or a reviewed Leina Radio correction. Only songs with no genre are looked up;
+  songs MusicBrainz had nothing for are listed in `data/genre_lookup_misses.json` and skipped
+  later. Duplicate-song merges keep the kept song's genre, else the other's. Migration `0013`
+  (2026-10-16), app handoff `musicdatabase-genres.md`, answer
+  [`handoffs/genres-for-musicdatabaseapp.md`](handoffs/genres-for-musicdatabaseapp.md).
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually (Song
   actions → "Set YouTube link", id parsed by `manage_youtube_playlists.extract_video_id()`) for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted

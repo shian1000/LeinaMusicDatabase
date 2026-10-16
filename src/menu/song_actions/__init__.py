@@ -15,6 +15,7 @@ from utils.database.tags_management import add_tag_to_song
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
 from utils.discoveries.discovery_modules.spotify_fetcher import normalize_spotify_url
+from utils.ui.genre_review import set_genre_of_songs
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -182,6 +183,7 @@ def song_actions(songs_objects):
         "Set YouTube link": lambda: set_youtube_link(songs_objects),
         "Set music video link": lambda: set_music_video_link(songs_objects),
         "Set Spotify link": lambda: set_spotify_link(songs_objects),
+        "Set genre": lambda: set_genre_of_songs(songs_objects),
         "Change artist": lambda: change_songs_artist(songs_objects),
         "Swap title and artist names": lambda: swap_titles_and_artist_names(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),

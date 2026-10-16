@@ -138,6 +138,14 @@ non-trivial work in that area.
   `utils/common/romanize.py`. Search treats them as names, matching as synonyms / second titles:
   code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
   `artist.synonyms`. Details: `docs/data-model.md`.
+  `genres.py` — `songs.genre` (migration 0013), read by Leina Radio's song radio: genres
+  comma-separated, main one first, **one spelling per genre** across the database (the phone only
+  matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
+  (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
+  spelling music.db already uses); never assign `song.genre` raw text. Filled by Fill missing data
+  → "Genres" (`utils/discoveries/genre_lookup.py`, MusicBrainz: song tags → album → artist, the
+  artist level ticked by the owner first; `utils/ui/genre_review.py`), the editor, Song actions →
+  "Set genre", or a reviewed correction. Details: `docs/data-model.md`.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
   instead of renaming the shared row, removing an artist left without songs (album rows go to its
   heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.
@@ -377,7 +385,8 @@ non-trivial work in that area.
   wrong for that song; `reason` codes from `constants.BAD_VIDEO_REASONS`, only shown there), and
   the Latin forms `songs.title_latin` / `artists.name_latin` / `albums.title_latin`, and
   `songs.music_video_youtube_id` (migration 0012: the official clip, a video id or NULL, only a
-  link to open — never played, matched, put in playlists or in `bad_youtube_videos`).
+  link to open — never played, matched, put in playlists or in `bad_youtube_videos`), and
+  `songs.genre` (migration 0013, its radio; keep one spelling per genre, see `genres.py`).
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →

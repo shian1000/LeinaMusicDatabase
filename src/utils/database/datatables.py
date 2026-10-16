@@ -43,6 +43,8 @@ class Song(Base):
     spotify_url = Column(String)  # album/track page set by hand, read by Years - see spotify_fetcher
     # The official music video, only a link to open (migration 0012) - never played or matched
     music_video_youtube_id = Column(String)
+    # Genres, comma-separated, main one first (migration 0013) - see utils/database/genres.py
+    genre = Column(String)
 
     artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False)
     # Album row of `album` (migrations 0006/0007). Kept in step with `album` by

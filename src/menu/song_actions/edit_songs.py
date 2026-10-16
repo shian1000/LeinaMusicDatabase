@@ -16,6 +16,7 @@ from utils.database.song_artists import (
 from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
 from utils.database.latin_names import latin_of
 from utils.ui.latin_forms_review import edit_latin_form
+from utils.ui.genre_review import set_genre_of_songs
 from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
 import time
 
@@ -129,7 +130,10 @@ def edit_entry_menu(mode: str = None, db_object = None):
     else:
         latin_options[f"name in Latin letters ({latin_of(db_object) or '—'})"] = db_object
     displayed_list.extend(latin_options)
+    genre_option = None
     if mode == "Song":
+        genre_option = f"genre ({db_object.genre or '—'})"
+        displayed_list.append(genre_option)
         displayed_list.append(swap_option)
     delete_option = "Delete from database"
     displayed_list.append(delete_option)
@@ -150,6 +154,9 @@ def edit_entry_menu(mode: str = None, db_object = None):
         return
     if choice in latin_options:
         edit_latin_form(latin_options[choice])
+        return
+    if choice == genre_option:
+        set_genre_of_songs([db_object])
         return
     if choice == delete_option:
         label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"

@@ -284,6 +284,42 @@ PERMISSION_LABELS = {
     PERMISSION_APPLY_CORRECTIONS: "Field corrections from Leina Radio are saved without review (when nothing conflicts)",
 }
 
+# ==================== Genres (utils/database/genres.py, songs.genre) ====================
+
+# MusicBrainz's genre list (CC0, ws/2/genre/all?fmt=txt), one per line - the
+# common spelling every genre is mapped onto. Relative to src/config/.
+GENRE_VOCABULARY_FILE = "musicbrainz_genres.txt"
+# Other spellings -> the stored one, keyed by genres.genre_key() (lowercase,
+# no diacritics, "&" = "and", no spaces or punctuation). Spellings that differ
+# only in case / hyphens / spaces ("Synthpop", "hip-hop") need no entry: the
+# key already finds them in the vocabulary.
+GENRE_SYNONYMS = {
+    "rnb": "r&b",
+    "randb": "r&b",
+    "rhythmandblues": "r&b",
+    "dnb": "drum and bass",
+    "dandb": "drum and bass",
+    "drumnbass": "drum and bass",
+    "rocknroll": "rock and roll",
+    "altrock": "alternative rock",
+    "kpop": "k-pop",
+    "jpop": "j-pop",
+    "jrock": "j-rock",
+    "lofi": "lo-fi",
+}
+# Fill missing data -> Genres: at most this many genres per song, the most
+# voted first, and only genres with at least this share of the top one's votes
+GENRE_MAX_PER_SONG = 3
+GENRE_MIN_VOTE_SHARE = 0.3
+# Songs MusicBrainz had no genre for, skipped by later runs. Relative to the
+# project root; delete it to look them all up again.
+GENRE_LOOKUP_MISSES_FILE = "data/genre_lookup_misses.json"
+# Where a looked-up genre came from (genres.GenreResult.level). Song and album
+# genres are saved at once; an artist's genre is listed for the owner first.
+GENRE_LEVEL_SONG = "song"
+GENRE_LEVEL_ALBUM = "album"
+GENRE_LEVEL_ARTIST = "artist"
+
 # ==================== Music library index (utils/database/files_index.py) ====================
 
 FILES_DB_FILENAME = "files.db"
@@ -298,6 +334,8 @@ FILE_MATCH_MANUAL = "manual"
 
 # MusicBrainz API
 MUSICBRAINZ_API_BASE_URL = "https://musicbrainz.org/ws/2/recording/"
+# Root of the web service, for the other entities (artist/, release-group/)
+MUSICBRAINZ_WS_ROOT = "https://musicbrainz.org/ws/2/"
 # MusicBrainz asks every client to identify itself with an application name,
 # version, and a real contact (an email address or a URL). A generic User-Agent
 # is throttled harder and can be blocked outright. This points at the project
