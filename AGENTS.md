@@ -248,6 +248,13 @@ non-trivial work in that area.
   asking. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
+  `folder_youtube_playlist.py` is "Create playlist from folder and compare with YT playlist": the
+  same folder playlist, each file paired with a video of a YouTube playlist (same database song, the
+  song's own link, else resembling artist + title; the rest by hand from the unpaired ones), whose
+  link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). A video
+  without a file can be a track with `file` None. Saved in the YouTube playlist's order, unpaired
+  files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
+  their source.
   `mp3_covers.py` is Fetch database data → "Import covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
   `<database_dir>/covers/`, matched to songs like the tag import (`read_file_metadata()`,
   `find_existing_song()`), non-square video frames skipped; see its docstring and

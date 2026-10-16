@@ -438,6 +438,7 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
             "video_id": video_id,
             "title": info.get("title") or "",
             "channel": info.get("channel") or info.get("uploader") or "",
+            "duration": info.get("duration"),
         })
     return items
 
@@ -506,7 +507,7 @@ def get_playlist_items(playlist_input: str) -> list:
         print(f"  ✖ Failed to fetch playlist via API: {e}")
         return []
 
-    printwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww(f"  ✔ Found {len(items)} video(s) via API")
+    print(f"  ✔ Found {len(items)} video(s) via API")
     return items
 
 
@@ -1001,6 +1002,18 @@ def _review_missing_artists(metadata_list: list) -> tuple:
     return remaining, pre_skipped
 
 
+def playlist_item_metadata(item: dict) -> dict:
+    """build_metadata_from_item() for one playlist video, with the artist
+    of a SPECIAL_DESCRIPTION_CHANNELS / generic "Release - Topic" upload read
+    from its description (one extra request for those)."""
+    channel = item.get("channel") or ""
+    override = resolve_special_channel_metadata(item) if _is_special_description_channel(channel) else None
+    metadata = build_metadata_from_item(item, override)
+    if not metadata["artist_name"] and _is_generic_topic_channel(channel):
+        metadata["artist_name"] = resolve_generic_topic_artist(item)
+    return metadata
+
+
 def import_data_from_youtube_playlist(playlist_input: str) -> list:
     items = get_playlist_items(playlist_input)
     if not items:
@@ -1011,15 +1024,7 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
     # Remove this line to go back to importing the whole playlist.
     # items = items[:94]
 
-    metadata_list = []
-    for item in items:
-        override = None
-        if _is_special_description_channel(item.get("channel") or ""):
-            override = resolve_special_channel_metadata(item)
-        metadata = build_metadata_from_item(item, override)
-        if not metadata["artist_name"] and _is_generic_topic_channel(item.get("channel") or ""):
-            metadata["artist_name"] = resolve_generic_topic_artist(item)
-        metadata_list.append(metadata)
+    metadata_list = [playlist_item_metadata(item) for item in items]
 
     _resolve_artist_synonyms(metadata_list)
 

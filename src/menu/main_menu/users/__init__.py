@@ -29,11 +29,21 @@ from utils.database.datatables import Song
 from menu.main_menu.users.moods import moods_menu, permissions_menu
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.folder_playlist import add_song_for_file, assign_song, build_folder_playlist, song_for_file_plan
+from utils.discoveries.folder_youtube_playlist import (
+    link_track,
+    pair_automatically,
+    rank_entries_for,
+    set_tracks,
+    youtube_entries,
+    youtube_only_track,
+)
+from utils.discoveries.import_engine import LocalSongMatcher
 from utils.discoveries.file_matching_settings import load_auto_accept_artist_similarity
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
+from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
 
 RED = "\033[91m"
 RESET = "\033[0m"
@@ -89,6 +99,14 @@ _SIMILAR_OTHER = "No - show the other options"
 _BACK_TO_OPTIONS = "Back to the options for this file"
 
 
+def _video_url(video_id: str) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def _default_title(track) -> str:
+    return track.title or (track.file.stem if track.file else "")
+
+
 def _song_choice_label(song) -> str:
     details = ", ".join(str(v) for v in (song.album, song.year) if v)
     return f"{song_artist_label(song)} - {song.title}" + (f"  ({details})" if details else "")
@@ -97,7 +115,7 @@ def _song_choice_label(song) -> str:
 def _pick_by_title(music_session, track):
     """Songs of any artist with this title: the user picks one, then has the
     final say - confirm it, or search the database by hand instead."""
-    query = questionary.text("Title to look for:", default=track.title or track.file.stem).ask()
+    query = questionary.text("Title to look for:", default=_default_title(track)).ask()
     if not query:
         return None
     songs = find_songs_by_title(music_session, query)
@@ -115,7 +133,7 @@ def _pick_by_title(music_session, track):
     if picked == _SEARCH_INSTEAD:
         return _pick_by_search()
 
-    print(f"  File:  {track.file.name}")
+    print(f"  File:  {track.file.name}" if track.file else f"  Video: {_video_url(track.youtube_video_id)}")
     print(f"  Song:  {_song_choice_label(picked)}")
     verdict = questionary.select("Is this the right song?",
                                  choices=[_CONFIRM_SONG, _SEARCH_INSTEAD, _BACK_TO_OPTIONS]).ask()
@@ -142,9 +160,13 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
     it stays in the playlist without a song, or is left out of it. A file
     still in `playlist.unmatched` afterwards (Stop) means don't save."""
     unmatched = playlist.unmatched
+    total = len(unmatched)
     for i, track in enumerate(list(unmatched), 1):
-        print(f"\n[{i}/{len(unmatched)}] {track.file.name}")
-        print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
+        if track.file is None:
+            print(f"\n[{i}/{total}] (no file) {_video_url(track.youtube_video_id)}")
+        else:
+            print(f"\n[{i}/{total}] {track.file.name}")
+            print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
         print(f"  Read as: {track.artist or '?'} - {track.title or '?'}")
         if track.similar_song is not None:
             print(f"  Similar song in the database: {_song_choice_label(track.similar_song)}")
@@ -169,7 +191,7 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
             if choice == _UNMATCHED_LEAVE_OUT:
                 unmatched.remove(track)
                 playlist.tracks.remove(track)
-                print("  -> left out of the playlist (the file itself stays)")
+                print("  -> left out of the playlist" + (" (the file itself stays)" if track.file else ""))
                 break
             if choice == _UNMATCHED_ADD:
                 song = _add_song_for_file(music_session, track)
@@ -186,7 +208,7 @@ def _add_song_for_file(music_session, track):
     """Ask for the new song's artist and title (the tags' as defaults), show
     whether the artist / song is already there, and add it once confirmed."""
     artist_name = (questionary.text("Artist:", default=track.artist or "").ask() or "").strip()
-    title = (questionary.text("Title:", default=track.title or track.file.stem).ask() or "").strip()
+    title = (questionary.text("Title:", default=_default_title(track)).ask() or "").strip()
     if not artist_name or not title:
         print("An artist and a title are both needed - nothing added.")
         return None
@@ -273,10 +295,17 @@ def _create_playlist_from_folder(username: str) -> None:
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
+    _finish_folder_playlist(music_session, username, name, folder, playlist)
+
+
+def _finish_folder_playlist(music_session, username: str, name: str, folder: Path, playlist) -> None:
+    """The files (and videos) without a song in the database, then saving
+    the playlist and offering to fix the files' names and tags."""
     if playlist.auto_accepted:
         print(f"\n{len(playlist.auto_accepted)} file(s) matched automatically though the artist is spelt differently:")
         for track, tag_artist in playlist.auto_accepted:
-            print(f"  {track.file.name}  ({tag_artist})  ->  {track.artist} - {track.title}")
+            source = track.file.name if track.file else _video_url(track.youtube_video_id)
+            print(f"  {source}  ({tag_artist})  ->  {track.artist} - {track.title}")
 
     if playlist.unmatched:
         print(f"\n{len(playlist.unmatched)} of {len(playlist.tracks)} file(s) have no song in the database.")
@@ -294,8 +323,147 @@ def _create_playlist_from_folder(username: str) -> None:
     without_song = sum(1 for t in playlist.tracks if t.song_id is None)
     print(f"Saved playlist '{name}' (#{playlist_id}) with {len(playlist.tracks)} track(s)"
           + (f", {without_song} of them without a song in the database." if without_song else "."))
-    _offer_file_fix(music_session, [t for t in playlist.tracks if t.picked])
-    _offer_tag_update(music_session, [t for t in playlist.tracks if t.song_id is not None and not t.picked])
+    files = [t for t in playlist.tracks if t.file is not None]
+    _offer_file_fix(music_session, [t for t in files if t.picked])
+    _offer_tag_update(music_session, [t for t in files if t.song_id is not None and not t.picked])
+
+
+# Choices when pairing the folder with a YouTube playlist
+_PAIR_NO_LINK = "Keep it without a YouTube link"
+_PAIR_LEAVE_OUT = "Leave it out of the playlist"
+_PAIR_STOP = "Stop (don't save the playlist)"
+_VIDEO_ADD = "Add it to the playlist without a file"
+_VIDEO_LEAVE_OUT = "Leave it out of the playlist"
+
+
+def _entry_label(entry) -> str:
+    channel = f"  [{entry.channel}]" if entry.channel and entry.channel.casefold() not in entry.label.casefold() else ""
+    return f"{entry.label}{channel}"
+
+
+def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | None:
+    """Each file no video was paired with: the user picks one of the videos
+    still unpaired, keeps it without a link, or leaves it out. Returns the
+    (pairs, files left out), None on Stop."""
+    pairs, left_out = [], []
+    for i, track in enumerate(files, 1):
+        print(f"\n[{i}/{len(files)}] {track.file.name}")
+        print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
+        print(f"  Read as: {track.artist or '?'} - {track.title or '?'}")
+        unpaired = rank_entries_for(track, [e for e in entries if all(e is not p for _, p in pairs)])
+        choices = [questionary.Choice(title=_entry_label(e), value=e) for e in unpaired]
+        picked = questionary.select(
+            "Which video of the YouTube playlist is this file?" if unpaired
+            else "No unpaired video left in the YouTube playlist - what should happen with this file?",
+            choices=choices + [_PAIR_NO_LINK, _PAIR_LEAVE_OUT, _PAIR_STOP],
+        ).ask()
+        if picked is None or picked == _PAIR_STOP:
+            return None
+        if picked == _PAIR_LEAVE_OUT:
+            left_out.append(track)
+            print("  -> left out of the playlist (the file itself stays)")
+        elif picked == _PAIR_NO_LINK:
+            print("  -> kept without a YouTube link")
+        else:
+            pairs.append((track, picked))
+            print(f"  -> {_video_url(picked.video_id)}")
+    return pairs, left_out
+
+
+def _review_unpaired_videos(entries: list) -> list | None:
+    """Each video no file was paired with: add it as a track of its own or
+    leave it out. Returns the videos to add, None on Stop."""
+    added = []
+    for i, entry in enumerate(entries, 1):
+        print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
+        print(f"  {_video_url(entry.video_id)}")
+        print(f"  Read as: {entry.metadata.get('artist_name') or '?'} - {entry.metadata.get('title') or '?'}")
+        choice = questionary.select("No file is this video - what should happen with it?",
+                                    choices=[_VIDEO_ADD, _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
+        if choice is None or choice == _PAIR_STOP:
+            return None
+        if choice == _VIDEO_ADD:
+            added.append(entry)
+            print("  -> added without a file")
+        else:
+            print("  -> left out of the playlist")
+    return added
+
+
+def _create_playlist_from_folder_and_youtube(username: str) -> None:
+    """Like "Create playlist from folder", with every file paired with a
+    video of a YouTube playlist holding the same songs, whose link the track
+    takes. The playlist follows the YouTube playlist's order; files without
+    a video come after it, in folder order."""
+    folder = open_file_browser_terminal(settings.export_dir)
+    if not folder:
+        return
+    folder = Path(str(folder))
+    playlist_input = questionary.text("YouTube playlist (link or id):").ask()
+    if not playlist_input:
+        print("Cancelled.")
+        return
+    if not extract_playlist_id(playlist_input):
+        _error(f"Couldn't find a playlist id in '{playlist_input}'.")
+        return
+    name = questionary.text("Playlist name:", default=folder.name).ask()
+    if not name:
+        print("Cancelled.")
+        return
+
+    music_session, _ = open_and_set_global_database_sessions()
+    min_similarity = load_auto_accept_artist_similarity()
+    print(f"Matching the mp3 files in {folder} with the database...")
+    playlist = build_folder_playlist(music_session, folder, min_similarity)
+    if not playlist.tracks:
+        print("No mp3 files in that folder.")
+        return
+    items = get_playlist_items(playlist_input)
+    if not items:
+        _error("No videos found in that YouTube playlist.")
+        return
+    matcher = LocalSongMatcher(music_session)
+    print("Reading the videos' artists and titles...")
+    entries = youtube_entries(matcher, items)
+
+    pairs = pair_automatically(playlist.tracks, entries)
+    paired_files = {id(t) for t, _ in pairs}
+    unpaired_files = [t for t in playlist.tracks if id(t) not in paired_files]
+    print(f"\nPaired {len(pairs)} of {len(playlist.tracks)} file(s) with the {len(entries)} video(s) automatically.")
+    left_out = []
+    if unpaired_files:
+        print(f"{len(unpaired_files)} file(s) without a video:")
+        result = _pair_files_by_hand(folder, unpaired_files, [e for e in entries if all(e is not p for _, p in pairs)])
+        if result is None:
+            print("Playlist not saved.")
+            return
+        pairs += result[0]
+        left_out = result[1]
+    paired_entries = {id(e) for _, e in pairs}
+    unpaired_entries = [e for e in entries if id(e) not in paired_entries]
+    added = []
+    if unpaired_entries:
+        print(f"\n{len(unpaired_entries)} video(s) of the YouTube playlist without a file:")
+        added = _review_unpaired_videos(unpaired_entries)
+        if added is None:
+            print("Playlist not saved.")
+            return
+
+    for track, entry in pairs:
+        link_track(track, entry)
+    by_entry = {id(e): t for t, e in pairs}
+    by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity) for e in added})
+    linked = {id(t) for t in by_entry.values()}
+    gone = {id(t) for t in left_out}
+    set_tracks(playlist, [by_entry[id(e)] for e in entries if id(e) in by_entry]
+               + [t for t in playlist.tracks if id(t) not in linked and id(t) not in gone])
+    if not playlist.tracks:
+        print("Everything was left out - playlist not saved.")
+        return
+    without_link = sum(1 for t in playlist.tracks if t.youtube_link is None)
+    print(f"\n{len(playlist.tracks)} track(s), {len(playlist.tracks) - without_link} with a link from the YouTube playlist."
+          + (f" {len(added)} of them without a file." if added else ""))
+    _finish_folder_playlist(music_session, username, name, folder, playlist)
 
 
 _BACK = "Back"
@@ -375,6 +543,8 @@ def enter_user_database() -> None:
 
     action_map = {
         "Create playlist from folder": lambda: _create_playlist_from_folder(username),
+        "Create playlist from folder and compare with YT playlist":
+            lambda: _create_playlist_from_folder_and_youtube(username),
         "Show playlists": lambda: _show_playlists(username),
     }
     execute_menu_item(f"User database: {username}", action_map, exit_label="Log out")

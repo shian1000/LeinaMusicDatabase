@@ -693,3 +693,99 @@ def test_html_entities_in_tags_are_read_as_characters(tmp_path, music_session):
     playlist = fp.build_folder_playlist(music_session, folder)
     assert playlist.tracks[0].song_id == lean_on.id
     assert playlist.unmatched[0].title == "Ty & ja"
+
+
+def _yt_compare_env(tmp_path, music_session, monkeypatch, tags: dict, items: list, select):
+    """Folder + mocked YouTube playlist for "Create playlist from folder and
+    compare with YT playlist"; the files' tags come from `tags`."""
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    for name in tags:
+        (folder / name).write_bytes(b"")
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+    monkeypatch.setattr(menu, "get_playlist_items", lambda playlist_input: items)
+    monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
+    monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer(
+        "https://www.youtube.com/playlist?list=PLx" if message.startswith("YouTube") else "Mix"))
+    monkeypatch.setattr(menu.questionary, "select", lambda message, choices, **k: _Answer(select(message, choices)))
+    monkeypatch.setattr(menu.questionary, "confirm", lambda *a, **k: _Answer(False))
+    return menu
+
+
+def _saved_tracks(username: str) -> list:
+    from utils.database.user_datatables import Playlist, user_db_session
+    ((playlist_id, *_),) = list_playlists(username)
+    with user_db_session(users.user_dir(username) / "user.db") as session:
+        return [(t.title, t.song_id, t.youtube_video_id, t.duration_s)
+                for t in session.get(Playlist, playlist_id).tracks]
+
+
+def test_folder_compared_with_youtube_playlist(users_env, tmp_path, music_session, monkeypatch):
+    tags = {"1.mp3": ("Hey", "Karma"), "2.mp3": ("Hey", "Teksanski"),
+            "3.mp3": ("Nobody", "Unknown song"), "4.mp3": ("Extra", "Extra file")}
+    items = [
+        {"video_id": "ytB", "title": "Hey - Teksański (Official Video)", "channel": "Hey"},  # by name
+        {"video_id": "vid1", "title": "Karma", "channel": "Hey - Topic"},                    # same song
+        {"video_id": "ytU", "title": "Something odd", "channel": "Some channel"},           # paired by hand
+        {"video_id": "ytAfina", "title": "Afina - Pay Your Respect", "channel": "Afina", "duration": 200.4},
+        {"video_id": "del", "title": "[Deleted video]", "channel": ""},
+    ]
+    asked = []
+
+    def select(message, choices):
+        asked.append(message)
+        menu = __import__("importlib").import_module("menu.main_menu.users")
+        if message.startswith("Which video"):
+            videos = [c.value for c in choices if hasattr(c, "value") and not isinstance(c.value, str)]
+            if asked.count(message) == 1:
+                # Only the unpaired videos are offered, never the deleted one
+                assert sorted(v.video_id for v in videos) == ["ytAfina", "ytU"]
+                return next(v for v in videos if v.video_id == "ytU")
+            return menu._PAIR_NO_LINK
+        if message.startswith("No file is this video"):
+            return menu._VIDEO_ADD
+        if message.startswith("What should happen"):
+            return menu._UNMATCHED_KEEP
+        raise AssertionError(message)
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, tags, items, select)
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    karma, teksanski, pay = (music_session.query(Song).filter(Song.title == t).one().id
+                             for t in ("Karma", "Teksański", "Pay Your Respect"))
+    # The YouTube playlist's order, the file without a video last; the
+    # video without a file matched to the database like a file
+    assert _saved_tracks("ania") == [
+        ("Teksański", teksanski, "ytB", None),
+        ("Karma", karma, "vid1", None),
+        ("Unknown song", None, "ytU", None),
+        ("Pay Your Respect", pay, "ytAfina", 200),
+        ("Extra file", None, None, None),
+    ]
+
+
+def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, tmp_path, music_session, monkeypatch):
+    from utils.discoveries import folder_youtube_playlist as fyp
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # A file the database doesn't know, paired with a video it does: the
+    # video's song is only suggested, and its link wins over the song's
+    music_session.query(Song).filter(Song.title == "Pay Your Respect").one().youtube_video_id = "songs-own"
+    music_session.commit()
+    track = fp.FolderTrack(file=Path("x.mp3"), title="Pay Your Respekt", artist="Afina")
+    (entry,) = fyp.youtube_entries(LocalSongMatcher(music_session),
+                                   [{"video_id": "ytK", "title": "Afina - Pay Your Respect", "channel": "Afina"}])
+    assert fyp.pair_automatically([track], [entry]) == [(track, entry)]
+    fyp.link_track(track, entry)
+    assert (track.song_id, track.similar_song.title, track.youtube_video_id) == (None, "Pay Your Respect", "ytK")
+    fp.assign_song(track, track.similar_song)
+    assert track.youtube_video_id == "ytK"
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Nobody", "Unknown song")},
+                           [{"video_id": "ytU", "title": "Something odd", "channel": "Some channel"}],
+                           lambda message, choices: "Stop (don't save the playlist)")
+    menu._create_playlist_from_folder_and_youtube("ania")
+    assert list_playlists("ania") == []

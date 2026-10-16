@@ -24,7 +24,7 @@ from utils.discoveries.import_engine import LocalSongMatcher, find_matching_arti
 
 @dataclass
 class FolderTrack:
-    file: Path
+    file: Path | None    # None: a video of the YouTube playlist with no file
     title: str
     artist: str | None
     song_id: int | None = None
@@ -32,6 +32,9 @@ class FolderTrack:
     duration_s: int | None = None
     similar_song: object | None = None  # a Song suggested for an unmatched file
     picked: bool = False                # its song was confirmed/picked by the user
+    # The video of the YouTube playlist it was paired with
+    # (folder_youtube_playlist.py), which wins over its song's own link
+    youtube_link: str | None = None
 
 
 @dataclass
@@ -50,7 +53,7 @@ def assign_song(track: FolderTrack, song) -> None:
     track.song_id = song.id
     track.title = song.title
     track.artist = song_artist_label(song)
-    track.youtube_video_id = song.youtube_video_id or None
+    track.youtube_video_id = track.youtube_link or song.youtube_video_id or None
 
 
 def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
@@ -92,9 +95,31 @@ def audio_duration(file: Path) -> int | None:
         return None
 
 
+def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: FolderTrack, metadata: dict,
+                min_artist_similarity: float = 1.1) -> None:
+    """Give `track` its database song from `metadata` (artist_name, title)
+    the way build_folder_playlist() does, or put it in `playlist.unmatched`
+    with a suggestion. `min_artist_similarity`: see
+    LocalSongMatcher.match_confident() - the user's setting; the default
+    (above 1) never auto-accepts."""
+    song = matcher.match_exact(metadata)
+    confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
+    if song is not None:
+        assign_song(track, song)
+    elif confident is not None:
+        # Its tags are wrong, so it's offered the name/tag fix like a pick
+        track.picked = True
+        assign_song(track, confident)
+        playlist.auto_accepted.append((track, metadata.get("artist_name")))
+    else:
+        track.title, track.artist = metadata["title"], metadata.get("artist_name")
+        track.similar_song = matcher.match_similar(metadata)
+        playlist.unmatched.append(track)
+        flog(f"Playlist from folder: no song in the database for {track.file or metadata.get('_label')}")
+
+
 def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1) -> FolderPlaylist:
-    """`min_artist_similarity`: see LocalSongMatcher.match_confident() -
-    the user's setting; the default (above 1) never auto-accepts."""
+    """`min_artist_similarity`: see match_track()."""
     playlist = FolderPlaylist(folder=Path(folder))
     matcher = LocalSongMatcher(session)
     for file in folder_mp3_files(folder):
@@ -106,22 +131,8 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
             # No title tag and no "Artist - Title" name: the name is the title,
             # as the user is shown it
             metadata = {**metadata, "title": html.unescape(file.stem)}
-        song = matcher.match_exact(metadata)
-        confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
-        if song is not None:
-            track = FolderTrack(file=file, title=song.title, artist=None)
-            assign_song(track, song)
-        elif confident is not None:
-            # Its tags are wrong, so it's offered the name/tag fix like a pick
-            track = FolderTrack(file=file, title=confident.title, artist=None, picked=True)
-            assign_song(track, confident)
-            playlist.auto_accepted.append((track, metadata.get("artist_name")))
-        else:
-            track = FolderTrack(file=file, title=metadata["title"],
-                                artist=metadata.get("artist_name"),
-                                similar_song=matcher.match_similar(metadata))
-            playlist.unmatched.append(track)
-            flog(f"Playlist from folder: no song in the database for {file}")
+        track = FolderTrack(file=file, title=metadata["title"], artist=None)
+        match_track(playlist, matcher, track, metadata, min_artist_similarity)
         track.duration_s = audio_duration(file)
         playlist.tracks.append(track)
     return playlist
