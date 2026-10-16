@@ -48,6 +48,16 @@ new videos play, for the automatic pass and the review. A newer
 youtube_video_id correction settles older dead link / found link reports of
 that song (inbox_requests.links_set_by_hand()).
 
+The song's artist (songs.artist_id, app handoff
+musicdatabase-song-artist.md): the phone sends the artist id it had as
+old_value and the NAME of the artist the song really is by as new_value. It
+is not a rename - an Artist row is shared by all its songs - but crediting
+this one song to another artist (artist_reassignment.set_primary_artist()):
+an existing one of that name (artist_choices()) or a new one. The old artist
+keeps its other songs; one left with none is the review's question. Taken
+back, new_value is the old artist's name: ALREADY_SET as soon as the song's
+artist is called that.
+
 Taking a correction back: the phone sends a newer report with new_value ==
 old_value. It's ALREADY_SET, and that is recorded in decisions.json as of the
 newest report, so an older report of the field waiting in another file (in
@@ -62,6 +72,7 @@ from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
 from utils.database.albums import album_key, album_twin, rename_album
+from utils.database.artist_reassignment import artists_named, set_primary_artist
 from utils.database.datatables import Album, Artist, Song
 from utils.database.genres import clean_genres, set_song_genre
 from utils.database.inbox_requests import (
@@ -78,7 +89,7 @@ from utils.database.inbox_requests import (
     unmark_bad_video,
 )
 from utils.database.latin_names import LATIN_COLUMNS, latin_of
-from utils.database.song_artists import song_all_artists
+from utils.database.song_artists import count_artist_songs, song_all_artists
 from utils.database.song_kinds import set_song_kind
 from utils.database.song_references import load_changes
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
@@ -92,6 +103,7 @@ YOUTUBE_LINK = "youtube link"  # a video id or NO_VIDEO_SENTINEL
 MUSIC_VIDEO = "music video"  # a video id
 GENRE = "genre"  # comma-separated genres, see utils/database/genres.py
 SONG_KIND = "song kind"  # constants.SONG_KINDS, empty = an ordinary song
+ARTIST = "artist"  # an artist's name: the song is credited to that artist
 VIDEO_KINDS = (YOUTUBE_LINK, MUSIC_VIDEO)
 
 # What the phone may correct: (table, column) -> (kind, may be emptied).
@@ -108,6 +120,7 @@ FIELDS = {
     ("songs", "music_video_youtube_id"): (MUSIC_VIDEO, True),
     ("songs", "genre"): (GENRE, True),
     ("songs", "kind"): (SONG_KIND, True),
+    ("songs", "artist_id"): (ARTIST, False),
     ("artists", "name"): (TEXT, False),
     ("artists", "name_latin"): (TEXT, True),
     ("artists", "origin"): (TEXT, True),
@@ -130,6 +143,7 @@ FIELD_LABELS = {
     ("songs", "music_video_youtube_id"): "music video",
     ("songs", "genre"): "song genre",
     ("songs", "kind"): "song or full album",
+    ("songs", "artist_id"): "song's artist",
     ("artists", "name"): "artist's name",
     ("artists", "name_latin"): "artist's name in Latin letters",
     ("artists", "origin"): "artist's origin",
@@ -153,6 +167,8 @@ ACCEPT = "accepted"
 EDIT = "edited"
 RENAME_ALBUM = "renamed album"  # a songs.album correction applied to its whole album
 MERGE_ARTIST = "merged artist"  # an artists.name correction naming another artist
+MOVE_TO_ARTIST = "credited to artist"  # a songs.artist_id correction, value = the existing Artist
+NEW_ARTIST = "credited to new artist"  # a songs.artist_id correction, value = the new artist's name
 REJECT = "rejected"
 
 
@@ -263,6 +279,11 @@ class FieldCorrectionCase:
         return FIELDS.get((self.table_name, self.column_name), (None,))[0] in VIDEO_KINDS
 
     @property
+    def is_artist(self) -> bool:
+        """songs.artist_id: the value is an artist's name, not the id."""
+        return (self.table_name, self.column_name) == ("songs", "artist_id")
+
+    @property
     def video_id(self) -> str | None:
         """The video the correction sets (not "N/A" or empty), else None."""
         if not self.is_video or self.error:
@@ -351,7 +372,7 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
         case.song = session.get(Song, song_id) if song_id is not None else None
         if case.row is None:
             case.status = ROW_GONE
-        elif case.error is None and same_value(case.current, case.new_value):
+        elif case.error is None and holds(case, case.new_value):
             case.status = ALREADY_SET
             _record_already_set(decisions, case)
         elif _answered_after(decisions.get(case.key), case.reports):
@@ -361,6 +382,17 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
                 bad_videos = load_bad_videos(session)
             case.bad = bad_videos.why(case.video_id, case.row_id)
     return list(cases.values())
+
+
+def holds(case: FieldCorrectionCase, value) -> bool:
+    """The database already has `value` (for songs.artist_id: the song's
+    artist is called that, normalized, Latin form too)."""
+    if case.is_artist:
+        artist = case.row.artist if case.row is not None else None
+        wanted = normalize(value or "")
+        return artist is not None and bool(wanted) and \
+            wanted in (normalize(artist.name or ""), normalize(artist.name_latin or ""))
+    return same_value(case.current, value)
 
 
 def _record_already_set(decisions: dict, case: FieldCorrectionCase) -> None:
@@ -434,6 +466,22 @@ def artist_twins(session, case: FieldCorrectionCase, name) -> list[Artist]:
             if normalize(a.name or "") == wanted]
 
 
+def artist_choices(session, case: FieldCorrectionCase, name) -> list[Artist]:
+    """For a songs.artist_id correction: the existing artists called `name`
+    the song could be credited to, oldest first. None of them: a new artist
+    would be made."""
+    if not case.is_artist or case.row is None or not name:
+        return []
+    return artists_named(session, name, exclude=case.row.artist)
+
+
+def artist_left_empty(session, case: FieldCorrectionCase) -> bool:
+    """Moving the song away would leave its artist without songs."""
+    if not case.is_artist or case.row is None or case.row.artist is None:
+        return False
+    return count_artist_songs(session, case.row.artist_id) <= 1
+
+
 def album_title_twin(session, case: FieldCorrectionCase, title) -> Album | None:
     """The album an albums.title correction would merge this one into."""
     if case.table_name != "albums" or case.column_name != "title" or not title:
@@ -468,7 +516,8 @@ def song_album_to_rename(case: FieldCorrectionCase) -> Album | None:
 # ==================== answers ====================
 
 def apply_field_correction(session, case: FieldCorrectionCase, decision: str, value=None,
-                           by: str | None = None, old_video_wrong: bool = False) -> None:
+                           by: str | None = None, old_video_wrong: bool = False,
+                           keep_old_as: str | None = None) -> None:
     """Store the answer: ACCEPT the phone's value, EDIT = `value` instead
     (already coerce_field_value()d), RENAME_ALBUM = a songs.album value
     (`value`, or the phone's) given to the song's whole album, REJECT = keep
@@ -479,8 +528,32 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
     bad_youtube_videos, and with `old_video_wrong` the replaced one goes on
     it as wrong for the song. The caller commits the music
     session (for MERGE_ARTIST it must be the global one, which the merge
-    uses)."""
-    if decision == ACCEPT:
+    uses). A songs.artist_id correction is answered with MOVE_TO_ARTIST
+    (`value` = the existing Artist), NEW_ARTIST (`value` = a name, else the
+    phone's) or ACCEPT (the one artist of the phone's name, a new one when
+    there is none); `keep_old_as` keeps the old artist on the song as an
+    additional one (set_primary_artist()). The old artist is left as it is,
+    even with no songs."""
+    if case.is_artist and decision in (ACCEPT, NEW_ARTIST, MOVE_TO_ARTIST):
+        if decision == ACCEPT and case.error:
+            raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
+        if decision == ACCEPT:
+            matches = artist_choices(session, case, case.new_value)
+            if len(matches) > 1:
+                raise ValueError(f'Several artists are called "{case.new_value}" - pick one')
+            decision, value = (MOVE_TO_ARTIST, matches[0]) if matches else (NEW_ARTIST, case.new_value)
+        elif decision == NEW_ARTIST:
+            value, error = coerce_field_value(case.table_name, case.column_name,
+                                              case.new_value if value is None else value)
+            if error:
+                raise ValueError(error)
+        elif not isinstance(value, Artist):
+            raise ValueError("MOVE_TO_ARTIST needs the Artist to credit the song to")
+    elif decision in (MOVE_TO_ARTIST, NEW_ARTIST):
+        raise ValueError(f"{decision!r} is only for the song's artist")
+    elif case.is_artist and decision != REJECT:
+        raise ValueError("The song's artist is answered with MOVE_TO_ARTIST or NEW_ARTIST")
+    elif decision == ACCEPT:
         if case.error:
             raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
         value = case.new_value
@@ -497,7 +570,16 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         raise ValueError(f"Unknown decision {decision!r}")
 
     old = case.current
-    if decision == MERGE_ARTIST:
+    if decision in (MOVE_TO_ARTIST, NEW_ARTIST):
+        if decision == NEW_ARTIST:
+            target = Artist(name=value)
+            session.add(target)
+            session.flush()
+        else:
+            target = value
+        set_primary_artist(session, case.row, target, keep_old_as)
+        value = target.id
+    elif decision == MERGE_ARTIST:
         from utils.database.database_management import merge_artists_in_db
         merge_artists_in_db(case.row, value)
         value = value.id

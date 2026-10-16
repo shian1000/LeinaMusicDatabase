@@ -32,10 +32,12 @@ from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_ma
 from utils.discoveries.file_matching_settings import (
     load_auto_accept_artist_similarity,
     load_best_guess_min_score,
+    load_closest_auto_accept_score,
     save_auto_accept_artist_similarity,
     save_best_guess_min_score,
+    save_closest_auto_accept_score,
 )
-from config.constants import BEST_GUESS_MIN_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
+from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import settings
 
 
@@ -46,6 +48,7 @@ def settings_menu():
         "Max songs to process per fetch": set_max_songs_per_fetch,
         "Auto-accept similar artist names": set_auto_accept_artist_similarity,
         "Closest songs: minimum score": set_best_guess_min_score,
+        "Closest songs: auto-accept score": set_closest_auto_accept_score,
         "Reset statistics records": reset_statistics_records,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
@@ -132,6 +135,28 @@ def set_best_guess_min_score():
         print(f"\033[91m'{typed}' is not a number between {lowest} and {highest}.\033[0m")
         return
     print(f"Closest songs offered from score: {value}")
+
+
+def set_closest_auto_accept_score():
+    """The score from which "Create playlist from folder" takes a suggested
+    song without asking."""
+    lowest, highest = CLOSEST_AUTO_ACCEPT_SCORE_RANGE
+    print("Create playlist from folder: a suggested song (similar song, closest song, ...) whose score")
+    print("reaches this is taken without asking - when it's the only one that does and the file has an")
+    print("artist - and listed after matching as auto-accepted. 1 = always ask.")
+    print(f"Current: {load_closest_auto_accept_score()}\n")
+
+    typed = questionary.text(f"New auto-accept score ({lowest}-{highest}):").ask()
+    if not typed:
+        print("Cancelled.")
+        return
+    try:
+        value = float(typed.replace(",", "."))
+        save_closest_auto_accept_score(value)
+    except ValueError:
+        print(f"\033[91m'{typed}' is not a number between {lowest} and {highest}.\033[0m")
+        return
+    print(f"Closest songs auto-accepted from score: {value}")
 
 
 def reset_statistics_records():

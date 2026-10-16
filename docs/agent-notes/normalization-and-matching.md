@@ -198,7 +198,13 @@ when the file has one. Two choices that aren't obvious:
   0.6, and every file whose song isn't in the database gets a random song of
   that artist ("Hymn to Virgil" for Hozier's "Take Me to Church").
 - A best song always exists, so these guesses are offered with the cursor on
-  "None of these", never taken by `match()` or auto-accepted.
+  "None of these" and never taken by `match()`. The one exception is the
+  user's "Closest songs: auto-accept score" (default 0.99), which applies to
+  any suggestion's score - and only for files with an artist: a file with
+  none is scored on its title alone, so the one "Intro" in the database
+  would be 100% for every nameless "Intro". A misspelt artist with an exact
+  title ("Liiquid tension experiment") scores ~0.993, so at 0.99 this also
+  takes what the artist auto-accept setting would have asked about.
 
 It compares against every song (~5.7k), so it uses
 `text_utils.similarity_at_least()` (SequenceMatcher's cheap upper bounds

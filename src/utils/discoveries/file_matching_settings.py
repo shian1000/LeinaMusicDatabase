@@ -2,13 +2,16 @@
 JSON file: how similar a file's tag artist must be to a song's artist (same
 title) to match it without asking (DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY),
 and the lowest score of the closest songs offered when nothing else matched
-(DEFAULT_BEST_GUESS_MIN_SCORE)."""
+(DEFAULT_BEST_GUESS_MIN_SCORE), and the score from which a suggestion is
+taken without asking (DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE)."""
 import json
 
 from upath import UPath
 
 from config.constants import (
     BEST_GUESS_MIN_SCORE_RANGE,
+    CLOSEST_AUTO_ACCEPT_SCORE_RANGE,
+    DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE,
     DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY,
     DEFAULT_BEST_GUESS_MIN_SCORE,
     FILE_MATCHING_CONFIG_FILE,
@@ -18,10 +21,12 @@ from utils.common.debug import slog
 
 _AUTO_ACCEPT = "auto_accept_artist_similarity"
 _BEST_GUESS = "best_guess_min_score"
+_CLOSEST_AUTO = "closest_auto_accept_score"
 # key -> (default, lowest, highest)
 _SETTINGS = {
     _AUTO_ACCEPT: (DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, 1.0),
     _BEST_GUESS: (DEFAULT_BEST_GUESS_MIN_SCORE, *BEST_GUESS_MIN_SCORE_RANGE),
+    _CLOSEST_AUTO: (DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE, *CLOSEST_AUTO_ACCEPT_SCORE_RANGE),
 }
 
 
@@ -75,3 +80,11 @@ def load_best_guess_min_score() -> float:
 
 def save_best_guess_min_score(value: float) -> None:
     _save(_BEST_GUESS, value)
+
+
+def load_closest_auto_accept_score() -> float:
+    return _load(_CLOSEST_AUTO)
+
+
+def save_closest_auto_accept_score(value: float) -> None:
+    _save(_CLOSEST_AUTO, value)

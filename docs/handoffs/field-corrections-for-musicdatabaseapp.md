@@ -38,6 +38,9 @@ album is no longer that song's.
   text changes with it. If the artist already has an album with that title the
   two are merged: the one with a cover (else the older id) is kept, so an
   `album_id` can disappear — the same as any album merge.
+- **`songs.artist_id`** (since 2026-10-17, a name, not an id): the song is
+  credited to that artist, nothing is renamed —
+  `song-artist-for-musicdatabaseapp.md`.
 - **`artists.name`** that is already another artist's name: the owner can merge
   the artist into that one, so the corrected `artists.id` disappears and its
   songs move to the other id (an ordinary artist merge).

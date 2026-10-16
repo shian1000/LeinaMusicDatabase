@@ -13,6 +13,7 @@ from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.latin_forms_review import fill_latin_forms
+from utils.ui.file_fix_review import fix_file_names_and_tags
 from utils.database.song_kinds import is_full_album
 from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
@@ -185,6 +186,7 @@ def manage_database():
         "Find full albums": review_full_albums,
         "Resolve albums with several artists": review_multi_artist_albums,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
+        "Fix names and tags for mp3 files that are in the database": fix_file_names_and_tags,
         "Spell check existing data": check_spelling_menu,
         "Get rid of rubish data": get_rid_of_rubish_data
     }

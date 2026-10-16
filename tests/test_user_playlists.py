@@ -32,6 +32,17 @@ def file_matching_config(tmp_path, monkeypatch):
     monkeypatch.setattr(file_matching_settings, "FILE_MATCHING_CONFIG_FILE", str(tmp_path / "file_matching_config.json"))
 
 
+@pytest.fixture(autouse=True)
+def quiet_review_screen(monkeypatch):
+    """The folder review clears the screen per file and may wait for a key:
+    neither in tests (the clear would hit the real terminal, the key wait
+    would block on stdin)."""
+    import importlib
+    menu = importlib.import_module("menu.main_menu.users")
+    monkeypatch.setattr(menu, "clear_screen", lambda: None)
+    monkeypatch.setattr(menu.questionary, "press_any_key_to_continue", lambda *a, **k: _Answer(None))
+
+
 @pytest.fixture
 def music_session(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
@@ -336,6 +347,7 @@ def test_similar_song_confirmed_then_file_renamed_and_tagged(users_env, tmp_path
     monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
     monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer("Mix"))
     monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)  # always ask
+    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 1.1)
     monkeypatch.setattr(menu.questionary, "select", lambda message, **k: _Answer(menu._CONFIRM_SONG))
     monkeypatch.setattr(menu.questionary, "confirm",
                         lambda message, **k: questions.append(message) or _Answer(True))
@@ -363,6 +375,7 @@ def test_similar_song_rejected_shows_the_other_options(users_env, tmp_path, musi
     monkeypatch.setattr(fp, "read_file_metadata",
                         lambda f: {"artist_name": "Liiquid tension experiment", "title": "Acid Rain"})
     monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)  # always ask
+    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 1.1)
     selects = iter([menu._SIMILAR_OTHER, menu._UNMATCHED_STOP])
     monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
     monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
@@ -928,3 +941,155 @@ def test_title_starting_with_a_song_of_the_tag_artist_is_suggested(music_session
     # The longest title the file's starts with wins; whole words only
     assert matcher.match_similar({"artist_name": "Blur", "title": "Song 2 Blur Remastered Wembley 1999"}) is song2
     assert matcher.match_similar({"artist_name": "Blur", "title": "Songbird remix"}) is None
+
+
+def test_suggestion_scoring_at_least_the_auto_accept_score_is_taken(tmp_path, music_session, monkeypatch):
+    acid_rain = _add_liquid_tension(music_session)
+    music_session.add(Song(title="Intro", artist=Artist(name="Afina")))
+    music_session.commit()
+    tags = {"1.mp3": ("Liiquid tension experiment", "Acid Rain"),  # similar song, ~0.99
+            "2.mp3": (None, "Intro"),                             # the one "Intro": 1.0 on the title alone
+            "3.mp3": ("Garbadge", "Acid Rain")}                   # another artist: well below 0.99
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    playlist = fp.build_folder_playlist(music_session, folder, 1.1, 0.6, 0.99)
+    first = playlist.tracks[0]
+    assert first.song_id == acid_rain.id and first.picked
+    ((track, read_as, score),) = playlist.auto_accepted_scored
+    assert track is first and read_as == ("Liiquid tension experiment", "Acid Rain") and score >= 0.99
+    # No artist in the tags: asked, however high the title scores
+    assert [t.file.name for t in playlist.unmatched][0] == "2.mp3"
+    assert playlist.unmatched[0].scores[playlist.unmatched[0].similar_song.id] == 1.0
+    # 1.1 (the default, above any score) never auto-accepts
+    assert fp.build_folder_playlist(music_session, folder, 1.1, 0.6).auto_accepted_scored == []
+
+
+def test_auto_accepted_by_score_is_listed(users_env, tmp_path, music_session, monkeypatch, capsys):
+    users.create_user("ania", "secret1")
+    _add_liquid_tension(music_session)
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "x.mp3")
+    menu, asked = _menu_for_folder(monkeypatch, music_session, folder,
+                                   {"x.mp3": {"artist_name": "Liiquid tension experiment", "title": "Acid Rain"}}, [])
+    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)  # not the artist rule
+
+    menu._create_playlist_from_folder("ania")
+
+    out = capsys.readouterr().out
+    assert "1 file(s) auto-accepted, their closest song scoring at least 99%" in out
+    assert "Acid Rain" in out and "%)" in out
+    assert asked == ["Fix the names and tags of these mp3 files?"]
+
+
+def test_closest_auto_accept_setting_defaults_to_99_percent():
+    from utils.discoveries import file_matching_settings as fms
+
+    assert fms.load_closest_auto_accept_score() == 0.99
+    fms.save_closest_auto_accept_score(1.0)
+    assert fms.load_closest_auto_accept_score() == 1.0
+    assert fms.load_best_guess_min_score() == 0.6  # the other settings untouched
+    with pytest.raises(ValueError):
+        fms.save_closest_auto_accept_score(0.5)
+
+
+def test_review_clears_the_screen_per_file_and_shows_the_previous_decision(
+        users_env, tmp_path, music_session, monkeypatch, capsys):
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    for name in ("1.mp3", "2.mp3", "3.mp3"):
+        _id3_file(folder / name)
+    tags = {"1.mp3": {"artist_name": "Hey", "title": "Karma"},
+            "2.mp3": {"artist_name": "Nobody", "title": "Unknown one"},
+            "3.mp3": {"artist_name": "Nobody", "title": "Unknown two"}}
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, tags,
+                               ["Leave it out of the playlist", "Keep it in the playlist without a song"],
+                               confirms=[False])
+    clears, waits = [], []
+    monkeypatch.setattr(menu, "clear_screen", lambda: clears.append(1))
+    monkeypatch.setattr(menu.questionary, "press_any_key_to_continue",
+                        lambda *a, **k: waits.append(1) or _Answer(None))
+
+    menu._create_playlist_from_folder("ania")
+
+    out = capsys.readouterr().out
+    assert len(clears) == 2  # one screen per file without a song
+    assert "Files without a song in the database (2 of 3)" in out
+    assert "Previous: 2.mp3  ->  left out of the playlist" in out
+    assert waits == []  # nothing auto-accepted to read first
+    ((_, _, count, missing, _),) = list_playlists("ania")
+    assert (count, missing) == (2, 1)
+
+
+def test_auto_accepted_list_is_read_before_the_review_clears_it(users_env, tmp_path, music_session, monkeypatch):
+    users.create_user("ania", "secret1")
+    _add_liquid_tension(music_session)
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "1.mp3")
+    _id3_file(folder / "2.mp3")
+    tags = {"1.mp3": {"artist_name": "Liiquid tension experiment", "title": "Acid Rain"},
+            "2.mp3": {"artist_name": "Nobody", "title": "Unknown one"}}
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, tags,
+                               ["Keep it in the playlist without a song"], confirms=[False])
+    waits = []
+    monkeypatch.setattr(menu.questionary, "press_any_key_to_continue",
+                        lambda *a, **k: waits.append(a) or _Answer(None))
+
+    menu._create_playlist_from_folder("ania")
+    assert len(waits) == 1
+
+
+def test_fix_names_and_tags_plans_then_applies(tmp_path, music_session, monkeypatch):
+    from mutagen.easyid3 import EasyID3
+    from utils.discoveries.file_fixes import apply_file_fix, plan_file_fixes
+
+    acid_rain = _add_liquid_tension(music_session)
+    folder = tmp_path / "music"
+    (folder / "sub").mkdir(parents=True)
+    _id3_file(folder / "Acid Rain - dscom.it.mp3", artist="Liiquid tension experiment", title="Acid Rain")
+    _id3_file(folder / "sub" / "Hey - Karma.mp3", artist="Hey", title="Karma")  # already right
+    _id3_file(folder / "Hey - Teksanski.mp3", artist="Hey", title="Teksański")  # tags right, name not
+    _id3_file(folder / "unknown.mp3", artist="Nobody", title="Unknown")
+    tags = {"Acid Rain - dscom.it.mp3": ("Liiquid tension experiment", "Acid Rain"),
+            "Hey - Karma.mp3": ("Hey", "Karma"), "Hey - Teksanski.mp3": ("Hey", "Teksański"),
+            "unknown.mp3": ("Nobody", "Unknown")}
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    plan = plan_file_fixes(music_session, folder, 0.9, 0.99)
+    by_name = {fix.file.name: fix for fix in plan.fixes}
+    assert set(by_name) == {"Acid Rain - dscom.it.mp3", "Hey - Teksanski.mp3"}
+    assert by_name["Acid Rain - dscom.it.mp3"].song is acid_rain
+    assert by_name["Acid Rain - dscom.it.mp3"].new_name == "Liquid Tension Experiment - Acid Rain.mp3"
+    assert by_name["Acid Rain - dscom.it.mp3"].tags_differ
+    assert (by_name["Hey - Teksanski.mp3"].new_name, by_name["Hey - Teksanski.mp3"].tags_differ) == ("Hey - Teksański.mp3", False)
+    assert plan.up_to_date == 1 and [p.name for p in plan.not_in_database] == ["unknown.mp3"]
+    # Planning wrote nothing
+    assert EasyID3(folder / "Acid Rain - dscom.it.mp3")["artist"] == ["Liiquid tension experiment"]
+
+    for fix in plan.fixes:
+        apply_file_fix(fix)
+    assert EasyID3(folder / "Liquid Tension Experiment - Acid Rain.mp3")["artist"] == ["Liquid Tension Experiment"]
+    assert (folder / "Hey - Teksański.mp3").exists() and (folder / "unknown.mp3").exists()
+
+
+def test_fix_names_and_tags_menu_asks_once(tmp_path, music_session, monkeypatch, capsys):
+    from utils.ui import file_fix_review as ffr
+
+    _add_liquid_tension(music_session)
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "a.mp3", artist="Liiquid tension experiment", title="Acid Rain")
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: {"artist_name": "Liiquid tension experiment",
+                                                             "title": "Acid Rain"})
+    monkeypatch.setattr(ffr, "open_file_browser_terminal", lambda start: folder)
+    monkeypatch.setattr(ffr, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    asked = []
+    monkeypatch.setattr(ffr.questionary, "confirm", lambda message, **k: asked.append(message) or _Answer(False))
+
+    ffr.fix_file_names_and_tags()
+    assert asked == ["Fix the names and tags of these mp3 files?"]
+    assert "-> Liquid Tension Experiment - Acid Rain.mp3, tags" in capsys.readouterr().out
+    assert (folder / "a.mp3").exists()  # declined: nothing changed

@@ -111,7 +111,9 @@ non-trivial work in that area.
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
-  artist's origin, an album's title, a YouTube link or music video set by hand, ...), and `inbox_found_links.py` for links the phone found for
+  artist's origin, an album's title, a YouTube link or music video set by hand, ...; the song's
+  artist, `songs.artist_id`, comes as a name and credits only that song to the artist of that name
+  via `set_primary_artist()`, never renaming the shared row), and `inbox_found_links.py` for links the phone found for
   songs without one. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
@@ -254,7 +256,8 @@ non-trivial work in that area.
   folder, what was read). For each, the user can search by title across all artists
   (`import_engine.find_songs_by_title()`, for files with no usable artist). Picking a candidate
   isn't final: the user confirms it or switches to the manual search. They can also search the
-  database (`search_and_pick_db_object()`), add it as a new song (`folder_playlist.add_song_for_file()`,
+  database (`search_and_pick_db_object()`; one file per cleared screen, the previous file's
+  decision on top, a key press first when auto-accepted files were listed), add it as a new song (`folder_playlist.add_song_for_file()`,
   the existing artist/song reused), keep it in the playlist without a song (a track with
   `song_id` NULL), or leave it out of the playlist (the file itself is never touched). Only "Stop"
   leaves the playlist unsaved. A file whose tag artist the artist search can't find (a typo: "Liiquid tension
@@ -274,10 +277,16 @@ non-trivial work in that area.
   When none of those fits, up to 3 closest songs by `LocalSongMatcher.best_guesses()` /
   `match_score()` are offered (title, and the artist when the file has one; the title alone must
   reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
-  `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score. `match()` (files.db, covers) takes
+  `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score; the
+  only one reaching Settings → "Closest songs: auto-accept score" (default 0.99) is taken without
+  asking and listed as auto-accepted — never for a file with no artist, scored on its title alone. `match()` (files.db, covers) takes
   `match_similar()`'s safe guesses without asking, never the title-only ones nor these. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
+  `file_fixes.py` is Manage database → "Fix names and tags for mp3 files that are in the database"
+  (`utils/ui/file_fix_review.py`): a folder's files matched by `build_folder_playlist()` without
+  asking (no closest-song guesses), renamed / re-tagged after their song on one confirm; files in
+  the library folder get a warning (a renamed file is new to files.db).
   `folder_youtube_playlist.py` is "Create playlist from folder and compare with YT playlist": the
   same folder playlist, each file paired with a video of a YouTube playlist (same database song, the
   song's own link, else resembling artist + title; the rest by hand from the unpaired ones), whose

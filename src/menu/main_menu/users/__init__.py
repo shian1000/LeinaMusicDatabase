@@ -38,12 +38,16 @@ from utils.discoveries.folder_youtube_playlist import (
     youtube_only_track,
 )
 from utils.discoveries.import_engine import LocalSongMatcher
-from utils.discoveries.file_matching_settings import load_auto_accept_artist_similarity, load_best_guess_min_score
+from utils.discoveries.file_matching_settings import (
+    load_auto_accept_artist_similarity,
+    load_best_guess_min_score,
+    load_closest_auto_accept_score,
+)
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
 from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
-from utils.ui.menu_utils import execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
+from utils.ui.menu_utils import clear_screen, execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
 
 RED = "\033[91m"
@@ -182,7 +186,15 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
     still in `playlist.unmatched` afterwards (Stop) means don't save."""
     unmatched = playlist.unmatched
     total = len(unmatched)
+    previous = None
     for i, track in enumerate(list(unmatched), 1):
+        # One file per screen; the decision about the one before, which the
+        # clearing would wipe, goes on top
+        clear_screen()
+        print(f"Files without a song in the database ({total} of {len(playlist.tracks)})")
+        if previous is not None:
+            print(f"  Previous: {_track_source(previous)}  ->  {_review_outcome(previous, playlist)}")
+        previous = track
         if track.file is None:
             print(f"\n[{i}/{total}] (no file) {_video_url(track.youtube_video_id)}")
         else:
@@ -266,6 +278,21 @@ def _add_song_for_file(music_session, track):
     return song
 
 
+def _track_source(track) -> str:
+    return track.file.name if track.file else _video_url(track.youtube_video_id)
+
+
+def _review_outcome(track, playlist) -> str:
+    """What became of a reviewed file, for the line on top of the next one."""
+    if any(t is track for t in playlist.unmatched):
+        return "not decided"
+    if not any(t is track for t in playlist.tracks):
+        return "left out of the playlist"
+    if track.song_id is None:
+        return "kept without a song"
+    return colored_song(track.artist, track.title)
+
+
 def _pick_for_track(track, song, unmatched: list) -> None:
     assign_song(track, song)
     track.picked = True
@@ -333,7 +360,7 @@ def _create_playlist_from_folder(username: str) -> None:
     music_session, _ = open_and_set_global_database_sessions()
     print(f"Matching the mp3 files in {folder} with the database...")
     playlist = build_folder_playlist(music_session, folder, load_auto_accept_artist_similarity(),
-                                     load_best_guess_min_score())
+                                     load_best_guess_min_score(), load_closest_auto_accept_score())
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
@@ -346,11 +373,20 @@ def _finish_folder_playlist(music_session, username: str, name: str, folder: Pat
     if playlist.auto_accepted:
         print(f"\n{len(playlist.auto_accepted)} file(s) matched automatically though the artist is spelt differently:")
         for track, tag_artist in playlist.auto_accepted:
-            source = track.file.name if track.file else _video_url(track.youtube_video_id)
-            print(f"  {source}  ({tag_artist})  ->  {colored_song(track.artist, track.title)}")
+            print(f"  {_track_source(track)}  ({tag_artist})  ->  {colored_song(track.artist, track.title)}")
+    if playlist.auto_accepted_scored:
+        print(f"\n{len(playlist.auto_accepted_scored)} file(s) auto-accepted, their closest song scoring "
+              f"at least {load_closest_auto_accept_score():.0%}:")
+        for track, (tag_artist, tag_title), score in playlist.auto_accepted_scored:
+            print(f"  {_track_source(track)}")
+            print(f"    {colored_song(tag_artist, tag_title)}  ->  "
+                  f"{as_ansi(_song_tokens(music_session.get(Song, track.song_id), score))}")
 
     if playlist.unmatched:
-        print(f"\n{len(playlist.unmatched)} of {len(playlist.tracks)} file(s) have no song in the database.")
+        if playlist.auto_accepted or playlist.auto_accepted_scored:
+            # The review clears the screen for every file: read these first
+            questionary.press_any_key_to_continue(
+                f"Press any key to go through the {len(playlist.unmatched)} file(s) without a song...").ask()
         _review_unmatched_files(music_session, folder, playlist)
         if playlist.unmatched:
             # Stopped before every file was decided on
@@ -455,8 +491,9 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
 
     music_session, _ = open_and_set_global_database_sessions()
     min_similarity, min_score = load_auto_accept_artist_similarity(), load_best_guess_min_score()
+    sure_score = load_closest_auto_accept_score()
     print(f"Matching the mp3 files in {folder} with the database...")
-    playlist = build_folder_playlist(music_session, folder, min_similarity, min_score)
+    playlist = build_folder_playlist(music_session, folder, min_similarity, min_score, sure_score)
     if not playlist.tracks:
         print("No mp3 files in that folder.")
         return
@@ -494,7 +531,7 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     for track, entry in pairs:
         link_track(track, entry, matcher)
     by_entry = {id(e): t for t, e in pairs}
-    by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity, min_score) for e in added})
+    by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity, min_score, sure_score) for e in added})
     linked = {id(t) for t in by_entry.values()}
     gone = {id(t) for t in left_out}
     set_tracks(playlist, [by_entry[id(e)] for e in entries if id(e) in by_entry]

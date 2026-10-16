@@ -116,7 +116,8 @@ def rank_entries_for(track: FolderTrack, entries: list) -> list:
 
 
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,
-                       min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1) -> FolderTrack:
+                       min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1,
+                       auto_accept_score: float = 1.1) -> FolderTrack:
     """A track for a video no file was paired with, matched to the
     database like a file (folder_playlist.match_track())."""
     track = FolderTrack(file=None, title=entry.metadata.get("title") or entry.label,
@@ -127,7 +128,7 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     else:
         match_track(playlist, matcher, track,
                     {**entry.metadata, "title": track.title, "_label": entry.label}, min_artist_similarity,
-                    best_guess_min_score)
+                    best_guess_min_score, auto_accept_score)
     return track
 
 
@@ -138,3 +139,4 @@ def set_tracks(playlist: FolderPlaylist, tracks: list) -> None:
     playlist.tracks = list(tracks)
     playlist.unmatched = [t for t in playlist.unmatched if id(t) in kept]
     playlist.auto_accepted = [(t, a) for t, a in playlist.auto_accepted if id(t) in kept]
+    playlist.auto_accepted_scored = [entry for entry in playlist.auto_accepted_scored if id(entry[0]) in kept]

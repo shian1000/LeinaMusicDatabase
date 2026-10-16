@@ -41,7 +41,7 @@ def pick_or_create_artist(name: str) -> Artist | None:
     return add_db_entry(Artist(name=name))
 
 
-def _ask_old_artist_role(song: Song, new: Artist) -> str | None | bool:
+def ask_old_artist_role(song: Song, new: Artist) -> str | None | bool:
     """`new` already is an additional artist of the song: what does the old
     primary artist become? A role, None (dropped from the song), or False
     when the user cancels."""
@@ -60,7 +60,7 @@ def _ask_old_artist_role(song: Song, new: Artist) -> str | None | bool:
     return choices[choice]
 
 
-def _offer_removing_emptied(session, emptied: list[Artist], heir: Artist) -> None:
+def offer_removing_emptied(session, emptied: list[Artist], heir: Artist) -> None:
     """Ask what to do with the artists the songs left, now without a song."""
     names = ", ".join(f'"{a.name}"' for a in emptied)
     print(f"{names} {'has' if len(emptied) == 1 else 'have'} no songs left.")
@@ -110,7 +110,7 @@ def change_songs_artist(songs: list[Song]) -> None:
     for song in to_move:
         keep_old_as = None
         if additional_artist_role(song, target):
-            keep_old_as = _ask_old_artist_role(song, target)
+            keep_old_as = ask_old_artist_role(song, target)
             if keep_old_as is False:
                 continue
         old = song.artist
@@ -122,7 +122,7 @@ def change_songs_artist(songs: list[Song]) -> None:
 
     emptied = [a for a in old_artists if is_unused(session, a)]
     if emptied:
-        _offer_removing_emptied(session, emptied, target)
+        offer_removing_emptied(session, emptied, target)
     submit_global_database_session()
     print(f'Credited {moved} song(s) to "{target.name}".')
 

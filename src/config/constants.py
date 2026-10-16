@@ -471,6 +471,12 @@ FILE_TITLE_CANDIDATES_MAX = 5
 FILE_BEST_GUESSES_MAX = 3
 DEFAULT_BEST_GUESS_MIN_SCORE = 0.6
 BEST_GUESS_MIN_SCORE_RANGE = (0.3, 0.95)
+# A suggestion (similar song, a song sharing the title, a closest song) whose
+# score reaches this is taken without asking - when it's the only one that
+# does - and listed after matching. Settings -> "Closest songs: auto-accept
+# score"; 1 = always ask.
+DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE = 0.99
+CLOSEST_AUTO_ACCEPT_SCORE_RANGE = (0.8, 1.0)
 # Weight of the title in match_score() when the file has an artist (the
 # artist's similarity gets the rest): a wrong artist spelling matters less
 # than a different title.

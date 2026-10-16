@@ -23,10 +23,13 @@ from utils.database.inbox_field_corrections import (
     ACCEPT,
     EDIT,
     MERGE_ARTIST,
+    MOVE_TO_ARTIST,
+    NEW_ARTIST,
     REJECT,
     RENAME_ALBUM,
     album_title_twin,
     apply_field_correction,
+    artist_choices,
     artist_twins,
     check_correction_videos,
     coerce_field_value,
@@ -39,7 +42,10 @@ from utils.database.inbox_found_links import REJECTED, apply_found_link_decision
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
 from utils.database.latin_names import LATIN_COLUMNS, name_of
-from utils.database.song_artists import count_artist_songs, song_artist_label
+from utils.database.artist_reassignment import is_unused
+from utils.database.datatables import Artist
+from utils.database.song_artists import additional_artist_role, count_artist_songs, song_artist_label
+from utils.ui.artist_change import ask_old_artist_role, offer_removing_emptied
 from utils.common.romanize import suggest_latin
 from utils.database.inbox_requests import (
     INBOX_DIR,
@@ -258,6 +264,14 @@ def _value(value) -> str:
     return f'"{escape(str(value))}"' if isinstance(value, str) else escape(str(value))
 
 
+def _artist_ref(session, artist_id) -> str:
+    """The song's artist as shown: songs.artist_id by name."""
+    artist = session.get(Artist, artist_id) if isinstance(artist_id, int) else None
+    if artist is None:
+        return f"#{artist_id} [dim](no longer in the database)[/dim]" if artist_id is not None else _value(None)
+    return f'"{escape(artist.name)}" (#{artist.id}, {count_artist_songs(session, artist.id)} song(s))'
+
+
 def _field_value(case, value) -> str:
     """A value as shown: a YouTube column's video as a link."""
     if case.is_video and value and value != NO_VIDEO_SENTINEL:
@@ -295,9 +309,11 @@ def _show_correction(session, case, position: str) -> None:
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
         print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
-    print(f"    Leina Radio had: {_field_value(case, report.old_value)}")
+    had, now = ((_artist_ref(session, report.old_value), _artist_ref(session, case.current)) if case.is_artist
+                else (_field_value(case, report.old_value), _field_value(case, case.current)))
+    print(f"    Leina Radio had: {had}")
     changed = "  [yellow](changed since Leina Radio's copy)[/yellow]" if case.changed_since else ""
-    print(f"    Now:             {_field_value(case, case.current)}{changed}")
+    print(f"    Now:             {now}{changed}")
     error = f"  [red]can't be stored: {escape(case.error)}[/red]" if case.error else ""
     shown = case.new_value if case.is_video and not case.error else report.new_value
     plays = f"  {_plays(case.plays.get(case.video_id))}" if case.video_id and case.checked_at else ""
@@ -306,6 +322,8 @@ def _show_correction(session, case, position: str) -> None:
         print(f"    [yellow]That video was found bad before: {escape(case.bad)}[/yellow]")
     if case.earlier_values:
         print(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
+    if case.is_artist:
+        print("    [dim]Only this song moves to that artist - its current artist is not renamed.[/dim]")
     if case.is_video:
         print("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
               "until the database's value changes.[/dim]")
@@ -331,7 +349,25 @@ def _value_notes(session, case, value) -> list:
     return notes
 
 
+def _artist_target_choices(session, case, name) -> list:
+    """The answers crediting the song to an artist called `name`."""
+    choices = [questionary.Choice(
+        f'Credit the song to "{twin.name}" (#{twin.id}, {count_artist_songs(session, twin.id)} song(s))',
+        (MOVE_TO_ARTIST, twin)) for twin in artist_choices(session, case, name)]
+    also = " (another artist of that name)" if choices else ""
+    choices.append(questionary.Choice(f'Credit it to a new artist "{name}"{also}', (NEW_ARTIST, name)))
+    return choices
+
+
 def _correction_choices(session, case) -> list:
+    if case.is_artist:
+        return [
+            *([] if case.error else _artist_target_choices(session, case, case.new_value)),
+            questionary.Choice("Type another artist", EDIT),
+            questionary.Choice(f'Keep "{case.row.artist.name}"', (REJECT, None)),
+            questionary.Choice(_SKIP, _SKIP),
+            questionary.Choice(_STOP, _STOP),
+        ]
     choices = []
     if not case.error:
         choices.append(questionary.Choice(f"Save the correction ({_plain(case.new_value)})", (ACCEPT, None)))
@@ -366,6 +402,16 @@ def _ask_correction(session, case):
             return _STOP
         if answer != EDIT:
             return answer
+        if case.is_artist:
+            typed = questionary.text("Artist's name:", default=case.new_value or "").ask()
+            if not typed or not typed.strip():
+                continue
+            picked = questionary.select("Which artist?", choices=[
+                *_artist_target_choices(session, case, typed.strip()),
+                questionary.Choice("Back", None)]).ask()
+            if picked is None:
+                continue
+            return picked
         start = case.new_value if case.new_value is not None else (case.latest.new_value or "")
         hint = (f'link or id, "{NO_VIDEO_SENTINEL}" = not on YouTube, ' if case.column_name == "youtube_video_id"
                 else "link or id, " if case.is_video
@@ -383,6 +429,22 @@ def _ask_correction(session, case):
         if notes and not questionary.confirm(f"Save {_plain(value)} anyway?").ask():
             continue
         return EDIT, value
+
+
+def _credit_to_artist(session, case, decision, value) -> None:
+    """A songs.artist_id answer, with the questions around it: what the old
+    artist becomes when the new one is already on the song, and what to do
+    with an old artist left without songs (as in the song editor)."""
+    song, old = case.row, case.row.artist
+    keep_old_as = None
+    if decision == MOVE_TO_ARTIST and additional_artist_role(song, value):
+        keep_old_as = ask_old_artist_role(song, value)
+        if keep_old_as is False:
+            return
+    apply_field_correction(session, case, decision, value, keep_old_as=keep_old_as)
+    print(f"Now: {escape(song_artist_label(song))} - {escape(song.title)}")
+    if is_unused(session, old):
+        offer_removing_emptied(session, [old], song.artist)
 
 
 def _review_field_corrections(session, requests) -> tuple[list, bool]:
@@ -416,6 +478,10 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         if answer == _SKIP:
             continue
         decision, value = answer
+        if decision in (MOVE_TO_ARTIST, NEW_ARTIST):
+            _credit_to_artist(session, case, decision, value)
+            submit_global_database_session()
+            continue
         old_video_wrong = False
         if decision in (ACCEPT, EDIT):
             old = replaced_video(case, case.new_value if decision == ACCEPT else value)

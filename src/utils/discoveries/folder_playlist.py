@@ -55,6 +55,9 @@ class FolderPlaylist:
     # Matched without asking though the tag artist is spelt differently
     # (LocalSongMatcher.match_confident()): (FolderTrack, tag artist) pairs
     auto_accepted: list = field(default_factory=list)
+    # Suggestions taken without asking for their score (the "Closest songs:
+    # auto-accept score" setting): (FolderTrack, (tag artist, tag title), score)
+    auto_accepted_scored: list = field(default_factory=list)
 
 
 def assign_song(track: FolderTrack, song) -> None:
@@ -98,13 +101,15 @@ def folder_mp3_files(folder: Path) -> list[Path]:
 
 
 def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: FolderTrack, metadata: dict,
-                min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1) -> None:
+                min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1,
+                auto_accept_score: float = 1.1) -> None:
     """Give `track` its database song from `metadata` (artist_name, title)
     the way build_folder_playlist() does, or put it in `playlist.unmatched`
     with a suggestion. `min_artist_similarity`: see
     LocalSongMatcher.match_confident(), `best_guess_min_score`: see
-    best_guesses() - the user's settings; the defaults (above 1) never
-    auto-accept nor guess."""
+    best_guesses(), `auto_accept_score`: the score from which the one
+    suggestion reaching it is taken without asking - the user's settings;
+    the defaults (above 1) never auto-accept nor guess."""
     song = matcher.match_exact(metadata)
     confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
     if song is not None:
@@ -123,12 +128,23 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
             track.best_guesses = matcher.best_guesses(metadata, FILE_BEST_GUESSES_MAX, best_guess_min_score)
         suggested = [track.similar_song, *track.title_candidates, *(song for song, _ in track.best_guesses)]
         track.scores = {song.id: matcher.match_score(metadata, song) for song in suggested if song is not None}
+        # Only with an artist in the tags: a file with none is scored on its
+        # title alone, so the one "Intro" in the database would be 100%
+        sure = {song.id: song for song in suggested
+                if song is not None and track.scores[song.id] >= auto_accept_score} if track.artist else {}
+        if len(sure) == 1:
+            (song,) = sure.values()
+            read_as = (track.artist, track.title)
+            track.picked = True  # its tags differ from the song's: offered the name/tag fix
+            assign_song(track, song)
+            playlist.auto_accepted_scored.append((track, read_as, track.scores[song.id]))
+            return
         playlist.unmatched.append(track)
         flog(f"Playlist from folder: no song in the database for {track.file or metadata.get('_label')}")
 
 
 def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1,
-                          best_guess_min_score: float = 1.1) -> FolderPlaylist:
+                          best_guess_min_score: float = 1.1, auto_accept_score: float = 1.1) -> FolderPlaylist:
     """`min_artist_similarity`: see match_track()."""
     playlist = FolderPlaylist(folder=Path(folder))
     matcher = LocalSongMatcher(session)
@@ -145,6 +161,7 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
         track.duration_s = metadata.get("duration_s") or audio_duration(file)
         # The length tells a whole-album file from a track (song_kinds.songs_for_entry())
         metadata = {**metadata, "duration_s": track.duration_s}
-        match_track(playlist, matcher, track, metadata, min_artist_similarity, best_guess_min_score)
+        match_track(playlist, matcher, track, metadata, min_artist_similarity, best_guess_min_score,
+                    auto_accept_score)
         playlist.tracks.append(track)
     return playlist

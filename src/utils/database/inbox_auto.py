@@ -20,7 +20,9 @@ What it does with the files in new/:
   the phone had, no other report asked for another value, the song still
   has that title / artist / album, and saving would merge nothing (another
   artist of that name, an album twin) nor leave the choice of renaming a
-  whole album; a YouTube link correction (songs.youtube_video_id /
+  whole album; the song's artist (songs.artist_id) only goes to an artist
+  that exists, alone with that name and not on the song yet, and only when
+  the old artist keeps other songs (no new artist, no emptied one); a YouTube link correction (songs.youtube_video_id /
   music_video_youtube_id) also needs its video to play here and not to be
   one found bad before for the song ("N/A" and empty need no check);
 - every case left over gets an auto_note (why), and its YouTube check is
@@ -42,6 +44,8 @@ from utils.database.inbox_field_corrections import (
     OPEN as FIELD_OPEN,
     album_title_twin,
     apply_field_correction,
+    artist_choices,
+    artist_left_empty,
     artist_twins,
     check_correction_videos,
     collect_field_correction_cases,
@@ -68,7 +72,7 @@ from utils.database.inbox_requests import (
     reject_request_file,
     save_case_checks,
 )
-from utils.database.song_artists import song_artist_label
+from utils.database.song_artists import additional_artist_role, song_artist_label
 
 AUTO = "auto"
 
@@ -133,6 +137,16 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
         return "the song has another title now"
     if case.not_on_song:
         return "that artist / album isn't the song's any more"
+    if case.is_artist:
+        matches = artist_choices(session, case, case.new_value)
+        if not matches:
+            return "no artist of that name yet (a new one would be made)"
+        if len(matches) > 1:
+            return "several artists have that name"
+        if additional_artist_role(case.row, matches[0]):
+            return "that artist is already credited on the song"
+        if artist_left_empty(session, case):
+            return "the song's artist would be left without songs"
     if artist_twins(session, case, case.new_value):
         return "another artist already has that name (a merge?)"
     if album_title_twin(session, case, case.new_value) is not None:
@@ -151,6 +165,11 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
             return ("the video doesn't play here" if plays is False
                     else "couldn't check whether the video plays (YouTube blocked it)")
     return None
+
+
+def _current_shown(case):
+    """The field's value as the report shows it: the song's artist by name, not id."""
+    return case.row.artist.name if case.is_artist else case.current
 
 
 def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool = False) -> AutoResult:
@@ -223,13 +242,13 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
         case.auto_note = field_correction_verdict(session, case, sender, permitted.get(sender, False))
         if case.auto_note is not None:
             continue
-        old = case.current
+        old = _current_shown(case)
         apply_field_correction(session, case, ACCEPT, by=AUTO)
         session.commit()
         result.changes.append({
             "at": now_iso(), "kind": "field_correction", "song_id": case.song.id if case.song else None,
             "text": f"{_song_label(case.song, case.latest)}: {case.label} {_shown(old)} -> "
-                    f"{_shown(case.current)} (corrected by {sender})",
+                    f"{_shown(_current_shown(case))} (corrected by {sender})",
             "files": sorted({r.file_name for r in case.reports}),
         })
 
