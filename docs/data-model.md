@@ -291,6 +291,13 @@ folders                           folder_revision: one row, its own counter
 -------
 id PK, uid unique (1-64 [A-Za-z0-9-]), name, items (JSON refs, stored as the phone sent them)
 revision, created_at, updated_at, deleted_at   (a deleted folder: no name/items, nothing archived)
+
+listens  (plays, migration 0009)  listen_revision: one row, its own counter
+-------
+id PK, uid unique (1-64 [A-Za-z0-9-]), started_at (ms), listened_ms, duration_ms, title NOT NULL,
+artist, album, song_id (music.db, as sent, never checked or remapped), youtube_video_id,
+spotify_track_id, source, playlist_uid, playlist_name, mood_uid, global_mood_id, mood_name,
+extra (JSON of unknown keys), revision    indexes: revision, started_at
 ```
 
 - Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`

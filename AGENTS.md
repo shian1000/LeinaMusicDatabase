@@ -107,7 +107,7 @@ non-trivial work in that area.
   (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
+  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
@@ -208,6 +208,11 @@ non-trivial work in that area.
   (`playlist_sync.replace_folder_refs()`); a new merge path must call it too. Folder calls need
   0008, playlists/moods don't. The menu doesn't show folders. Details: `docs/runbooks/database.md`
   → "Folders on the phone".
+  Plays for Leina Radio's listening stats sync through `listen_sync.py` (standard-library, user
+  migration 0009, own `listen_revision` counter, `GET/POST /users/<name>/listens`): only stored and
+  handed back, a play only added or lengthened (the longer `listened_ms` wins), fields kept as sent
+  (unknown keys in `extra`), `song_id` never checked nor remapped by `song_references`. Details:
+  `docs/runbooks/database.md` → "Listening stats on the phone".
   `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
   tracks and private tags (a mood whose songs change gets a new revision too).

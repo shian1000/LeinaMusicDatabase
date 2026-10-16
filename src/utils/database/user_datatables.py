@@ -99,6 +99,33 @@ class Folder(UserBase):
     deleted_at = Column(Integer)  # NULL = live, else a marker without items
 
 
+class Listen(UserBase):
+    """A play on one of the user's phones (migration 0009), for Leina
+    Radio's listening stats, synced by listen_sync.py, which does every
+    write to listens."""
+    __tablename__ = "listens"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=False)
+    started_at = Column(Integer, nullable=False)  # Unix ms, the phone's clock
+    listened_ms = Column(Integer, nullable=False)
+    duration_ms = Column(Integer)
+    title = Column(String, nullable=False)
+    artist = Column(String)
+    album = Column(String)
+    song_id = Column(Integer)  # music.db's songs.id as the phone sent it, never checked
+    youtube_video_id = Column(String)
+    spotify_track_id = Column(String)
+    source = Column(String)  # 'phone' / 'server' / 'youtube' / anything newer
+    playlist_uid = Column(String)
+    playlist_name = Column(String)
+    mood_uid = Column(String)
+    global_mood_id = Column(Integer)  # tag.db's tags.id
+    mood_name = Column(String)
+    extra = Column(String)  # JSON object of the other keys the phone sent
+    revision = Column(Integer, nullable=False)  # the user's listen_revision counter
+
+
 class PrivateSongTag(UserBase):
     __tablename__ = "song_tags"
     __table_args__ = (UniqueConstraint("song_id", "tag_id", name="uix_song_tag"),)

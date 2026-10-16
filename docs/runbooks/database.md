@@ -487,8 +487,30 @@ moods; they sync between the user's phones like playlists. Only the folders: the
 - The rules live in `utils/database/folder_sync.py` (standard-library, built on `playlist_sync.py`).
   MusicDatabase's menu doesn't show or edit folders.
 
+**Listening stats on the phone (2026-10-16).** Leina Radio records each song it plays with how long
+it was really heard ("a play") and computes Spotify-like stats from them; MusicDatabase only stores
+and hands back the plays, so both of the owner's phones count together. The owner's decisions are in
+the app's `docs/handoffs/musicdatabase-listening-stats.md` (app ADR 0012); the answer, with the
+final contract, is
+[`docs/handoffs/listening-stats-for-musicdatabaseapp.md`](../handoffs/listening-stats-for-musicdatabaseapp.md).
+
+- `GET /users/<name>/listens?since=&limit=` (limit default and cap 1000) →
+  `{"revision", "listens", "more"}`; with `more` the revision is the last listed play's.
+  `POST /users/<name>/listens` with `{"listens": [...]}` → `{"revision"}`. Same token rules and
+  errors as folders, bodies up to 1 MiB, own `listen_revision` counter. 503 until that `user.db` has
+  user migration 0009 (`listens`).
+- **Only added or lengthened:** a known `uid` is updated (new revision) only when its `listened_ms`
+  is larger, `duration_ms` then filled in if it was NULL; nothing else changes, no deletions. A batch
+  with one bad play is 400 and nothing is stored.
+- **Stored as sent:** `song_id`, `global_mood_id`, playlist/mood uids are never checked, and
+  `song_references.apply_song_id_changes()` deliberately doesn't remap `listens.song_id` (that
+  would change plays behind the phones' backs); a reader resolves old ids through music.db's
+  `song_id_changes`. Keys the server doesn't know are kept in `listens.extra` and served back.
+- The rules live in `utils/database/listen_sync.py` (standard-library, built on `playlist_sync.py`).
+  Private, no review, no permission. MusicDatabase's menu doesn't show plays yet.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods` and `…/folders` (401 without a token), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders` and `…/listens` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.

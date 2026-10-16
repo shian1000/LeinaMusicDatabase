@@ -70,6 +70,12 @@ with every path passed on the command line.
   /users/<name>/folders[/<uid>], a folder being a name + items (refs to
   playlists / moods, stored as sent). A uid is 1-64 characters [A-Za-z0-9-];
   a body over FOLDER_MAX_BODY_BYTES -> 413.
+- Plays for the phone's listening stats (only with --users; rules in
+  listen_sync.py): GET /users/<name>/listens?since=<revision>&limit=<n> ->
+  {"revision", "listens", "more"}, POST /users/<name>/listens with
+  {"listens": [...]} -> {"revision"}; a play is added, or updated when its
+  listened_ms is longer. The same token rules and errors as folders; a batch
+  with one bad play -> 400, nothing stored.
   GET /users/<name> -> {"username", "permissions"} with that user's token
   (POST /login answers the permissions too), so a revoked permission reaches
   the phone without logging in again.
@@ -128,12 +134,13 @@ import urllib.parse
 from urllib.parse import parse_qs, urlsplit
 
 try:
-    from . import account_auth, covers, folder_sync, global_mood_log, mood_sync, playlist_sync  # as utils.database.sharing_server
+    from . import account_auth, covers, folder_sync, global_mood_log, listen_sync, mood_sync, playlist_sync  # as utils.database.sharing_server
 except ImportError:
     import account_auth  # run as a script by the systemd service (its folder is on sys.path)
     import covers
     import folder_sync
     import global_mood_log
+    import listen_sync
     import mood_sync
     import playlist_sync
 
@@ -172,6 +179,10 @@ MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$"
 FOLDERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/folders(?:/(?P<uid>[^/]+))?$")
 # A folder holds only refs; the app has no limit, this is generous
 FOLDER_MAX_BODY_BYTES = 1024 * 1024
+# /users/<name>/listens
+LISTENS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/listens$")
+# The phone sends up to 500 plays, ~250 KB of JSON
+LISTEN_MAX_BODY_BYTES = 1024 * 1024
 # /users/<name>: who the token is and what they may do
 USER_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)$")
 # /users/<name>/covers/<sha256>
@@ -335,6 +346,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._moods(method)
             elif FOLDERS_PATH_RE.match(path):
                 self._folders(method)
+            elif method in ("GET", "POST") and LISTENS_PATH_RE.match(path):
+                self._listens(method)
             elif method in ("GET", "PUT") and COVERS_PATH_RE.match(path):
                 self._cover_blob(method)
             elif GLOBAL_MOOD_COVERS_PATH_RE.match(path):
@@ -467,6 +480,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             return token.strip() if scheme.lower() == "bearer" else ""
 
         def do_POST(self):
+            if self._route_users("POST"):
+                return
             path = self.path.split("?", 1)[0]
             if users_dir is None or path not in ("/login", "/logout"):
                 self._reply(HTTPStatus.NOT_FOUND)
@@ -817,6 +832,57 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 what = "deleted" if stored["deleted"] else f"stored ({len(stored['items'])} items)"
                 print(f"Folder {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
             self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
+
+        # ---- listens (plays, for the phone's listening stats) ----
+
+        def _listens(self, method: str):
+            url = urlsplit(self.path)
+            username = LISTENS_PATH_RE.match(url.path).group("user")
+            body = None
+            if method == "POST":
+                body = self._read_json_body(LISTEN_MAX_BODY_BYTES)
+                if body is None:
+                    return
+            if not self._authorize(username, "another user's listens"):
+                return
+            query = parse_qs(url.query)
+            try:
+                if method == "GET":
+                    since = self._query_int(query, "since", default=0)
+                    limit = self._query_int(query, "limit", default=listen_sync.DEFAULT_LIMIT)
+                    if limit < 1:
+                        raise listen_sync.BadListenError("limit: expected an integer >= 1")
+                else:
+                    plays = listen_sync.parse_listens(body)
+            except listen_sync.BadListenError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            try:
+                conn = listen_sync.connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
+            except listen_sync.NotMigratedError as exc:
+                print(f"Listens of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Listens of {username}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if method == "GET":
+                    self._reply_json(HTTPStatus.OK, listen_sync.changes_since(conn, since, limit))
+                    return
+                result = listen_sync.store_listens(conn, plays)
+            except (OSError, sqlite3.Error) as exc:
+                print(f"Listens of {username}: {method} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            finally:
+                conn.close()
+            if result["added"] or result["updated"]:
+                print(f"Listens of {username}: {result['added']} added, {result['updated']} updated, "
+                      f"revision {result['revision']}", flush=True)
+            self._reply_json(HTTPStatus.OK, {"revision": result["revision"]})
 
         # ---- covers ----
 
@@ -1211,7 +1277,7 @@ def main(argv=None) -> int:
         server = bind_when_ready(handler, args.port, get_address, label)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
-        inbox += f", logins, playlists, moods, folders and covers for {args.users}" if args.users else ""
+        inbox += f", logins, playlists, moods, folders, listens and covers for {args.users}" if args.users else ""
         inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
         inbox += f", library files from {args.library}" if args.library else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)

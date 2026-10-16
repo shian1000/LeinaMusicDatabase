@@ -1135,6 +1135,85 @@ def test_bad_or_unavailable_folder_requests(playlist_server, tmp_path):
     assert _call("GET", f"{unmounted}/users/ola_k/folders", token)[0] == 503
 
 
+# ==================== listens ====================
+
+def _listen(uid, listened_ms=183400, **extra):
+    return {"uid": uid, "started_at": 1791839796631, "listened_ms": listened_ms, "duration_ms": 214000,
+            "title": "Gruppa krovi", "artist": "Kino", "album": None, "song_id": 1234,
+            "youtube_video_id": "abc123", "spotify_track_id": None, "source": "youtube",
+            "playlist_uid": None, "playlist_name": None, "mood_uid": None, "global_mood_id": 5,
+            "mood_name": "Do biegania", **extra}
+
+
+def test_listens_round_trip(playlist_server):
+    start, _, tokens = playlist_server
+    url = f"{start()}/users/ola_k/listens"
+    token = tokens["ola_k"]
+
+    assert _call("GET", url, token) == (200, {"revision": 0, "listens": [], "more": False})
+    plays = [_listen("a", source="car-radio", future={"x": 1}), _listen("b"), _listen("c")]
+    assert _call("POST", url, token, {"listens": plays}) == (200, {"revision": 3})
+    status, got = _call("GET", f"{url}?since=0", token)
+    # Song ids as sent (1234 isn't in the shared music.db); unknown keys and sources kept
+    assert (status, got) == (200, {"revision": 3, "more": False,
+                                   "listens": [{**p, "revision": i} for i, p in enumerate(plays, 1)]})
+    assert _call("GET", f"{url}?since=1&limit=1", token) == \
+        (200, {"revision": 2, "listens": [{**plays[1], "revision": 2}], "more": True})
+    assert _call("GET", f"{url}?since=2&limit=1", token)[1]["more"] is False
+    # The song still playing, then its final time: the longer one wins
+    assert _call("POST", url, token, {"listens": [_listen("b", listened_ms=200000)]}) == (200, {"revision": 4})
+    assert _call("POST", url, token, {"listens": [_listen("b", listened_ms=5)]}) == (200, {"revision": 4})
+    assert _call("GET", f"{url}?since=3", token)[1]["listens"] == [{**_listen("b", listened_ms=200000), "revision": 4}]
+    # Listens don't touch playlists or folders
+    assert _call("GET", f"{start()}/users/ola_k/folders", token) == (200, {"revision": 0, "folders": []})
+
+
+@pytest.mark.parametrize("token_of, status", [(None, 401), ("revoked", 401), ("bob", 403)])
+def test_listens_need_that_users_token(playlist_server, token_of, status):
+    start, _, tokens = playlist_server
+    url = f"{start()}/users/ola_k/listens"
+    token = {"revoked": "not-a-token", None: None}.get(token_of, tokens.get(token_of))
+    assert _call("GET", url, token)[0] == status
+    assert _call("POST", url, token, {"listens": [_listen("a")]})[0] == status
+
+
+def test_bad_or_unavailable_listen_requests(playlist_server, tmp_path):
+    start, _, tokens = playlist_server
+    base = start()
+    url = f"{base}/users/ola_k/listens"
+    token = tokens["ola_k"]
+    # One bad play: 400, nothing stored
+    assert _call("POST", url, token, {"listens": [_listen("a"), _listen("b", listened_ms=-1)]})[0] == 400
+    assert _call("POST", url, token, {"listens": [{"uid": "c", "started_at": 1, "listened_ms": 0}]})[0] == 400
+    assert _call("POST", url, token, {"listens": [_listen("bad_uid")]})[0] == 400
+    assert _call("GET", url, token) == (200, {"revision": 0, "listens": [], "more": False})
+    assert _call("POST", url, token, {"plays": []})[0] == 400
+    assert _call("POST", url, token, raw=b"not json")[0] == 400
+    assert _call("POST", url, token, raw=b"[" + b" " * sharing_server.LISTEN_MAX_BODY_BYTES + b"]")[0] == 413
+    assert _call("GET", f"{url}?since=x", token)[0] == 400
+    assert _call("GET", f"{url}?limit=0", token)[0] == 400
+    assert _call("GET", f"{url}/a", token)[0] == 404
+    assert _call("PUT", url, token, {"listens": []})[0] == 404
+    assert _call("GET", f"{base}/users/bob/listens", tokens["bob"])[0] == 503  # no user.db
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _call("GET", f"{unmounted}/users/ola_k/listens", token)[0] == 503
+
+    import http.client
+    host, port = base.removeprefix("http://").split(":")
+    conn = http.client.HTTPConnection(host, int(port))
+    conn.putrequest("POST", "/users/ola_k/listens")
+    conn.putheader("Transfer-Encoding", "chunked")
+    conn.endheaders()
+    assert conn.getresponse().status == 411
+    conn.close()
+
+
+def test_without_users_there_are_no_listens(inbox_server):
+    start, _ = inbox_server
+    assert _call("GET", f"{start()}/users/ola_k/listens")[0] == 404
+    assert _call("POST", f"{start()}/users/ola_k/listens", payload={"listens": []})[0] == 404
+
+
 # ==================== covers ====================
 
 COVER_PNG = b"\x89PNG\r\n\x1a\n" + b"cover"
