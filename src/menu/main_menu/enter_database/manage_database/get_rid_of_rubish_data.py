@@ -173,7 +173,7 @@ def fix_lookalike_letters(songs):
     if any(entries[i][0][0] == "artist" for i in selected):
         print('An artist may now share its name with another one - run "Resolve duplicated artists" to merge them.')
 
-def seek_nonsense_names(songs, checked_ids):
+def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
     # away, per song. Now the scan just tags and queues them, and the questions
     # (plus the free-text replacement each "yes" needs) are asked in one batch
@@ -182,28 +182,27 @@ def seek_nonsense_names(songs, checked_ids):
     pending_rubbish_corrections = []
     auto_fixed_titles = []
     for song in songs:
-        if song.id not in checked_ids:
-            if is_blacklisted_album(song.album):
-                pending_rubbish_corrections.append({
-                    "song": song,
-                    "field": "album",
-                    "old_value": song.album,
-                })
+        if is_blacklisted_album(song.album):
+            pending_rubbish_corrections.append({
+                "song": song,
+                "field": "album",
+                "old_value": song.album,
+            })
 
-            if song.title:
-                stripped_title = strip_trailing_junk(song.title)
-                if stripped_title and stripped_title != song.title:
-                    old_title = song.title
-                    edit_db_entry(song, "title", stripped_title)
-                    auto_fixed_titles.append(f"'{old_title}' -> \033[93m'{stripped_title}'\033[0m")
+        if song.title:
+            stripped_title = strip_trailing_junk(song.title)
+            if stripped_title and stripped_title != song.title:
+                old_title = song.title
+                edit_db_entry(song, "title", stripped_title)
+                auto_fixed_titles.append(f"'{old_title}' -> \033[93m'{stripped_title}'\033[0m")
 
-            if is_blacklisted_album(song.title):
-                pending_rubbish_corrections.append({
-                    "song": song,
-                    "field": "title",
-                    "old_value": song.title,
-                })
-            add_tag_to_song(song, "album_checked")
+        if is_blacklisted_album(song.title):
+            pending_rubbish_corrections.append({
+                "song": song,
+                "field": "title",
+                "old_value": song.title,
+            })
+        add_tag_to_song(song, "album_checked")
 
     if auto_fixed_titles:
         print("\n" + "="*70)
@@ -255,7 +254,7 @@ def seek_nonsense_names(songs, checked_ids):
             else:
                 print("Can't delete title name entirely")
 
-def resolve_unknown_artist(songs, checked_ids):
+def resolve_unknown_artist(songs):
         # Editing an unknown-artist/title split is unconditional (there's no
         # yes/no decision to defer) - the per-song "Press anything to continue"
         # was only there to pause and show what changed, one song at a time.
@@ -263,27 +262,26 @@ def resolve_unknown_artist(songs, checked_ids):
         # print it as a single summary at the end instead of blocking per song.
         changes = []
         for song in songs:
-            if song.id not in checked_ids:
-                lowered_artist = song.artist.name.strip().lower()
-                lowered_title = song.title.strip().lower()
-                slog(lowered_artist)
-                slog(lowered_title)
-                if "unknown" in lowered_artist or not lowered_artist:
-                    print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
-                    new_artist = ""
-                    new_title = ""
-                    if " - " in lowered_artist:
-                        new_artist, new_title = lowered_artist.split(" - ", 1)
-                    elif " - " in lowered_title:
-                        new_artist, new_title = lowered_title.split(" - ", 1)
-                    if new_artist:
-                        old_artist = song.artist.name
-                        edit_db_entry(song, song_categories[1], new_artist)
-                        changes.append(f"song_id {song.id}: artist '{old_artist}' -> \033[93m'{new_artist}'\033[0m")
-                    if new_title:
-                        old_title = song.title
-                        edit_db_entry(song, song_categories[0], new_title)
-                        changes.append(f"song_id {song.id}: title '{old_title}' -> \033[93m'{new_title}'\033[0m")
+            lowered_artist = song.artist.name.strip().lower()
+            lowered_title = song.title.strip().lower()
+            slog(lowered_artist)
+            slog(lowered_title)
+            if "unknown" in lowered_artist or not lowered_artist:
+                print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
+                new_artist = ""
+                new_title = ""
+                if " - " in lowered_artist:
+                    new_artist, new_title = lowered_artist.split(" - ", 1)
+                elif " - " in lowered_title:
+                    new_artist, new_title = lowered_title.split(" - ", 1)
+                if new_artist:
+                    old_artist = song.artist.name
+                    edit_db_entry(song, song_categories[1], new_artist)
+                    changes.append(f"song_id {song.id}: artist '{old_artist}' -> \033[93m'{new_artist}'\033[0m")
+                if new_title:
+                    old_title = song.title
+                    edit_db_entry(song, song_categories[0], new_title)
+                    changes.append(f"song_id {song.id}: title '{old_title}' -> \033[93m'{new_title}'\033[0m")
 
         if changes:
             print("\n" + "="*70)
@@ -294,24 +292,34 @@ def resolve_unknown_artist(songs, checked_ids):
 
 
 
+def _load_songs():
+    """All songs, with their artists loaded in one query. The artist list must
+    be kept: the session holds its rows only weakly, so a discarded one is
+    gone again and every song.artist becomes a query of its own."""
+    songs = get_songs_from_db_session()
+    music_session, _ = get_global_database_sessions()
+    return songs, music_session.query(Artist).all()
+
+
 def get_rid_of_rubish_data():
     print("Looking for sus album titles . . . . . ")
-    songs = get_songs_from_db_session()
-    # Every step reads song.artist; loading all artists once puts them in the
-    # session, so those lookups need no query per song (~4 s otherwise).
-    music_session, _ = get_global_database_sessions()
-    music_session.query(Artist).all()
-    # One query instead of has_tag_on_song() per song, twice (~26 s).
+    songs, _artists = _load_songs()
+    # Only songs without the "album_checked" marker get the unknown-artist and
+    # rubbish-name checks. Picked here, before the first commit: a commit
+    # expires every loaded row, and reading song.id afterwards reloads each
+    # song with a query of its own (~14 s for the whole catalog).
     checked_ids = song_ids_with_tag("album_checked")
+    unchecked = [song for song in songs if song.id not in checked_ids]
     convert_characters_encoding(songs)
     remove_invisible_characters(songs)
     strip_leading_spaces(songs)
     replace_double_spaces(songs)
-    resolve_unknown_artist(songs, checked_ids)
+    resolve_unknown_artist(unchecked)
     submit_global_database_session()
+    # The commit expired every song: reload them all in two queries rather
+    # than one per song (~20 s)
+    songs, _artists = _load_songs()
     fix_lookalike_letters(songs)
     submit_global_database_session()
-    seek_nonsense_names(songs, checked_ids)
+    seek_nonsense_names(unchecked)
     submit_global_database_session()
-
-
