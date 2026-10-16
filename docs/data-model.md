@@ -286,6 +286,11 @@ global_mood_covers                global_mood_cover_revision: one row, its own c
 mood_id       PK (tag.db tags.id, may not exist there)
 cover_sha256  NULL = removed (row kept for the phones)
 revision, updated_at
+
+folders                           folder_revision: one row, its own counter
+-------
+id PK, uid unique (1-64 [A-Za-z0-9-]), name, items (JSON refs, stored as the phone sent them)
+revision, created_at, updated_at, deleted_at   (a deleted folder: no name/items, nothing archived)
 ```
 
 - Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`

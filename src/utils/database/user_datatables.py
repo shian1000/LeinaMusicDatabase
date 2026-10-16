@@ -84,6 +84,21 @@ class GlobalMoodCover(UserBase):
     updated_at = Column(Integer, nullable=False)
 
 
+class Folder(UserBase):
+    """A folder of the phone's Biblioteka (migration 0008), synced by
+    folder_sync.py, which does every write to folders."""
+    __tablename__ = "folders"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=False)
+    name = Column(String)  # NULL on a deleted folder
+    items = Column(String)  # JSON list of refs, as the phone sent it
+    revision = Column(Integer, nullable=False, default=0)  # the user's folder_revision counter
+    created_at = Column(Integer)  # Unix ms
+    updated_at = Column(Integer, nullable=False)
+    deleted_at = Column(Integer)  # NULL = live, else a marker without items
+
+
 class PrivateSongTag(UserBase):
     __tablename__ = "song_tags"
     __table_args__ = (UniqueConstraint("song_id", "tag_id", name="uix_song_tag"),)

@@ -245,6 +245,7 @@ def store_mood(conn, user_folder, uid: str, mood: dict, base_revision: int,
                           _earliest(other["song_ids_checked_to"], song_ids_checked_to), cover, other["id"]))
             if row is not None and row["deleted_at"] is None:
                 _retire(conn, user_folder, row, mood["updated_at"], merged_into=other["uid"])
+            playlist_sync.replace_folder_refs(conn, "mood", uid, other["uid"])
             return True, mood_json(conn, _row_by_id(conn, other["id"]))
 
         revision = next_revision(conn)

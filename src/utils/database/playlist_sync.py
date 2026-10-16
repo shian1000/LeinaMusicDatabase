@@ -364,6 +364,9 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
                 "SELECT * FROM playlists WHERE source = ? AND source_id = ? AND deleted_at IS NULL "
                 "ORDER BY id LIMIT 1", (playlist["source"], playlist["source_id"])).fetchone()
             same_source = row is not None
+            if same_source:
+                # The phone adopts the kept uid; its folders follow
+                replace_folder_refs(conn, "playlist", uid, row["uid"])
         if row is not None and not _wins(row, base_revision, playlist["updated_at"]):
             if same_source and row["cover_sha256"] is None and incoming_cover not in (None, KEEP_COVER):
                 # The same import on two phones: the newer side's cover, or
@@ -401,6 +404,16 @@ def store_playlist(conn, username: str, uid: str, playlist: dict, base_revision:
         _write_tracks(conn, playlist_id, playlist["tracks"])
         stored = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
         return True, playlist_json(conn, stored)
+
+
+def replace_folder_refs(conn, item_type: str, old_uid: str, new_uid: str) -> None:
+    """folder_sync.replace_refs(), imported here because folder_sync builds
+    on this module. Inside the caller's transaction."""
+    try:
+        from . import folder_sync
+    except ImportError:
+        import folder_sync
+    folder_sync.replace_refs(conn, item_type, old_uid, new_uid)
 
 
 def _archive(user_folder, payload: dict, deleted_at: int, subdir: Path = ARCHIVE_SUBDIR) -> Path:

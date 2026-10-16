@@ -462,8 +462,33 @@ and mood lists.
   A restored user.db may name blobs the folder no longer has; the phone then re-uploads on
   `cover_missing`, and a GET of a missing blob is 404.
 
+**Folders on the phone (2026-10-16).** Leina Radio's Biblioteka has folders holding playlists and
+moods; they sync between the user's phones like playlists. Only the folders: the sort order and
+"recently opened" stay on each phone. The owner's decisions are in the app's
+`docs/handoffs/musicdatabase-folders.md` (app ADR 0011); the answer, with the final contract, is
+[`docs/handoffs/folders-for-musicdatabaseapp.md`](../handoffs/folders-for-musicdatabaseapp.md).
+
+- `GET /users/<name>/folders?since=`, `PUT /users/<name>/folders/<uid>` (`name`, `items`,
+  `created_at`, `updated_at`, `base_revision`), `DELETE …?base_revision=&deleted_at=`. The same
+  token rules, answers and conflict rule as playlists, own `folder_revision` counter, bodies up to
+  1 MiB. A uid is 1–64 characters `[A-Za-z0-9-]` (folders made before syncing keep a short base-36
+  id). 503 until that `user.db` has user migration 0008 (`folders`); playlists and moods don't need it.
+- **Items are stored as sent** (`folders.items`, JSON, in the user's order), never checked: a
+  folder may name a playlist only one phone has, and unknown item types are kept for later app
+  versions. Each item only has to be an object with a string `type`. Private, no review, no
+  permission; folders don't nest and the phone keeps an item in one folder at most.
+- **Deleting** keeps the row as a marker without name or items; nothing is archived (a folder
+  holds only references). A later PUT whose `updated_at` is newer brings it back.
+- **Merges follow:** when the server merges a playlist (same import on two phones) or a mood (same
+  name, or a rename onto another's name) into another, `folder_sync.replace_refs()` points the
+  user's live folders at the kept uid in the same transaction, each changed folder under a new
+  revision, dropping a ref that would then appear twice. A promoted mood's refs are left alone
+  (the phone switches via `promoted_to`); a playlist deleted from the menu leaves its ref too.
+- The rules live in `utils/database/folder_sync.py` (standard-library, built on `playlist_sync.py`).
+  MusicDatabase's menu doesn't show or edit folders.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists` and `…/users/<name>/moods` (401 without a token), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods` and `…/folders` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
@@ -488,7 +513,7 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
 - **Not served as files.** The sharing server serves only `music.db` / `tag.db` / `files.db` and
-  the library's audio files by id, so `Users/` and everything in it is a 404. Playlists and moods reach the logged-in user's phones
+  the library's audio files by id, so `Users/` and everything in it is a 404. Playlists, moods and folders reach the logged-in user's phones
   through their endpoints above; other private tags (kind `'marker'`) don't go anywhere.
 - **Deleted playlists** are copied to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json`
   first (see "Playlists on the phone" above). To recover one, read its tracks from that file.

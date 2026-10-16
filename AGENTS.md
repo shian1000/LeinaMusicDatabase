@@ -108,7 +108,7 @@ non-trivial work in that area.
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / `GET /users/<name>`
-  endpoints and their JSON, nor the permission names).
+  endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
   artist's origin, an album's title, a YouTube link or music video set by hand, ...), and `inbox_found_links.py` for links the phone found for
@@ -201,6 +201,13 @@ non-trivial work in that area.
   `Settings.global_mood_changes_dir` on T7): the server never writes tag.db. The app applies them at
   startup, before every sharing copy and in the Moods menu. Owner's menu: Users → Moods
   (`menu/main_menu/users/moods.py`). Details: `docs/runbooks/database.md` → "Moods on the phone".
+  Folders of Leina Radio's Biblioteka (holding playlists and moods) sync the same way through
+  `folder_sync.py` (standard-library, user migration 0008, own `folder_revision` counter,
+  `/users/<name>/folders`): items are stored exactly as sent, never checked, unknown types kept.
+  A playlist or mood merge on the server rewrites folder refs to the kept uid
+  (`playlist_sync.replace_folder_refs()`); a new merge path must call it too. Folder calls need
+  0008, playlists/moods don't. The menu doesn't show folders. Details: `docs/runbooks/database.md`
+  → "Folders on the phone".
   `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
   tracks and private tags (a mood whose songs change gets a new revision too).
