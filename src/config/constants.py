@@ -101,6 +101,12 @@ YTDLP_UPDATE_CHECK_TIMEOUT = 10
 # Country (ISO 3166-1 alpha-2) the database's YouTube links have to play in -
 # a video region-blocked here counts as not playing (videos_exist_via_api())
 YOUTUBE_REGION = "PL"
+# Language yt-dlp asks YouTube in when it reads a playlist page (--flat-playlist).
+# yt-dlp's default, English, gets the uploader's English translation of a title
+# ("Ivan NAVI - Такі Молоді" -> "So Young"); a language uploaders practically never
+# translate into gives the original title, and Zulu still writes numbers the English
+# way, so view counts keep parsing. Full video reads already return the original.
+YTDLP_PLAYLIST_LANG = "zu"
 
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",

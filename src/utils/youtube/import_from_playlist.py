@@ -19,6 +19,7 @@ from utils.discoveries.import_engine import find_matching_artist, run_import_bat
 from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
 from utils.common.text_utils import strip_trailing_junk_suffix
+from config.constants import YTDLP_PLAYLIST_LANG
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -413,7 +414,10 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
     url = f"https://www.youtube.com/playlist?list={playlist_id}"
     try:
         result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--flat-playlist", "--ignore-errors", "--no-warnings", url],
+            [
+                "yt-dlp", "--dump-json", "--flat-playlist", "--ignore-errors", "--no-warnings",
+                "--extractor-args", f"youtube:lang={YTDLP_PLAYLIST_LANG}", url,
+            ],
             capture_output=True,
             text=True,
             timeout=timeout,

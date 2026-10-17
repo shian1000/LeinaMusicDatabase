@@ -46,6 +46,16 @@ like a hang (this happened during testing - the user reported "nothing happens" 
 populated the same as the non-flat form). If a future change needs a field `--flat-playlist`
 doesn't provide, don't just drop the flag - it will silently reintroduce this timeout.
 
+**Flat titles are localized - hence `youtube:lang=zu`.** A flat listing's `title` is the
+uploader's translation into the language yt-dlp asks in (`hl`, English by default), so
+"Ivan NAVI - Такі Молоді" came in as "So Young". `YTDLP_PLAYLIST_LANG` (`constants.py`) asks in
+Zulu, which uploaders practically never translate into, so the original comes back; Polish/
+Ukrainian also gave originals but broke `view_count` parsing (13 instead of 13.7M), Zulu
+doesn't. Full (non-flat) reads already return the original title in any language. Search
+results (`ytsearch`) are different again: YouTube returns whichever translation matches the
+*query's* language, regardless of `lang` - "So Young official" gets the English title even in
+Zulu - so the setting only matters for playlist pages.
+
 ### Turning one playlist video into artist/title
 
 `build_metadata_from_item()`:
