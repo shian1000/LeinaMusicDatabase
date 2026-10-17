@@ -708,6 +708,41 @@ def test_html_entities_in_tags_are_read_as_characters(tmp_path, music_session):
     assert playlist.unmatched[0].title == "Ty & ja"
 
 
+def test_file_name_split_on_a_bare_hyphen_is_also_read_whole_as_the_title(tmp_path, music_session):
+    """"Svefn-g-englar.mp3" with no tags is read as "Svefn" - "g-englar";
+    the whole name is Sigur Rós's title, so that song is suggested (asked,
+    never taken by match()), with the whole name's score - also when an
+    artist "Svefn" already exists."""
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    svefn = Song(title="Svefn-G-Englar", artist=Artist(name="Sigur Rós"))
+    music_session.add(svefn)
+    music_session.commit()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Svefn-g-englar.mp3")
+    _id3_file(folder / "Hey - Karma.mp3")  # spaced separator: no whole-name reading
+
+    metadata = read_file_metadata(folder / "Svefn-g-englar.mp3")
+    assert (metadata["artist_name"], metadata["title"], metadata["unsplit_title"]) == ("Svefn", "g-englar", "Svefn-g-englar")
+    assert "unsplit_title" not in read_file_metadata(folder / "Hey - Karma.mp3")
+
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_similar(metadata) is svefn
+    assert matcher.match(metadata) is None
+    assert matcher.match_score(metadata, svefn) == 1.0
+    assert matcher.match_similar({**metadata, "unsplit_title": None}) is None
+
+    (track,) = fp.build_folder_playlist(music_session, folder, auto_accept_score=0.99).unmatched
+    # "svefn g englar" isn't distinctive enough to take without asking
+    assert track.similar_song is svefn
+
+    music_session.add(Song(title="Other", artist=Artist(name="Svefn")))
+    music_session.commit()
+    assert LocalSongMatcher(music_session).match_similar(metadata) is svefn
+
+
 def _yt_compare_env(tmp_path, music_session, monkeypatch, tags: dict, items: list, select):
     """Folder + mocked YouTube playlist for "Create playlist from folder and
     compare with YT playlist"; the files' tags come from `tags`."""

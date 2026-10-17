@@ -134,6 +134,12 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         # its title (match_similar()), and only for a distinctive title
         if track.artist:
             candidates = suggested
+            unsplit = metadata.get("unsplit_title")
+            if unsplit and not is_distinctive_title(unsplit):
+                # Scored on the whole file name as a title alone: like a file with no artist
+                plain = {**metadata, "unsplit_title": None}
+                candidates = [song for song in suggested if song is not None
+                              and matcher.match_score(plain, song) == track.scores[song.id]]
         elif track.similar_song is not None and is_distinctive_title(track.title):
             candidates = [track.similar_song]
         else:

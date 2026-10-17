@@ -522,7 +522,9 @@ class LocalSongMatcher:
         else - no artist found - the one song with its title
         (brackets/junk ignored) by an artist whose name, Latin form or synonym
         resembles the tag's; for a file with no artist, the one song with
-        its title by anyone. None when there is none or more than one. A
+        its title by anyone, and for a file name split on a bare hyphen
+        ("Svefn-g-englar" read as "Svefn" - "g-englar") the one song titled
+        the whole name. None when there is none or more than one. A
         guess - the folder playlist asks the user about it."""
         name, title = metadata.get("artist_name"), metadata.get("title")
         if not title:
@@ -543,9 +545,14 @@ class LocalSongMatcher:
         if artist is not None:
             if not title_guesses:
                 return None
-            return self._similar_title(artist, title, duration_s) or self._title_prefix(artist, title, duration_s)
-        found = [s for s in self._songs_by_title_core(title, duration_s) if _artist_resembles(name, s)]
-        return found[0] if len(found) == 1 else None
+            song = self._similar_title(artist, title, duration_s) or self._title_prefix(artist, title, duration_s)
+        else:
+            found = [s for s in self._songs_by_title_core(title, duration_s) if _artist_resembles(name, s)]
+            song = found[0] if len(found) == 1 else None
+        if song is None and title_guesses and (unsplit := metadata.get("unsplit_title")):
+            # A file name split on a bare hyphen: the whole name as the title
+            song = self.match_similar({"title": unsplit, "duration_s": duration_s})
+        return song
 
     def match_score(self, metadata: dict, song: Song) -> float:
         """0-1, how well the file's tags fit `song`: the title's similarity
@@ -579,10 +586,13 @@ class LocalSongMatcher:
     @classmethod
     def _readings(cls, metadata: dict) -> list:
         """The tags as written, and with artist and title swapped when both
-        are there."""
+        are there, and a file name split on a bare hyphen read whole as the
+        title ("Svefn-g-englar")."""
         readings = [cls._wanted(metadata)]
         if metadata.get("artist_name") and metadata.get("title"):
             readings.append(cls._wanted({"title": metadata["artist_name"], "artist_name": metadata["title"]}))
+        if unsplit := metadata.get("unsplit_title"):
+            readings.append(cls._wanted({"title": unsplit}))
         return readings
 
     @staticmethod

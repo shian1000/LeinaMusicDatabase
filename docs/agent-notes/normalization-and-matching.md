@@ -94,7 +94,17 @@ playlist" section.
    halves. Intentionally permissive and a genuine last resort: a title with an
    incidental hyphen and no real artist (`Re-Animator.mp3`) misparses into
    artist `Re` / title `Animator` here rather than being reported unparseable —
-   acceptable only because stage 1 already failed.
+   acceptable only because stage 1 already failed. Real case: an untagged
+   `Svefn-g-englar.mp3` (Sigur Rós) became artist `Svefn` / title `g-englar`,
+   and the folder playlist added it as a new song. So `read_file_metadata()`
+   marks a name read through stage 2 or 3 with `unsplit_title` (the whole stem),
+   and `LocalSongMatcher` also reads that as a title alone: `match_similar()` (a
+   suggestion that is asked about, never taken in `match()`), `_readings()` for
+   scores, and auto-accept only when `is_distinctive_title()`. The filename gets
+   split in two places, `read_file_metadata()` (tags present but empty) and
+   `mp3_utils.extract_metadata_with_fallback()` (no ID3 at all), so the marker
+   is set afterwards, by comparing with `extract_unknown_data()`, not in either
+   branch.
 3. **Split on 2+ consecutive spaces** — recovers filenames with no punctuation
    separator at all, e.g. `Akiko Yano  Iroha Ni Konpeitou.mp3`, where the
    artist/title boundary is just a double space.

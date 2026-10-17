@@ -1,4 +1,5 @@
 import html
+import re
 from pathlib import Path
 
 from utils.common.debug import mlog
@@ -38,6 +39,16 @@ def read_file_metadata(file: Path) -> dict:
             metadata["artist_name"] = artist
             metadata["title"] = title
             metadata = _clean_fields(metadata)
+    stem = strip_site_names(file.stem)
+    if metadata["artist_name"] and not re.search(r" [–—\-_] ", stem):
+        artist, title = extract_unknown_data(file)
+        split = _clean_fields({"artist_name": artist, "title": title})
+        if (split["artist_name"], split["title"]) == (metadata["artist_name"], metadata["title"]):
+            # Read from a name split on a bare hyphen or a double space (here or
+            # in extract_metadata_with_fallback()) - only a guess, the whole name
+            # may be the title ("Svefn-g-englar" by Sigur Rós), which
+            # LocalSongMatcher tries too
+            metadata["unsplit_title"] = html.unescape(stem)
     # Tells a whole-album file from a track when matching (song_kinds.songs_for_entry())
     metadata["duration_s"] = audio_duration(file)
     return metadata
