@@ -21,6 +21,7 @@ from utils.database.song_kinds import (
 from config.constants import SONG_KIND_FULL_ALBUM
 from config.constants import NAMELESS_AUTO_ACCEPT_MIN_CHARS, NAMELESS_AUTO_ACCEPT_MIN_WORDS, FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
+from utils.common.normalizer import name_key
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import offer_album_resolution
@@ -207,17 +208,31 @@ def _match_artist_locally(name: str) -> tuple:
     if candidates:
         return candidates[0], True
 
-    existing_artists = get_artists_from_db_session(artist_categories[0], normalize(name))
-    if not existing_artists:
-        return None, False
-
-    # Pre-filter: only check artists that are somewhat similar in length -
-    # avoids expensive similarity calculations on obviously different names.
     # The search finds artists by their synonyms too ("I nad kropką" is
     # Konkret's), so they're compared like the name.
     def known_names(artist):
         synonyms = (artist_match_synonyms(artist) or "").split(",")
         return [n for n in (artist.name, *(s.strip() for s in synonyms)) if n]
+
+    search = normalize(name)
+    key = name_key(name)
+    existing_artists = get_artists_from_db_session(artist_categories[0], search)
+    if not existing_artists and search.startswith("the "):
+        # The search is substring-based, so "The Caesars" never finds
+        # "Caesars": only the same name without its "The" is taken then
+        same = [a for a in get_artists_from_db_session(artist_categories[0], search[4:])
+                if any(name_key(n) == key for n in known_names(a))]
+        return (same[0], True) if same else (None, False)
+    if not existing_artists:
+        return None, False
+
+    # "Caesars" is "The Caesars" (similarity rates the pair too low)
+    same = [a for a in existing_artists if any(name_key(n) == key for n in known_names(a))]
+    if same:
+        return same[0], True
+
+    # Pre-filter: only check artists that are somewhat similar in length -
+    # avoids expensive similarity calculations on obviously different names.
 
     name_length = len(name)
     filtered_candidates = [

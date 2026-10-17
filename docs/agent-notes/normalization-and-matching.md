@@ -152,7 +152,12 @@ name, and that search is substring-based. A typo inside the name ("Liiquid
 Tension Experiment" vs "Liquid Tension Experiment") therefore yields no
 candidates at all, and the fuzzy step never runs - however close the spelling.
 The import survives this by falling back to MusicBrainz; local-only lookups
-don't. The search does find artists by their synonyms, so the fuzzy step (and
+don't. The same goes for a leading "The" ("The caesars" never finds "Caesars",
+which silently broke the swapped-tags check below and let a folder playlist add
+"The caesars" by "Jerk it out" as a new song), so a name starting with "the"
+that finds nothing is searched again without it, taking only an artist equal
+by `normalizer.name_key()`; that equality also wins before the fuzzy step
+("Caesars" -> "The Caesars", which `similarity()` rates too low). The search does find artists by their synonyms, so the fuzzy step (and
 its length pre-filter) compares the name *and* `artist_match_synonyms()` -
 before that, a tag naming an artist by a synonym ("I nad kropką", Konkret's)
 was found by the search and then thrown away, so nothing local matched it. `LocalSongMatcher.match_similar()` works around it from the other side:
