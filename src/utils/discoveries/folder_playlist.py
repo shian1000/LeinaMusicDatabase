@@ -81,12 +81,13 @@ def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
     return artist, find_song_loosely(title, songs)
 
 
-def add_song_for_file(session, artist_name: str, title: str) -> Song:
+def add_song_for_file(session, artist_name: str, title: str, even_if_similar: bool = False) -> Song:
     """Add a song by `artist_name` titled `title` for a file the database
     has nothing for - the existing artist (and song) when there is one, as
-    song_for_file_plan() shows it. Commits."""
+    song_for_file_plan() shows it; with `even_if_similar` a new song even
+    then (the user said the one found isn't it). Commits."""
     artist, song = song_for_file_plan(session, artist_name, title)
-    if song is not None:
+    if song is not None and not even_if_similar:
         return song
     song = Song(title=title, artist=artist or Artist(name=artist_name))
     session.add(song)

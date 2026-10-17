@@ -270,12 +270,14 @@ def _add_song_for_file(music_session, track):
     artist, existing = song_for_file_plan(music_session, artist_name, title)
     if existing is not None:
         print(f"  Already in the database: {_song_choice_label(existing)}")
-        return existing if ask_yes_no("Use this song?") else None
+        if ask_yes_no("Use this song?"):
+            return existing
     print(f"  Artist: {artist.name} (already in the database)" if artist else f"  Artist: {artist_name} (new)")
     print(f"  Title:  {title}")
-    if not ask_yes_no("Add this song to the database?"):
+    if not ask_yes_no("Add this song to the database?" if existing is None else "Add it as a new song instead?"):
         return None
-    song = add_song_for_file(music_session, artist.name if artist else artist_name, title)
+    song = add_song_for_file(music_session, artist.name if artist else artist_name, title,
+                             even_if_similar=existing is not None)
     print(f"Added song '{song.title}' with id {song.id}.")
     return song
 

@@ -363,12 +363,18 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
     """The song among one artist's `artist_songs` that `title` already is:
     same normalized title (or the owner's Latin form of it: "Gruppa krovi"
     is "Группа крови"), else the first whose title contains it ("Song" vs
-    "Song (Remastered)"). Shared by resolve_song() and the cover import
+    "Song (Remastered)"). A title of punctuation only (":/") has to be
+    spelt the same. Shared by resolve_song() and the cover import
     (utils/discoveries/mp3_covers.py). Full albums only for an entry that
     looks like one (`duration_s` = its length, if known) - see
     song_kinds.songs_for_entry()."""
     artist_songs = songs_for_entry(artist_songs, title, duration_s)
     key = normalize(title)
+    if not key:
+        # Only punctuation (":/", "?!"): normalize() leaves nothing, and ""
+        # is in every title - only the very same characters are this song
+        raw = " ".join((title or "").split()).casefold()
+        return next((s for s in artist_songs if " ".join(s.title.split()).casefold() == raw), None) if raw else None
     exact = next((s for s in artist_songs if normalize(s.title) == key), None)
     if exact is None and key:
         exact = next((s for s in artist_songs if normalize(getattr(s, "title_latin", None) or "") == key), None)
@@ -544,9 +550,12 @@ class LocalSongMatcher:
     def match_score(self, metadata: dict, song: Song) -> float:
         """0-1, how well the file's tags fit `song`: the title's similarity
         (whole and core, the better) and, when the file has an artist, the
-        artist's (FILE_MATCH_SCORE_TITLE_WEIGHT : the rest). Shown with every
+        artist's (FILE_MATCH_SCORE_TITLE_WEIGHT : the rest) - read as tagged
+        or with artist and title swapped, the better ("Ne Bucuram In Ciuda
+        Lor" by "Carla's Dreams" tagged the other way round). Shown with every
         guess; best_guesses() ranks by it."""
-        return self._score(*self._wanted(metadata), self._title_forms(song), song, 0.0)
+        forms = self._title_forms(song)
+        return max(self._score(*wanted, forms, song, 0.0) for wanted in self._readings(metadata))
 
     def best_guesses(self, metadata: dict, limit: int, min_score: float) -> list:
         """The `limit` songs scoring at least `min_score`, best first, as
@@ -554,17 +563,27 @@ class LocalSongMatcher:
         alone must reach `min_score` too, or a perfect artist would bring
         any of their songs over it ("Hymn to Virgil" for a Hozier file whose
         song isn't in the database)."""
-        wanted = self._wanted(metadata)
-        if not wanted[0]:
+        readings = [w for w in self._readings(metadata) if w[0]]
+        if not readings:
             return []
         if self._scoring is None:
             self._scoring = [(song, self._title_forms(song)) for song in self.session.query(Song).all()]
         allowed = set(map(id, songs_for_entry([song for song, _ in self._scoring],
                                                metadata.get("title"), metadata.get("duration_s"))))
         scored = [(song, score) for song, forms in self._scoring
-                  if id(song) in allowed and (score := self._score(*wanted, forms, song, min_score)) >= min_score]
+                  if id(song) in allowed
+                  and (score := max(self._score(*w, forms, song, min_score) for w in readings)) >= min_score]
         scored.sort(key=lambda pair: (-pair[1], pair[0].id))
         return scored[:limit]
+
+    @classmethod
+    def _readings(cls, metadata: dict) -> list:
+        """The tags as written, and with artist and title swapped when both
+        are there."""
+        readings = [cls._wanted(metadata)]
+        if metadata.get("artist_name") and metadata.get("title"):
+            readings.append(cls._wanted({"title": metadata["artist_name"], "artist_name": metadata["title"]}))
+        return readings
 
     @staticmethod
     def _wanted(metadata: dict) -> tuple:

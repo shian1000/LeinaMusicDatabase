@@ -2,9 +2,22 @@ import html
 from pathlib import Path
 
 from utils.common.debug import mlog
+from utils.common.normalizer import is_site_name, strip_site_names
 from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
 from utils.discoveries.import_engine import run_import_batch
 from rich import print
+
+
+def _clean_fields(metadata: dict) -> dict:
+    """Artist, title and album as characters ("Major Lazer &amp; DJ Snake")
+    and without download-site names ("y2meta.com", "(greenmp3.com)"); a
+    field that was nothing but one is empty, so the file name is read."""
+    for key in ("artist_name", "title", "album"):
+        value = metadata.get(key)
+        if isinstance(value, str):
+            value = html.unescape(value)
+            metadata[key] = None if is_site_name(value) else strip_site_names(value)
+    return metadata
 
 
 def read_file_metadata(file: Path) -> dict:
@@ -12,7 +25,7 @@ def read_file_metadata(file: Path) -> dict:
     back to the filename when the artist or title tag is missing. Shared
     with the cover import (utils/discoveries/mp3_covers.py), so both match a
     file to the same song."""
-    metadata = extract_metadata_with_fallback(file)
+    metadata = _clean_fields(extract_metadata_with_fallback(file))
 
     if metadata["artist_name"] in {"Unknown Artist", None, ""} or metadata["title"] in {"Unknown Title", None, ""}:
         print("Warning - title/artist tags missing. Trying to extract data from filename")
@@ -24,11 +37,7 @@ def read_file_metadata(file: Path) -> dict:
         else:
             metadata["artist_name"] = artist
             metadata["title"] = title
-    # Some download sites write HTML entities into tags and file names:
-    # "Major Lazer &amp; DJ Snake"
-    for key in ("artist_name", "title", "album"):
-        if isinstance(metadata.get(key), str):
-            metadata[key] = html.unescape(metadata[key])
+            metadata = _clean_fields(metadata)
     # Tells a whole-album file from a track when matching (song_kinds.songs_for_entry())
     metadata["duration_s"] = audio_duration(file)
     return metadata

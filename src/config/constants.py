@@ -513,6 +513,13 @@ DUPLICATE_VERSION_WORDS = frozenset({"remix", "mix", "live", "acoustic", "akusty
                                      "edit", "dub", "rework", "instrumental", "karaoke", "remaster", "remastered",
                                      "demo", "unplugged", "extended", "radio", "orchestral", "piano"})
 
+# Download sites put their name into files and tags ("y2meta.com - ...",
+# "(greenmp3.com)", "- dscom.it"): a word ending in one of these is dropped
+# before a file name is split into artist and title, and from tags.
+SITE_NAME_TLDS = ("com", "net", "org", "info", "biz", "io", "it", "pl", "ru")
+# ... and the words listed in this file (src/config/), one per line
+FILE_NAME_JUNK_FILE = "file_name_junk.txt"
+
 TITLE_JUNK_SUFFIXES = [
     "official music video",
     "official lyric video",

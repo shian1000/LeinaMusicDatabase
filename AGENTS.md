@@ -286,7 +286,8 @@ non-trivial work in that area.
   same title by a resembling artist — its name, a synonym, or one part of a joined name not split
   yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms.
   When none of those fits, up to 3 closest songs by `LocalSongMatcher.best_guesses()` /
-  `match_score()` are offered (title, and the artist when the file has one; the title alone must
+  `match_score()` are offered (title, and the artist when the file has one, the tags also read with
+  artist and title swapped; the title alone must
   reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
   `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score; the
   only one reaching Settings → "Closest songs: auto-accept score" (default 0.99) is taken without
@@ -317,7 +318,9 @@ non-trivial work in that area.
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
-  write a second one. `normalize()` is `lru_cache`d (pure function of its arguments): the artist
+  write a second one. `strip_site_names()` drops download-site junk from mp3 file names and tags
+  before they're read (domains in `SITE_NAME_TLDS`, the words in `src/config/file_name_junk.txt` —
+  the owner's list, add entries there — and Y2Mate's id/bitrate/timestamp suffix). `normalize()` is `lru_cache`d (pure function of its arguments): the artist
   search re-normalizes every artist per lookup, so keep it free of side effects and global state. `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
   short-string-threshold pitfalls: `docs/agent-notes/normalization-and-matching.md`. The

@@ -1202,3 +1202,101 @@ def test_artists_before_the_title_and_a_trailing_feat_are_ignored(music_session)
     assert title_after_artists("AC-DC - Back in Black", "AC-DC") == "Back in Black"
     assert title_after_artists("Love - Me Do", "Beatles") is None  # the artist isn't before the dash
     assert title_after_artists("Karma", "Hey") is None
+
+
+def test_score_reads_swapped_tags_too(tmp_path, music_session, monkeypatch):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    song = Song(title="Ne Bucuram In Ciuda Lor", artist=Artist(name="Carla's Dreams"))
+    radiohead = Song(title="Paranoid Android", artist=Artist(name="Radiohead"))
+    music_session.add_all([song, radiohead])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    swapped = {"artist_name": "Ne Bucuram In Ciuda Lor", "title": "Carla's Dreams"}
+    assert matcher.match_similar(swapped) is song
+    assert matcher.match_score(swapped, song) == 1.0  # not the ~0.2 of the tags as written
+    (guess, score), = matcher.best_guesses({"artist_name": "Paranoid Androyd", "title": "Radiohed"}, 3, 0.6)
+    assert guess is radiohead and score > 0.9
+
+    # At 100% it's auto-accepted like any sure suggestion
+    folder = _folder(tmp_path, {"x.mp3": None})
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(swapped))
+    playlist = fp.build_folder_playlist(music_session, folder, 1.1, 0.6, 0.96)
+    assert playlist.tracks[0].song_id == song.id and playlist.auto_accepted_scored
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("y2meta.com - David Dean Burkhart Playlist _ September 2021 (128 kbps)",
+     "David Dean Burkhart Playlist _ September 2021 (128 kbps)"),
+    ("Angel Of Small Death - Hozier (128 kbps) (greenmp3.com)", "Angel Of Small Death - Hozier (128 kbps)"),
+    ("Acid Rain - liquid tension experiment 2 - dscom.it", "Acid Rain - liquid tension experiment 2"),
+    ("will.i.am - Scream & Shout", "will.i.am - Scream & Shout"),  # not a site
+    ("y2meta.com", "y2meta.com"),  # never emptied
+    # The junk words of src/config/file_name_junk.txt, and Y2Mate's id/bitrate/timestamp suffix
+    ("Y2Mate.is - Hugh Laurie - Saint James Infirmary (Let Them Talk)-AzEBH6DZJVk-160k-1645418932557",
+     "Hugh Laurie - Saint James Infirmary (Let Them Talk)"),
+    ("Hugh Laurie - Y2Mate.is - Saint James Infirmary", "Hugh Laurie - Saint James Infirmary"),
+    ("Song (y2mate)", "Song"),
+    ("Mylo - In My Arms", "Mylo - In My Arms"),
+])
+def test_strip_site_names(text, expected):
+    from utils.common.normalizer import strip_site_names
+    assert strip_site_names(text) == expected
+
+
+def test_site_names_are_dropped_before_reading_a_file(tmp_path):
+    """The real read_file_metadata(): a site name in the file name doesn't
+    become the artist, and a tag holding only one counts as missing."""
+    from mutagen.easyid3 import EasyID3
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+
+    frame = b"\xff\xfb\x90\x64" + b"\x00" * 413  # real MPEG frames, so mutagen reads the tags
+    named = tmp_path / "y2meta.com - David Dean Burkhart Playlist _ September 2021 (128 kbps).mp3"
+    named.write_bytes(frame * 20)
+    tagged = tmp_path / "Hey - Karma.mp3"
+    tagged.write_bytes(frame * 20)
+    tags = EasyID3()
+    tags["artist"], tags["title"] = "y2meta.com", "Karma (greenmp3.com)"
+    tags.save(tagged)
+
+    metadata = read_file_metadata(named)
+    assert (metadata["artist_name"], metadata["title"]) == ("David Dean Burkhart Playlist", "September 2021 (128 kbps)")
+    metadata = read_file_metadata(tagged)
+    assert (metadata["artist_name"], metadata["title"]) == ("Hey", "Karma")  # the artist tag was only a site
+
+
+def test_punctuation_only_title_matches_only_itself(music_session):
+    """normalize(":/") is "", which is "in" every title: such a title must
+    be spelt the same, or the import would skip it as already there."""
+    from utils.discoveries.import_engine import LocalSongMatcher, find_existing_song
+
+    mistmorn = Artist(name="Mistmorn")
+    other = Song(title="Дідько, я у розпачі", artist=mistmorn)
+    music_session.add(other)
+    music_session.commit()
+    assert find_existing_song(":/", [other]) is None
+    assert LocalSongMatcher(music_session).match_exact({"artist_name": "Mistmorn", "title": ":/"}) is None
+    face = Song(title=":/", artist=mistmorn)
+    music_session.add(face)
+    music_session.commit()
+    assert find_existing_song(" :/ ", [other, face]) is face
+    assert find_existing_song(":(", [other, face]) is None
+
+
+def test_new_song_added_after_rejecting_the_one_found(users_env, tmp_path, music_session, monkeypatch):
+    users.create_user("ania", "secret1")
+    hey = music_session.query(Artist).filter(Artist.name == "Hey").one()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "x.mp3")
+    # "Karma (live)" loosely is the "Karma" already there - but it's another recording
+    menu, asked = _menu_for_folder(monkeypatch, music_session, folder,
+                                   {"x.mp3": {"artist_name": "Nobody", "title": "Unknown"}},
+                                   ["Add it to the database as a new song"],
+                                   texts={"Artist:": "Hey", "Title:": "Karma (live)"},
+                                   confirms=[False, True, False])
+    menu._create_playlist_from_folder("ania")
+
+    assert asked[:2] == ["Use this song?", "Add it as a new song instead?"]
+    assert sorted(s.title for s in music_session.query(Song).filter(Song.artist_id == hey.id)) == [
+        "Karma", "Karma (live)", "Teksański"]

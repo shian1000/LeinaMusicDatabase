@@ -1,0 +1,11 @@
+# Words download sites and converters put into mp3 file names and tags.
+# One per line, case doesn't matter; each is removed with a bracket around it
+# and the dash next to it ("Y2Mate.is - Artist - Title" -> "Artist - Title").
+# Names ending in .com / .net / .org / .pl / ... are removed anyway
+# (SITE_NAME_TLDS in constants.py), so they needn't be listed here.
+Y2Mate.is
+y2mate
+ytmp3.cc
+mp3juices.cc
+savefrom.net
+dscom.it

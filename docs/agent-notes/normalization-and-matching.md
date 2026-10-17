@@ -209,7 +209,9 @@ one artist in the real database collapsed into the same core.
 When no rule above finds anything, the folder playlist offers the top 3 of
 `LocalSongMatcher.best_guesses()`, scored by `match_score()`: the title's
 similarity (whole and core, the better), weighted 0.65 against the artist's
-when the file has one. Two choices that aren't obvious:
+when the file has one - and the better of the tags as written and swapped:
+`match_similar()` already finds a swapped-tags song, and scoring only the
+written order showed it at ~20% next to a 100% match. Two choices that aren't obvious:
 
 - The **title alone** must reach the minimum score, not just the weighted
   sum. Otherwise a perfect artist (0.35) needs a title of only ~0.38 to pass
@@ -233,6 +235,15 @@ It compares against every song (~5.7k), so it uses
 first, no `slog()` per call) and caches each song's normalized titles and
 artist names per matcher: ~0.1-0.5 s per unmatched file on the real database.
 
+## A title of punctuation only normalizes to ""
+
+`normalize(":/")` is `""`, and `"" in anything` is True: `find_existing_song()`'s
+last "contained in" step used to call ":/" the artist's first song, so the
+import skipped such songs as already there and "Add it as a new song" offered
+the wrong one. A title that normalizes to nothing is now compared by its own
+characters only (case and spaces aside). Any new "key in other_key" check
+needs the same empty-key guard.
+
 ## Duplicate songs: a stricter key than the file matcher's
 
 `song_duplicates.duplicate_key()` is deliberately *not* `_title_core()`.
@@ -251,14 +262,22 @@ lowest id and lost the dropped row's link, album, year and extra artists.
 It also runs on the global music session - it used to open its own, leaving
 the deleted song alive in the session the rest of the app holds.
 
-## Tags can carry HTML entities
+## Tags can carry HTML entities and site names
 
 Files from some download sites have `&amp;` (and the like) literally in their
 ID3 tags and names: "Major Lazer &amp; DJ Snake". `normalize()` would keep the
 "amp" as a word, so `read_file_metadata()` - shared by the mp3 import, the
 cover import, `files.db` and folder playlists - runs `html.unescape()` on the
 artist, title and album it returns; the folder playlist does the same for a
-file name used as the title.
+file name used as the title. The same pass drops download-site names
+(`normalizer.strip_site_names()`: a word ending in a `SITE_NAME_TLDS` domain,
+"y2meta.com - ...", "(greenmp3.com)", "- dscom.it"), the words listed in
+`src/config/file_name_junk.txt` (any site whose domain isn't in the list,
+"Y2Mate.is"; edit that file to add more - it's read once per run) and
+Y2Mate's "-<11-char video id>-160k-<ms timestamp>" suffix, and *before* deciding
+whether to read the file name: a tag artist that was only "y2meta.com" counts
+as missing. `extract_unknown_data()` strips them from the file name before
+`split_artist_title()`, which otherwise made the site the artist.
 
 ## Full albums vs. tracks of the same name
 
