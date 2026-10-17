@@ -31,7 +31,8 @@ from utils.common.normalizer import name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.artist_splitting import propose_artist_split
-from utils.common.script_utils import cyrillic_search_variant
+from utils.common.script_utils import cyrillic_search_variant, has_non_latin
+from utils.common.romanize import suggest_latin
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 
 def split_synonyms(synonyms: str | None) -> list[str]:
@@ -292,6 +293,19 @@ def _multi_artist_query(song) -> tuple[list[str] | None, str | None]:
     return credited, label
 
 
+def _latin_search_title(song, title: str) -> str | None:
+    """The Latin form of a title in another alphabet, to retry a search with:
+    sources may list it only in Latin (N.R.M.'s "Фабрыка" is "Fabryka" on
+    MusicBrainz). The owner's songs.title_latin first, else suggest_latin()'s
+    guess - only a search query here, never stored."""
+    if not has_non_latin(title):
+        return None
+    stored = getattr(song, "title_latin", None)
+    if stored:
+        return stored.split("(")[0].strip() or None
+    return suggest_latin(title, getattr(song, "language", None), getattr(song.artist, "origin", None))
+
+
 def discover_album_name(song, modules):
     art_full, son_full, alb = song.artist.name, song.title, song.album
     credited, multi_label = _multi_artist_query(song)
@@ -321,6 +335,7 @@ def discover_album_name(song, modules):
     # Magnoliy" -> "В краю магнолий"). A Cyrillic artist synonym ("Ариэль")
     # counts as context, see script_utils.cyrillic_search_variant()
     alt_script_title = cyrillic_search_variant(son_cln, [art_full, alb or "", *synonyms])
+    latin_title = _latin_search_title(song, son_cln)
 
     slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
@@ -361,6 +376,13 @@ def discover_album_name(song, modules):
             print(f"Looking in {module_name} using the title in its own script")
             for alt_artist in [art_cln, *synonyms]:
                 album = _call_module(module, module_id, module_name, alt_artist, alt_script_title, credited)
+                if album:
+                    break
+
+        if not album and latin_title:
+            print(f"Looking in {module_name} using the title in Latin letters")
+            for alt_artist in [art_cln, *synonyms]:
+                album = _call_module(module, module_id, module_name, alt_artist, latin_title, credited)
                 if album:
                     break
 

@@ -28,7 +28,11 @@ this looser path. Years and album lookups also get one extra search stage with
 `cyrillic_search_variant()`, a rough Russian-style Latin -> Cyrillic spelling
 ("Neformat" -> "Неформат"). It's only used when the query is Latin-only but the
 rest of the entry (artist, other titles) has Cyrillic, and search engines
-tolerate the rest ("НєФормат"). The scope was deliberately narrowed: Cyrillic,
+tolerate the rest ("НєФормат"). Album lookups also go the other way: a title
+in another alphabet gets one more search in Latin letters, since some sources
+list it only that way (MusicBrainz has N.R.M.'s "Фабрыка" only as "Fabryka").
+That query is `title_latin` if set, else `romanize.suggest_latin()`'s guess
+(never stored), not `matching_key()`, whose folds would spoil a search. The scope was deliberately narrowed: Cyrillic,
 Greek, Georgian, Hangul and kana are covered without new dependencies.
 Kanji/hanzi (pykakasi/pypinyin) and Arabic wait for a first real case.
 The owner's stored Latin forms (`title_latin` / `name_latin`, `latin_names.py`) are a separate,

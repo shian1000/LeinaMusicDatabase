@@ -153,6 +153,33 @@ def test_no_cyrillic_retry_without_cyrillic_context():
     assert queries == ["V Krayu Magnoliy"]
 
 
+def _only_in_latin(artist, title):
+    # MusicBrainz knows N.R.M.'s "Фабрыка" only as "Fabryka" ("Dom kultury")
+    return "Dom kultury" if (artist, title) == ("N.R.M.", "Fabryka") else None
+
+
+def test_title_in_another_alphabet_is_retried_in_latin_letters():
+    song = SimpleNamespace(artist=SimpleNamespace(name="N.R.M.", synonyms=None),
+                           title="Фабрыка", album=None, additional_artists=[])
+    modules = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=_only_in_latin))]
+    assert discoveries_manager.discover_album_name(song, modules) == "Dom kultury"
+
+
+def test_latin_retry_prefers_the_stored_latin_title():
+    queries = []
+
+    def fake_get_album_name(artist, title):
+        queries.append(title)
+        return None
+
+    song = SimpleNamespace(artist=SimpleNamespace(name="N.R.M.", synonyms=None),
+                           title="Маё пакаленьне", title_latin="Maje pakaleńnie", album=None,
+                           additional_artists=[])
+    modules = [("fake_fetcher", "Fake Fetcher", SimpleNamespace(get_album_name=fake_get_album_name))]
+    discoveries_manager.discover_album_name(song, modules)
+    assert queries == ["Маё пакаленьне", "Maje pakaleńnie"]
+
+
 def _linked_song(video_id, artist="Злипні", synonyms=None, title="Глюки"):
     return SimpleNamespace(artist=SimpleNamespace(name=artist, synonyms=synonyms), title=title, album=None,
                            additional_artists=[], youtube_video_id=video_id)
