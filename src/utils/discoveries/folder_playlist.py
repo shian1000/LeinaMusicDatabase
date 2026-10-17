@@ -21,7 +21,7 @@ from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
 from utils.discoveries.mp3_utils import audio_duration
-from utils.discoveries.import_engine import LocalSongMatcher, find_matching_artist, find_song_loosely
+from utils.discoveries.import_engine import LocalSongMatcher, is_distinctive_title, find_matching_artist, find_song_loosely
 
 
 @dataclass
@@ -128,10 +128,17 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
             track.best_guesses = matcher.best_guesses(metadata, FILE_BEST_GUESSES_MAX, best_guess_min_score)
         suggested = [track.similar_song, *track.title_candidates, *(song for song, _ in track.best_guesses)]
         track.scores = {song.id: matcher.match_score(metadata, song) for song in suggested if song is not None}
-        # Only with an artist in the tags: a file with none is scored on its
-        # title alone, so the one "Intro" in the database would be 100%
-        sure = {song.id: song for song in suggested
-                if song is not None and track.scores[song.id] >= auto_accept_score} if track.artist else {}
+        # A file with no artist in the tags is scored on its title alone (the
+        # one "Intro" in the database would be 100%): only the one song with
+        # its title (match_similar()), and only for a distinctive title
+        if track.artist:
+            candidates = suggested
+        elif track.similar_song is not None and is_distinctive_title(track.title):
+            candidates = [track.similar_song]
+        else:
+            candidates = []
+        sure = {song.id: song for song in candidates
+                if song is not None and track.scores[song.id] >= auto_accept_score}
         if len(sure) == 1:
             (song,) = sure.values()
             read_as = (track.artist, track.title)

@@ -6,6 +6,7 @@ password (docs/runbooks/database.md -> "Moods on the phone")."""
 from datetime import datetime
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich.console import Console
 from rich.table import Table
 
@@ -155,7 +156,7 @@ def _delete(mood_id: int, name: str) -> str | None:
     count = len(global_mood_song_ids(tag_session, mood_id))
     print(f"This deletes the global mood '{name}' with its {count} song link(s), for every user "
           "(after the next copy for sharing). The songs themselves stay.")
-    if not questionary.confirm("Delete it?", default=False).ask():
+    if not ask_yes_no("Delete it?"):
         return None
     delete_global_mood(tag_session, mood_id)
     print(f"Deleted '{name}'.")
@@ -227,7 +228,7 @@ def _promote(username: str, mood_id: int, name: str, count: int) -> str | None:
     else:
         print(f"This makes a new global mood '{name}' with {username}'s {count} song(s).")
     print(f"The mood leaves {username}'s own moods; their Leina Radio switches to the global one at its next sync.")
-    if not questionary.confirm("Promote it?", default=False).ask():
+    if not ask_yes_no("Promote it?"):
         return None
     try:
         global_id, global_name, merged, added = promote_user_mood(tag_session, username, mood_id)

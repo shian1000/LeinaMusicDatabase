@@ -18,6 +18,7 @@ from utils.database.song_kinds import is_full_album
 from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
@@ -158,7 +159,7 @@ def check_spelling_menu():
 
         for correction in pending_artist_corrections.values():
             print(f"{RED}{correction['old_name']}{RESET} -> {GREEN}{correction['new_name']}{RESET}")
-            if questionary.confirm("Do you wish to correct this artist name?").ask():
+            if ask_yes_no("Do you wish to correct this artist name?"):
                 print("Confirmed")
                 correction["artist"].name = correction["new_name"]
 
@@ -166,7 +167,7 @@ def check_spelling_menu():
             song = correction["song"]
             print(f"{RED}{correction['old_title']}{RESET} -> {GREEN}{correction['new_title']}{RESET}")
             print(f"song_id = {song.id}")
-            if questionary.confirm("Do you wish to correct this song title?").ask():
+            if ask_yes_no("Do you wish to correct this song title?"):
                 print("Confirmed")
                 song.title = correction["new_title"]
 

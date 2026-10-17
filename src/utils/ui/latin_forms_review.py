@@ -6,6 +6,7 @@ suggestion and need typing. Nothing is stored that the owner didn't tick
 or type."""
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -93,8 +94,7 @@ def fill_latin_forms() -> None:
     if not rest:
         return
     without = sum(1 for c in rest if not c.suggestion)
-    if not questionary.confirm(
-            f"Go through the other {len(rest)} one by one ({without} without a suggestion)?").ask():
+    if not ask_yes_no(f"Go through the other {len(rest)} one by one ({without} without a suggestion)?"):
         return
     saved = _type_the_rest(rest)
     print(f"Saved {saved} Latin form(s).")

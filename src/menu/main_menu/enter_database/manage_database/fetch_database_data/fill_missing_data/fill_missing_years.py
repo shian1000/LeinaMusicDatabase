@@ -2,6 +2,7 @@ import re
 import random
 from collections import defaultdict
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
 from utils.database.database_management import edit_db_entry
 from utils.common.debug import slog
@@ -125,10 +126,8 @@ def fill_missing_years():
 
     if no_year_entries:
         total_missing_songs = sum(len(songs) for _, songs in no_year_entries)
-        confirmation = questionary.confirm(
-            f"Unable to find {total_missing_songs} release year(s) across {len(no_year_entries)} album/single group(s). "
-            f"Would you like to fill them up manually?"
-        ).ask()
+        confirmation = ask_yes_no(f"Unable to find {total_missing_songs} release year(s) across {len(no_year_entries)} album/single group(s). "
+            f"Would you like to fill them up manually?")
         if confirmation:
             for label, songs in no_year_entries:
                 print(label + _sample_titles(label, songs))
@@ -167,7 +166,7 @@ def _strip_guest_credit(title: str) -> str:
 
 def _finish(touched_songs) -> None:
     if touched_songs:
-        confirmation = questionary.confirm("Do you want to edit some of the changes manually?").ask()
+        confirmation = ask_yes_no("Do you want to edit some of the changes manually?")
         if confirmation:
             edit_songs_menu(touched_songs)
 

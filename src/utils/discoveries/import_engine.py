@@ -19,13 +19,14 @@ from utils.database.song_kinds import (
     title_has_full_album_marker,
 )
 from config.constants import SONG_KIND_FULL_ALBUM
-from config.constants import FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
+from config.constants import NAMELESS_AUTO_ACCEPT_MIN_CHARS, NAMELESS_AUTO_ACCEPT_MIN_WORDS, FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import offer_album_resolution
 from rich import print
 import questionary
+from utils.ui.prompts import ask_yes_no
 from sqlalchemy import func
 
 # OPTIMIZATION: Cache for spell check results to avoid repeated API calls
@@ -383,6 +384,15 @@ def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = N
     return song
 
 
+def is_distinctive_title(title: str) -> bool:
+    """Is the title, without brackets / junk / a track number, long enough
+    to name one song by itself (NAMELESS_AUTO_ACCEPT_MIN_WORDS and _CHARS)?
+    "Dragostea Din Tei (Numa Numa) (Medieval Cover)" -> "dragostea din tei"
+    is; "Intro" isn't."""
+    core = _title_core(title)
+    return len(core.split()) >= NAMELESS_AUTO_ACCEPT_MIN_WORDS and len(core) >= NAMELESS_AUTO_ACCEPT_MIN_CHARS
+
+
 class LocalSongMatcher:
     """mp3/import metadata -> the Song already in the database, looked up
     locally only (no MusicBrainz, nothing created). Caches each artist's
@@ -469,6 +479,11 @@ class LocalSongMatcher:
         duration_s = metadata.get("duration_s")
         if not name:
             found = self._songs_by_title_core(title, duration_s) if title_guesses else []
+            if len(found) > 1:
+                # The brackets tell them apart: "Dragostea Din Tei (Numa Numa)
+                # (Medieval Cover)" is the one titled exactly so, not O-Zone's
+                whole = normalize(title)
+                found = [s for s in found if whole in map(normalize, song_titles(s))]
             return found[0] if len(found) == 1 else None
         swapped = self.match_exact({"artist_name": title, "title": name, "duration_s": duration_s})
         if swapped is not None:
@@ -797,7 +812,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             resolved_artist = None
             for candidate in conflict["candidate_artists"]:
                 print(f"Found similar artist [blue]{candidate.name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
-                confirmation = questionary.confirm("Do you wish to use the artist already in the database?").ask()
+                confirmation = ask_yes_no("Do you wish to use the artist already in the database?")
                 if confirmation:
                     resolved_artist = candidate
                     print("Found existing artist")
@@ -846,7 +861,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             conflict_artist_obj = conflict["artist_obj"]
             existing_song = conflict["existing_song"]
             print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{conflict_metadata['title']}[/green] by [cyan]{conflict_artist_obj.name}[/cyan]")
-            confirmation = questionary.confirm("Do you wish to use the song already in the database?").ask()
+            confirmation = ask_yes_no("Do you wish to use the song already in the database?")
             if confirmation:
                 skipped_count = skipped_count + 1
                 skipped_songs.append(_entry_label(conflict_metadata))

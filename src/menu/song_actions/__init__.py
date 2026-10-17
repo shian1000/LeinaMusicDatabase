@@ -1,5 +1,6 @@
 from googleapiclient.errors import HttpError
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
@@ -135,7 +136,7 @@ def remove_links_from_songs(songs_objects):
 
     print(f"About to remove the {label} link(s) from these songs:")
     display_songs(songs_objects)
-    confirmation = questionary.confirm(f"Remove the {label} link(s) from {len(songs_objects)} song(s)?").ask()
+    confirmation = ask_yes_no(f"Remove the {label} link(s) from {len(songs_objects)} song(s)?")
     if not confirmation:
         print("Aborted")
         return
@@ -155,7 +156,7 @@ def remove_links_from_songs(songs_objects):
 def remove_songs_from_database(songs_objects):
     print("About to delete these songs from the database:")
     display_songs(songs_objects)
-    confirmation = questionary.confirm(f"Are you sure you want to delete {len(songs_objects)} song(s)???").ask()
+    confirmation = ask_yes_no(f"Are you sure you want to delete {len(songs_objects)} song(s)???")
     if not confirmation:
         print("Aborted")
         return

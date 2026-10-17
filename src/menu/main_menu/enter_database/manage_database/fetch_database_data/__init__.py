@@ -9,6 +9,7 @@ from settings import settings
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.database_sessions import submit_global_database_session, open_and_set_global_database_sessions
 from utils.discoveries.mp3_covers import import_covers_from_mp3
 from utils.database.albums import covers_dir
@@ -18,7 +19,7 @@ def _review_imported_songs(imported_songs):
         print("displaying")
         display_songs(imported_songs)
         edit_songs_menu(imported_songs)
-        decision = questionary.confirm("Do you want to do something with these songs?").ask()
+        decision = ask_yes_no("Do you want to do something with these songs?")
         if decision:
             from menu.song_actions import song_actions
             song_actions(imported_songs)

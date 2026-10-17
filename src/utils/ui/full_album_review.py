@@ -4,6 +4,7 @@ question about taking "(Full Album)" out of the marked titles, then one about
 remembering the unticked ones."""
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -58,7 +59,7 @@ def review_full_albums() -> int:
         print("\nTitles with the full-album words taken out:")
         for c in renames:
             print(f"  [red]{escape(c.song.title)}[/red] -> [green]{escape(c.cleaned_title)}[/green]")
-        if questionary.confirm(f"Change these {len(renames)} title(s)?", default=True).ask():
+        if ask_yes_no(f"Change these {len(renames)} title(s)?"):
             for c in renames:
                 c.song.title = c.cleaned_title
 
@@ -69,10 +70,7 @@ def review_full_albums() -> int:
               f'filed under "{escape(song.album)}".')
 
     skipped = [c.song.id for i, c in enumerate(candidates) if i not in set(selected)]
-    if skipped and questionary.confirm(
-        f"Remember the {len(skipped)} unselected song(s) as not albums, so they aren't proposed again?",
-        default=True,
-    ).ask():
+    if skipped and ask_yes_no(f"Remember the {len(skipped)} unselected song(s) as not albums, so they aren't proposed again?"):
         add_to_full_album_ignore_list(skipped)
         print(f"Remembered {len(skipped)} song(s).")
 

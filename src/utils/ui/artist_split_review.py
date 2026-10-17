@@ -3,6 +3,7 @@ utils/database/artist_splitting.py): list every proposal, let the user tick
 which ones to apply, then optionally remember the rest as single artists."""
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -62,10 +63,7 @@ def review_artist_splits(artists: list[Artist] | None = None) -> int:
     submit_global_database_session()
 
     skipped = [candidates[i].proposal.original for i in range(len(candidates)) if i not in set(selected)]
-    if skipped and questionary.confirm(
-        f"Remember the {len(skipped)} unselected name(s) as single artists, so they aren't proposed again?",
-        default=False,
-    ).ask():
+    if skipped and ask_yes_no(f"Remember the {len(skipped)} unselected name(s) as single artists, so they aren't proposed again?"):
         add_to_split_ignore_list(skipped)
         print(f"Remembered {len(skipped)} name(s).")
 

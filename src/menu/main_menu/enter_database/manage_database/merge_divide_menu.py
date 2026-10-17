@@ -1,4 +1,5 @@
 import questionary
+from utils.ui.prompts import ask_yes_no
 import time
 from utils.database.database_getter import get_artists_from_db_session, extract_db_object_info
 from utils.common.debug import slog, mlog
@@ -49,9 +50,7 @@ def merge_artists_menu(artist_objects = None):
     if obj1 == obj2:
         print("Picked the same artists")
         return
-    confirm = questionary.confirm(
-        f"You are about to merge all the songs from {obj1.name} into {obj2.name}. Do you wish to proceed?"
-    ).ask()
+    confirm = ask_yes_no(f"You are about to merge all the songs from {obj1.name} into {obj2.name}. Do you wish to proceed?")
     if confirm:
         print("Merging songs")
         merge_artists_in_db(obj1, obj2)
@@ -100,7 +99,7 @@ def divide_artists_menu():
         print(f"Artist has only one song. Nothing to do.")
         return
 
-    confirmation = questionary.confirm("Proceed with dividing this artist so each song gets its own new artist record?").ask()
+    confirmation = ask_yes_no("Proceed with dividing this artist so each song gets its own new artist record?")
     if confirmation:
         divide_artist(obj)        
     else:

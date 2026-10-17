@@ -204,7 +204,7 @@ def ui(session, monkeypatch):
         asked.append((message, pick))
         return _Answer(pick)
 
-    def confirm(message):
+    def confirm(message, **kwargs):
         asked.append((message, True))
         return _Answer(True)
 

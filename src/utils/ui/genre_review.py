@@ -5,6 +5,7 @@ per genre (clean_genres()); nothing the owner typed is overwritten - the
 lookup only fills songs with no genre."""
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -106,9 +107,7 @@ def _review_artist_genres(session, artist_level: list, known: dict) -> int:
 
 
 def _type_missing(session, songs: list, known: dict) -> int:
-    if not questionary.confirm(
-            f"MusicBrainz had nothing for {len(songs)} song(s). Type their genres one by one?",
-            default=False).ask():
+    if not ask_yes_no(f"MusicBrainz had nothing for {len(songs)} song(s). Type their genres one by one?"):
         return 0
     print("Comma-separated, the main one first. Leave it empty to skip that song, Ctrl+C to stop.")
     typed = 0

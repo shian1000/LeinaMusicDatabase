@@ -1,6 +1,7 @@
 from utils.database.database_getter import get_songs_with_empty_category, extract_db_object_info
 from utils.database.database_management import edit_db_entry
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.common.debug import slog, mlog
 from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
@@ -82,7 +83,7 @@ def fill_missing_albums():
     slog(no_albums_count)
 
     if (no_albums_count > 0):
-        confirmation = questionary.confirm(f"Unable to find {no_albums_count} album names. Would you like to fill them up manually?").ask()
+        confirmation = ask_yes_no(f"Unable to find {no_albums_count} album names. Would you like to fill them up manually?")
         if confirmation:
             for i, song in enumerate(songs_list):
                 art, son, new_album = song
@@ -95,7 +96,7 @@ def fill_missing_albums():
                     else:
                         print(f"Skipped {art} - {son}")
 
-    confirmation = questionary.confirm(f"Do you want to edit some of the changes manually?").ask()
+    confirmation = ask_yes_no(f"Do you want to edit some of the changes manually?")
     if confirmation:
         edit_songs_menu(songs_objects)
 

@@ -4,6 +4,7 @@ backup). Logic: utils/youtube/ytdlp_update.py."""
 import subprocess
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 
 from utils.common.debug import slog
 from utils.youtube.ytdlp_update import available_update, install_ytdlp
@@ -15,7 +16,7 @@ def offer_ytdlp_update() -> None:
         return
     installed, latest = update
     print(f"A newer yt-dlp is out: {installed} -> {latest} (an old one gets blocked by YouTube sooner).")
-    if not questionary.confirm(f"Update yt-dlp to {latest} now?", default=True).ask():
+    if not ask_yes_no(f"Update yt-dlp to {latest} now?"):
         return
     print("Updating yt-dlp...")
     try:

@@ -5,6 +5,7 @@ their song (utils/discoveries/file_fixes.py), and confirm once for all."""
 from pathlib import Path
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 
 from settings import settings
 from utils.database.database_sessions import open_and_set_global_database_sessions
@@ -38,7 +39,7 @@ def fix_file_names_and_tags() -> None:
     if _in_library(folder):
         print("This folder is in the music library: a renamed file is a new file to the library index")
         print("(files.db) at its next scan, with a new id for Leina Radio.")
-        if not questionary.confirm("Go on?", default=False).ask():
+        if not ask_yes_no("Go on?"):
             return
 
     music_session, _ = open_and_set_global_database_sessions()
@@ -61,7 +62,7 @@ def fix_file_names_and_tags() -> None:
     if not plan.fixes:
         print("Nothing to fix.")
         return
-    if not questionary.confirm("Fix the names and tags of these mp3 files?", default=True).ask():
+    if not ask_yes_no("Fix the names and tags of these mp3 files?"):
         print("Nothing changed.")
         return
 

@@ -469,13 +469,24 @@ FILE_TITLE_CANDIDATES_MAX = 5
 # artist when the file has one), if they score at least the "Closest songs:
 # minimum score" setting (Settings, persisted with the auto-accept one).
 FILE_BEST_GUESSES_MAX = 3
+# Pairing a file with a video of the YouTube playlist by hand: only this many
+# of the most alike unpaired videos are listed (plus a search). A list taller
+# than the terminal makes questionary draw its hidden part as blank lines.
+FILE_PAIR_VIDEO_CHOICES_MAX = 10
 DEFAULT_BEST_GUESS_MIN_SCORE = 0.6
 BEST_GUESS_MIN_SCORE_RANGE = (0.3, 0.95)
 # A suggestion (similar song, a song sharing the title, a closest song) whose
 # score reaches this is taken without asking - when it's the only one that
-# does - and listed after matching. Settings -> "Closest songs: auto-accept
-# score"; 1 = always ask.
+# does - and listed after matching (a file with no artist: see
+# NAMELESS_AUTO_ACCEPT_*). Settings -> "Closest songs: auto-accept score";
+# 1 = always ask.
 DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE = 0.99
+# A file with no artist is scored on its title alone, so it's auto-accepted
+# only for the one song with its title, and only when the title (core) is
+# distinctive enough: "Dragostea Din Tei (Numa Numa) (Medieval Cover)" yes,
+# "Intro" or "Ocean Drive" never.
+NAMELESS_AUTO_ACCEPT_MIN_WORDS = 3
+NAMELESS_AUTO_ACCEPT_MIN_CHARS = 15
 CLOSEST_AUTO_ACCEPT_SCORE_RANGE = (0.8, 1.0)
 # Weight of the title in match_score() when the file has an artist (the
 # artist's similarity gets the rest): a wrong artist spelling matters less

@@ -5,8 +5,9 @@ owner's view of moods and permissions (moods.py next to this file)."""
 from pathlib import Path
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 
-from config.constants import USER_PLAYLIST_SOURCE_FOLDER
+from config.constants import FILE_PAIR_VIDEO_CHOICES_MAX, USER_PLAYLIST_SOURCE_FOLDER
 from settings import settings
 from utils.common.debug import slog
 from utils.database.database_sessions import open_and_set_global_database_sessions
@@ -33,6 +34,7 @@ from utils.discoveries.folder_youtube_playlist import (
     link_track,
     pair_automatically,
     rank_entries_for,
+    search_entries,
     set_tracks,
     youtube_entries,
     youtube_only_track,
@@ -145,7 +147,7 @@ def _pick_by_title(music_session, track):
     songs = find_songs_by_title(music_session, query)
     if not songs:
         print("No song with that title in the database.")
-        if questionary.confirm("Search the database by hand instead?", default=True).ask():
+        if ask_yes_no("Search the database by hand instead?"):
             return _pick_by_search()
         return None
 
@@ -174,7 +176,7 @@ def _pick_by_search():
         print("Nothing picked.")
         return None
     print(f"  Song:  {_song_choice_label(song)}")
-    if not questionary.confirm("Use this song?", default=True).ask():
+    if not ask_yes_no("Use this song?"):
         return None
     return song
 
@@ -268,10 +270,10 @@ def _add_song_for_file(music_session, track):
     artist, existing = song_for_file_plan(music_session, artist_name, title)
     if existing is not None:
         print(f"  Already in the database: {_song_choice_label(existing)}")
-        return existing if questionary.confirm("Use this song?", default=True).ask() else None
+        return existing if ask_yes_no("Use this song?") else None
     print(f"  Artist: {artist.name} (already in the database)" if artist else f"  Artist: {artist_name} (new)")
     print(f"  Title:  {title}")
-    if not questionary.confirm("Add this song to the database?", default=True).ask():
+    if not ask_yes_no("Add this song to the database?"):
         return None
     song = add_song_for_file(music_session, artist.name if artist else artist_name, title)
     print(f"Added song '{song.title}' with id {song.id}.")
@@ -310,7 +312,7 @@ def _offer_file_fix(music_session, tracks: list) -> None:
     songs = {id(t): music_session.get(Song, t.song_id) for t in tracks}
     for track in tracks:
         print(f"  {track.file.name}  ->  {song_file_name(songs[id(track)], track.file.suffix)}")
-    if not questionary.confirm("Fix the names and tags of these mp3 files?", default=True).ask():
+    if not ask_yes_no("Fix the names and tags of these mp3 files?"):
         return
     failed = []
     for track in tracks:
@@ -330,10 +332,7 @@ def _offer_tag_update(music_session, tracks: list) -> None:
     into each file's tags, if the user wants."""
     if not tracks:
         return
-    if not questionary.confirm(
-        f"Update the mp3 tags of these {len(tracks)} file(s) with the data from the database?",
-        default=False,
-    ).ask():
+    if not ask_yes_no(f"Update the mp3 tags of these {len(tracks)} file(s) with the data from the database?"):
         return
     changed, failed = 0, []
     for track in tracks:
@@ -408,6 +407,7 @@ def _finish_folder_playlist(music_session, username: str, name: str, folder: Pat
 
 # Choices when pairing the folder with a YouTube playlist
 _PAIR_NO_LINK = "Keep it without a YouTube link"
+_PAIR_SEARCH = "Search the videos by title..."
 _PAIR_LEAVE_OUT = "Leave it out of the playlist"
 _PAIR_STOP = "Stop (don't save the playlist)"
 _VIDEO_ADD = "Add it to the playlist without a file"
@@ -417,6 +417,30 @@ _VIDEO_LEAVE_OUT = "Leave it out of the playlist"
 def _entry_label(entry) -> str:
     channel = f"  [{entry.channel}]" if entry.channel and entry.channel.casefold() not in entry.label.casefold() else ""
     return f"{entry.label}{channel}"
+
+
+def _pick_video(unpaired: list):
+    """The video for a file, or one of the _PAIR_* choices: the most alike
+    unpaired videos (FILE_PAIR_VIDEO_CHOICES_MAX, so the list fits the
+    terminal), and when there are more, a search through all of them."""
+    limit = FILE_PAIR_VIDEO_CHOICES_MAX
+    shown, search = unpaired[:limit], [_PAIR_SEARCH] if len(unpaired) > limit else []
+    while True:
+        if search:
+            print(f"  {len(shown)} of the {len(unpaired)} unpaired videos shown - search for the others.")
+        picked = questionary.select(
+            "Which video of the YouTube playlist is this file?" if unpaired
+            else "No unpaired video left in the YouTube playlist - what should happen with this file?",
+            choices=[questionary.Choice(title=_entry_label(e), value=e) for e in shown]
+            + search + [_PAIR_NO_LINK, _PAIR_LEAVE_OUT, _PAIR_STOP],
+        ).ask()
+        if picked != _PAIR_SEARCH:
+            return picked
+        query = questionary.text("Part of the video's title or channel:").ask() or ""
+        found = search_entries(unpaired, query)
+        if not found:
+            print(f"  No unpaired video with \"{query}\".")
+        shown = found[:limit] or unpaired[:limit]
 
 
 def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | None:
@@ -429,12 +453,7 @@ def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | Non
         print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
         print(f"  Read as: {colored_song(track.artist, track.title)}")
         unpaired = rank_entries_for(track, [e for e in entries if all(e is not p for _, p in pairs)])
-        choices = [questionary.Choice(title=_entry_label(e), value=e) for e in unpaired]
-        picked = questionary.select(
-            "Which video of the YouTube playlist is this file?" if unpaired
-            else "No unpaired video left in the YouTube playlist - what should happen with this file?",
-            choices=choices + [_PAIR_NO_LINK, _PAIR_LEAVE_OUT, _PAIR_STOP],
-        ).ask()
+        picked = _pick_video(unpaired)
         if picked is None or picked == _PAIR_STOP:
             return None
         if picked == _PAIR_LEAVE_OUT:
@@ -504,6 +523,9 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     matcher = LocalSongMatcher(music_session)
     print("Reading the videos' artists and titles...")
     entries = youtube_entries(matcher, items)
+    if len(entries) < len(items):
+        print(f"{len(items) - len(entries)} video(s) of the YouTube playlist skipped: deleted, private, "
+              "or with neither an artist nor a title to read.")
 
     pairs = pair_automatically(playlist.tracks, entries)
     paired_files = {id(t) for t, _ in pairs}
@@ -565,7 +587,7 @@ def _show_playlist(username: str, playlist_id: int, show) -> None:
 def _delete_playlist(username: str, playlist_id: int, name: str) -> str | None:
     """Returns _BACK once deleted, which closes the playlist's menu."""
     print(f"This deletes '{name}' here and in {username}'s Leina Radio (at its next sync).")
-    if not questionary.confirm("Delete it?", default=False).ask():
+    if not ask_yes_no("Delete it?"):
         return None
     archived = delete_playlist(username, playlist_id)
     print(f"Deleted '{name}'." + (f" A copy is kept in {archived}" if archived else ""))

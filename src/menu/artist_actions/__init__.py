@@ -1,4 +1,5 @@
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.ui.menu_utils import execute_menu_item, pick_from_db_objects
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
@@ -58,7 +59,7 @@ def remove_synonym_menu(artist_objects):
 def remove_artists(artist_objects):
     print("About to delete these artists from the database:")
     display_artists(artist_objects)
-    confirmation = questionary.confirm(f"Are you sure you want to delete {len(artist_objects)} artist(s)???").ask()
+    confirmation = ask_yes_no(f"Are you sure you want to delete {len(artist_objects)} artist(s)???")
     if not confirmation:
         print("Aborted")
         return

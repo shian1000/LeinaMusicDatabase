@@ -1093,3 +1093,91 @@ def test_fix_names_and_tags_menu_asks_once(tmp_path, music_session, monkeypatch,
     assert asked == ["Fix the names and tags of these mp3 files?"]
     assert "-> Liquid Tension Experiment - Acid Rain.mp3, tags" in capsys.readouterr().out
     assert (folder / "a.mp3").exists()  # declined: nothing changed
+
+
+def test_pairing_by_hand_lists_the_closest_videos_and_searches_the_rest(users_env, tmp_path, music_session,
+                                                                        monkeypatch):
+    """A long YouTube playlist: only FILE_PAIR_VIDEO_CHOICES_MAX videos are
+    listed (a taller list shows as blank lines), the others by search."""
+    import questionary
+    from config.constants import FILE_PAIR_VIDEO_CHOICES_MAX
+    from utils.discoveries import folder_youtube_playlist as fyp
+
+    items = [{"video_id": f"v{i}", "title": f"Band {i} - Song number {i}", "channel": f"Band {i}"}
+             for i in range(30)]
+    items.append({"video_id": "vR", "title": "Leon Bridges - River (Official Video)", "channel": "LeonBridgesVEVO"})
+    seen = []
+
+    def select(message, choices):
+        if message.startswith("No file is this video"):
+            return "Leave it out of the playlist"
+        if message.startswith("What should happen with this file"):  # not in the database
+            return "Keep it in the playlist without a song"
+        videos = [c.value for c in choices if isinstance(c, questionary.Choice)]
+        seen.append((len(videos), "Search the videos by title..." in choices))
+        if len(seen) == 1:
+            return "Search the videos by title..."
+        return next(v for v in videos if v.video_id == "vR")
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Leon Bridges", "Coming Home")},
+                           items, select)
+    text = menu.questionary.text
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer("bridges river")
+                        if message.startswith("Part of") else text(message, default))
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    assert seen == [(FILE_PAIR_VIDEO_CHOICES_MAX, True), (1, True)]
+    assert [t[2] for t in _saved_tracks("ania")] == ["vR"]
+    entries = fyp.youtube_entries(fyp.LocalSongMatcher(music_session), items[-1:])
+    assert fyp.search_entries(entries, "LEON  riVer") == entries  # every word, any case
+    assert fyp.search_entries(entries, "leon ocean") == fyp.search_entries(entries, "") == []
+
+
+def test_videos_without_artist_or_title_are_skipped(music_session):
+    from utils.discoveries import folder_youtube_playlist as fyp
+
+    items = [{"video_id": "ok", "title": "Afina - Pay Your Respect", "channel": "Afina"},
+             {"video_id": "empty", "title": "", "channel": ""},
+             {"video_id": "none", "title": None, "channel": "Some channel"},
+             {"video_id": "gone", "title": "[Deleted video]", "channel": ""}]
+    entries = fyp.youtube_entries(fyp.LocalSongMatcher(music_session), items)
+    assert [e.video_id for e in entries] == ["ok"]
+
+
+def test_file_without_artist_auto_accepted_only_for_a_distinctive_unique_title(tmp_path, music_session, monkeypatch):
+    from utils.discoveries.import_engine import LocalSongMatcher, is_distinctive_title
+
+    medieval = Song(title="Dragostea Din Tei (Numa Numa) (Medieval Cover)", artist=Artist(name="Middle Ages"))
+    ozone = Song(title="Dragostea din tei", artist=Artist(name="O-Zone"))
+    music_session.add_all([medieval, ozone, Song(title="Intro", artist=Artist(name="Afina"))])
+    music_session.commit()
+    assert is_distinctive_title("Dragostea Din Tei (Numa Numa) (Medieval Cover)")
+    assert not is_distinctive_title("Intro") and not is_distinctive_title("Ocean Drive")
+    # Same title without brackets: the whole title tells the two apart
+    assert LocalSongMatcher(music_session).match_similar(
+        {"artist_name": None, "title": "Dragostea Din Tei (Numa Numa) (Medieval Cover)"}) is medieval
+
+    tags = {"1.mp3": (None, "Dragostea Din Tei (Numa Numa) (Medieval Cover)"),
+            "2.mp3": (None, "Intro")}  # the one "Intro", 100% - but anyone's could be called so
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+    playlist = fp.build_folder_playlist(music_session, folder, 1.1, 0.6, 0.96)
+    assert [t.song_id for t in playlist.tracks] == [medieval.id, None]
+    assert [t.file.name for t, _, _ in playlist.auto_accepted_scored] == ["1.mp3"]
+
+
+def test_every_yes_no_question_defaults_to_yes(monkeypatch):
+    """ask_yes_no() is the one yes/no prompt: a bare Enter means yes, and no
+    module asks questionary.confirm() directly any more."""
+    import ast
+    from utils.ui import prompts
+
+    calls = []
+    monkeypatch.setattr(prompts.questionary, "confirm", lambda message, **k: calls.append(k) or _Answer(True))
+    assert prompts.ask_yes_no("Go on?") is True and calls == [{"default": True}]
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    direct = [f"{p.relative_to(src)}:{n.lineno}" for p in src.rglob("*.py") if p.name != "prompts.py"
+              for n in ast.walk(ast.parse(p.read_text()))
+              if isinstance(n, ast.Attribute) and n.attr == "confirm" and getattr(n.value, "id", None) == "questionary"]
+    assert direct == []

@@ -1,4 +1,5 @@
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.common.debug import slog
 from utils.database.database_sessions import submit_global_database_session
@@ -168,7 +169,7 @@ def edit_entry_menu(mode: str = None, db_object = None):
         return
     if choice == delete_option:
         label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
-        confirmation = questionary.confirm(f"Do you really want to delete {label}?").ask()
+        confirmation = ask_yes_no(f"Do you really want to delete {label}?")
         if confirmation:
             delete_db_entry(db_object)
             print(f"Deleted {label}")
@@ -204,7 +205,7 @@ def remove_song_menu(mode: str = None):
         return
 
     label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
-    confirmation = questionary.confirm(f"Do you really want to delete {label}?").ask()
+    confirmation = ask_yes_no(f"Do you really want to delete {label}?")
     if confirmation:
         delete_db_entry(db_object)
         print(f"Deleted {label}")

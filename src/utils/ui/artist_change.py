@@ -6,6 +6,7 @@ actions; renaming an artist row is Artist actions → Edit only.
 """
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 
 from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, ADDITIONAL_ARTIST_ROLE_MAIN
 from utils.database.artist_reassignment import (
@@ -36,7 +37,7 @@ def pick_or_create_artist(name: str) -> Artist | None:
         picked = pick_from_db_objects(existing, question="Pick the artist", back_label="Add new")
         if picked:
             return picked
-    if not questionary.confirm(f"Add new artist '{name}' to the database?").ask():
+    if not ask_yes_no(f"Add new artist '{name}' to the database?"):
         return None
     return add_db_entry(Artist(name=name))
 
@@ -100,7 +101,7 @@ def change_songs_artist(songs: list[Song]) -> None:
     if len(to_move) > 1:
         print(f'About to credit these songs to "{target.name}":')
         display_songs(to_move)
-        if not questionary.confirm(f'Credit {len(to_move)} song(s) to "{target.name}"?').ask():
+        if not ask_yes_no(f'Credit {len(to_move)} song(s) to "{target.name}"?'):
             print("Aborted")
             return
 
@@ -190,11 +191,11 @@ def swap_titles_and_artist_names(songs: list[Song]) -> None:
         return
     if len(songs) == 1:
         song = songs[0]
-        confirmed = questionary.confirm(f'Swap "{song.title}" and "{song.artist.name}"?').ask()
+        confirmed = ask_yes_no(f'Swap "{song.title}" and "{song.artist.name}"?')
     else:
         print("About to swap the title and artist name of these songs:")
         display_songs(songs)
-        confirmed = questionary.confirm(f"Swap title and artist name of {len(songs)} song(s)?").ask()
+        confirmed = ask_yes_no(f"Swap title and artist name of {len(songs)} song(s)?")
     if not confirmed:
         print("Aborted")
         return

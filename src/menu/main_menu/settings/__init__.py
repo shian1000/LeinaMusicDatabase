@@ -2,6 +2,7 @@ import subprocess
 from datetime import datetime
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
 from utils.discoveries.discoveries_manager import (
@@ -142,8 +143,8 @@ def set_closest_auto_accept_score():
     song without asking."""
     lowest, highest = CLOSEST_AUTO_ACCEPT_SCORE_RANGE
     print("Create playlist from folder: a suggested song (similar song, closest song, ...) whose score")
-    print("reaches this is taken without asking - when it's the only one that does and the file has an")
-    print("artist - and listed after matching as auto-accepted. 1 = always ask.")
+    print("reaches this is taken without asking - when it's the only one that does - and listed after")
+    print("matching as auto-accepted. A file with no artist only for a long title one song has. 1 = always ask.")
     print(f"Current: {load_closest_auto_accept_score()}\n")
 
     typed = questionary.text(f"New auto-accept score ({lowest}-{highest}):").ask()
@@ -162,10 +163,7 @@ def set_closest_auto_accept_score():
 def reset_statistics_records():
     """Zero the fetchers' invocation/success counters shown in the Statistics
     menu (album and year lookups), so they start being collected anew."""
-    if not questionary.confirm(
-        "Reset all fetcher statistics (albums and years) to zero? This can't be undone.",
-        default=False,
-    ).ask():
+    if not ask_yes_no("Reset all fetcher statistics (albums and years) to zero? This can't be undone."):
         print("Cancelled.")
         return
     reset_discovery_stats()
@@ -202,7 +200,7 @@ def index_music_library():
     matched = report.files - len(report.unmatched)
     print(f"{matched} file(s) have a song in the database ({report.matched_now} matched now), "
           f"{len(report.unmatched)} don't.")
-    if report.unmatched and questionary.confirm("Show the files without a song?", default=False).ask():
+    if report.unmatched and ask_yes_no("Show the files without a song?"):
         for path, artist, title in report.unmatched:
             print(f"  {path}   ({artist or '?'} - {title})")
     print(f"Index saved to {FILES_DB_PATH}")
@@ -237,7 +235,7 @@ def setup_database_sharing():
     lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
     print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
-    if not questionary.confirm("Install (or reinstall) it now?").ask():
+    if not ask_yes_no("Install (or reinstall) it now?"):
         print("Cancelled.")
         return
     try:

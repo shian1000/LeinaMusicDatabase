@@ -204,9 +204,13 @@ when the file has one. Two choices that aren't obvious:
 - A best song always exists, so these guesses are offered with the cursor on
   "None of these" and never taken by `match()`. The one exception is the
   user's "Closest songs: auto-accept score" (default 0.99), which applies to
-  any suggestion's score - and only for files with an artist: a file with
-  none is scored on its title alone, so the one "Intro" in the database
-  would be 100% for every nameless "Intro". A misspelt artist with an exact
+  any suggestion's score. A file with no artist is scored on its title
+  alone, so the one "Intro" in the database would be 100% for every nameless
+  "Intro": such a file is auto-accepted only for the one song with its title
+  and only when the title is distinctive (`is_distinctive_title()`: 3+ words,
+  15+ characters without brackets). Songs sharing a bracket-less title core
+  ("Dragostea Din Tei (Numa Numa) (Medieval Cover)" vs O-Zone's "Dragostea din
+  tei") are told apart by the whole title before giving up. A misspelt artist with an exact
   title ("Liiquid tension experiment") scores ~0.993, so at 0.99 this also
   takes what the artist auto-accept setting would have asked about.
 

@@ -33,13 +33,16 @@ class YouTubeEntry:
 
 def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry]:
     """The playlist's videos (import_from_playlist.get_playlist_items()), in
-    order, without the deleted / private ones, which have nothing to pair."""
+    order, without the deleted / private ones and those giving neither an
+    artist nor a title (no title at all), which have nothing to pair."""
     entries = []
     for item in items:
         title = (item.get("title") or "").strip()
-        if title.strip("[]") in PLACEHOLDER_TITLES:
+        if not title or title.strip("[]") in PLACEHOLDER_TITLES:
             continue
         metadata = playlist_item_metadata(item)
+        if not metadata.get("artist_name") and not metadata.get("title"):
+            continue
         song = matcher.match_exact(metadata) if metadata.get("title") else None
         duration = item.get("duration")
         entries.append(YouTubeEntry(video_id=item["video_id"], label=title, channel=item.get("channel") or "",
@@ -113,6 +116,15 @@ def rank_entries_for(track: FolderTrack, entries: list) -> list:
     """The unpaired videos to offer for `track`, the most like it first."""
     wanted = normalize(f"{track.artist or ''} {track.title or ''}")
     return sorted(entries, key=lambda e: -similarity(wanted, normalize(f"{e.channel} {e.label}")))
+
+
+def search_entries(entries: list, query: str) -> list:
+    """The videos whose title or channel holds every word of `query`
+    (normalized, so case and diacritics don't matter), in their order."""
+    words = normalize(query).split()
+    if not words:
+        return []
+    return [e for e in entries if all(w in normalize(f"{e.label} {e.channel or ''}") for w in words)]
 
 
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,

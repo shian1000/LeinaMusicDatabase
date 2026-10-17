@@ -13,6 +13,7 @@ skipped stays in review/ for next time. The screen also lists what the
 automatic pass changed."""
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -426,7 +427,7 @@ def _ask_correction(session, case):
         notes = _value_notes(session, case, value)
         for note in notes:
             print(f"    {note}")
-        if notes and not questionary.confirm(f"Save {_plain(value)} anyway?").ask():
+        if notes and not ask_yes_no(f"Save {_plain(value)} anyway?"):
             continue
         return EDIT, value
 
@@ -486,9 +487,8 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         if decision in (ACCEPT, EDIT):
             old = replaced_video(case, case.new_value if decision == ACCEPT else value)
             if old:
-                old_video_wrong = bool(questionary.confirm(
-                    f"Also remember the replaced video ({old}) as wrong for this song? "
-                    "(It won't be used for it again, here or in Leina Radio.)", default=False).ask())
+                old_video_wrong = bool(ask_yes_no(f"Also remember the replaced video ({old}) as wrong for this song? "
+                    "(It won't be used for it again, here or in Leina Radio.)"))
         apply_field_correction(session, case, decision, value, old_video_wrong=old_video_wrong)
         submit_global_database_session()
     return cases, False

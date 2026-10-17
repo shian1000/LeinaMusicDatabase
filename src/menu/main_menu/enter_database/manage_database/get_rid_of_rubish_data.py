@@ -2,6 +2,7 @@ from utils.database.database_getter import get_songs_from_db_session
 from utils.common.text_utils import is_blacklisted_album
 import time
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import get_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
@@ -236,7 +237,7 @@ def seek_nonsense_names(songs):
             context = f"{song.artist.name} - \033[93m{song.title}\033[0m"
         print(f"\n[{field.upper()}] {context}")
 
-        confirmation = questionary.confirm(f"'{old_value}' seems like rubish. Do you wish to edit it?").ask()
+        confirmation = ask_yes_no(f"'{old_value}' seems like rubish. Do you wish to edit it?")
         if not confirmation:
             continue
 

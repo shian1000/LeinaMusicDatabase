@@ -279,7 +279,9 @@ non-trivial work in that area.
   reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
   `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score; the
   only one reaching Settings → "Closest songs: auto-accept score" (default 0.99) is taken without
-  asking and listed as auto-accepted — never for a file with no artist, scored on its title alone. `match()` (files.db, covers) takes
+  asking and listed as auto-accepted — for a file with no artist (scored on its title alone) only the
+  one song with its title, and only a distinctive title (`import_engine.is_distinctive_title()`,
+  `NAMELESS_AUTO_ACCEPT_MIN_WORDS` / `_CHARS`: "Intro" always asks). `match()` (files.db, covers) takes
   `match_similar()`'s safe guesses without asking, never the title-only ones nor these. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).
@@ -289,9 +291,12 @@ non-trivial work in that area.
   the library folder get a warning (a renamed file is new to files.db).
   `folder_youtube_playlist.py` is "Create playlist from folder and compare with YT playlist": the
   same folder playlist, each file paired with a video of a YouTube playlist (same database song, the
-  song's own link, else resembling artist + title; the rest by hand from the unpaired ones), whose
+  song's own link, else resembling artist + title; the rest by hand from the unpaired ones — only the
+  `FILE_PAIR_VIDEO_CHOICES_MAX` most alike listed plus a search, since a `questionary` list taller
+  than the terminal draws its hidden part as blank lines), whose
   link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). A video
-  without a file can be a track with `file` None. Saved in the YouTube playlist's order, unpaired
+  without a file can be a track with `file` None. Deleted / private videos and those giving neither
+  an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
   their source.
   `mp3_covers.py` is Fetch database data → "Import covers from mp3 tags": embedded APIC pictures → one ≤600 px JPEG per album in
@@ -481,6 +486,8 @@ non-trivial work in that area.
   in `get_rid_of_rubish_data.py` for the pattern). A `questionary.Choice` title can be coloured,
   though, given as prompt_toolkit `(style, text)` tokens: `utils/ui/song_colors.py` builds artist
   (cyan) / title (yellow) labels that way and turns them into ANSI only for `print()`.
+- Every yes/no question goes through `utils/ui/prompts.ask_yes_no()` (a bare Enter means yes,
+  everywhere — the owner's choice), never `questionary.confirm()` directly; a test checks that.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - In user-facing text (prints, menu labels, prompts, review notes) the mobile client is "Leina
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong

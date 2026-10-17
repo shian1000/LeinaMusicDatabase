@@ -8,6 +8,7 @@ such a case (run_import_batch())."""
 from collections import defaultdict
 
 import questionary
+from utils.ui.prompts import ask_yes_no
 from rich import print
 from rich.markup import escape
 
@@ -234,7 +235,7 @@ def offer_album_resolution(songs: list) -> int:
     if not find_unresolved_album_groups(music_session, pending):
         return 0
     print(f"\n{len(pending)} imported song(s) have an album title other artists also use.")
-    if not questionary.confirm("Resolve those albums now?", default=True).ask():
+    if not ask_yes_no("Resolve those albums now?"):
         print('Left for later: Manage database -> "Resolve albums with several artists".')
         return 0
     return review_multi_artist_albums(pending)

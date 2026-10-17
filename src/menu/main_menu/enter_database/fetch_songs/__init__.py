@@ -1,6 +1,7 @@
 from utils.common.debug import slog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 import questionary
+from utils.ui.prompts import ask_yes_no
 from utils.database.datatables import artist_categories, search_only_categories, song_categories
 from menu.song_actions import song_actions
 from menu.artist_actions import artist_actions
@@ -27,7 +28,7 @@ def fetch_artists():
     display_artists(artist_objects)
 
     if(artist_objects):
-        decision = questionary.confirm("Do you want to do something with these artists?").ask()
+        decision = ask_yes_no("Do you want to do something with these artists?")
         if decision:
             artist_actions(artist_objects)
             submit_global_database_session()
@@ -59,7 +60,7 @@ def fetch_songs():
 
 
     if(songs_objects):
-        decision = questionary.confirm("Do you want to do something with these songs?").ask()
+        decision = ask_yes_no("Do you want to do something with these songs?")
         if decision:
             song_actions(songs_objects)
             submit_global_database_session()
