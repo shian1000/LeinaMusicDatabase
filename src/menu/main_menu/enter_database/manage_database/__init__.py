@@ -14,6 +14,7 @@ from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.latin_forms_review import fill_latin_forms
 from utils.ui.file_fix_review import fix_file_names_and_tags
+from utils.ui.song_duplicate_review import resolve_duplicated_songs
 from utils.database.song_kinds import is_full_album
 from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
@@ -40,6 +41,7 @@ def should_auto_confirm(old_title: str, new_title: str) -> bool:
 def resolve_duplicates():
     action_map = {
         "Resolve duplicated artists": resolve_duplicated_artists,
+        "Resolve duplicated songs": resolve_duplicated_songs,
         "Resolve duplicated albums": resolve_duplicated_albums
     }
 

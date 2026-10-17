@@ -495,6 +495,18 @@ FILE_MATCH_SCORE_TITLE_WEIGHT = 0.65
 
 TITLE_AMPERSAND_WORDS = frozenset({"and", "und", "et", "i", "y", "n"})
 
+# Finding duplicate songs (utils/database/song_duplicates.py): bracketed
+# annotations that, besides TITLE_JUNK_SUFFIXES and featured-artist credits,
+# don't make a song of their own ("Sorcererz (Visualiser)" is "Sorcererz").
+# Only used to *propose* duplicates, never to rename anything.
+DUPLICATE_TITLE_EXTRA_JUNK = frozenset({"visualiser", "visualizer", "official visualiser", "official visualizer",
+                                        "teledysk", "oficjalny teledysk", "lyrics", "audio"})
+# Words naming a version: a proposed duplicate whose titles differ in them is
+# left unticked in the review ("Spider and the Fly" / "... (acoustic)").
+DUPLICATE_VERSION_WORDS = frozenset({"remix", "mix", "live", "acoustic", "akustycznie", "cover", "version",
+                                     "edit", "dub", "rework", "instrumental", "karaoke", "remaster", "remastered",
+                                     "demo", "unplugged", "extended", "radio", "orchestral", "piano"})
+
 TITLE_JUNK_SUFFIXES = [
     "official music video",
     "official lyric video",

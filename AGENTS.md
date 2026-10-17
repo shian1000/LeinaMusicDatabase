@@ -152,6 +152,15 @@ non-trivial work in that area.
   → "Genres" (`utils/discoveries/genre_lookup.py`, MusicBrainz: song tags → album → artist, the
   artist level ticked by the owner first; `utils/ui/genre_review.py`), the editor, Song actions →
   "Set genre", or a reviewed correction. Details: `docs/data-model.md`.
+  `song_duplicates.py` — duplicate songs of one artist (titles differing only in spelling, a
+  "feat." credit or a junk bracket like "(Visualiser)"; remix / cover / live brackets are songs of
+  their own) and `merge_songs()`, the one way to fold a duplicate: the kept row (most data) gets
+  the other's missing fields and extra artists, references follow via `record_song_merge()`.
+  "Resolve duplicated artists" folds spelling-only ones silently (`remove_duplicate_songs()`);
+  Manage database → Resolve duplicates → "Resolve duplicated songs"
+  (`utils/ui/song_duplicate_review.py`) asks in one checkbox list, version-looking pairs unticked,
+  then in a second one whether to credit the featured artists only a folded title named
+  (`missing_feat_artists()` → `credit_feat_artists()`, role `feat`, an existing artist reused).
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
   instead of renaming the shared row, removing an artist left without songs (album rows go to its
   heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.
@@ -247,7 +256,9 @@ non-trivial work in that area.
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
   "which existing song is this file?" lookup, shared by the cover import and playlists from a
   folder. It's deliberately looser than the import's own `find_existing_song()` check: it matches
-  the main artist of "A ft. B", and titles with brackets, trailing junk, a leading track number
+  the main artist of "A ft. B", a tag title that starts with the artists ("A & B — Title",
+  `import_engine.title_after_artists()`), and titles with brackets, trailing junk, a trailing
+  unbracketed "feat. X" (tried after the title with it, so an original beats its "ft." version), a leading track number
   ("T03: ", `text_utils.strip_track_number_prefix()`) and words standing for "&"
   (`TITLE_AMPERSAND_WORDS`: "and", "i", "und", ...; `normalize()` drops the "&" itself) stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
@@ -584,7 +595,8 @@ non-trivial work in that area.
   distinct `text_utils` similarity functions (and the `TypeError` from
   confusing them), why artist-name matching uses `scaled_similarity_threshold()` for short
   strings, and why a typo inside an artist name defeats the local fuzzy lookup (substring-only
-  candidates) and how `LocalSongMatcher.match_similar()` works around it.
+  candidates) and how `LocalSongMatcher.match_similar()` works around it, and why the duplicate-song
+  key keeps non-junk brackets (remixes and covers are songs of their own).
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome

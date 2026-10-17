@@ -1181,3 +1181,24 @@ def test_every_yes_no_question_defaults_to_yes(monkeypatch):
               for n in ast.walk(ast.parse(p.read_text()))
               if isinstance(n, ast.Attribute) and n.attr == "confirm" and getattr(n.value, "id", None) == "questionary"]
     assert direct == []
+
+
+def test_artists_before_the_title_and_a_trailing_feat_are_ignored(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher, title_after_artists
+
+    solovij = Artist(name="Христина Соловій")
+    habit = Song(title="Шкідлива звичка feat. YanGo", artist=solovij)
+    pluto = Artist(name="Unlike Pluto")
+    original, cover = Song(title="No Scrubs", artist=pluto), Song(title="No Scrubs ft. Joanna Jones (Cover)", artist=pluto)
+    music_session.add_all([habit, cover, original])  # the cover first: it mustn't win by order
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_exact({"artist_name": "Христина Соловій",
+                                "title": "Христина Соловій & YanGo — Шкідлива звичка"}) is habit
+    # Keeping the "ft." first tells an original from the feat. version beside it
+    assert matcher.match_exact({"artist_name": "Unlike Pluto", "title": "No Scrubs (Official Video)"}) is original
+    assert matcher.match_exact({"artist_name": "Unlike Pluto", "title": "No Scrubs ft. Joanna Jones HD"}) is cover
+
+    assert title_after_artists("AC-DC - Back in Black", "AC-DC") == "Back in Black"
+    assert title_after_artists("Love - Me Do", "Beatles") is None  # the artist isn't before the dash
+    assert title_after_artists("Karma", "Hey") is None

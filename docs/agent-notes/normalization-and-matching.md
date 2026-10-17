@@ -184,6 +184,15 @@ usual via `scaled_similarity_threshold()`). Note that `files.db` rematches
 old unmatched rows only when the catalog fingerprint changes, so a matching
 improvement like this reaches those rows only after the next catalog change.
 
+Title cores also drop a trailing unbracketed "feat. X" ("Шкідлива звичка feat.
+YanGo"), but `find_song_loosely()` tries the core *with* it first: one artist
+can have both "No Scrubs" and "No Scrubs ft. Joanna Jones (Cover)" (seven such
+pairs in the real database when added, several of them plain duplicates), and
+without the first pass a file "No Scrubs (Official Video)" would take
+whichever came first. A tag title holding the artists before a dash ("A & B —
+Title") is retried as "Title" (`title_after_artists()`), only after the whole
+title found nothing.
+
 Title cores (`import_engine._title_core()`) also drop a leading track number
 (`strip_track_number_prefix()`: "T03: ", "03. ", "03 - ", "Track 5) "). It
 needs a separator *and* a space after the digits so titles that are numbers
@@ -223,6 +232,24 @@ It compares against every song (~5.7k), so it uses
 `text_utils.similarity_at_least()` (SequenceMatcher's cheap upper bounds
 first, no `slog()` per call) and caches each song's normalized titles and
 artist names per matcher: ~0.1-0.5 s per unmatched file on the real database.
+
+## Duplicate songs: a stricter key than the file matcher's
+
+`song_duplicates.duplicate_key()` is deliberately *not* `_title_core()`.
+Dropping every bracket, as file matching does, proposed 29 "duplicates" on
+the real database, nearly all remixes, covers, acoustic or long versions -
+songs of their own. The key drops only featured-artist credits (bracketed or
+not) and junk-only brackets (`TITLE_JUNK_SUFFIXES` +
+`DUPLICATE_TITLE_EXTRA_JUNK`: "Visualiser", "Teledysk", ...), which left 9
+groups, 8 real. A title naming a version word the others don't
+(`DUPLICATE_VERSION_WORDS`) still gets proposed - "No Scrubs" vs "No Scrubs
+ft. Joanna Jones (Cover)" - but unticked. Only spelling-identical titles
+(`spelling_key()`) are folded without asking, by "Resolve duplicated artists".
+
+Every fold goes through `merge_songs()`: before it, the silent pass kept the
+lowest id and lost the dropped row's link, album, year and extra artists.
+It also runs on the global music session - it used to open its own, leaving
+the deleted song alive in the session the rest of the app holds.
 
 ## Tags can carry HTML entities
 

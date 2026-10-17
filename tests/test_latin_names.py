@@ -274,21 +274,19 @@ def test_album_merge_keeps_a_latin_form(session, monkeypatch, tmp_path):
 
 
 def test_song_dedup_keeps_a_latin_form(session_factory, monkeypatch):
-    monkeypatch.setattr(rd, "get_music_session", lambda: session_factory())
-    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
     s = session_factory()
+    monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (s, None))
+    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
     kino = _artist(s, "Кино")
-    kept = _song(s, "Кукушка", kino)
+    _song(s, "Кукушка", kino)
     _song(s, "Кукушка", kino, title_latin="Kukushka")
     s.commit()
-    kept_id = kept.id
-    s.close()
 
     rd.remove_duplicate_songs()
 
-    s = session_factory()
+    # The row with more data (here the Latin form) is the one kept
     [song] = s.query(Song).all()
-    assert song.id == kept_id and song.title_latin == "Kukushka"
+    assert song.title_latin == "Kukushka"
     s.close()
 
 

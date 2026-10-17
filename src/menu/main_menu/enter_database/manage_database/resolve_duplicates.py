@@ -7,55 +7,36 @@ from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tags_management import has_tag_on_song
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
-from utils.database.latin_names import artist_match_synonyms, keep_latin_on_merge
-from utils.database.genres import keep_genre_on_merge
-from utils.database.song_references import apply_song_id_changes, record_song_merge
+from utils.database.latin_names import artist_match_synonyms
+from utils.database.song_references import apply_song_id_changes
+from utils.database.song_duplicates import find_duplicate_groups, merge_songs, spelling_key
+from utils.database.database_sessions import open_and_set_global_database_sessions
 from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize, normalize_apostrophes
 from utils.common.script_utils import fix_mixed_script_words
 
 def remove_duplicate_songs():
-    """
-    Finds and removes duplicate songs (same artist_id + title + kind),
-    keeping the entry with the lowest id. A full album and its title track
-    share a title but aren't duplicates.
-    """
-    session = get_music_session()
-
-    all_songs = session.query(Song).join(Artist).order_by(Artist.name, Song.title).all()
-
-    seen = {}
-    duplicates = []
-
-    for song in all_songs:
-        key = (song.artist_id, song.title.lower(), song.kind)
-        if key in seen:
-            duplicates.append(song)
-        else:
-            seen[key] = song
-
-    if not duplicates:
-        print("No duplicates found.")
-        session.close()
+    """Fold the songs of one artist (and kind) whose titles differ only in
+    spelling - case, punctuation, apostrophes - into one, without asking:
+    those are duplicates for certain. Nothing is lost (song_duplicates.
+    merge_songs()); near duplicates ("feat.", "(Visualiser)") are for
+    "Resolve duplicated songs", which asks. A full album and its title track
+    share a title but aren't duplicates (different kind)."""
+    session, _ = open_and_set_global_database_sessions()
+    groups = find_duplicate_groups(session, spelling_key)
+    if not groups:
+        print("No duplicate songs found.")
         return
 
-    print(f"Found {len(duplicates)} duplicate(s):")
-    for song in duplicates:
-        print(f"  - [{song.id}] {song.artist.name} — {song.title}")
-
-    for song in duplicates:
-        # Its tags, and users' playlist entries, move to the song kept
-        kept = seen[(song.artist_id, song.title.lower(), song.kind)]
-        keep_latin_on_merge(kept, song)
-        keep_genre_on_merge(kept, song)
-        record_song_merge(session, song.id, kept.id)
-        session.delete(song)
-
+    print(f"Found {sum(len(g) - 1 for g in groups)} duplicate song(s):")
+    for kept, *dropped in groups:
+        for song in dropped:
+            print(f"  - [{song.id}] {song.artist.name} — {song.title}  ->  kept [{kept.id}] {kept.title}")
+            merge_songs(session, kept, song)
     session.commit()
-    session.close()
     apply_song_id_changes()
-    print(f"\nRemoved {len(duplicates)} duplicate(s).")
+    print(f"Merged {sum(len(g) - 1 for g in groups)} duplicate song(s).")
 
 
 def _artist_key(name: str) -> str:

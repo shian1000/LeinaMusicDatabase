@@ -323,6 +323,16 @@ def similarity(a: str, b: str) -> float:
     return result
 
 
+# A featured artist credited at the end of a title without brackets:
+# "Шкідлива звичка feat. YanGo" - artist information, like "(feat. YanGo)"
+_TRAILING_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+.*$", re.IGNORECASE)
+
+
+def strip_trailing_feat(title: str) -> str:
+    """`title` without a trailing unbracketed "feat. X" / "ft. X" credit."""
+    return _TRAILING_FEAT_RE.sub("", title or "")
+
+
 def similarity_at_least(a: str, b: str, floor: float) -> float:
     """similarity(a, b) when it can reach `floor`, else 0.0 - without
     logging, and SequenceMatcher's cheap upper bounds first, for comparing

@@ -1,3 +1,4 @@
+import re
 import time
 
 from utils.database.datatables import Song, Artist
@@ -7,7 +8,7 @@ from utils.common.debug import slog, mlog
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix, similarity_at_least
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix, similarity_at_least, strip_trailing_feat
 from utils.database.artist_splitting import propose_artist_split
 from utils.database.latin_names import artist_match_synonyms, song_titles
 from utils.database.song_artists import song_all_artists
@@ -380,22 +381,35 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
     return next((s for s in artist_songs if key in normalize(s.title)), None)
 
 
-def _title_core(title: str) -> str:
-    """A title without brackets, trailing junk ("Official Video", "HD") or a
-    leading track number ("T03: "), normalized: "Pay Your Respect (Official
-    Lyric Video)" -> "pay your respect". Words standing for "&" are dropped
-    too, since normalize() drops the "&" itself."""
-    core = normalize(strip_track_number_prefix(strip_trailing_junk_suffix(remove_brackets(title or ""))))
+# What separates an artist from the title inside a tag's title field
+_TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
+
+
+def _title_core(title: str, drop_feat: bool = True) -> str:
+    """A title without brackets, trailing junk ("Official Video", "HD"), a
+    trailing "feat. X" (unless not `drop_feat`) or a leading track number
+    ("T03: "), normalized: "Pay Your Respect (Official Lyric Video)" -> "pay
+    your respect". Words standing for "&" are dropped too, since normalize()
+    drops the "&" itself."""
+    title = remove_brackets(title or "")
+    if drop_feat:
+        title = strip_trailing_feat(title)
+    core = normalize(strip_track_number_prefix(strip_trailing_junk_suffix(title)))
     return " ".join(w for w in core.split() if w not in TITLE_AMPERSAND_WORDS) or core
 
 
 def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = None) -> Song | None:
     """find_existing_song(), else the song whose title is `title` without
-    brackets, trailing junk or a track number on either side."""
+    brackets, trailing junk or a track number on either side - first keeping
+    a trailing "feat. X", then without it: "No Scrubs (Official Video)" is
+    "No Scrubs", not the "No Scrubs ft. Joanna Jones (Cover)" beside it, but
+    "Шкідлива звичка" still finds "Шкідлива звичка feat. YanGo"."""
     song = find_existing_song(title, artist_songs, duration_s)
     artist_songs = songs_for_entry(artist_songs, title, duration_s)
-    if song is None and (core := _title_core(title)):
-        song = next((s for s in artist_songs if core in map(_title_core, song_titles(s))), None)
+    for drop_feat in (False, True):
+        if song is None and (core := _title_core(title, drop_feat)):
+            song = next((s for s in artist_songs
+                         if core in (_title_core(t, drop_feat) for t in song_titles(s))), None)
     return song
 
 
@@ -406,6 +420,18 @@ def is_distinctive_title(title: str) -> bool:
     is; "Intro" isn't."""
     core = _title_core(title)
     return len(core.split()) >= NAMELESS_AUTO_ACCEPT_MIN_WORDS and len(core) >= NAMELESS_AUTO_ACCEPT_MIN_CHARS
+
+
+def title_after_artists(title: str, artist: str) -> str | None:
+    """The title part of a tag's title field that starts with the artists
+    themselves - "Христина Соловій & YanGo — Шкідлива звичка" for artist
+    "Христина Соловій" -> "Шкідлива звичка" - or None: the part before the
+    first " - " / " – " / " — " must hold the artist's whole name."""
+    parts = _TITLE_ARTIST_SEPARATOR.split(title or "", maxsplit=1)
+    wanted = normalize(artist)
+    if len(parts) < 2 or not wanted or not parts[1].strip():
+        return None
+    return parts[1].strip() if f" {wanted} " in f" {normalize(parts[0])} " else None
 
 
 class LocalSongMatcher:
@@ -456,7 +482,11 @@ class LocalSongMatcher:
         artist = self._artist(name)
         if artist is None:
             return None
-        return find_song_loosely(title, self._artist_songs(artist), metadata.get("duration_s"))
+        songs, duration = self._artist_songs(artist), metadata.get("duration_s")
+        song = find_song_loosely(title, songs, duration)
+        if song is None and (rest := title_after_artists(title, name)):
+            song = find_song_loosely(rest, songs, duration)
+        return song
 
     def _artist_songs(self, artist: Artist) -> list:
         if artist.id not in self._songs:
