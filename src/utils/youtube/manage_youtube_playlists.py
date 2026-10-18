@@ -588,6 +588,13 @@ def _collapse_repeated_letters(text: str) -> str:
 _NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O"})
 
 
+def _drop_punctuation(text: str) -> str:
+    """Punctuation as spaces, collapsed - "kochasz, to" == "Kochasz To".
+    A punctuation-only title (":/") is kept as it is, it has nothing else."""
+    dropped = re.sub(r"\s+", " ", re.sub(r"[^\w\s]|_", " ", text)).strip()
+    return dropped or text
+
+
 def _fold_diacritics(text: str) -> str:
     """Strip accents/diacritics via Unicode NFKD decomposition + dropping
     combining marks — the same technique `normalizer.normalize()` already
@@ -1052,8 +1059,11 @@ def score_result(
         # neither transform is destructive when the other's pattern isn't
         # present (collapsing is a no-op with no repeated letters; folding
         # is a no-op with no diacritics).
-        expected_title_normalized = _collapse_repeated_letters(_fold_diacritics(expected_title))
-        candidate_clean_normalized = _collapse_repeated_letters(_fold_diacritics(candidate_clean))
+        # Punctuation goes too: ranking is lexicographic, so a Topic upload
+        # missing one comma ("Jeżeli kochasz, to..." -> 0.986) lost to an
+        # exactly-punctuated album reupload before its quality was compared.
+        expected_title_normalized = _collapse_repeated_letters(_fold_diacritics(_drop_punctuation(expected_title)))
+        candidate_clean_normalized = _collapse_repeated_letters(_fold_diacritics(_drop_punctuation(candidate_clean)))
         relevance = max(
             similarity(expected_title, candidate_clean),
             _text_containment(expected_title, candidate_clean),

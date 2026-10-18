@@ -749,7 +749,7 @@ remixes/dubs/demos exactly like `"official audio"` already did — verified none
 "official" somewhere) picked up the bonus, because each also matches an `LQ_KEYWORDS` term that
 suppresses the whole HQ bonus block.
 
-## Typo/spelling-variant tolerance for short titles: doubled letters and diacritics
+## Typo/spelling-variant tolerance for titles: doubled letters, diacritics, punctuation
 
 Two related relevance-matching gaps, both stemming from the same root cause: the scaled threshold
 that protects short titles from false positives (the "netflix ≈ nix" problem above) also makes
@@ -781,10 +781,18 @@ observed.
     variant, so this fix can't help every Cyrillic spelling-variant case, only the ones that are
     truly "a letter plus a diacritic" under Unicode.
 
-Both transforms are combined into one "maximally normalized" pass (fold diacritics, then collapse
-repeated letters) rather than kept as separate `max()` branches — a title can need both at once,
-and running them together costs nothing extra since neither transform does anything when its own
-pattern isn't present.
+- `_drop_punctuation()` turns punctuation into spaces (`"kochasz, to"` → `"kochasz to"`); a
+  punctuation-only title (`":/"`) is left as it is. Real case: `Anna Maria Jopek - Jeżeli kochasz,
+  to nie pamiętaj mnie` — the Topic upload, which has no comma, scored `0.986` against an album
+  reupload from the artist's own channel that kept the comma (`1.0`). The tuple is compared left to
+  right, so the album reupload won before the Topic upload's +2 official-release quality was ever
+  compared. Leina Radio picked the Topic one. Another case of the tuple-ordering failure: any
+  near-1.0 relevance difference from formatting alone decides the pick.
+
+All three transforms are combined into one "maximally normalized" pass (drop punctuation, fold
+diacritics, then collapse repeated letters) rather than kept as separate `max()` branches — a title
+can need several at once, and running them together costs nothing extra since none of them does
+anything when its own pattern isn't present.
 
 ## `track`/`artists`/`album` — a free, reliable "genuine official release" signal from yt-dlp
 
