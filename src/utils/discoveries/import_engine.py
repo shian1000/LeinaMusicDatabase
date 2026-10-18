@@ -216,6 +216,9 @@ def _match_artist_locally(name: str) -> tuple:
         return [n for n in (artist.name, *(s.strip() for s in synonyms)) if n]
 
     search = normalize(name)
+    if not search:
+        # Punctuation only (")" read from a broken file name): nothing to search by
+        return None, False
     key = name_key(name)
     existing_artists = get_artists_from_db_session(artist_categories[0], search)
     if not existing_artists and search.startswith("the "):
