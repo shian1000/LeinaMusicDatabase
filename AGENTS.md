@@ -113,8 +113,13 @@ non-trivial work in that area.
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
   artist's origin, an album's title, a YouTube link or music video set by hand, ...; the song's
   artist, `songs.artist_id`, comes as a name and credits only that song to the artist of that name
-  via `set_primary_artist()`, never renaming the shared row), and `inbox_found_links.py` for links the phone found for
-  songs without one. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
+  via `set_primary_artist()`, never renaming the shared row; an `artists.name` rename to a name not
+  resembling the old one is offered as crediting only its song first, and never saved by the
+  automatic pass), `inbox_found_links.py` for links the phone found for
+  songs without one, and `inbox_song_requests.py` for songs the phone played that music.db doesn't
+  have (`song_requests`): never added automatically - the owner adds them (through
+  `run_import_batch()`), skips or rejects them; a rejected one goes to music.db's
+  `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
   table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: every 15 min a
@@ -258,7 +263,8 @@ non-trivial work in that area.
   folder. It's deliberately looser than the import's own `find_existing_song()` check: it matches
   the main artist of "A ft. B", a tag title that starts with the artists ("A & B — Title",
   `import_engine.title_after_artists()`), and titles with brackets, trailing junk, a trailing
-  unbracketed "feat. X" (tried after the title with it, so an original beats its "ft." version), a leading track number
+  unbracketed "feat. X" (tried after the title with it, so an original beats its "ft." version), a
+  trailing year ("... [Full Length] 2006", on both sides, so "Party Like It's 1999" still meets itself), a leading track number
   ("T03: ", `text_utils.strip_track_number_prefix()`) and words standing for "&"
   (`TITLE_AMPERSAND_WORDS`: "and", "i", "und", ...; `normalize()` drops the "&" itself) stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
@@ -318,7 +324,8 @@ non-trivial work in that area.
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
-  write a second one. `strip_site_names()` drops download-site junk from mp3 file names and tags
+  write a second one. `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 ("Ma³pa"),
+  only when a never-genuine character shows it. `strip_site_names()` drops download-site junk from mp3 file names and tags
   before they're read (domains in `SITE_NAME_TLDS`, the words in `src/config/file_name_junk.txt` —
   the owner's list, add entries there — and Y2Mate's id/bitrate/timestamp suffix). `normalize()` is `lru_cache`d (pure function of its arguments): the artist
   search re-normalizes every artist per lookup, so keep it free of side effects and global state. `docs/agent-notes/normalization-and-matching.md`.
@@ -427,7 +434,8 @@ non-trivial work in that area.
   `songs.genre` (migration 0013, its radio; keep one spelling per genre, see `genres.py`), and
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
-  out of its radio). Matching keeps a track apart from the full album of the same name
+  out of its radio), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  added, by the artist / title / YouTube video / Spotify track the request named). Matching keeps a track apart from the full album of the same name
   (`song_kinds.songs_for_entry()`, entries carry `duration_s`); candidates are reviewed in Manage
   database → "Find full albums".
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).

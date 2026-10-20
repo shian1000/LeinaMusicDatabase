@@ -272,6 +272,17 @@ lowest id and lost the dropped row's link, album, year and extra artists.
 It also runs on the global music session - it used to open its own, leaving
 the deleted song alive in the session the rest of the app holds.
 
+## Polish tags read as Latin-1
+
+Old taggers wrote ID3 text in Windows-1250 while declaring Latin-1, so mutagen
+returns "Ma³pa i ja" for "Małpa i ja" (ł and ³ share byte 0xB3). It scored
+94% instead of matching. `read_file_metadata()` runs
+`normalizer.fix_cp1250_mojibake()`, which re-reads the whole text as
+Windows-1250 only when it holds a character real text never has: "³", "¹",
+a control character 0x80-0x9F (ś, ź, Ś, Ź), or "¿" inside a word (ż). It
+can't simply re-read everything: "ñ", "ê", "ó" are fine Latin-1 letters
+("España") that Windows-1250 would turn into "ń", "ę", "ó".
+
 ## Tags can carry HTML entities and site names
 
 Files from some download sites have `&amp;` (and the like) literally in their

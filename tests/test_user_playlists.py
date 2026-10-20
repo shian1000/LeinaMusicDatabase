@@ -1335,3 +1335,40 @@ def test_new_song_added_after_rejecting_the_one_found(users_env, tmp_path, music
     assert asked[:2] == ["Use this song?", "Add it as a new song instead?"]
     assert sorted(s.title for s in music_session.query(Song).filter(Song.artist_id == hey.id)) == [
         "Karma", "Karma (live)", "Teksański"]
+
+
+def test_trailing_year_in_the_tag_title_is_ignored(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher, _title_core
+
+    fish = Artist(name="Fish Go Deep")
+    cure = Song(title="The Cure & The Cause (Dennis Ferrer remix)", artist=fish)
+    party = Song(title="Party Like It's 1999", artist=fish)
+    music_session.add_all([cure, party])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_exact({"artist_name": "Fish Go Deep",
+                                "title": "The Cure & The Cause (Dennis Ferrer Remix) [Full Length] 2006"}) is cure
+    # A year that is the title, or ends it on both sides, still matches itself
+    assert matcher.match_exact({"artist_name": "Fish Go Deep", "title": "Party Like It's 1999 (Official Video)"}) is party
+    assert _title_core("1979") == "1979"
+
+
+def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
+    """Tags written in Windows-1250 come out as "Ma³pa"; read_file_metadata()
+    re-reads them, but leaves genuine Latin-1 letters ("España") alone."""
+    from mutagen.easyid3 import EasyID3
+    from utils.common.normalizer import fix_cp1250_mojibake
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+
+    misread = lambda text: text.encode("cp1250").decode("latin-1")
+    assert fix_cp1250_mojibake(misread("Żółć gęślą jaźń")) == "Żółć gęślą jaźń"
+    for fine in ("España", "¿Dónde estás?", "Crème brûlée", "Hey"):
+        assert fix_cp1250_mojibake(fine) == fine
+
+    frame = b"\xff\xfb\x90\x64" + b"\x00" * 413
+    file = tmp_path / "Bajm - Małpa i ja.mp3"
+    file.write_bytes(frame * 20)
+    tags = EasyID3()
+    tags["artist"], tags["title"] = "Bajm", misread("Małpa i ja")
+    tags.save(file)
+    assert read_file_metadata(file)["title"] == "Małpa i ja"

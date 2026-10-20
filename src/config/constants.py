@@ -404,6 +404,10 @@ SPELLCHECK_CACHE_FILE = "data/spellcheck_cache.json"
 # "Split joined artist names" stops proposing them. Relative to the project
 # root; delete it (or a line in it) to be asked again.
 ARTIST_SPLIT_IGNORE_FILE = "data/artist_split_ignore.json"
+# Words joining two artists ("Ірина Білик і Скрябін", "Hasiok i Maciej
+# Maleńczuk"). So many band names use them ("Tymon i Trupy", "Of Monsters and
+# Men") that a split on one is proposed only when a part is already an artist.
+ARTIST_JOINING_WORDS = ("and", "und", "et", "i", "y", "і", "и", "та")
 
 # ==================== System Constants ====================
 

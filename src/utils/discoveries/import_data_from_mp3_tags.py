@@ -3,20 +3,21 @@ import re
 from pathlib import Path
 
 from utils.common.debug import mlog
-from utils.common.normalizer import is_site_name, strip_site_names
+from utils.common.normalizer import fix_cp1250_mojibake, is_site_name, strip_site_names
 from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
 from utils.discoveries.import_engine import run_import_batch
 from rich import print
 
 
 def _clean_fields(metadata: dict) -> dict:
-    """Artist, title and album as characters ("Major Lazer &amp; DJ Snake")
+    """Artist, title and album as characters ("Major Lazer &amp; DJ Snake",
+    Polish tags read as Latin-1: "Ma³pa" -> "Małpa")
     and without download-site names ("y2meta.com", "(greenmp3.com)"); a
     field that was nothing but one is empty, so the file name is read."""
     for key in ("artist_name", "title", "album"):
         value = metadata.get(key)
         if isinstance(value, str):
-            value = html.unescape(value)
+            value = fix_cp1250_mojibake(html.unescape(value))
             metadata[key] = None if is_site_name(value) else strip_site_names(value)
     return metadata
 

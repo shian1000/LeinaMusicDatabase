@@ -51,7 +51,8 @@ whether the dead link and the phone's replacement play, runs its own matcher,
 and the owner picks: the phone's video, its own, a pasted link, "N/A", keep the
 current link, or later. The result reaches the phone the usual way, in the next
 downloaded `music.db`. Format 1, `dead_youtube_links` and (since 2026-10-14)
-`field_corrections` and `found_youtube_links` are understood — see
-`field-corrections-for-musicdatabaseapp.md` and `found-links-for-musicdatabaseapp.md`; a file
+`field_corrections` and `found_youtube_links`, and (since 2026-10-18) `song_requests`, are
+understood — see `field-corrections-for-musicdatabaseapp.md`,
+`found-links-for-musicdatabaseapp.md` and `song-requests-for-musicdatabaseapp.md`; a file
 with another `format` or an unknown table is kept unprocessed for a later version
 (Android's own `android_metadata` doesn't count as one).

@@ -96,6 +96,26 @@ def test_candidates_reuse_existing_parts_and_preselect_when_all_exist(session):
     assert not candidates[unknown.name].preselected
 
 
+def test_joining_words_split_only_when_a_part_already_exists(session):
+    _artist_with_song(session, "Скрябін", "Старі фотографії")
+    _artist_with_song(session, "Louis Jordan", "Solo")
+    _artist_with_song(session, "Me", "Solo 2")
+    _artist_with_song(session, "Łona", "Solo 3")
+    _artist_with_song(session, "Webber", "Solo 4")
+    one_known = _artist_with_song(session, "Ірина Білик і Скрябін", "Мовчати")
+    all_known = _artist_with_song(session, "Łona i Webber", "Duet")
+    _artist_with_song(session, "Tymon i Trupy")  # no part known - a band
+    _artist_with_song(session, "Louis Jordan and His Tympany Five")
+    _artist_with_song(session, "Between the Buried and Me")
+
+    candidates = {c.artist.name: c for c in split.find_split_candidates(session)}
+    assert set(candidates) == {one_known.name, all_known.name}
+    assert candidates[one_known.name].proposal.main == ["Ірина Білик", "Скрябін"]
+    assert set(candidates[one_known.name].existing) == {"Скрябін"}
+    assert not candidates[one_known.name].preselected
+    assert candidates[all_known.name].preselected
+
+
 def test_ignore_list_hides_names_case_insensitively(session, ignore_file):
     _artist_with_song(session, "Simon & Garfunkel")
     split.add_to_split_ignore_list(["simon & GARFUNKEL"])

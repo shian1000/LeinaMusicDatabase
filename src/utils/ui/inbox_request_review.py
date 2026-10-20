@@ -8,7 +8,9 @@ through the same automatic pass the background timer runs
 reviews, the slow YouTube checks run first for every report (reusing the
 pass's check while it's fresh) and the questions come after, in one go: dead
 links first, then links found for songs without one (inbox_found_links.py),
-then field corrections (inbox_field_corrections.py). Anything
+then field corrections (inbox_field_corrections.py), then songs Leina Radio
+asked to have added (inbox_song_requests.py; the approved ones go through the
+import together at the end of that part). Anything
 skipped stays in review/ for next time. The screen also lists what the
 automatic pass changed."""
 
@@ -35,11 +37,14 @@ from utils.database.inbox_field_corrections import (
     check_correction_videos,
     coerce_field_value,
     collect_field_correction_cases,
+    credit_target_song,
     latin_form_to_check,
+    rename_looks_like_other_artist,
     replaced_video,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
+from utils.database.inbox_song_requests import collect_song_request_cases, mark_song_added, reject_song_request
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
 from utils.database.latin_names import LATIN_COLUMNS, name_of
@@ -325,6 +330,9 @@ def _show_correction(session, case, position: str) -> None:
         print(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
     if case.is_artist:
         print("    [dim]Only this song moves to that artist - its current artist is not renamed.[/dim]")
+    elif rename_looks_like_other_artist(case, case.new_value) and credit_target_song(case) is not None:
+        print("    [yellow]The new name doesn't look like a spelling fix - maybe only this song is by another "
+              "artist.[/yellow]")
     if case.is_video:
         print("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
               "until the database's value changes.[/dim]")
@@ -350,13 +358,13 @@ def _value_notes(session, case, value) -> list:
     return notes
 
 
-def _artist_target_choices(session, case, name) -> list:
+def _artist_target_choices(session, case, name, prefix: str = "") -> list:
     """The answers crediting the song to an artist called `name`."""
     choices = [questionary.Choice(
-        f'Credit the song to "{twin.name}" (#{twin.id}, {count_artist_songs(session, twin.id)} song(s))',
+        f'{prefix}Credit the song to "{twin.name}" (#{twin.id}, {count_artist_songs(session, twin.id)} song(s))',
         (MOVE_TO_ARTIST, twin)) for twin in artist_choices(session, case, name)]
     also = " (another artist of that name)" if choices else ""
-    choices.append(questionary.Choice(f'Credit it to a new artist "{name}"{also}', (NEW_ARTIST, name)))
+    choices.append(questionary.Choice(f'{prefix}Credit it to a new artist "{name}"{also}', (NEW_ARTIST, name)))
     return choices
 
 
@@ -370,8 +378,16 @@ def _correction_choices(session, case) -> list:
             questionary.Choice(_STOP, _STOP),
         ]
     choices = []
+    # An artists.name correction may really mean "this song is another artist's"
+    credit = [] if case.error or credit_target_song(case) is None else \
+        _artist_target_choices(session, case, case.new_value, prefix="Only this song: ")
+    other_artist = rename_looks_like_other_artist(case, case.new_value)
+    if other_artist:
+        choices += credit
     if not case.error:
-        choices.append(questionary.Choice(f"Save the correction ({_plain(case.new_value)})", (ACCEPT, None)))
+        choices.append(questionary.Choice(
+            f'Rename the artist for all its songs ({_plain(case.new_value)})' if credit
+            else f"Save the correction ({_plain(case.new_value)})", (ACCEPT, None)))
         album = song_album_to_rename(case)
         if album is not None and case.new_value is not None:
             choices.append(questionary.Choice(
@@ -380,6 +396,8 @@ def _correction_choices(session, case) -> list:
         for twin in artist_twins(session, case, case.new_value):
             choices.append(questionary.Choice(
                 f'Merge this artist into "{twin.name}" (#{twin.id}, which stays)', (MERGE_ARTIST, twin)))
+    if not other_artist:
+        choices += credit
     choices += [
         questionary.Choice("Edit the value before saving", EDIT),
         questionary.Choice(f"Keep the current value ({_plain(case.current)})", (REJECT, None)),
@@ -436,7 +454,8 @@ def _credit_to_artist(session, case, decision, value) -> None:
     """A songs.artist_id answer, with the questions around it: what the old
     artist becomes when the new one is already on the song, and what to do
     with an old artist left without songs (as in the song editor)."""
-    song, old = case.row, case.row.artist
+    song = credit_target_song(case)
+    old = song.artist
     keep_old_as = None
     if decision == MOVE_TO_ARTIST and additional_artist_role(song, value):
         keep_old_as = ask_old_artist_role(song, value)
@@ -492,6 +511,111 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         apply_field_correction(session, case, decision, value, old_video_wrong=old_video_wrong)
         submit_global_database_session()
     return cases, False
+
+
+# ==================== songs to add ====================
+
+_ADD = "add"
+_CORRECT = "correct"
+_REJECT_SONG = "reject"
+
+
+def _song_label(artist, title) -> str:
+    return f"{artist or '(no artist)'} - {title}"
+
+
+def _show_song_request(case, position: str) -> None:
+    report = case.latest
+    print(f"\n{position} [yellow]{escape(_song_label(report.artist, report.title))}[/yellow]")
+    other = sorted({_song_label(r.artist, r.title) for r in case.reports} - {_song_label(report.artist, report.title)})
+    if other:
+        print(f"    [dim]Also asked for as {escape(', '.join(other))}[/dim]")
+    print(f"    From:         {escape(', '.join(case.sources))}")
+    album, year = case.metadata()["album"], case.metadata()["year"]
+    if album or year:
+        print(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")
+    for video_id in case.youtube_video_ids:
+        print(f"    YouTube:      {_url(video_id)}")
+    for track_id in case.spotify_track_ids:
+        print(f"    Spotify:      https://open.spotify.com/track/{track_id}")
+    files = sorted({r.file_name for r in case.reports})
+    print(f"    [dim]Asked {escape(report.requested_at or '?')}, in {', '.join(files)}[/dim]")
+    _show_auto_note(case)
+
+
+def _ask_song_request(case):
+    """(_ADD, artist, title), _REJECT_SONG, _SKIP or _STOP."""
+    report = case.latest
+    choices = [
+        *([questionary.Choice(f"Add it to the database ({_song_label(report.artist, report.title)})", _ADD)]
+          if report.artist else []),
+        questionary.Choice("Correct the artist / title, then add it", _CORRECT),
+        questionary.Choice("Reject - Leina Radio won't ask for it again", _REJECT_SONG),
+        questionary.Choice(_SKIP, _SKIP),
+        questionary.Choice(_STOP, _STOP),
+    ]
+    while True:
+        answer = questionary.select("What should the database do?", choices=choices).ask()
+        if answer is None:
+            return _STOP
+        if answer == _ADD:
+            return _ADD, report.artist, report.title
+        if answer != _CORRECT:
+            return answer
+        artist = (questionary.text("Artist:", default=report.artist or "").ask() or "").strip()
+        title = (questionary.text("Title:", default=report.title or "").ask() or "").strip()
+        if artist and title:
+            return _ADD, artist, title
+        print("[red]Both the artist and the title are needed.[/red]")
+
+
+def _add_requested_songs(approved: list) -> None:
+    """The approved songs through the import, in one batch (its questions
+    about similar artists / songs come at the end, as for any import)."""
+    if not approved:
+        return
+    from utils.discoveries.import_engine import run_import_batch
+
+    print(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
+    run_import_batch([case.metadata(artist, title) for case, artist, title in approved])
+    submit_global_database_session()
+    for case, artist, title in approved:
+        mark_song_added(case, artist, title)
+
+
+def _review_song_requests(session, requests) -> tuple[list, bool]:
+    """Returns (cases, stopped)."""
+    cases = collect_song_request_cases(session, requests)
+    settled = [c for c in cases if not c.pending]
+    open_cases = [c for c in cases if c.pending]
+    if settled:
+        print(f"\n{len(settled)} song(s) Leina Radio asked for need no answer:")
+        for case in settled:
+            report = case.latest
+            also = (f" (#{case.existing.id} {escape(song_artist_label(case.existing))} - {escape(case.existing.title)})"
+                    if case.existing is not None else "")
+            print(f"    {escape(_song_label(report.artist, report.title))}: {case.status}{also}")
+    if open_cases:
+        print(f"\n{len(open_cases)} song(s) Leina Radio played that aren't in the database:")
+    approved = []
+    stopped = False
+    for i, case in enumerate(open_cases, 1):
+        _show_song_request(case, f"[{i}/{len(open_cases)}]")
+        answer = _ask_song_request(case)
+        if answer == _STOP:
+            stopped = True
+            break
+        if answer == _SKIP:
+            continue
+        if answer == _REJECT_SONG:
+            reject_song_request(session, case)
+            submit_global_database_session()
+            continue
+        _, artist, title = answer
+        approved.append((case, artist, title))
+    # What was approved before a stop is still added
+    _add_requested_songs(approved)
+    return cases, stopped
 
 
 def show_auto_changes(entries: list[dict]) -> None:
@@ -593,7 +717,11 @@ def resolve_new_requests() -> None:
         field_cases, stopped = _review_field_corrections(session, requests)
     else:
         field_cases = collect_field_correction_cases(session, requests)
-    cases = cases + found_cases + field_cases
+    if not stopped:
+        song_cases, stopped = _review_song_requests(session, requests)
+    else:
+        song_cases = collect_song_request_cases(session, requests)
+    cases = cases + found_cases + field_cases + song_cases
 
     moved, left = finish_request_files(requests, cases)
     if moved:

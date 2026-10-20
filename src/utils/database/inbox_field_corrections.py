@@ -58,6 +58,12 @@ keeps its other songs; one left with none is the review's question. Taken
 back, new_value is the old artist's name: ALREADY_SET as soon as the song's
 artist is called that.
 
+An artists.name correction (a rename of the row, all its songs) whose new
+name doesn't resemble the old one ("Paramore" -> "David Byrne") is more
+likely meant as "this song is another artist's": the review then offers
+crediting only the correction's song to that artist first
+(credit_target_song()), and the automatic pass never saves it.
+
 Taking a correction back: the phone sends a newer report with new_value ==
 old_value. It's ALREADY_SET, and that is recorded in decisions.json as of the
 newest report, so an older report of the field waiting in another file (in
@@ -71,6 +77,7 @@ from datetime import datetime
 from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG, SONG_KINDS
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
+from utils.common.text_utils import title_resembles
 from utils.database.albums import album_key, album_twin, rename_album
 from utils.database.artist_reassignment import artists_named, set_primary_artist
 from utils.database.datatables import Album, Artist, Song
@@ -466,20 +473,45 @@ def artist_twins(session, case: FieldCorrectionCase, name) -> list[Artist]:
             if normalize(a.name or "") == wanted]
 
 
+def credit_target_song(case: FieldCorrectionCase) -> Song | None:
+    """The song a MOVE_TO_ARTIST / NEW_ARTIST answer credits to another
+    artist: a songs.artist_id correction's row, or for an artists.name
+    correction the song it was made from, when this artist is that song's
+    primary one (the phone may send a rename where only the song was meant).
+    None when the case can't be answered that way."""
+    if case.is_artist:
+        return case.row
+    if (case.table_name, case.column_name) == ("artists", "name") and case.row is not None \
+            and case.song is not None and case.song.artist_id == case.row.id:
+        return case.song
+    return None
+
+
+def rename_looks_like_other_artist(case: FieldCorrectionCase, name) -> bool:
+    """An artists.name correction to a name that doesn't resemble the
+    current one - not a spelling fix but, most likely, the song being
+    another artist's."""
+    if (case.table_name, case.column_name) != ("artists", "name") or case.row is None or not name:
+        return False
+    return not title_resembles(case.row.name or "", name, allow_subtitle=False)
+
+
 def artist_choices(session, case: FieldCorrectionCase, name) -> list[Artist]:
-    """For a songs.artist_id correction: the existing artists called `name`
-    the song could be credited to, oldest first. None of them: a new artist
-    would be made."""
-    if not case.is_artist or case.row is None or not name:
+    """For crediting the song to an artist called `name` (credit_target_song()):
+    the existing artists of that name, oldest first. None of them: a new
+    artist would be made."""
+    song = credit_target_song(case)
+    if song is None or not name:
         return []
-    return artists_named(session, name, exclude=case.row.artist)
+    return artists_named(session, name, exclude=song.artist)
 
 
 def artist_left_empty(session, case: FieldCorrectionCase) -> bool:
     """Moving the song away would leave its artist without songs."""
-    if not case.is_artist or case.row is None or case.row.artist is None:
+    song = credit_target_song(case)
+    if song is None or song.artist is None:
         return False
-    return count_artist_songs(session, case.row.artist_id) <= 1
+    return count_artist_songs(session, song.artist_id) <= 1
 
 
 def album_title_twin(session, case: FieldCorrectionCase, title) -> Album | None:
@@ -533,7 +565,9 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
     phone's) or ACCEPT (the one artist of the phone's name, a new one when
     there is none); `keep_old_as` keeps the old artist on the song as an
     additional one (set_primary_artist()). The old artist is left as it is,
-    even with no songs."""
+    even with no songs. An artists.name correction may be answered with
+    MOVE_TO_ARTIST / NEW_ARTIST too (credit_target_song()): only its song
+    moves, the artist isn't renamed."""
     if case.is_artist and decision in (ACCEPT, NEW_ARTIST, MOVE_TO_ARTIST):
         if decision == ACCEPT and case.error:
             raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
@@ -550,7 +584,14 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         elif not isinstance(value, Artist):
             raise ValueError("MOVE_TO_ARTIST needs the Artist to credit the song to")
     elif decision in (MOVE_TO_ARTIST, NEW_ARTIST):
-        raise ValueError(f"{decision!r} is only for the song's artist")
+        if credit_target_song(case) is None:
+            raise ValueError(f"{decision!r} is only for the song's artist")
+        if decision == NEW_ARTIST:
+            value, error = coerce_field_value("songs", "artist_id", case.new_value if value is None else value)
+            if error:
+                raise ValueError(error)
+        elif not isinstance(value, Artist):
+            raise ValueError("MOVE_TO_ARTIST needs the Artist to credit the song to")
     elif case.is_artist and decision != REJECT:
         raise ValueError("The song's artist is answered with MOVE_TO_ARTIST or NEW_ARTIST")
     elif decision == ACCEPT:
@@ -577,7 +618,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
             session.flush()
         else:
             target = value
-        set_primary_artist(session, case.row, target, keep_old_as)
+        set_primary_artist(session, credit_target_song(case), target, keep_old_as)
         value = target.id
     elif decision == MERGE_ARTIST:
         from utils.database.database_management import merge_artists_in_db

@@ -15,6 +15,7 @@ from pathlib import Path
 from config.constants import (
     ADDITIONAL_ARTIST_ROLE_FEAT,
     ADDITIONAL_ARTIST_ROLE_MAIN,
+    ARTIST_JOINING_WORDS,
     ARTIST_SPLIT_IGNORE_FILE,
 )
 from utils.common.normalizer import normalize
@@ -38,6 +39,11 @@ _CONFIDENT_SEPARATOR = re.compile(r"\s+x\s+")
 # The uppercase " X " left out above - accepted only when every part already
 # exists as an artist ("Coldplay X BTS" yes, "Final Fantasy X OST" no).
 _UPPERCASE_X_SEPARATOR = re.compile(r"\s+X\s+")
+# The "and"/"i" left out above - accepted only when some part already exists
+# as an artist (see ARTIST_JOINING_WORDS), and never pre-selected unless all do.
+_JOINING_WORD_SEPARATOR = re.compile(
+    r"\s+(?:" + "|".join(map(re.escape, ARTIST_JOINING_WORDS)) + r")\s+", re.IGNORECASE
+)
 # "Group (A, B, C)" - the bracket lists the lineup ("Męskie Granie Orkiestra
 # 2026 (Igor Herbut, Zalia, Vito Bambino)", "Inpatient (Ren x Chris Webby)").
 _LINEUP_BRACKET = re.compile(r"^(?P<group>[^()]+?)\s*\((?P<lineup>[^()]+)\)\s*$")
@@ -169,19 +175,28 @@ class SplitCandidate:
         return self.proposal.confident or len(self.existing) == len(self.proposal.names)
 
 
-def _propose_uppercase_x_split(artist: Artist, by_name: dict[str, Artist]) -> SplitProposal | None:
-    """A " X "-joined name, as a split proposal only when every part is
-    already a different artist in the DB - see _UPPERCASE_X_SEPARATOR."""
-    if not _UPPERCASE_X_SEPARATOR.search(artist.name):
+def _propose_split_on_existing_parts(
+    artist: Artist, by_name: dict[str, Artist], separator: re.Pattern, require_all: bool
+) -> SplitProposal | None:
+    """A name joined by `separator`, as a split proposal only when its parts
+    are already different artists in the DB - every part (`require_all`) or at
+    least one. See _UPPERCASE_X_SEPARATOR / _JOINING_WORD_SEPARATOR."""
+    if not separator.search(artist.name):
         return None
-    proposal = propose_artist_split(_UPPERCASE_X_SEPARATOR.sub(" x ", artist.name))
+    proposal = propose_artist_split(separator.sub(" x ", artist.name))
     if proposal is None:
         return None
-    for name in proposal.names:
-        match = by_name.get(normalize(name))
-        if match is None or match.id == artist.id:
-            return None
+    # "Tom Petty and the Heartbreakers", "Louis Jordan and His Tympany Five" -
+    # a band name; "Between the Buried and Me" - "Me" isn't the artist "Me"
+    if any(n.lower().startswith(("the ", "his ", "her ")) or len(n) <= 2 for n in proposal.names):
+        return None
+    found = [by_name.get(normalize(n)) for n in proposal.names]
+    if any(match is not None and match.id == artist.id for match in found):
+        return None
+    if not any(found) or (require_all and not all(found)):
+        return None
     proposal.original = artist.name
+    proposal.confident = False  # " x " was ours; the existing parts decide
     return proposal
 
 
@@ -196,7 +211,11 @@ def find_split_candidates(session, artists: list[Artist] | None = None) -> list[
     for artist in pool:
         if normalize(artist.name) in ignored:
             continue
-        proposal = propose_artist_split(artist.name) or _propose_uppercase_x_split(artist, by_name)
+        proposal = (
+            propose_artist_split(artist.name)
+            or _propose_split_on_existing_parts(artist, by_name, _UPPERCASE_X_SEPARATOR, require_all=True)
+            or _propose_split_on_existing_parts(artist, by_name, _JOINING_WORD_SEPARATOR, require_all=False)
+        )
         if proposal is None:
             continue
         song_count = len(artist.songs) + len(artist.additional_song_links)

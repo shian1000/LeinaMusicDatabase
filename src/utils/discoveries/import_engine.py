@@ -394,16 +394,23 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
 _TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
 
 
+# A release year left at the end of a file's title ("... [Full Length] 2006")
+_TRAILING_YEAR = re.compile(r"\s+(?:19|20)\d{2}\s*$")
+
+
 def _title_core(title: str, drop_feat: bool = True) -> str:
     """A title without brackets, trailing junk ("Official Video", "HD"), a
-    trailing "feat. X" (unless not `drop_feat`) or a leading track number
-    ("T03: "), normalized: "Pay Your Respect (Official Lyric Video)" -> "pay
-    your respect". Words standing for "&" are dropped too, since normalize()
-    drops the "&" itself."""
+    trailing "feat. X" (unless not `drop_feat`), a trailing year ("... 2006";
+    "1979" alone stays) or a leading track number ("T03: "), normalized:
+    "Pay Your Respect (Official Lyric Video)" -> "pay your respect". Words
+    standing for "&" are dropped too, since normalize() drops the "&" itself.
+    Both sides lose the year, so "Party Like It's 1999" still meets itself."""
     title = remove_brackets(title or "")
     if drop_feat:
         title = strip_trailing_feat(title)
-    core = normalize(strip_track_number_prefix(strip_trailing_junk_suffix(title)))
+    title = strip_trailing_junk_suffix(title)
+    title = _TRAILING_YEAR.sub("", title) or title
+    core = normalize(strip_track_number_prefix(title))
     return " ".join(w for w in core.split() if w not in TITLE_AMPERSAND_WORDS) or core
 
 

@@ -90,7 +90,9 @@ role          NOT NULL, 'main' | 'feat'
   Splitting is always a user decision in one batch review — "&"/"," can't tell "Sw@da & Maxim"
   from "Simon & Garfunkel". The " x " separator is lowercase only, because an uppercase X is
   usually part of a name ("Final Fantasy X OST"). An uppercase " X " splits only when every part
-  is already an artist in the DB ("Coldplay X BTS"). "Group (A, B)" is a group plus its lineup
+  is already an artist in the DB ("Coldplay X BTS"). Joining words ("and", "i", "і", "и", "та", "und", "et", "y",
+  `ARTIST_JOINING_WORDS`) split only when at least one part is already an artist ("Ірина Білик і
+  Скрябін"), never with a "the/his/her ..." or two-letter part, and are ticked only when every part is. "Group (A, B)" is a group plus its lineup
   ("Męskie Granie Orkiestra 2026 (Igor Herbut, Zalia, Vito Bambino)") and is proposed as all
   main, never pre-selected, since members are sometimes co-performers and sometimes guests. A
   split that would cut through a bracket ("X (A" + "B)") is never proposed. Earlier imports

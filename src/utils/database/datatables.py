@@ -175,6 +175,21 @@ BEGIN
 END
 """))
 
+# --------------------
+# Songs Leina Radio asked to have added that the owner turned down (migration
+# 0015), read by the phone client too - see utils/database/inbox_song_requests.py
+# --------------------
+class RejectedSongRequest(Base):
+    __tablename__ = "rejected_song_requests"
+
+    id = Column(Integer, primary_key=True)
+    artist = Column(String)  # as requested; NULL = the request had none
+    title = Column(String, nullable=False)
+    youtube_video_id = Column(String)
+    spotify_track_id = Column(String)
+    rejected_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+
 song_categories = [
     "title",
     "artist name",

@@ -220,6 +220,24 @@ def _drop_junk(text: str) -> str:
     return _EDGE_SEPARATORS_RE.sub("", re.sub(r"\s{2,}", " ", text))
 
 
+# Polish (Windows-1250) tags read as Latin-1: "Ma³pa" for "Małpa". These
+# never stand in real text - "³" / "¹" (ł / ą), control characters 0x80-0x9F
+# (ś, ź, Ś, Ź, ...), "¿" inside a word (ż) - while "ñ", "ê", "ó" do, so only
+# one of them triggers re-reading the whole text as Windows-1250.
+_CP1250_MOJIBAKE_RE = re.compile(r"[³¹\x80-\x9f]|(?<=\w)¿")
+
+
+def fix_cp1250_mojibake(text: str) -> str:
+    """`text` re-read as Windows-1250 when it's Polish mis-read as Latin-1
+    ("Ma³pa i ja" -> "Małpa i ja"); unchanged otherwise."""
+    if not text or not _CP1250_MOJIBAKE_RE.search(text):
+        return text
+    try:
+        return text.encode("latin-1").decode("cp1250")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
 def strip_site_names(text: str) -> str:
     """`text` without download-site names ("y2meta.com - David Dean
     Burkhart Playlist" -> "David Dean Burkhart Playlist", "Song (greenmp3.com)"

@@ -35,8 +35,9 @@ turned it down or chose "N/A"). Choosing a video takes it off.
 One request file is one SQLite file with a one-row `request` table and one
 table per request type (app ADR 0005; format described in the app's
 docs/handoffs/musicdatabase-outbox.md). Known types: dead_youtube_links,
-field_corrections (handled in inbox_field_corrections.py) and
-found_youtube_links (inbox_found_links.py). A file with a
+field_corrections (handled in inbox_field_corrections.py),
+found_youtube_links (inbox_found_links.py) and song_requests
+(inbox_song_requests.py). A file with a
 table this version doesn't know stays in new/, so a later version can still
 handle that part.
 
@@ -96,7 +97,8 @@ _SENDER_RE = re.compile(r"^(?P<user>[a-z0-9][a-z0-9_-]{1,31})_\d{4}-\d{2}-\d{2}_
 DEAD_LINKS_TABLE = "dead_youtube_links"
 FIELD_CORRECTIONS_TABLE = "field_corrections"
 FOUND_LINKS_TABLE = "found_youtube_links"
-KNOWN_TABLES = {"request", DEAD_LINKS_TABLE, FIELD_CORRECTIONS_TABLE, FOUND_LINKS_TABLE}
+SONG_REQUESTS_TABLE = "song_requests"
+KNOWN_TABLES = {"request", DEAD_LINKS_TABLE, FIELD_CORRECTIONS_TABLE, FOUND_LINKS_TABLE, SONG_REQUESTS_TABLE}
 # Android's SQLiteDatabase adds this to every file it creates (just the locale) -
 # not a request, so it never keeps a file in the inbox
 PLATFORM_TABLES = {"android_metadata"}
@@ -160,6 +162,23 @@ class FoundLinkReport:
 
 
 @dataclass
+class SongRequestReport:
+    """A song Leina Radio had that music.db didn't (app handoff
+    musicdatabase-song-requests.md): a YouTube video, a Spotify track or a
+    file on the phone, by its title and artist as the phone showed them."""
+    file_name: str
+    title: str
+    artist: str | None  # None = the phone knew no artist
+    album: str | None
+    year: int | None
+    duration_s: int | None
+    youtube_video_id: str | None
+    spotify_track_id: str | None
+    source: str  # "youtube", "spotify" or "phone_file"
+    requested_at: str
+
+
+@dataclass
 class RequestFile:
     path: Path
     format: int | None = None
@@ -169,6 +188,7 @@ class RequestFile:
     dead_links: list[DeadLinkReport] = field(default_factory=list)
     field_corrections: list[FieldCorrection] = field(default_factory=list)
     found_links: list[FoundLinkReport] = field(default_factory=list)
+    song_requests: list[SongRequestReport] = field(default_factory=list)
     unknown_tables: list[str] = field(default_factory=list)
     error: str | None = None  # not a readable request file
 
@@ -362,6 +382,18 @@ def read_request_file(path: Path) -> RequestFile:
             select = ", ".join(c if c in have else "NULL" for c in wanted)
             for row in conn.execute(f"SELECT {select} FROM {FOUND_LINKS_TABLE}"):
                 request.found_links.append(FoundLinkReport(path.name, *row))
+        if SONG_REQUESTS_TABLE in tables:
+            wanted = ["title", "artist", "album", "year", "duration_s", "youtube_video_id",
+                      "spotify_track_id", "source", "requested_at"]
+            required = ["title", "source", "requested_at"]
+            have = _columns(conn, SONG_REQUESTS_TABLE)
+            missing = [c for c in required if c not in have]
+            if missing:
+                request.error = f"{SONG_REQUESTS_TABLE} lacks {', '.join(missing)}"
+                return request
+            select = ", ".join(c if c in have else "NULL" for c in wanted)
+            for row in conn.execute(f"SELECT {select} FROM {SONG_REQUESTS_TABLE}"):
+                request.song_requests.append(SongRequestReport(path.name, *row))
     except sqlite3.Error as exc:
         request.error = f"unreadable: {exc}"
     finally:
@@ -779,7 +811,7 @@ def finish_request_files(requests: list[RequestFile], cases: list,
         done = (request.supported and not request.unknown_tables
                 and not any(id(report) in open_reports
                             for report in request.dead_links + request.field_corrections
-                            + request.found_links))
+                            + request.found_links + request.song_requests))
         if done:
             _move(request.path, PROCESSED)
             moved.append(request)

@@ -25,6 +25,9 @@ What it does with the files in new/:
   the old artist keeps other songs (no new artist, no emptied one); a YouTube link correction (songs.youtube_video_id /
   music_video_youtube_id) also needs its video to play here and not to be
   one found bad before for the song ("N/A" and empty need no check);
+- a song Leina Radio asked to have added is never added here (the owner
+  approves each one); only one already in the database or rejected before is
+  settled;
 - every case left over gets an auto_note (why), and its YouTube check is
   kept in auto_checks.json, so the review shows both without searching
   YouTube again;
@@ -50,6 +53,7 @@ from utils.database.inbox_field_corrections import (
     check_correction_videos,
     collect_field_correction_cases,
     latin_form_to_check,
+    rename_looks_like_other_artist,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import (
@@ -72,6 +76,7 @@ from utils.database.inbox_requests import (
     reject_request_file,
     save_case_checks,
 )
+from utils.database.inbox_song_requests import collect_song_request_cases
 from utils.database.song_artists import additional_artist_role, song_artist_label
 
 AUTO = "auto"
@@ -149,6 +154,8 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
             return "the song's artist would be left without songs"
     if artist_twins(session, case, case.new_value):
         return "another artist already has that name (a merge?)"
+    if rename_looks_like_other_artist(case, case.new_value):
+        return "the new name doesn't look like a spelling fix (maybe only the song is another artist's)"
     if album_title_twin(session, case, case.new_value) is not None:
         return "the artist already has an album of that title (saving merges the two)"
     if song_album_to_rename(case) is not None:
@@ -252,7 +259,12 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
             "files": sorted({r.file_name for r in case.reports}),
         })
 
-    cases = dead_cases + found_cases + field_cases
+    song_cases = collect_song_request_cases(session, requests)
+    for case in song_cases:
+        if case.pending:
+            case.auto_note = "adding a song waits for your approval"
+
+    cases = dead_cases + found_cases + field_cases + song_cases
     left_cases = [c for c in cases if c.pending]
     result.to_review = len(left_cases)
     save_case_checks(left_cases)

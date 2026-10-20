@@ -305,6 +305,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   down without asking YouTube; a dead link's suggestion naming one is left out (shown dimmed in the
   review, still choosable) and our own search never offers one. Choosing a video, or keeping a link
   reported dead, takes it off the list. Delete a row (app closed) to give a video another chance.
+- **Songs to add** (`song_requests`, owner's request 2026-10-18; `inbox_song_requests.py`, app
+  handoff `musicdatabase-song-requests.md`, answer
+  [`docs/handoffs/song-requests-for-musicdatabaseapp.md`](../handoffs/song-requests-for-musicdatabaseapp.md)):
+  a song Leina Radio played that music.db doesn't have. Never added automatically: the automatic
+  pass only settles one already in the database (`LocalSongMatcher`, or its video is a song's
+  link) or rejected before, and leaves the rest for review - add it (as asked, or with the artist /
+  title corrected; the approved ones go through `run_import_batch()` together), skip, or reject.
+  A rejection is a row of music.db's `rejected_song_requests` (migration 0015), read by the phone
+  with the next copy for sharing, so it doesn't ask again; a later request matching one by artist +
+  title (normalized), YouTube video or Spotify track is settled without asking. Delete a row (app
+  closed) to let Leina Radio ask for that song again.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
