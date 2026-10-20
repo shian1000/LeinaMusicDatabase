@@ -484,6 +484,10 @@ class LocalSongMatcher:
             self._artists[name] = artist
         return self._artists[name]
 
+    def artist(self, name: str) -> Artist | None:
+        """The database artist a tag's artist name stands for, or None."""
+        return self._artist(name)
+
     def match(self, metadata: dict) -> Song | None:
         """The exact match, else the similar one - taken without asking, so
         without the guesses by title alone: a similar title could pick

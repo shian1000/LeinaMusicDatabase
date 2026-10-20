@@ -316,6 +316,13 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   with the next copy for sharing, so it doesn't ask again; a later request matching one by artist +
   title (normalized), YouTube video or Spotify track is settled without asking. Delete a row (app
   closed) to let Leina Radio ask for that song again.
+  A request carrying a YouTube channel as the artist and the whole video title as the title
+  ("familyboombox" / "Бумбокс - Твiй на 100%", Leina Radio's search results before
+  [`youtube-search-requests-for-musicdatabaseapp.md`](../handoffs/youtube-search-requests-for-musicdatabaseapp.md))
+  gets a suggested split (`suggested_artist_title()`): the title's part before " - " is an
+  artist in music.db and the channel is that artist (name / synonym / Latin form) or unknown;
+  another known artist's channel is left as asked. The review offers it first, and the "already
+  in the database" / "rejected before" checks use it too.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
@@ -435,7 +442,10 @@ permission is the trust — but everything is recorded (`utils/database/global_m
   `Settings.global_mood_changes_dir/pending/` (`--mood-changes`, `.../Database/MoodChanges`) and
   answers 202 `{"mood_id", "song_id", "action"}`. **It never writes `tag.db`**: the original is on
   the system disk and `main.py` may hold it open.
-- MusicDatabase applies the pending files in arrival order (`moods.apply_global_mood_changes()`):
+- MusicDatabase applies the pending files in arrival order, which is file-name order
+  (`moods.apply_global_mood_changes()`; `record_change()` makes `received_at`, the name's
+  prefix, strictly increasing, since the threaded server can get two changes in one millisecond
+  and the uuid after it is random):
   at startup (after `apply_song_id_changes()`), before every copy for the phones (startup and
   "Submit database for sharing"), and when the Moods menu shows global moods or the log. Song ids
   are followed through `song_id_changes` past what the server checked. Each change is appended to

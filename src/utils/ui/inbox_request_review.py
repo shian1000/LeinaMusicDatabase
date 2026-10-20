@@ -16,6 +16,7 @@ automatic pass changed."""
 
 import questionary
 from utils.ui.prompts import ask_yes_no
+from utils.ui.song_colors import song_tokens
 from rich import print
 from rich.markup import escape
 
@@ -516,6 +517,7 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
 # ==================== songs to add ====================
 
 _ADD = "add"
+_ADD_SUGGESTED = "add suggested"
 _CORRECT = "correct"
 _REJECT_SONG = "reject"
 
@@ -524,16 +526,25 @@ def _song_label(artist, title) -> str:
     return f"{artist or '(no artist)'} - {title}"
 
 
+def _colored_song_label(artist, title) -> str:
+    """_song_label() as rich markup, the artist and the title in song_colors'
+    colours - a name with " - " in it otherwise hides where one ends."""
+    return f"[bright_cyan]{escape(artist or '(no artist)')}[/bright_cyan] - [bright_yellow]{escape(title or '?')}[/bright_yellow]"
+
+
 def _show_song_request(case, position: str) -> None:
     report = case.latest
-    print(f"\n{position} [yellow]{escape(_song_label(report.artist, report.title))}[/yellow]")
-    other = sorted({_song_label(r.artist, r.title) for r in case.reports} - {_song_label(report.artist, report.title)})
+    print(f"\n{position} {_colored_song_label(report.artist, report.title)}")
+    other = sorted({(r.artist, r.title) for r in case.reports} - {(report.artist, report.title)},
+                   key=lambda pair: _song_label(*pair))
     if other:
-        print(f"    [dim]Also asked for as {escape(', '.join(other))}[/dim]")
+        print(f"    Also asked for as {', '.join(_colored_song_label(*pair) for pair in other)}")
     print(f"    From:         {escape(', '.join(case.sources))}")
     album, year = case.metadata()["album"], case.metadata()["year"]
     if album or year:
         print(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")
+    if case.suggested:
+        print(f"    Looks like:   {_colored_song_label(*case.suggested)}  [dim](the title starts with the artist)[/dim]")
     for video_id in case.youtube_video_ids:
         print(f"    YouTube:      {_url(video_id)}")
     for track_id in case.spotify_track_ids:
@@ -546,8 +557,12 @@ def _show_song_request(case, position: str) -> None:
 def _ask_song_request(case):
     """(_ADD, artist, title), _REJECT_SONG, _SKIP or _STOP."""
     report = case.latest
+    suggested = case.suggested
     choices = [
-        *([questionary.Choice(f"Add it to the database ({_song_label(report.artist, report.title)})", _ADD)]
+        *([questionary.Choice([("", "Add it as "), *song_tokens(*suggested)], _ADD_SUGGESTED)]
+          if suggested else []),
+        *([questionary.Choice([("", "Add it as asked (" if suggested else "Add it to the database ("),
+                               *song_tokens(report.artist, report.title), ("", ")")], _ADD)]
           if report.artist else []),
         questionary.Choice("Correct the artist / title, then add it", _CORRECT),
         questionary.Choice("Reject - Leina Radio won't ask for it again", _REJECT_SONG),
@@ -558,12 +573,15 @@ def _ask_song_request(case):
         answer = questionary.select("What should the database do?", choices=choices).ask()
         if answer is None:
             return _STOP
+        if answer == _ADD_SUGGESTED:
+            return _ADD, *suggested
         if answer == _ADD:
             return _ADD, report.artist, report.title
         if answer != _CORRECT:
             return answer
-        artist = (questionary.text("Artist:", default=report.artist or "").ask() or "").strip()
-        title = (questionary.text("Title:", default=report.title or "").ask() or "").strip()
+        default_artist, default_title = suggested or (report.artist, report.title)
+        artist = (questionary.text("Artist:", default=default_artist or "").ask() or "").strip()
+        title = (questionary.text("Title:", default=default_title or "").ask() or "").strip()
         if artist and title:
             return _ADD, artist, title
         print("[red]Both the artist and the title are needed.[/red]")

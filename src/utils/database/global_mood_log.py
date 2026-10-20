@@ -33,6 +33,7 @@ Standard-library only: the sharing server imports it.
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -52,13 +53,26 @@ RESULT_SONG_GONE = "song_gone"  # deleted from music.db before the change was ap
 
 _TMP_PREFIX = "."
 
+# received_at only ever grows within the process (the threaded server may get
+# two changes in one millisecond), so the file names keep the arrival order
+# instead of leaving it to the random uuid after them
+_received_lock = threading.Lock()
+_last_received_at = 0
+
+
+def _next_received_at() -> int:
+    global _last_received_at
+    with _received_lock:
+        _last_received_at = max(int(time.time() * 1000), _last_received_at + 1)
+        return _last_received_at
+
 
 def record_change(changes_dir, user: str, action: str, mood_id: int, mood_name: str,
                   song_id: int, requested_song_id: int, song_ids_checked_to: int) -> dict:
     """Store one change in pending/ for MusicDatabase to apply. Returns the record."""
     if action not in ACTIONS:
         raise ValueError(f"unknown action {action!r}")
-    received_at = int(time.time() * 1000)
+    received_at = _next_received_at()
     record = {"id": str(uuid.uuid4()), "received_at": received_at, "user": user, "action": action,
               "mood_id": mood_id, "mood_name": mood_name, "song_id": song_id,
               "requested_song_id": requested_song_id, "song_ids_checked_to": song_ids_checked_to}

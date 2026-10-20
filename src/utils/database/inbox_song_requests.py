@@ -19,8 +19,17 @@ every file. Settled without asking (the automatic pass too):
   a song's link;
 - it was rejected before (a rejected_song_requests row with the same artist +
   title, YouTube video or Spotify track).
+
+A request may carry a YouTube video's channel as the artist and the whole
+video title as the title ("familyboombox" / "Бумбокс - Твiй на 100%"; Leina
+Radio's YouTube search results did that). When the part of the title before
+" - " is an artist in the database and the request's artist is the same one
+(a synonym, as here) or none the database knows, the case suggests the split
+(`suggested`): the review offers it first, and the "already in the database"
+check uses it too.
 """
 
+import re
 from dataclasses import dataclass
 
 from utils.common.debug import mlog
@@ -44,6 +53,9 @@ REJECTED_BEFORE = "rejected before"
 ADD = "added"
 REJECT = "rejected"
 
+# What separates the artist from the title inside a video's title
+_TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
+
 SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a file on the phone"}
 
 
@@ -58,6 +70,7 @@ class SongRequestCase:
     status: str = OPEN
     existing: Song | None = None  # the song it already is, for ALREADY_IN_DATABASE
     auto_note: str | None = None  # why the automatic pass left it to the owner
+    suggested: tuple | None = None  # (artist, title) read out of the title, see the module docstring
 
     @property
     def pending(self) -> bool:
@@ -122,12 +135,34 @@ def _rejected_rows(session) -> tuple[set, set, set]:
     return keys, videos, tracks
 
 
+def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tuple | None:
+    """(artist, title) when `title` is "<artist> - <title>" of an artist in
+    the database and `artist` is the same artist or one it doesn't know (a
+    YouTube channel): "familyboombox" (Бумбокс's synonym) / "Бумбокс - Твiй на
+    100%" -> ("Бумбокс", "Твiй на 100%"). None otherwise - a known artist's
+    channel uploading another artist's song is left as asked."""
+    parts = _TITLE_ARTIST_SEPARATOR.split(title or "", maxsplit=1)
+    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+        return None
+    in_title = matcher.artist(parts[0].strip())
+    if in_title is None:
+        return None
+    asked = matcher.artist(artist) if artist else None
+    if asked is not None and asked.id != in_title.id:
+        return None
+    return in_title.name, parts[1].strip()
+
+
 def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
     for video_id in case.youtube_video_ids:
         song = session.query(Song).filter(Song.youtube_video_id == video_id).first()
         if song is not None:
             return song
     metadata = case.metadata()
+    if case.suggested:
+        song = matcher.match(case.metadata(*case.suggested))
+        if song is not None:
+            return song
     if not metadata["artist_name"]:
         return None
     return matcher.match(metadata)
@@ -152,7 +187,9 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
         matcher = LocalSongMatcher(session)
     rejected_keys, rejected_videos, rejected_tracks = _rejected_rows(session)
     for key, case in cases.items():
-        if (key in rejected_keys or set(case.youtube_video_ids) & rejected_videos
+        case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
+        if (key in rejected_keys or (case.suggested and song_key(*case.suggested) in rejected_keys)
+                or set(case.youtube_video_ids) & rejected_videos
                 or set(case.spotify_track_ids) & rejected_tracks):
             case.status = REJECTED_BEFORE
             continue

@@ -32,13 +32,19 @@ WHEN = "2026-10-18T09:00:00+02:00"
 
 
 class FakeMatcher:
-    """LocalSongMatcher by exact (artist, title)."""
+    """LocalSongMatcher by exact (artist, title); artists by name or synonym."""
 
-    def __init__(self, songs):
+    def __init__(self, songs, artists=()):
         self.songs = songs
+        self.artists = [*{s.artist.id: s.artist for s in songs}.values(), *artists]
+
+    def artist(self, name):
+        return next((a for a in self.artists
+                     if name in (a.name, *[n.strip() for n in (a.synonyms or "").split(",")])), None)
 
     def match(self, metadata):
-        return next((s for s in self.songs if s.artist.name == metadata["artist_name"]
+        artist = self.artist(metadata["artist_name"] or "")
+        return next((s for s in self.songs if artist is not None and s.artist.id == artist.id
                      and s.title == metadata["title"]), None)
 
 
@@ -54,10 +60,13 @@ def env(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     artist = Artist(id=10, name="Elise Trouw")
-    songs = [Song(id=1, title="Chromatic", artist=artist, youtube_video_id="chrom")]
-    session.add_all(songs)
+    boombox = Artist(id=20, name="Бумбокс", synonyms="familyboombox, BoomBox")
+    other = Artist(id=30, name="Okean Elzy")
+    songs = [Song(id=1, title="Chromatic", artist=artist, youtube_video_id="chrom"),
+             Song(id=2, title="Вахтёрам", artist=boombox)]
+    session.add_all([*songs, other])
     session.commit()
-    matcher = FakeMatcher(songs)
+    matcher = FakeMatcher(songs, [other])
     import utils.discoveries.import_engine as ie
     monkeypatch.setattr(ie, "LocalSongMatcher", lambda _session: matcher)
     return {"inbox": inbox, "session": session, "matcher": matcher}
@@ -125,6 +134,38 @@ def test_a_song_in_the_database_already_is_settled(env):
     assert len(moved) == 1 and not left
 
 
+@pytest.mark.parametrize("channel, expected", [
+    ("familyboombox", ("Бумбокс", "Твiй на 100%")),   # the artist's synonym
+    ("Some Uploads", ("Бумбокс", "Твiй на 100%")),    # a channel the database doesn't know
+    (None, ("Бумбокс", "Твiй на 100%")),
+    ("Okean Elzy", None),                              # another artist's channel: left as asked
+])
+def test_a_channel_and_video_title_suggest_the_artist_from_the_title(env, channel, expected):
+    _request(env["inbox"], "2026-10-19_17-50-39_001.db", [{"title": "Бумбокс - Твiй на 100%", "artist": channel}])
+
+    _, [case] = _cases(env)
+
+    assert case.pending
+    assert case.suggested == expected
+
+
+def test_a_title_naming_no_known_artist_suggests_nothing(env):
+    _request(env["inbox"], "2026-10-19_17-50-39_001.db", [{"title": "Nobody - Song", "artist": "familyboombox"}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested is None
+
+
+def test_the_suggested_split_finds_a_song_in_the_database(env):
+    _request(env["inbox"], "2026-10-19_17-50-39_001.db", [{"title": "Бумбокс - Вахтёрам", "artist": "familyboombox"}])
+
+    _, [case] = _cases(env)
+
+    assert case.status == sr.ALREADY_IN_DATABASE
+    assert case.existing.id == 2
+
+
 def test_rejecting_publishes_it_and_settles_later_requests(env):
     _request(env["inbox"], "2026-10-18_10-00-00_001.db",
              [{"title": "Unseen", "artist": "Elise Trouw", "youtube_video_id": "v1", "spotify_track_id": "sp1"}])
@@ -184,13 +225,14 @@ def test_the_automatic_pass_never_adds_a_song(env):
     _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Unseen", "artist": "Elise Trouw"}])
     _request(env["inbox"], "2026-10-18_10-00-01_002.db", [{"title": "Chromatic", "artist": "Elise Trouw"}])
 
+    songs_before = env["session"].query(Song).count()
     result = ia.auto_resolve(env["session"], pr.read_new_requests())
 
     assert not result.changes
     assert result.to_review == 1
     assert _names(env["inbox"], "review") == ["2026-10-18_10-00-00_001.db"]
     assert _names(env["inbox"], "processed") == ["2026-10-18_10-00-01_002.db"]
-    assert env["session"].query(Song).count() == 1
+    assert env["session"].query(Song).count() == songs_before
     [request] = pr.read_review_requests()
     [case] = sr.collect_song_request_cases(env["session"], [request], matcher=env["matcher"])
     pr.load_case_checks([case], 24)
