@@ -3,8 +3,9 @@ library folder into files.db - relative paths, audio files only, re-reading
 only new or changed files, removed files dropped and their ids never reused,
 unmatched files rematched only when the catalog changed, hand-set matches
 left alone - and files.db following merged/deleted songs through
-song_references. Temp-file SQLite for music.db and files.db (files.db from
-the real migrations/files/); tag reading and the song matcher are faked."""
+song_references. Temp-file SQLite for music.db, tag.db and files.db
+(files.db from the real migrations/files/); tag reading and the song matcher
+are faked."""
 
 import os
 import sqlite3
@@ -23,6 +24,7 @@ from utils.database import files_index as fi
 from utils.database import song_references as sr
 from utils.database import users
 from utils.database.datatables import Artist, Base, Song
+from utils.database.tag_db_manager import Base as TagBase
 from utils.discoveries.import_engine import LocalSongMatcher
 
 
@@ -233,7 +235,12 @@ def test_files_follow_merged_and_deleted_songs(env):
     session.delete(merged)
     session.delete(deleted)
     session.commit()
-    results = sr.apply_song_id_changes(force=True)
+    tag_engine = create_engine(f"sqlite:///{db.parent / 'tag.db'}")
+    TagBase.metadata.create_all(tag_engine)
+    with tag_engine.begin() as conn:
+        conn.exec_driver_sql((repo_root / "migrations/tag/0002_applied_song_changes.sql").read_text())
+    with sessionmaker(bind=tag_engine)() as tag_session:
+        results = sr.apply_song_id_changes(tag_session=tag_session, force=True)
 
     rows = _rows(db)
     assert results["files.db"] == 2

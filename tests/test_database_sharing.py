@@ -798,6 +798,25 @@ def playlist_server(serve, share_dir, tmp_path):
     return start, users_dir, tokens
 
 
+def _status_of_oversized_body(method, url, token, limit):
+    """The answer to a body of limit + 1 bytes, announced but never sent: the
+    server refuses it on the header alone and closes, so a client still
+    sending a real one could get a broken pipe instead of the 413."""
+    import http.client
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port)
+    try:
+        conn.putrequest(method, parts.path)
+        conn.putheader("Authorization", f"Bearer {token}")
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", str(limit + 1))
+        conn.endheaders()
+        return conn.getresponse().status
+    finally:
+        conn.close()
+
+
 def _call(method, url, token=None, payload=None, raw=None):
     data = raw if raw is not None else (None if payload is None else json.dumps(payload).encode())
     headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -1127,7 +1146,7 @@ def test_bad_or_unavailable_folder_requests(playlist_server, tmp_path):
     assert _call("PUT", f"{url}/k3x", token, raw=b"not json")[0] == 400
     assert _call("PUT", f"{url}/bad_uid", token, _folder_body())[0] == 400
     assert _call("PUT", f"{url}/{'x' * 65}", token, _folder_body())[0] == 400
-    assert _call("PUT", f"{url}/k3x", token, raw=b"[" + b" " * sharing_server.FOLDER_MAX_BODY_BYTES + b"]")[0] == 413
+    assert _status_of_oversized_body("PUT", f"{url}/k3x", token, sharing_server.FOLDER_MAX_BODY_BYTES) == 413
     assert _call("DELETE", f"{url}/k3x?deleted_at=5", token)[0] == 400
     assert _call("GET", f"{url}/k3x", token)[0] == 404
     assert _call("GET", f"{base}/users/bob/folders", tokens["bob"])[0] == 503  # no user.db
@@ -1212,7 +1231,7 @@ def test_bad_or_unavailable_saved_requests(playlist_server, tmp_path):
     assert _call("PUT", f"{url}/k3x", token, raw=b"not json")[0] == 400
     assert _call("PUT", f"{url}/bad_uid", token, _saved_song_body())[0] == 400
     assert _call("PUT", f"{url}/{'x' * 65}", token, _saved_song_body())[0] == 400
-    assert _call("PUT", f"{url}/k3x", token, raw=b"[" + b" " * sharing_server.SAVED_MAX_BODY_BYTES + b"]")[0] == 413
+    assert _status_of_oversized_body("PUT", f"{url}/k3x", token, sharing_server.SAVED_MAX_BODY_BYTES) == 413
     assert _call("DELETE", f"{url}/k3x?deleted_at=5", token)[0] == 400
     assert _call("GET", f"{url}/k3x", token)[0] == 404
     assert _call("GET", f"{base}/users/ola_k/saved-songs-x", token)[0] == 404
@@ -1275,7 +1294,7 @@ def test_bad_or_unavailable_listen_requests(playlist_server, tmp_path):
     assert _call("GET", url, token) == (200, {"revision": 0, "listens": [], "more": False})
     assert _call("POST", url, token, {"plays": []})[0] == 400
     assert _call("POST", url, token, raw=b"not json")[0] == 400
-    assert _call("POST", url, token, raw=b"[" + b" " * sharing_server.LISTEN_MAX_BODY_BYTES + b"]")[0] == 413
+    assert _status_of_oversized_body("POST", url, token, sharing_server.LISTEN_MAX_BODY_BYTES) == 413
     assert _call("GET", f"{url}?since=x", token)[0] == 400
     assert _call("GET", f"{url}?limit=0", token)[0] == 400
     assert _call("GET", f"{url}/a", token)[0] == 404

@@ -582,6 +582,9 @@ non-trivial work in that area.
 - `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~900 tests, ~1.5 minutes, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
+- `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
+  folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
+  with "unable to open database file". Give it temp-file databases; never undo the isolation.
 - Don't claim a check passed unless you ran it in this workspace.
 - Ask before creating or changing regression tests unless the task explicitly requires it.
 - If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.

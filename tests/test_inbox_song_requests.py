@@ -18,6 +18,7 @@ sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
 from utils.database import inbox_auto as ia
+from utils.database import inbox_field_corrections as fc
 from utils.database import inbox_requests as pr
 from utils.database import inbox_song_requests as sr
 from utils.database.datatables import Artist, Base, RejectedSongRequest, Song
@@ -55,6 +56,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pr, "INBOX_DIR", inbox)
     monkeypatch.setattr(pr, "inbox_available", lambda: True)
     monkeypatch.setattr(pr, "load_changes", lambda: [])
+    monkeypatch.setattr(fc, "load_changes", lambda: [])
 
     engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
     Base.metadata.create_all(engine)

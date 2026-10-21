@@ -41,6 +41,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(pr, "inbox_available", lambda: True)
     changes = []
     monkeypatch.setattr(fc, "load_changes", lambda: list(changes))
+    monkeypatch.setattr(pr, "load_changes", lambda: list(changes))
 
     engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
     Base.metadata.create_all(engine)

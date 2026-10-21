@@ -8,6 +8,12 @@ YouTube/Wikipedia/Spotify traffic. Full run takes ~2-3 seconds. (`AGENTS.md` use
 these hit real network — that was true once, but every test here is mocked as of 2026-09; verified
 by reading each file, not assumed.)
 
+No test may touch the owner's real databases or `.env`: `conftest.py` points `Settings.database_dir`
+at a folder that doesn't exist and `.env` at an empty temp folder before anything imports
+`settings.py`, so a test that forgets to patch a module-level engine (`song_references._music_engine`,
+`tag_db_manager`, ...) fails every time with "unable to open database file" instead of reading the
+real `music.db` / `tag.db` and failing only when the app or the inbox timer had them locked.
+
 ## What each file covers
 
 | File | Covers |
