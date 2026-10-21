@@ -381,7 +381,7 @@ MUSICBRAINZ_WS_ROOT = "https://musicbrainz.org/ws/2/"
 # version, and a real contact (an email address or a URL). A generic User-Agent
 # is throttled harder and can be blocked outright. This points at the project
 # repo; swap in your own contact if you fork it.
-MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/MusicDatabase )"
+MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/LeinaMusicDatabase )"
 MUSICBRAINZ_API_LIMIT = 20
 # MusicBrainz's special "Various Artists" artist - a compilation's or soundtrack's
 # release artist, so a song on it is never "another artist's album"

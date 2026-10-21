@@ -6,7 +6,7 @@ sources such as MusicBrainz, Wikipedia, iTunes, and Genius).
 ## Setup
 
 ```bash
-git clone https://github.com/shian1000/MusicDatabase.git
+git clone https://github.com/shian1000/LeinaMusicDatabase.git
 cd MusicDatabase
 
 python3 -m venv venv
@@ -43,4 +43,4 @@ documentation entry point (architecture, data model, system registry, runbooks).
 ## License
 
 GPLv3 — see [`LICENSE`](LICENSE). It uses mutagen (GPLv2 or later), so the whole program stays
-GPL-compatible; the phone app ([MusicDatabaseApp](https://github.com/shian1000/MusicDatabaseApp)) is GPLv3 too.
+GPL-compatible; the phone app ([Leina Radio](https://github.com/shian1000/LeinaPlayer)) is GPLv3 too.

@@ -15,7 +15,7 @@ from config.constants import MUSICBRAINZ_API_USER_AGENT, MUSICBRAINZ_VARIOUS_ART
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
-musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian1000/MusicDatabase")
+musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian1000/LeinaMusicDatabase")
 
 HEADERS = {"User-Agent": MUSICBRAINZ_API_USER_AGENT}
 MODULE_NAME = "Musicbrainz fetcher"

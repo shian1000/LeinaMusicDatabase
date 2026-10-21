@@ -266,7 +266,7 @@ limit — is another client running?), or `other_errors` + high
 ## User-Agent
 
 MusicBrainz wants a real application/version/contact. `constants.py` sets
-`MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/MusicDatabase )"`
+`MUSICBRAINZ_API_USER_AGENT = "MusicDatabase/1.0 ( https://github.com/shian1000/LeinaMusicDatabase )"`
 and `music_brainz_fetcher.py` mirrors it (both its `HEADERS` and its
 `musicbrainzngs.set_useragent(...)` call). The contact is the project repo URL,
 not a personal email — keep it that way if you touch it.
