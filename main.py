@@ -28,7 +28,7 @@ def main():
     if ALBUM_ID_MIGRATION in applied.get("music", []):
         run_album_backfill()
     # Tags, the library index and users' playlists catch up on songs merged
-    # or deleted since (a user DB on an unplugged T7 included)
+    # or deleted since (a user DB on an unplugged data drive included)
     try:
         apply_song_id_changes(force=True)
     except Exception as exc:

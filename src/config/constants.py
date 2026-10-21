@@ -287,7 +287,7 @@ ALBUM_COVER_SAME_IMAGE_MAX_DISTANCE = 6
 
 # ==================== Users (utils/database/users.py) ====================
 
-# Lowercase only: the users folder is on exFAT (T7), which ignores case, so
+# Lowercase only: the users folder is on exFAT (the data drive), which ignores case, so
 # "Ania" and "ania" would be the same folder anyway
 USERNAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{1,31}$"
 USER_PASSWORD_MIN_LENGTH = 6

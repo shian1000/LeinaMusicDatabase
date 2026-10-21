@@ -108,7 +108,8 @@ and is reviewed here, never applied blindly. See [ADR-0003](../decisions/0003-ph
 
 **Copying** (`utils/database/sharing.py`) puts every file in `backup.DB_FILES` (music, tag,
 files) in `Settings.sharing_dir`
-(`/media/owner/T7/Shared/Music/Database` by default):
+(`SHARING_DIR` in `.env`, on the drive mounted at `SHARING_DRIVE_MOUNT`; see `.env.example`, or set
+both in Settings → Server → "Folders and network", read at the next start):
 
 - Automatically once a day in `main.py`: after a *successful* daily backup, the startup
   migrations and the library scan (`scan_library_quietly()`, then `share_databases_quietly()`;
@@ -118,10 +119,11 @@ files) in `Settings.sharing_dir`
 - It uses the online backup API into `music.db.tmp` / `tag.db.tmp` in the same folder. Both temp
   copies are made first, then both are `os.replace()`d in, so a download in progress never gets
   half a file and the pair comes from one moment. Temp names must never be `music.db`/`tag.db`.
-- T7 is an exFAT external drive, automounted at login and not in fstab. If
+- The data drive is an exFAT external drive, automounted at login and not in fstab. If
   `Settings.sharing_drive_mount` isn't a mount point, the copy raises `SharingUnavailableError`
   and never `mkdir`s. Creating the folder under an empty mount point would fill the system disk
-  instead of T7.
+  instead of the data drive. With `SHARING_DIR` / `SHARING_DRIVE_MOUNT` unset in `.env` it's the
+  same error, and users, the inbox and mood changes are unavailable too.
 
 **Serving** (`utils/database/sharing_server.py`) is a stdlib-only script run on the system
 `python3` by the systemd user units `musicdatabase-share.service` + `.timer` in
@@ -148,14 +150,14 @@ server. Tests: `tests/test_database_sharing.py`.
     ranges, or a malformed header, → 200 with the whole file. A range starting past the end →
     416 with `Content-Range: bytes */<size>`. Copied in 64 KiB chunks.
   - 404 unknown id, not an id, file gone / not audio / outside the library, no shared `files.db`;
-    503 T7 not mounted or the library folder missing. `Cache-Control: no-cache`, since a row keeps
+    503 data drive not mounted or the library folder missing. `Cache-Control: no-cache`, since a row keeps
     its id when the file's contents change.
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
 - It listens on at most two addresses, one socket each, with the same handler and port 8002:
   - **Tailscale:** the address from `tailscale ip -4`. The phone uses this one away from home.
   - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`
-    (`enp2s0`, passed as `--lan-interface`). The phone uses it on the home Wi-Fi and silently falls
+    (`SHARING_LAN_INTERFACE` in `.env`, e.g. `enp2s0`, passed as `--lan-interface`). The phone uses it on the home Wi-Fi and silently falls
     back to Tailscale when it doesn't answer. An empty setting means Tailscale only.
   - The server was Tailscale-only at first. Adding the LAN address on 2026-10-10 was a deliberate
     widening, not a workaround: anyone on the home network can now download the two files
@@ -166,17 +168,17 @@ server. Tests: `tests/test_database_sharing.py`.
   - Each socket waits and retries every 10 s in its own thread until its address exists. A
     missing LAN address never delays the Tailscale socket, or the other way round.
   - It never binds to `0.0.0.0`.
-  - The phone has the LAN address typed in (`192.0.2.13`, from DHCP). If the router hands out a
+  - The phone has the LAN address typed in (the server's address on that interface, from DHCP). If the router hands out a
     different one, local access quietly stops working; the fix is a DHCP reservation on the router.
   - `ufw` is installed but disabled (`ENABLED=no`). If it is ever enabled, open 8002 to
-    `192.0.2.0/24` only.
-- If T7 is unmounted it keeps running and answers 503, so the phone retries the next day.
+    the home LAN's subnet only.
+- If the data drive is unmounted it keeps running and answers 503, so the phone retries the next day.
 - `Restart=always`, not `on-failure`: on 2026-10-10 a stray SIGTERM (something killing whatever
   was on port 8002) stopped it for good, because `on-failure` treats a clean SIGTERM as success.
   `systemctl --user stop` still stops it normally.
 - The timer uses `OnStartupSec=1min`, counted from the user's systemd manager start. With
   `Linger=no` (the owner chose this on 2026-10-10) that means one minute after login, not after
-  boot. That's fine here because the machine logs into GNOME, and T7 is only mounted after login
+  boot. That's fine here because the machine logs into GNOME, and the data drive is only mounted after login
   anyway.
 
 **Requests from the phone (inbox, 2026-10-13).** The phone keeps an outbox of requests (app ADR
@@ -188,7 +190,7 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   in. It never overwrites and never serves inbox files back (a GET is a 404). Answers: 201 stored,
   200 the same file is already in `new/` or `processed/` (a resend), 409 another file under that
   name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
-  (1 MiB), 507 inbox full, 503 T7 not mounted (nothing is created then).
+  (1 MiB), 507 inbox full, 503 data drive not mounted (nothing is created then).
 - **Inbox limit:** while the files in `new/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
   the owner's choice) nothing more is taken; the phone keeps the request and retries later. Settling
   a file moves it to `processed/`, which frees the room; `processed/` doesn't count. A resend of a
@@ -218,7 +220,7 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
 - **The pass never runs while the app is open:** both write music.db, and the open app's ORM
   objects would go stale (`utils/database/app_lock.py`: `main.py` holds an `flock` on
   `<database_dir>/.musicdatabase.lock` shared for its whole run, the pass needs it exclusive and
-  skips the run otherwise; an app started during a run waits for it). It also skips while T7 isn't
+  skips the run otherwise; an app started during a run waits for it). It also skips while the data drive isn't
   mounted or music.db has a pending migration (`migrations.has_pending_migrations()`), and copies
   the databases for the phones after any change. Log: `journalctl --user -u musicdatabase-inbox`.
 - Manage database → "Resolve new requests (N)" (`utils/ui/inbox_request_review.py`, logic in
@@ -334,7 +336,7 @@ because the server imports it too (as a sibling module), and `users.py` uses it 
 
 - `POST /login`, JSON `{"username", "password"}` (username as typed; trimmed and lowercased) →
   200 `{"username": <normalized>, "token"}`, 401 wrong username or password (never says which; an
-  unknown user costs the same scrypt time), 400 malformed body, 503 T7 not mounted (hashes and
+  unknown user costs the same scrypt time), 400 malformed body, 503 data drive not mounted (hashes and
   tokens only live there — decided not to cache them elsewhere).
 - Tokens: 32 random bytes; only their SHA-256 is stored, in `Users/<name>/tokens.json` (not in
   `user.db`, which may be sent to the phone one day). No expiry. `POST /logout` with
@@ -347,7 +349,7 @@ because the server imports it too (as a sibling module), and `users.py` uses it 
   token (none, unknown or revoked → 401, which the phone takes as "log in again"; another user's →
   403). A name without one is accepted with or without a token (old phones, requests made before
   logging in), but a token that is sent must be valid. Auth is checked after the mount check, so a
-  missing T7 is a 503, never a 401. The name pattern's user part is `USERNAME_PATTERN` (may hold
+  a missing data drive is a 503, never a 401. The name pattern's user part is `USERNAME_PATTERN` (may hold
   `_`; the fixed-shape date keeps the split unambiguous).
 
 **Playlists on the phone (2026-10-13).** A logged-in phone syncs the user's playlists with their
@@ -359,7 +361,7 @@ because the server and the app's own writes (`user_playlists.py`) both use it.
 
 - `GET /users/<name>/playlists?since=<revision>`, `PUT /users/<name>/playlists/<uid>` (whole
   playlist + `base_revision`), `DELETE /users/<name>/playlists/<uid>?base_revision=&deleted_at=`.
-  Every call needs `<name>`'s token (401 none/unknown, 403 another user's); 503 when T7 isn't
+  Every call needs `<name>`'s token (401 none/unknown, 403 another user's); 503 when the data drive isn't
   mounted or that `user.db` hasn't got migration `user/0004_playlist_sync.sql` (the server never
   migrates; the app does at startup). Bodies up to `--max-playlist-bytes` (8 MiB).
 - **Revisions:** every change to a playlist, from any writer, gives it the next number of the
@@ -487,7 +489,7 @@ and mood lists.
   24 hours old (mtime; a re-upload touches it). The grace period is there because the phone uploads
   the blob before the PUT that names it. Blob writes, the "blob exists" check plus its write, and
   the clean-up share one lock in the server.
-- `covers/` lives in the user's folder on T7, which the backups don't copy (they copy `user.db`).
+- `covers/` lives in the user's folder on the data drive, which the backups don't copy (they copy `user.db`).
   A restored user.db may name blobs the folder no longer has; the phone then re-uploads on
   `cover_missing`, and a GET of a missing blob is 404.
 
@@ -565,15 +567,15 @@ contract, is [`docs/handoffs/saved-songs-for-musicdatabaseapp.md`](../handoffs/s
   Private, no review, no permission. MusicDatabase's menu doesn't show them.
 
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `http://192.0.2.13:8002/`, and
-`ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `http://<lan-address>:8002/`, and
+`ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and the LAN address.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
 
 ## Users' databases
 
 Users are managed from the main menu → Users (create, log in, list, rename, change password,
-delete). Each user has `Settings.users_dir/<username>/` = `/media/owner/T7/Shared/Music/Database/Users/<username>/`
+delete). Each user has `Settings.users_dir/<username>/` = `<SHARING_DIR>/Users/<username>/`
 with `user.db` (their playlists and private tags) and `account.json` (password hash). The logic is in `utils/database/users.py`, and why it works
 this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
 
@@ -583,10 +585,10 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
 - **Migrations:** `migrations/user/NNNN_*.sql`, applied to every user's `user.db` at startup
   (`run_pending_user_migrations()`, one backup first). A new user gets every file at creation
   (`initialize_user_db()`), with no bootstrap step as in `music.db`'s adoption below.
-- **T7 not mounted:** users are skipped by backups and migrations (the next startup with T7
+- **Data drive not mounted:** users are skipped by backups and migrations (the next startup with the data drive
   mounted catches up on migrations), and "Create a new user" refuses. Nothing is ever created
   under an empty mount point. The daily backup still counts as done for that day, so a day
-  with T7 unplugged at startup has no user backup.
+  with the data drive unplugged at startup has no user backup.
 - **Deleting a user** moves their folder to `src/database/archive/deleted-users/<name>.<YYMMDD-HHMM>/`
   (on the system disk). To undo, move it back into `Users/` under its name.
 - **Not served as files.** The sharing server serves only `music.db` / `tag.db` / `files.db` and
@@ -597,8 +599,8 @@ this way is in [ADR-0004](../decisions/0004-per-user-data.md). Notes:
 
 ## Music library index (`files.db`)
 
-The mp3 collection is at `Settings.local_library_dir` (`/media/owner/T7/Shared/Music/Library/`
-since 2026-10-12). `files.db` (beside `music.db`, schema in [data-model.md](../data-model.md))
+The mp3 collection is at `Settings.local_library_dir` (`MUSIC_LIBRARY_DIR` in `.env`;
+on the data drive since 2026-10-12). `files.db` (beside `music.db`, schema in [data-model.md](../data-model.md))
 maps each file in it to its song:
 
 - **Scanning:** Settings → Server → "Index music library", and once a day at startup after the
@@ -607,7 +609,7 @@ maps each file in it to its song:
   `debug.log` (`flog`).
 - **Backed up and migrated** like tag.db (`backup.DB_FILES`, `migrations.DB_FILES`); everything
   but a future hand-set match can be rebuilt by deleting the file and scanning again.
-- T7 not mounted → the library folder is missing → the scan is skipped
+- The data drive not mounted → the library folder is missing → the scan is skipped
   (`LibraryUnavailableError`), the index is left as it was.
 - The sharing server serves the files themselves at `/library/<files.id>` (see "Sharing with the
   mobile app"), using the ids in the shared copy. Ids are never reused, so a stale copy on the

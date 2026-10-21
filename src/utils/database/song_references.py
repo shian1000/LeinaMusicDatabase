@@ -19,7 +19,7 @@ them across: tag.db's song_tags (global tags), every user's user.db
      their song too and the next scan tries to match them again.
    It runs at startup, on logging into a user database, and after commits
    that logged something (database_sessions.submit/close). A user.db on an
-   unplugged T7 is simply caught up later, which is why it's a log with
+   unplugged data drive is simply caught up later, which is why it's a log with
    cursors and not an update made on the spot.
    Leina Radio's saved songs (saved_sync.py) follow merges only, from the
    whole log rather than the cursor; a deleted song's id stays on them.

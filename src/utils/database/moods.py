@@ -30,7 +30,7 @@ from utils.database import global_mood_log, mood_sync, playlist_sync
 from utils.database.tag_db_manager import SongTag, Tag
 from utils.database.users import user_dir, users_available
 
-GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir))
+GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir)) if Settings.global_mood_changes_dir else None
 
 
 class MoodError(ValueError):
@@ -212,13 +212,13 @@ def _resolve(song_id: int, checked_to: int, changes: list) -> int | None:
 def apply_global_mood_changes(tag_session=None, changes_dir: Path | None = None) -> list[dict]:
     """Apply every pending change to tag.db in the order they arrived, then
     append them to history.jsonl and delete them. Returns the history
-    records written ([] when there's nothing, or T7 isn't mounted). A crash
+    records written ([] when there's nothing, or the data drive isn't mounted). A crash
     between the commit and deleting the files re-applies them next time,
     which ends in the same state."""
     from utils.database.song_references import existing_song_ids, load_changes
 
     changes_dir = changes_dir or GLOBAL_MOOD_CHANGES_DIR
-    if changes_dir == GLOBAL_MOOD_CHANGES_DIR and not users_available():
+    if changes_dir is None or changes_dir == GLOBAL_MOOD_CHANGES_DIR and not users_available():
         return []
     pending = global_mood_log.pending_changes(changes_dir)
     if not pending:
@@ -268,9 +268,11 @@ def apply_global_mood_changes_quietly() -> list[dict]:
 
 def global_mood_history(changes_dir: Path | None = None) -> list[dict]:
     """Every applied change from the phones, newest first."""
-    return list(reversed(global_mood_log.read_history(changes_dir or GLOBAL_MOOD_CHANGES_DIR)))
+    changes_dir = changes_dir or GLOBAL_MOOD_CHANGES_DIR
+    return list(reversed(global_mood_log.read_history(changes_dir))) if changes_dir else []
 
 
 def pending_global_mood_changes(changes_dir: Path | None = None) -> list[dict]:
-    return [r for _, r in global_mood_log.pending_changes(changes_dir or GLOBAL_MOOD_CHANGES_DIR)]
+    changes_dir = changes_dir or GLOBAL_MOOD_CHANGES_DIR
+    return [r for _, r in global_mood_log.pending_changes(changes_dir)] if changes_dir else []
 

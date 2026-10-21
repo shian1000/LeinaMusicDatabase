@@ -69,14 +69,15 @@ GPLv2-only or proprietary).
 One line per module — what it owns, and where the depth lives. Read the linked topic note before
 non-trivial work in that area.
 
-- `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets). `database_dir`
+- `src/settings.py` — runtime paths and env-based config (SMB creds — see Secrets; this machine's
+  folders — see Machine settings). `database_dir`
   defaults to `src/database/` but can be overridden via Settings → Server → Database location in the menu
   (persisted by `utils/database/database_location.py`); takes effect after a restart, not
-  immediately — why: `docs/runbooks/database.md`. `local_library_dir` is the mp3 collection, on the
-  T7 SSD at `/media/owner/T7/Shared/Music/Library/` since 2026-10-12 (Samba: `Shared (SSD)`);
-  the old copy on the HDD (`ServerHDD/Shared/Music/`) is no longer the source. Its old
+  immediately — why: `docs/runbooks/database.md`. `local_library_dir` is the mp3 collection
+  (`MUSIC_LIBRARY_DIR`), on the data drive since 2026-10-12 (an older copy on another disk is no
+  longer the source). Its old
   `.mp3_index.sqlite3` (made by some external tool; still used by "Copy songs from storage" and
-  `tags_fetcher`) stores local T7 paths; `files.db` below is meant to replace it.
+  `tags_fetcher`) stores local paths on the data drive; `files.db` below is meant to replace it.
 - `src/utils/database/files_index.py` — `files.db`, the music library index: one row per audio
   file under `local_library_dir` (path relative to it), its `songs.id` matched with
   `read_file_metadata()` + `LocalSongMatcher`, artist/title from tags as a fallback. Settings →
@@ -100,7 +101,7 @@ non-trivial work in that area.
   shared across every "Fill missing data" category (Albums, Years, ...), not just albums.
   `sharing.py` / `sharing_server.py` copy the DBs for the MusicDatabaseApp phone client and serve
   them. The copy runs after each daily backup and from Settings → Server → "Submit database for sharing";
-  it goes to `Settings.sharing_dir` on the external T7 drive. The server is a systemd user service
+  it goes to `Settings.sharing_dir` on the data drive. The server is a systemd user service
   installed from Settings → Server → "Setup this PC for database sharing". It serves only `music.db` /
   `tag.db` / `files.db` and, with `--library`, the library's audio files by `files.id`
   (`GET`/`HEAD /library/<id>`, looked up in the shared `files.db`, path checked to stay inside
@@ -185,7 +186,7 @@ non-trivial work in that area.
   share stay NULL for Manage database → "Resolve albums with several artists"
   (`utils/ui/album_resolution_review.py`), which first offers to merge one artist spelt twice and
   to fix swapped artist/title songs (`artist_identity.py`), the usual reason a title looks shared. Rules, the "Singles" one-song albums, stable ids:
-  `docs/data-model.md`. `users.py` — users and their private data (main menu → Users): one folder per user under `Settings.users_dir` on T7 holding `user.db` (playlists,
+  `docs/data-model.md`. `users.py` — users and their private data (main menu → Users): one folder per user under `Settings.users_dir` on the data drive holding `user.db` (playlists,
   private tags; schema only from `migrations/user/`) and `account.json` (salted scrypt password
   hash). Those files are originals, so backups and startup migrations cover every user. A drive
   that isn't mounted means users are skipped, never created on the system disk. Main menu → Users
@@ -228,7 +229,7 @@ non-trivial work in that area.
   merged). `moods.py` owns global moods (tag.db), promoting a user's mood into one, and applying
   the phones' global-mood changes. Those come from `PUT/DELETE /global-moods/<id>/songs/<id>` by users
   with `edit_global_moods` and are only *recorded* by the server (`global_mood_log.py`, files in
-  `Settings.global_mood_changes_dir` on T7): the server never writes tag.db. The app applies them at
+  `Settings.global_mood_changes_dir` on the data drive): the server never writes tag.db. The app applies them at
   startup, before every sharing copy and in the Moods menu. Owner's menu: Users → Moods
   (`menu/main_menu/users/moods.py`). Details: `docs/runbooks/database.md` → "Moods on the phone".
   Folders of Leina Radio's Biblioteka (holding playlists and moods) sync the same way through
@@ -342,7 +343,7 @@ non-trivial work in that area.
   `check_spelling()` cost path and return shape: `docs/agent-notes/import-pipeline.md`.
   `copy_to_clipboard()` falls back to an OSC 52 terminal escape sequence when `pyperclip` finds no
   clipboard mechanism — the normal case when the app is launched via the root `MusicDatabase-
-  Remote-*.sh` scripts, which run the whole program on a remote host over `ssh -t` (no local
+  Remote.sh` script, which runs the whole program on a remote host over `ssh -t` (no local
   display for xclip/xsel/wl-clipboard to attach to). OSC 52 asks the local terminal emulator
   itself to set the clipboard, so it works headless; the plain "Clipboard unavailable" warning
   only prints if that also fails (e.g. non-interactive stdout, or a terminal that doesn't support
@@ -462,7 +463,7 @@ non-trivial work in that area.
   primary one) — see the `src/utils/database/` Module map entry — and `albums` / `album_covers`
   (migrations 0005–0008). Cover *images* are never stored in a DB file: they're in
   `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). Each
-  user's private `user.db` is a third kind, on T7 (`Settings.users_dir`), with its own migration
+  user's private `user.db` is a third kind, on the data drive (`Settings.users_dir`), with its own migration
   track `migrations/user/` — see the `users.py` Module map entry. `files.db` (the music library
   index, `migrations/files/`, next to music.db) is a fourth. Those files and tag.db point at
   `songs.id` with plain integers, so deleting or merging a song must go through the ORM (or log
@@ -501,6 +502,23 @@ non-trivial work in that area.
   token issued to another client and logs in again in the browser. An OAuth app left in "Testing"
   gets its refresh token revoked after 7 days (`invalid_grant`); deleting the project behind the
   client gives "Project … has been deleted" (403).
+
+## Machine settings
+
+- This machine's folders and network interface load from `.env` (gitignored) into
+  `src/settings.py`, every key documented in `.env.example`: `MUSIC_LIBRARY_DIR` (the mp3
+  collection), `SHARING_DRIVE_MOUNT` + `SHARING_DIR` (the data drive and the shared folder on it,
+  which also holds `Users/`, `Inbox/` and `MoodChanges/`), `SHARING_LAN_INTERFACE`, and the
+  `REMOTE_*` keys read by `MusicDatabase-Remote.sh`. A missing key never falls back to someone's
+  real path: the feature is skipped with a message naming the key, as for an unplugged drive
+  (`settings.drive_unavailable_message()`; the drive-path `Settings` fields are then `None`).
+- Settings → Server → "Folders and network" sets the folder and LAN keys in `.env`
+  (`utils/common/env_file.py`: `MACHINE_KEYS`, `save_env_value()` keeps every other line), warning
+  about a folder that isn't there, a mount point that isn't mounted or a sharing folder off the
+  drive. `Settings` reads `.env` once at startup, so a change needs a restart.
+- The sharing server's own paths are in its systemd unit (written by "Setup this PC for database
+  sharing" from these settings), so changing `.env` reaches the server only after that setup is
+  re-run.
 
 ## Coding conventions
 
@@ -600,6 +618,13 @@ non-trivial work in that area.
 - Preserve unrelated working-tree changes. Don't discard, rewrite, or overwrite the user's changes.
 - Keep generated files and local DBs out of version control.
 - Don't commit, push, or tag unless explicitly asked. Prefer small, single-purpose commits.
+- The repo is public on GitHub. Nothing committed may carry this machine's or a user's private
+  data — the Tailscale or LAN address, local paths (`/home/…`, `/media/…`), drive or host names,
+  account names, the home Wi-Fi's name: write `<tailscale-ip>`, "the data drive", "the owner's
+  account", documentation addresses in tests (`192.0.2.10`, `100.64.0.10`), or read the value at
+  run time from `.env` (Machine settings). Such values live only in git-ignored local files
+  (`.env`, `.agents/local.md`) (user's rule, 2026-10-21); what stays on this computer only
+  (`~/system-docs`) may keep them.
 
 ## Topic notes (`docs/agent-notes/`)
 

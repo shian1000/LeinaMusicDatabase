@@ -73,7 +73,7 @@ class LibraryFile(FilesBase):
 
 
 class LibraryUnavailableError(Exception):
-    """The library folder isn't there (e.g. the T7 drive isn't plugged in) or isn't local."""
+    """The library folder isn't set, isn't there (e.g. its drive isn't plugged in) or isn't local."""
 
 
 @dataclass
@@ -109,9 +109,9 @@ def ensure_files_db(db_path: Path = None) -> Path:
 
 def local_library_path() -> Path | None:
     """The configured library folder as a local path, whether or not it's
-    there right now; None for a remote (smb://) library."""
+    there right now; None for a remote (smb://) library or none set."""
     root_str = Settings.local_library_dir_str
-    if "://" in root_str and not root_str.startswith("file://"):
+    if not root_str or "://" in root_str and not root_str.startswith("file://"):
         return None
     return Path(root_str.removeprefix("file://"))
 
@@ -119,6 +119,8 @@ def local_library_path() -> Path | None:
 def library_root() -> Path:
     """The library folder, or LibraryUnavailableError. Only a local folder
     can be indexed (an smb:// library would have to be read over the network)."""
+    if not Settings.local_library_dir_str:
+        raise LibraryUnavailableError("MUSIC_LIBRARY_DIR isn't set - Settings -> Server -> Folders and network (or .env)")
     root = local_library_path()
     if root is None:
         raise LibraryUnavailableError(f"{Settings.local_library_dir_str} is not a local folder")
@@ -150,7 +152,7 @@ def song_file_paths(song_ids, db_path: Path = None) -> dict:
     doesn't exist yet - nothing has been indexed."""
     db_path = Path(db_path or FILES_DB_PATH)
     song_ids = [i for i in song_ids if i is not None]
-    if not song_ids or not db_path.exists():
+    if not song_ids or not db_path.exists() or not Settings.local_library_dir_str:
         return {}
     root = Settings.local_library_dir_str.removeprefix("file://").rstrip("/")
     found = {}

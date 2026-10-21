@@ -9,7 +9,7 @@ left open, are marked **(decided)**; differences from it are marked **(changed)*
 ## The owner's answers to the open questions
 
 - **How a permitted user's change reaches `tag.db` (decided):** the server records it in a log
-  on T7 and MusicDatabase applies it, so the server never writes `tag.db` (the option from your
+  on the data drive and MusicDatabase applies it, so the server never writes `tag.db` (the option from your
   handoff). MusicDatabase applies the log at startup, before every copy for the phones, and when
   the owner opens the moods menu. **Delay:** other phones get the change with the next copy of
   `tag.db`. That is the daily copy when MusicDatabase starts, or the owner's "Submit database
@@ -43,8 +43,8 @@ playlists, unless a JSON body is shown.
 | `DELETE /global-moods/<mood id>/songs/<song id>` | 202 `{"mood_id", "song_id", "action": "remove"}` | |
 
 The user-mood calls use the playlist codes: 200, 409 with the stored mood, 400, 401, 403, 411,
-413 (8 MiB), and 503 (T7 not mounted, or that `user.db` hasn't got migration
-`0005_moods.sql` yet). `owner`'s file has it.
+413 (8 MiB), and 503 (data drive not mounted, or that `user.db` hasn't got migration
+`0005_moods.sql` yet). The owner's file has it.
 
 The global-mood calls answer:
 
@@ -56,7 +56,7 @@ The global-mood calls answer:
 | 404 | `{"error": "mood", "mood_id": n}` | the shared `tag.db` has no mood with that id (deleted, or it's a marker): drop the change |
 | 404 | `{"error": "song", "song_id": n}` | the song was deleted from `music.db`, or never existed: drop the change |
 | 400 | text | ids that aren't positive integers |
-| 503 | text | T7 not mounted: retry later |
+| 503 | text | data drive not mounted: retry later |
 
 Both the mood and the song are checked against the copies the phone downloads. **(decided)**
 Global changes aren't idempotent per request, but repeating one is harmless: adding a song that's
@@ -126,13 +126,13 @@ ones will be added to the same list.
 ## State on the real server
 
 Applied 2026-10-13 14:48, with a backup taken before: `tag.db` migration `0003_tag_kind.sql`
-(both existing tags are markers; there are no global moods yet) and `owner`'s `user.db`
+(both existing tags are markers; there are no global moods yet) and the owner's `user.db`
 migration `0005_moods.sql` (no moods, counter 0). The service was reinstalled with
-`--mood-changes /media/owner/T7/Shared/Music/Database/MoodChanges`.
+`--mood-changes <SHARING_DIR>/MoodChanges`.
 
 A curl round trip on the LAN address passed with a temporary token:
 
-- `GET /users/owner`, and a 403 with the permission JSON before the permission was granted;
+- `GET /users/<owner>`, and a 403 with the permission JSON before the permission was granted;
 - a user mood: 401 without a token, PUT (song 5332 resolved to 5147), a stale PUT → 409, the
   same name under a new uid merged into the existing uid, DELETE with its archive file, GET
   `since`;
@@ -142,7 +142,7 @@ A curl round trip on the LAN address passed with a temporary token:
 
 The temporary global mood, the change log, the test mood with its archive file, the permission
 and the token were removed afterwards. A new user's `user.db` gets the migration at creation;
-other users get it at the next MusicDatabase startup with T7 mounted.
+other users get it at the next MusicDatabase startup with the data drive mounted.
 
 Code: `src/utils/database/mood_sync.py` (user moods, shared with the server), `moods.py` (global
 moods, promotion, applying the log), `global_mood_log.py` (the log, shared with the server),

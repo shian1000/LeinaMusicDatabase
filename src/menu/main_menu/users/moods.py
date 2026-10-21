@@ -42,6 +42,7 @@ from utils.database.users import (
     set_permissions,
     user_permissions,
     users_available,
+    users_unavailable_message,
 )
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import execute_menu_item, search_and_pick_db_object
@@ -60,8 +61,7 @@ def _error(message) -> None:
 
 def _pick_user(question: str) -> str | None:
     if not users_available():
-        _error(f"The users folder {settings.users_dir} is on a drive that isn't mounted "
-               "- plug in the external drive first.")
+        _error(f"The users folder isn't available: {users_unavailable_message()}")
         return None
     names = list_usernames()
     if not names:
@@ -257,7 +257,7 @@ def users_moods() -> None:
         try:
             moods = list_user_moods(username)
         except NotMigratedError:
-            _error(f"{username}'s database hasn't got the moods yet - restart MusicDatabase with T7 plugged in.")
+            _error(f"{username}'s database hasn't got the moods yet - restart MusicDatabase with the data drive plugged in.")
             return
         if not moods:
             print(f"{username} has no moods yet.")
@@ -292,7 +292,7 @@ def show_phone_changes() -> None:
     """Who added or removed which song in which global mood, newest first -
     to undo one, use Global moods -> the mood -> Add a song / Remove songs."""
     if not users_available():
-        _error(f"The changes are kept on the drive with {settings.users_dir}, which isn't mounted.")
+        _error(f"The changes are kept with the users, which aren't available: {users_unavailable_message()}")
         return
     music_session, tag_session = open_and_set_global_database_sessions()
     _apply_phone_changes(tag_session)

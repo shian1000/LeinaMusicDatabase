@@ -254,7 +254,7 @@ keeps them valid:
   playlist still shows them, and library files get `song_id` NULL (`match_source` back to
   `auto`) so the next scan can match them again.
   It runs at startup, at user login, and after any commit that logged something
-  (`database_sessions` submit/close). A user.db on an unplugged T7 catches up later. A new user
+  (`database_sessions` submit/close). A user.db on an unplugged data drive catches up later. A new user
   starts at the end of the log.
 - **`bad_youtube_videos`** (music.db, migration 0010) is not replayed: an `AFTER INSERT` trigger
   on `song_id_changes` moves its per-song rows to the kept song (one the kept song already has

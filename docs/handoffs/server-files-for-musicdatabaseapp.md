@@ -34,7 +34,7 @@ shared `files.db` copy (the one the phone downloads), opened read-only per reque
     decimal without leading zeros (`/library/abc`, `/library/0`, `/library/01`, a trailing `/`);
     a row whose file is gone, is a folder, isn't `.mp3`, or resolves outside the library (`..`,
     an absolute path, a symlink); no shared `files.db`; and on a server started without `--library`.
-  - 503: T7 not mounted, or the library folder isn't there.
+  - 503: data drive not mounted, or the library folder isn't there.
   - 416: a range starting at or past the end (or `bytes=-0`), with `Content-Range: bytes */<size>`.
 - Error bodies are short plain text (`Cache-Control: no-store`), as for the other endpoints.
 - HTTP/1.0, one connection per request. Files are streamed in 64 KiB chunks; a hang-up
@@ -49,7 +49,7 @@ another file.
 
 ## Checked against the running service
 
-`curl -sI http://100.64.0.10:8002/library/1` and the same on `192.0.2.13`: 200,
+`curl -sI http://<tailscale-ip>:8002/library/1` and the same on the LAN address: 200,
 `audio/mpeg`, `Accept-Ranges: bytes`. `curl -s -r 0-99 … | wc -c`: 100. `/library/abc` and an
 unknown id: 404. Three clients hanging up mid-stream: no errors in the journal, and the next
 request was a normal 200.

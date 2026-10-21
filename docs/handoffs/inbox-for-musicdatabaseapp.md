@@ -10,7 +10,7 @@ and has been tested against the real server.
 
 `PUT http://<server>:8002/inbox/<file name>`, body = the request file's bytes,
 with `Content-Length` (no chunked encoding). Same server, port and addresses as
-the database download (LAN `192.0.2.13`, Tailscale `100.64.0.10`).
+the database download (the server's LAN and Tailscale addresses).
 
 - File name: `[<user>_]YYYY-MM-DD_HH-MM-SS_NNN.db` — the user part is a
   MusicDatabase username (`USERNAME_PATTERN` in `account_auth.py`: 2–32 of

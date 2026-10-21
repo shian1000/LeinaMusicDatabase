@@ -28,7 +28,7 @@ the token's user.
   **(decided)**. So uploading again right before a PUT is always safe, even for a picture the
   server had stopped using a day ago.
 - Error bodies are plain text, as for playlists. HEAD isn't supported (404).
-- Files: `Users/<name>/covers/<sha256>.png|.jpg` on T7, never in `user.db`.
+- Files: `Users/<name>/covers/<sha256>.png|.jpg` on the data drive, never in `user.db`.
 
 ## `cover` in playlists and moods
 
@@ -44,8 +44,8 @@ As you specified, in `GET` answers, `PUT` bodies and `PUT`/409 answers of
   (JSON). This check runs before the conflict check, so a stale PUT with a missing blob gets the
   400 first, and the 409 after you've uploaded and retried.
 - A user.db without migration `0006_covers.sql` → 503 on **every** playlist, mood and
-  global-mood-cover call for that user, not only the cover ones. `owner`'s file has it. Other
-  users get it the next time MusicDatabase starts with T7 mounted, and a new user gets it when
+  global-mood-cover call for that user, not only the cover ones. The owner's file has it. Other
+  users get it the next time MusicDatabase starts with the data drive mounted, and a new user gets it when
   they're created.
 
 ### Merges
@@ -114,7 +114,7 @@ and Users → Moods → "Users' moods" add ", cover" to the entries that have on
 ## State on the real server
 
 Applied 2026-10-13 18:35, with a backup taken first (`src/database/archive/*.261013-1835.db`):
-`owner`'s `user.db` got `0006_covers.sql`. The service was restarted, and its unit is
+the owner's `user.db` got `0006_covers.sql`. The service was restarted, and its unit is
 unchanged. A curl round trip over the LAN address with a temporary token passed:
 
 - 401 without a token;

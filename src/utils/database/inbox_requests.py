@@ -5,7 +5,7 @@ applying the user's answers. The review screen is
 utils/ui/inbox_request_review.py (Manage database -> "Resolve new requests");
 nothing here asks anything, so a later intake can reuse it (ADR-0001).
 
-Inbox (Settings.phone_inbox_dir, on T7):
+Inbox (Settings.phone_inbox_dir, on the data drive):
 - new/        - what the sharing server stored (PUT /inbox/<name>.db), not
                 looked at yet. The automatic pass (inbox_auto.py) takes them
                 from here.
@@ -81,8 +81,8 @@ from utils.database.song_references import load_changes
 from utils.database.song_kinds import is_full_album
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
 
-INBOX_DIR = Path(str(Settings.phone_inbox_dir))
-INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
+INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
+INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 NEW = "new"
 REVIEW = "review"
 PROCESSED = "processed"
@@ -291,12 +291,14 @@ def _decision_key(song_id, video_id) -> str:
 
 def inbox_available() -> bool:
     # Never create inbox folders under an unmounted mount point (system disk)
-    return os.path.ismount(INBOX_DRIVE_MOUNT)
+    return INBOX_DRIVE_MOUNT is not None and os.path.ismount(INBOX_DRIVE_MOUNT)
 
 
 def _request_paths(folder: str) -> list[Path]:
+    if not inbox_available():
+        return []
     directory = INBOX_DIR / folder
-    if not inbox_available() or not directory.is_dir():
+    if not directory.is_dir():
         return []
     # Dot files are uploads still being written by the server
     return sorted(p for p in directory.iterdir()
@@ -305,7 +307,7 @@ def _request_paths(folder: str) -> list[Path]:
 
 def new_request_paths() -> list[Path]:
     """Request files nobody has looked at yet (new/), oldest name first; []
-    when T7 isn't there."""
+    when the data drive isn't there."""
     return _request_paths(NEW)
 
 

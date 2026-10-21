@@ -34,7 +34,7 @@ def test():
 
     # uris = []
     # for path in files:
-    #     dest = UPath("/home/owner/Downloads/")
+    #     dest = UPath("~/Downloads/").expanduser()
     #     copy_file_to_destination(path, dest)
 
     time.sleep(10000)

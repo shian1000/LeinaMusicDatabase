@@ -43,13 +43,16 @@ def import_youtube_playlist():
 
 def import_covers():
     default = settings.local_library_dir_str
-    choice = questionary.select(
-        "Which folder's mp3 files should the covers come from?",
-        choices=[default, "Pick another folder"],
-    ).ask()
-    if choice is None:
-        return
-    folder = default if choice == default else open_file_browser_terminal(default)
+    if default:
+        choice = questionary.select(
+            "Which folder's mp3 files should the covers come from?",
+            choices=[default, "Pick another folder"],
+        ).ask()
+        if choice is None:
+            return
+        folder = default if choice == default else open_file_browser_terminal(default)
+    else:
+        folder = open_file_browser_terminal(settings.export_dir)
     if not folder:
         return
 

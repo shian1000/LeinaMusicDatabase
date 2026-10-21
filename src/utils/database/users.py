@@ -1,7 +1,7 @@
 """
 Users and their private data: main menu -> Users.
 
-Every user gets a folder under Settings.users_dir (on the T7 drive, next to
+Every user gets a folder under Settings.users_dir (on the data drive, next to
 the shared music.db/tag.db):
 
     Users/<username>/user.db       playlists + private tags, schema from migrations/user/
@@ -39,16 +39,16 @@ from config.constants import (
     USER_PASSWORD_MIN_LENGTH,
     USERNAME_PATTERN,
 )
-from settings import Settings
+from settings import Settings, drive_unavailable_message
 from utils.database.account_auth import PERMISSIONS, password_matches, revoke_all_tokens
 from utils.database.account_auth import user_permissions as _user_permissions
 
-USERS_DIR = Path(str(Settings.users_dir))
-USERS_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
+USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
+USERS_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 
 
 class UsersUnavailableError(Exception):
-    """The users folder can't be reached right now (the T7 drive isn't plugged in)."""
+    """The users folder can't be reached right now (the data drive isn't plugged in)."""
 
 
 class InvalidUserError(ValueError):
@@ -56,16 +56,18 @@ class InvalidUserError(ValueError):
 
 
 def users_available() -> bool:
-    return os.path.ismount(USERS_DRIVE_MOUNT)
+    return USERS_DRIVE_MOUNT is not None and os.path.ismount(USERS_DRIVE_MOUNT)
+
+
+def users_unavailable_message() -> str:
+    return drive_unavailable_message(USERS_DRIVE_MOUNT)
 
 
 def _require_users_dir() -> None:
     # Never mkdir under an unmounted mount point: the folder would land on the
     # system disk instead of the external drive (same rule as sharing.py).
     if not users_available():
-        raise UsersUnavailableError(
-            f"Drive {USERS_DRIVE_MOUNT} is not mounted - is the external drive plugged in?"
-        )
+        raise UsersUnavailableError(users_unavailable_message())
     USERS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -81,6 +83,8 @@ def normalize_username(username: str) -> str:
 
 
 def user_dir(username: str) -> Path:
+    if USERS_DIR is None:
+        raise UsersUnavailableError(users_unavailable_message())
     return USERS_DIR / normalize_username(username)
 
 
@@ -185,9 +189,7 @@ DELETED_USERS_DIR = Path(str(Settings.database_dir)) / "archive" / "deleted-user
 
 def _existing_user_dir(username: str) -> Path:
     if not users_available():
-        raise UsersUnavailableError(
-            f"Drive {USERS_DRIVE_MOUNT} is not mounted - is the external drive plugged in?"
-        )
+        raise UsersUnavailableError(users_unavailable_message())
     folder = user_dir(username)
     if not (folder / USER_ACCOUNT_FILENAME).exists():
         raise InvalidUserError(f"There's no user '{normalize_username(username)}'.")

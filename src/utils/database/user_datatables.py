@@ -167,7 +167,7 @@ class PrivateSongTag(UserBase):
 @contextmanager
 def user_db_session(db_path: Path):
     """A session on one user.db; its engine is disposed afterwards, so no
-    connection to the file on T7 stays open. The caller commits."""
+    connection to the file on the data drive stays open. The caller commits."""
     engine = create_engine(f"sqlite:///{db_path}")
     session = sessionmaker(bind=engine)()
     try:

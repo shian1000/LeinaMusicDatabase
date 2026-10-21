@@ -24,6 +24,7 @@ from utils.database.users import (
     read_account,
     rename_user,
     users_available,
+    users_unavailable_message,
     verify_user,
 )
 from utils.database.datatables import Song
@@ -62,8 +63,7 @@ def _error(message) -> None:
 
 def _users_or_explain() -> list[str] | None:
     if not users_available():
-        _error(f"The users folder {settings.users_dir} is on a drive that isn't mounted "
-               "- plug in the external drive first.")
+        _error(f"The users folder isn't available: {users_unavailable_message()}")
         return None
     names = list_usernames()
     if not names:
@@ -661,8 +661,7 @@ def create_new_user() -> None:
     """Make a user folder with an empty private user.db (playlists, private
     tags) and a password."""
     if not users_available():
-        _error(f"The users folder {settings.users_dir} is on a drive that isn't mounted "
-               "- plug in the external drive first.")
+        _error(f"The users folder isn't available: {users_unavailable_message()}")
         return
     existing = list_usernames()
     print(f"Users are kept in {settings.users_dir}")

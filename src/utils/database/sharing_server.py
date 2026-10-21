@@ -1298,7 +1298,7 @@ def interface_ipv4(interface: str) -> str | None:
         ).stdout.split()
     except (OSError, subprocess.SubprocessError):
         return None
-    # `ip -o` prints one line per address: "2: enp2s0    inet 192.0.2.13/24 brd ..."
+    # `ip -o` prints one line per address: "2: enp2s0    inet 192.0.2.10/24 brd ..."
     for i, token in enumerate(out[:-1]):
         if token != "inet":
             continue

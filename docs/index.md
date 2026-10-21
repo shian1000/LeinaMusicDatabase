@@ -32,7 +32,7 @@ this index is the map of everything else.
   [ADR-0003](decisions/0003-phone-client-fills-gaps.md) (the MusicDatabaseApp phone client may
   fill missing data locally, MusicDatabase's values win, phone-found data will come back for
   review), and [ADR-0004](decisions/0004-per-user-data.md) (per-user private data: one `user.db`
-  per user on T7, username + password, a review inbox planned for phone-found global data).
+  per user on the data drive, username + password, a review inbox planned for phone-found global data).
   Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records

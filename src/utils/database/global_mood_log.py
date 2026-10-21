@@ -7,7 +7,7 @@ by hand (docs/runbooks/database.md -> "Global moods from the phone").
 
 The original tag.db is on the system disk and main.py may have it open, so
 the sharing server never writes it. Instead, in Settings.global_mood_changes_dir
-on T7:
+on the data drive:
 
     pending/<received>_<id>.json  one change, written by the server
                                   (dot-named temp file, then os.replace)

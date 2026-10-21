@@ -43,7 +43,7 @@ def share_env(tmp_path, monkeypatch):
     src.mkdir()
     _make_db(src / "music.db", 1)
     _make_db(src / "tag.db", 1)
-    mount = tmp_path / "T7"
+    mount = tmp_path / "data-drive"
     mount.mkdir()
     share_dir = mount / "Shared" / "Music" / "Database"
     state = {"mounted": True}
@@ -545,7 +545,7 @@ def test_signed_upload_when_drive_unmounted_is_503_not_401(login_server, tmp_pat
 @pytest.mark.parametrize("stdout, expected", [
     ("100.64.0.10\n", "100.64.0.10"),
     ("", None),
-    ("192.0.2.13\n", None),  # not a Tailscale (CGNAT) address
+    ("192.0.2.10\n", None),  # not a Tailscale (CGNAT) address
     ("garbage\n100.64.0.1\n", "100.64.0.1"),
 ])
 def test_tailscale_ipv4_parsing(monkeypatch, stdout, expected):
@@ -598,13 +598,13 @@ def test_bind_retries_when_address_not_bindable_yet(monkeypatch):
 
 
 IP_ADDR_ENP2S0 = (
-    "2: enp2s0    inet 192.0.2.13/24 brd 192.0.2.255 scope global dynamic noprefixroute enp2s0\\"
+    "2: enp2s0    inet 192.0.2.10/24 brd 192.0.2.255 scope global dynamic noprefixroute enp2s0\\"
     "       valid_lft 2944sec preferred_lft 2944sec\n"
 )
 
 
 @pytest.mark.parametrize("stdout, expected", [
-    (IP_ADDR_ENP2S0, "192.0.2.13"),
+    (IP_ADDR_ENP2S0, "192.0.2.10"),
     ("", None),  # interface has no address yet
     ("2: eth0    inet 8.8.8.8/24 scope global eth0\n", None),  # public
     ("3: tailscale0    inet 100.64.0.10/32 scope global tailscale0\n", None),  # Tailscale range
@@ -637,7 +637,7 @@ def test_bind_uses_the_given_address_getter(monkeypatch):
     monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: pytest.fail("Tailscale queried for the LAN socket"))
     monkeypatch.setattr(sharing_server, "ThreadingHTTPServer", lambda addr, handler: addr)
 
-    assert sharing_server.bind_when_ready(object, 8002, lambda: "192.0.2.13", "LAN") == ("192.0.2.13", 8002)
+    assert sharing_server.bind_when_ready(object, 8002, lambda: "192.0.2.10", "LAN") == ("192.0.2.10", 8002)
 
 
 class _FakeServer:
@@ -650,7 +650,7 @@ class _FakeServer:
 
 def _run_main(monkeypatch, extra_args):
     bound = []
-    addresses = {"Tailscale": "100.64.0.10", "LAN enp2s0": "192.0.2.13"}
+    addresses = {"Tailscale": "100.64.0.10", "LAN enp2s0": "192.0.2.10"}
 
     def fake_bind(handler, port, get_address, label):
         bound.append(label)
@@ -664,14 +664,14 @@ def _run_main(monkeypatch, extra_args):
 def test_without_lan_interface_only_tailscale_is_served(monkeypatch, capsys):
     assert _run_main(monkeypatch, []) == ["Tailscale"]
     assert [label for label, _ in sharing_server.address_sources(None)] == ["Tailscale"]
-    assert "192.0.2.13" not in capsys.readouterr().out
+    assert "192.0.2.10" not in capsys.readouterr().out
 
 
 def test_lan_interface_adds_a_second_socket(monkeypatch, capsys):
     assert sorted(_run_main(monkeypatch, ["--lan-interface", "enp2s0"])) == ["LAN enp2s0", "Tailscale"]
     out = capsys.readouterr().out
     assert "http://100.64.0.10:8002/" in out
-    assert "http://192.0.2.13:8002/" in out
+    assert "http://192.0.2.10:8002/" in out
 
 
 def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
@@ -679,7 +679,7 @@ def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
     lan_has_address = threading.Event()
     tailscale_bound = threading.Event()
     monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: "100.64.0.10")
-    monkeypatch.setattr(sharing_server, "interface_ipv4", lambda name: "192.0.2.13" if lan_has_address.is_set() else None)
+    monkeypatch.setattr(sharing_server, "interface_ipv4", lambda name: "192.0.2.10" if lan_has_address.is_set() else None)
     monkeypatch.setattr(sharing_server.time, "sleep", lambda s: lan_has_address.wait(0.01))
 
     def fake_server(addr, handler):
@@ -704,7 +704,7 @@ def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
 # ==================== systemd installer ====================
 
 @pytest.mark.parametrize("library, expected_flag", [
-    ("/media/owner/T7/Shared/Music/Library/", "--library /media/owner/T7/Shared/Music/Library"),
+    ("/mnt/data-drive/Music/Library/", "--library /mnt/data-drive/Music/Library"),
     ("file:///srv/Music/", "--library /srv/Music"),
     ("smb://user:pw@host/Shared/Music/", None),
 ])

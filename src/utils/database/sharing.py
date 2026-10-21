@@ -35,17 +35,17 @@ from config.constants import (
     SHARING_SERVICE_NAME,
     SHARING_STARTUP_DELAY,
 )
-from settings import Settings
+from settings import Settings, drive_unavailable_message
 from utils.common.debug import mlog, slog
 from utils.database.backup import DB_FILES
 from utils.database.files_index import local_library_path
 
-SHARING_DIR = Path(str(Settings.sharing_dir))
-SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount))
+SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
+SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 SHARING_LAN_INTERFACE = Settings.sharing_lan_interface
-PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir))
-USERS_DIR = Path(str(Settings.users_dir))
-GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir))
+PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
+USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
+GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir)) if Settings.global_mood_changes_dir else None
 SERVER_SCRIPT = Path(__file__).with_name("sharing_server.py")
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INBOX_AUTO_SCRIPT = REPO_ROOT / "auto_resolve_requests.py"
@@ -56,16 +56,14 @@ _TMP_SUFFIX = ".tmp"
 
 
 class SharingUnavailableError(Exception):
-    """The sharing folder can't be written right now (e.g. the T7 drive isn't plugged in)."""
+    """The sharing folder can't be written right now (e.g. the data drive isn't plugged in)."""
 
 
 def _ensure_sharing_dir() -> None:
     # Never mkdir under an unmounted mount point: the folder would land on the
     # system disk instead of the external drive.
-    if not os.path.ismount(SHARING_DRIVE_MOUNT):
-        raise SharingUnavailableError(
-            f"Drive {SHARING_DRIVE_MOUNT} is not mounted - is the external drive plugged in?"
-        )
+    if SHARING_DRIVE_MOUNT is None or not os.path.ismount(SHARING_DRIVE_MOUNT):
+        raise SharingUnavailableError(drive_unavailable_message(SHARING_DRIVE_MOUNT))
     SHARING_DIR.mkdir(parents=True, exist_ok=True)
 
 

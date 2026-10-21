@@ -26,6 +26,9 @@ discovery_fetcher_stats_years.json
 database_location_config.json
 file_matching_config.json
 /.agents/local.md
+# This machine's own ssh shortcuts (the committed one is MusicDatabase-Remote.sh, configured in .env)
+/MusicDatabase-Remote-LAN.sh
+/MusicDatabase-Remote-Tailscale.sh
 
 # Databases (runtime / user data)
 /src/database/

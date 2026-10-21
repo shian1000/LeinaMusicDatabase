@@ -238,7 +238,8 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
     for case in open_fields:
         sender = senders.get(case.latest.file_name)
         if sender is not None and sender not in permitted:
-            permitted[sender] = PERMISSION_APPLY_CORRECTIONS in user_permissions(Path(str(Settings.users_dir)), sender)
+            permitted[sender] = (Settings.users_dir is not None and PERMISSION_APPLY_CORRECTIONS
+                                 in user_permissions(Path(str(Settings.users_dir)), sender))
     # Only links that could be saved are worth asking YouTube about
     to_play = [c for c in open_fields if c.video_id and not c.bad
                and permitted.get(senders.get(c.latest.file_name), False)]

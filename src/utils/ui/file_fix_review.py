@@ -24,6 +24,8 @@ RESET = "\033[0m"
 
 
 def _in_library(folder: Path) -> bool:
+    if not settings.local_library_dir_str:
+        return False
     try:
         folder.resolve().relative_to(Path(settings.local_library_dir_str).resolve())
         return True

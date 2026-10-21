@@ -19,7 +19,7 @@ from utils.database import backup, migrations, song_references, users
 
 @pytest.fixture
 def users_env(tmp_path, monkeypatch):
-    users_dir = tmp_path / "T7" / "Users"
+    users_dir = tmp_path / "data-drive" / "Users"
     monkeypatch.setattr(users, "USERS_DIR", users_dir)
     monkeypatch.setattr(users, "users_available", lambda: True)
     monkeypatch.setattr(backup, "ARCHIVE_DIR", tmp_path / "archive")

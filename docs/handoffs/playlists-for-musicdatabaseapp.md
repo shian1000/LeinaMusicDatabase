@@ -8,8 +8,8 @@ marked **(changed)** or **(decided)**.
 
 ## Endpoints
 
-Same server, port and addresses as the database download (LAN `192.0.2.13`,
-Tailscale `100.64.0.10`, port 8002), plain HTTP, JSON bodies with
+Same server, port and addresses as the database download (the server's LAN and
+Tailscale addresses, port 8002), plain HTTP, JSON bodies with
 `Content-Length` (no chunked). Every call needs `Authorization: Bearer <token>`
 from `POST /login`, and `<name>` must be the token's user.
 
@@ -28,7 +28,7 @@ from `POST /login`, and `<name>` must be the token's user.
 | 403 | the token belongs to another user than `<name>` | bug on the phone |
 | 411 | no `Content-Length` | send with a length |
 | 413 | body over 8 MiB **(decided)** | shouldn't happen at 5000 tracks (~1.5 MiB) |
-| 503 | T7 not mounted, that `user.db` hasn't got the migration yet, or the file stayed locked for 15 s | retry later |
+| 503 | data drive not mounted, that `user.db` hasn't got the migration yet, or the file stayed locked for 15 s | retry later |
 | 404 | any other path or method (e.g. `GET …/playlists/<uid>`) | — |
 
 ## A playlist in JSON
@@ -92,12 +92,12 @@ path. A uid is 8–64 characters of `0-9 A-Z a-z -` (a UUID fits).
 
 ## State on the real server
 
-`owner`'s `user.db` is migrated: "0. Fixed" has a uid and revision 1, and the
+The owner's `user.db` is migrated: "0. Fixed" has a uid and revision 1, and the
 counter is 1. A curl round trip (GET, PUT, stale PUT → 409, no token → 401, another
 user → 403, DELETE + archive file, GET `since=1`) passed on the LAN address with a
 temporary token. The test playlist, its archive file and the token were removed
 afterwards. A new user's `user.db` gets the migration at creation. Others get it at the
-next MusicDatabase startup with T7 mounted, and until then the server answers 503 for
+next MusicDatabase startup with the data drive mounted, and until then the server answers 503 for
 them.
 
 Code: `src/utils/database/playlist_sync.py` (rules, shared by the server and the menu),

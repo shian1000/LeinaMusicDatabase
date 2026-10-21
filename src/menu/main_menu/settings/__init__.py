@@ -1,3 +1,4 @@
+import os
 import subprocess
 from datetime import datetime
 
@@ -15,11 +16,12 @@ from utils.discoveries.discovery_settings import (
     load_year_discovery_config,
     save_year_discovery_config,
 )
+from utils.common.env_file import MACHINE_KEYS, read_env_value, save_env_value
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
 from utils.database.database_sessions import open_and_set_global_database_sessions
 from utils.database.files_index import FILES_DB_PATH, LibraryUnavailableError, scan_library
-from utils.database.users import users_available
+from utils.database.users import users_available, users_unavailable_message
 from utils.database.moods import apply_global_mood_changes_quietly
 from utils.database.sharing import (
     SharingUnavailableError,
@@ -39,7 +41,7 @@ from utils.discoveries.file_matching_settings import (
     save_closest_auto_accept_score,
 )
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
-from settings import settings
+from settings import drive_unavailable_message, settings
 
 
 def settings_menu():
@@ -61,6 +63,7 @@ def server_menu():
     action_map = {
         "Back up database now": backup_database_now,
         "Database location": database_location_menu,
+        "Folders and network": machine_settings_menu,
         "Index music library": index_music_library,
         "Submit database for sharing": submit_database_for_sharing,
         "Setup this PC for database sharing": setup_database_sharing,
@@ -181,7 +184,7 @@ def backup_database_now():
     else:
         print("No database files found to back up.")
     if not users_available():
-        print(f"Users' databases skipped: {settings.users_dir} is on a drive that isn't mounted.")
+        print(f"Users' databases skipped: {users_unavailable_message()}")
 
 
 def index_music_library():
@@ -232,6 +235,9 @@ def submit_database_for_sharing():
 def setup_database_sharing():
     """Install the systemd user service that serves the shared databases to
     the mobile app over Tailscale, starting shortly after every login."""
+    if settings.sharing_dir is None:
+        print(f"\033[91mCan't set up sharing: {drive_unavailable_message(None)}\033[0m")
+        return
     lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
     print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
@@ -431,6 +437,94 @@ def database_location_menu():
         "Reset to default": reset_database_location,
     }
     execute_menu_item("Database location", action_map, exit_label="Back")
+
+
+def machine_settings_menu():
+    """This machine's library and sharing folders and LAN interface, saved in
+    .env. Read at startup, so a change needs a restart - and a new "Setup this
+    PC for database sharing" before the sharing server uses it."""
+    while True:
+        choices = [questionary.Choice(title=f"{key.label}: {read_env_value(key.name) or '(not set)'}", value=key)
+                   for key in MACHINE_KEYS]
+        choices.append(questionary.Choice(title="Back", value="__back__"))
+        key = questionary.select("Folders and network (saved in .env):", choices=choices).ask()
+        if key in (None, "__back__"):
+            return
+        _change_machine_key(key)
+
+
+def _change_machine_key(key) -> None:
+    current = read_env_value(key.name)
+    if key.is_path:
+        methods = ["Open file manager", "Type path manually"]
+    else:
+        methods = ["Pick a network interface", "Type the name manually"]
+    if current:
+        methods.append("Clear")
+    methods.append("Cancel")
+    method = questionary.select(f"{key.name} (now: {current or 'not set'}):", choices=methods).ask()
+    if method in (None, "Cancel"):
+        return
+    if method == "Open file manager":
+        picked = open_file_browser_terminal(current or os.path.expanduser("~"))
+        value = str(picked) if picked else None
+    elif method == "Pick a network interface":
+        value = _pick_lan_interface()
+    elif method == "Clear":
+        value = ""
+    else:
+        value = questionary.text(f"{key.name}:", default=current).ask()
+    if value is None:
+        print("Cancelled.")
+        return
+    value = value.strip()
+    warning = _machine_value_warning(key.name, value)
+    if warning:
+        print(f"\033[93m{warning}\033[0m")
+        if not ask_yes_no("Save it anyway?"):
+            print("Cancelled.")
+            return
+    save_env_value(key.name, value)
+    print(f"{key.name} {'set to ' + value if value else 'cleared'} in .env.")
+    print('Restart the app for this to take effect, then run "Setup this PC for database sharing"'
+          " again so the sharing server uses it too.")
+
+
+def _machine_value_warning(name: str, value: str) -> str | None:
+    if not value:
+        return None
+    if name == "SHARING_LAN_INTERFACE":
+        if not os.path.exists(f"/sys/class/net/{value}"):
+            return f"There's no network interface {value} on this PC."
+        return None
+    if "://" in value and not value.startswith("file://"):
+        if name == "MUSIC_LIBRARY_DIR":
+            return None
+        return f"{name} must be a local folder."
+    path = value.removeprefix("file://")
+    if name == "SHARING_DRIVE_MOUNT" and not os.path.ismount(path):
+        return f"{path} isn't a mount point right now (is the drive plugged in?)."
+    if name == "SHARING_DIR":
+        mount = read_env_value("SHARING_DRIVE_MOUNT")
+        if mount and os.path.commonpath([os.path.abspath(path), os.path.abspath(mount)]) != os.path.abspath(mount):
+            return f"{path} isn't on the data drive ({mount}): nothing is written there while it isn't mounted."
+    if not os.path.isdir(path):
+        return f"{path} isn't a folder right now."
+    return None
+
+
+def _pick_lan_interface() -> str | None:
+    # Only interfaces with a private address; docker0 / br-* bridges never (see sharing_server)
+    names = sorted(n for n in os.listdir("/sys/class/net")
+                   if n != "lo" and not n.startswith(("docker", "br-", "veth", "tailscale")))
+    choices = [questionary.Choice(title=f"{n} ({address})", value=n)
+               for n in names if (address := interface_ipv4(n))]
+    if not choices:
+        print("No network interface with a private LAN address found.")
+        return None
+    choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
+    picked = questionary.select("Which interface is on the home network?", choices=choices).ask()
+    return None if picked == "__cancel__" else picked
 
 
 def change_database_location():

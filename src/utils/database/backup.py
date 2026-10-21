@@ -1,6 +1,6 @@
 """
 Automatic backup of the SQLite databases (music.db, tag.db, files.db, and every
-user's user.db when the T7 drive is mounted - archived as
+user's user.db when the data drive is mounted - archived as
 user-<name>.<timestamp>.db) into src/database/archive/, using SQLite's online backup API so a copy is safe to
 take even while the app holds an open connection.
 
@@ -84,7 +84,7 @@ def backup_databases(reason: str = "manual") -> list[Path]:
         if not src_path.exists():
             continue
         created.append(_backup_one(src_path, name, timestamp))
-    # Each user's user.db on the T7 drive is an original, not a copy - skipped
+    # Each user's user.db on the data drive is an original, not a copy - skipped
     # (not an error) while the drive isn't mounted
     for username, src_path in user_db_files().items():
         created.append(_backup_one(src_path, f"user-{username}", timestamp))

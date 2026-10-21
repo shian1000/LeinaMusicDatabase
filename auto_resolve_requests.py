@@ -2,7 +2,7 @@
 INBOX_AUTO_INTERVAL by the musicdatabase-inbox systemd user timer (installed
 with Settings -> Server -> "Setup this PC for database sharing"). Logic:
 src/utils/database/inbox_auto.py. Does nothing while the app is open (the
-app's own "Resolve new requests" runs the same pass), while T7 isn't
+app's own "Resolve new requests" runs the same pass), while the data drive isn't
 mounted, or while music.db waits for a migration the app hasn't applied.
 Output goes to the journal: journalctl --user -u musicdatabase-inbox"""
 

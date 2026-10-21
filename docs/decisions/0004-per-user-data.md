@@ -26,7 +26,7 @@ anywhere.
 ## Decision
 
 1. **One folder per user** under `Settings.users_dir` =
-   `/media/owner/T7/Shared/Music/Database/Users/<username>/` (the T7 SSD, next to the shared
+   `<SHARING_DIR>/Users/<username>/` (on the external data drive, next to the shared
    `music.db` / `tag.db`). It holds `user.db` (the user's data) and `account.json` (username,
    password hash, creation time). Called "Users", not "Private": it's per-user, not hidden from
    the admin. A separate file per user makes "only this user sees it" a matter of which file is
@@ -46,10 +46,10 @@ anywhere.
    ignores case. Passwords are stored only as salted `hashlib.scrypt` hashes, in `account.json`
    rather than `user.db`, because `user.db` may be sent to the phone one day. Enough for a
    household. If this ever grows, the login can change without touching the data.
-5. **The originals live on T7**, unlike `music.db`/`tag.db` there, which are copies. So the
+5. **The originals live on the data drive**, unlike `music.db`/`tag.db` there, which are copies. So the
    daily and manual backups include every user's `user.db`
    (`archive/user-<name>.<timestamp>.db`), and `migrations/user/` is applied to each of them at
-   startup, after a backup. While T7 isn't mounted, users are skipped, never created on the
+   startup, after a backup. While the data drive isn't mounted, users are skipped, never created on the
    system disk.
 6. **Global data the phone finds goes through a review inbox, not straight in**: requests that
    MusicDatabase reads and the user accepts or rejects. Built 2026-10-13 as one SQLite file per
@@ -88,7 +88,7 @@ log in, list, rename, re-password and delete users.
 ## Consequences
 
 - Each new kind of private data is a new `migrations/user/NNNN_*.sql` file, applied to every
-  existing user's `user.db` at the next startup with T7 mounted.
+  existing user's `user.db` at the next startup with the data drive mounted.
 - A new user's `user.db` gets its whole schema from those files (`initialize_user_db()`). The
   SQLAlchemy models in `src/utils/database/user_datatables.py` mirror them and must be updated
   with each new file.

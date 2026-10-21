@@ -54,8 +54,10 @@ from utils.database.datatables import Artist
 from utils.database.song_artists import additional_artist_role, count_artist_songs, song_artist_label
 from utils.ui.artist_change import ask_old_artist_role, offer_removing_emptied
 from utils.common.romanize import suggest_latin
+from settings import drive_unavailable_message
 from utils.database.inbox_requests import (
     INBOX_DIR,
+    INBOX_DRIVE_MOUNT,
     KEEP,
     NO_VIDEO,
     OPEN,
@@ -662,7 +664,7 @@ def _auto_pass(session) -> None:
 
 def resolve_new_requests() -> None:
     if not inbox_available():
-        print(f"The inbox ({INBOX_DIR}) is on a drive that isn't mounted - is T7 plugged in?")
+        print(f"The inbox isn't available: {drive_unavailable_message(INBOX_DRIVE_MOUNT)}")
         return
     new_count, review_count = len(new_request_paths()), len(review_request_paths())
     history = auto_report()
