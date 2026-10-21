@@ -62,9 +62,6 @@ def display_songs(songs: Optional[List[Song]]) -> None:
         ("Language", None, None),
         ("Genre", None, None),
         ("Origin", None, None),
-        ("Nostalgic", None, "center"),
-        ("Melancholic", None, "center"),
-        ("Party", None, "center"),
     ])
 
     for song in songs:
@@ -76,9 +73,6 @@ def display_songs(songs: Optional[List[Song]]) -> None:
             song.language or "—",
             song.genre or "—",
             song.artist.origin,
-            "✓" if song.nostalgic else "✗",
-            "✓" if song.melancholic else "✗",
-            "✓" if song.party else "✗",
         )
 
     console.print(table)

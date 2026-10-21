@@ -42,6 +42,7 @@ from utils.discoveries.file_matching_settings import (
 )
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import drive_unavailable_message, settings
+from menu.main_menu.settings.public_database import public_database_menu
 
 
 def settings_menu():
@@ -67,6 +68,7 @@ def server_menu():
         "Index music library": index_music_library,
         "Submit database for sharing": submit_database_for_sharing,
         "Setup this PC for database sharing": setup_database_sharing,
+        "Public database on GitHub": public_database_menu,
     }
     execute_menu_item("Server", action_map, exit_label="Back")
 

@@ -73,6 +73,7 @@ from utils.database.inbox_requests import (
     collect_dead_link_cases,
     finish_request_files,
     now_iso,
+    package_entry,
     reject_request_file,
     save_case_checks,
 )
@@ -127,6 +128,8 @@ def link_verdict(case) -> tuple[str | None, str | None]:
 def field_correction_verdict(session, case, sender: str | None, permitted: bool) -> str | None:
     """None when the pass may save the correction, else why not."""
     if sender is None:
+        if package_entry(case.latest.file_name) is not None:
+            return "imported from a request package - its sender name isn't a login"
         return "sent without logging in"
     if not permitted:
         return f"{sender} has no permission to save corrections without review"

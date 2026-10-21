@@ -25,6 +25,12 @@ Inbox (Settings.phone_inbox_dir, on the data drive):
                 left the case to the owner, shown in the review.
 - auto_report.json - what the automatic pass changed; main.py shows the
                 entries not shown yet at startup.
+- packages.json - the files imported from request packages (a .zip sent by
+                hand, request_packages.py): file name -> the sender name
+                typed on the phone, the package, when. Their user part is
+                nobody's verified account, so RequestFile.sender is None for
+                them (no permission ever applies) and the review shows them
+                as from that name, from a package.
 
 Videos found bad are kept in music.db's bad_youtube_videos (migration 0010),
 which the phone reads too, so a later request naming one is turned down
@@ -90,6 +96,7 @@ REJECTED = "rejected"
 DECISIONS_FILE = "decisions.json"
 CHECKS_FILE = "auto_checks.json"
 REPORT_FILE = "auto_report.json"
+PACKAGES_FILE = "packages.json"
 # The user part of a request file name - the server only takes a named file
 # from that user's token, so it is a verified sender
 _SENDER_RE = re.compile(r"^(?P<user>[a-z0-9][a-z0-9_-]{1,31})_\d{4}-\d{2}-\d{2}_")
@@ -191,6 +198,7 @@ class RequestFile:
     song_requests: list[SongRequestReport] = field(default_factory=list)
     unknown_tables: list[str] = field(default_factory=list)
     error: str | None = None  # not a readable request file
+    package: dict | None = None  # packages.json's entry: imported from a request package
 
     @property
     def name(self) -> str:
@@ -202,7 +210,10 @@ class RequestFile:
 
     @property
     def sender(self) -> str | None:
-        """The logged-in user who sent it (from the file name); None = anonymous."""
+        """The logged-in user who sent it (from the file name); None =
+        anonymous, or imported from a package (its name is only typed)."""
+        if self.package is not None:
+            return None
         match = _SENDER_RE.match(self.name)
         return match.group("user") if match else None
 
@@ -331,7 +342,7 @@ def _columns(conn, table: str) -> set:
 def read_request_file(path: Path) -> RequestFile:
     """Read one request file without changing it. Never raises for a bad file:
     RequestFile.error says what's wrong."""
-    request = RequestFile(path=path)
+    request = RequestFile(path=path, package=package_entry(path.name))
     try:
         # immutable: no locks, journal or -shm next to a file we only read
         conn = sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)
@@ -428,6 +439,40 @@ def _move(path: Path, folder: str) -> Path:
 def reject_request_file(request: RequestFile) -> Path:
     flog(f"Inbox request {request.name} rejected: {request.error}")
     return _move(request.path, REJECTED)
+
+
+# ==================== request packages ====================
+
+def package_files() -> dict:
+    """packages.json: request file name -> {"sender", "package", "imported_at"}."""
+    if INBOX_DIR is None:
+        return {}
+    return _load_json(PACKAGES_FILE, {})
+
+
+def package_entry(name: str) -> dict | None:
+    # _move() names a clash "<stem>.1.db"; it's still that package's file
+    entry = package_files().get(re.sub(r"\.\d+\.db$", ".db", name))
+    return entry if isinstance(entry, dict) else None
+
+
+def record_package_files(entries: dict) -> None:
+    files = package_files()
+    files.update(entries)
+    _save_json(PACKAGES_FILE, files)
+
+
+def describe_files(names) -> str:
+    """The request files' names for the review, a package's marked with its sender."""
+    packages = package_files()
+    labels = []
+    for name in sorted(names):
+        entry = packages.get(re.sub(r"\.\d+\.db$", ".db", name))
+        if isinstance(entry, dict):
+            labels.append(f"{name} (from {entry.get('sender') or 'no name'}, imported from a package)")
+        else:
+            labels.append(name)
+    return ", ".join(labels)
 
 
 # ==================== decisions ====================

@@ -22,9 +22,6 @@ synonyms                        album
 name_latin    (migration 0011)  year
                                  language
                                  artist_id      FK -> Artist.id, NOT NULL
-                                 nostalgic
-                                 melancholic
-                                 party
                                  youtube_video_id
                                  spotify_url
                                  music_video_youtube_id (migration 0012)
@@ -75,7 +72,8 @@ role          NOT NULL, 'main' | 'feat'
   the other's (`merge_artist_synonyms()`, `merge_albums()`, song dedup); a rename keeps it and the
   review/editor point at it. A one-song "Singles" album copies its song's form. Rules:
   `utils/database/latin_names.py`.
-- `Song.nostalgic` / `melancholic` / `party` — integer mood flags, set through the terminal UI.
+- `songs.nostalgic` / `melancholic` / `party` (baseline integer mood flags, never filled) were dropped by
+  migration 0016 (2026-10-21); moods are `tags.kind = 'mood'` in tag.db.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.
 - Multi-artist songs: `Song.artist_id` is always the **primary** artist; each extra one is a row in
   `additional_song_artists` (`role` `'main'` = co-headliner "A x B", `'feat'` = guest "A feat. B").

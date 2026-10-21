@@ -71,6 +71,24 @@ PHONE_REQUEST_MAX_BYTES = 1024 * 1024
 PHONE_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
 # Request file format this version understands (request.format)
 PHONE_REQUEST_FORMAT = 1
+# A request package (utils/database/request_packages.py): a .zip of Leina
+# Radio's outbox files, sent by hand by someone who can't reach the sharing
+# server. Caps against zip bombs, on top of PHONE_REQUEST_MAX_BYTES per file.
+REQUEST_PACKAGE_MAX_FILES = 1000
+REQUEST_PACKAGE_MAX_BYTES = 50 * 1024 * 1024
+# The public copy of music.db / tag.db published as a GitHub Release
+# (utils/database/public_database.py; app ADR 0014). Phones download
+# https://github.com/<GITHUB_DB_REPO>/releases/download/<tag>/<file>, so the
+# tag and the asset names are the app's contract, like the sharing port.
+PUBLIC_DB_RELEASE_TAG = "database"
+PUBLIC_DB_RELEASE_NAME = "Public database"
+PUBLIC_DB_VERSION_FILE = "version.json"
+PUBLIC_DB_FORMAT = 1
+# The daily publish switch and the last publish's time and result
+PUBLIC_DB_STATE_FILE = "data/public_database.json"
+GITHUB_API_URL = "https://api.github.com"
+GITHUB_API_TIMEOUT = 20
+GITHUB_UPLOAD_TIMEOUT = 120
 # The automatic pass over new requests (utils/database/inbox_auto.py), run by
 # a systemd user timer (auto_resolve_requests.py) this often, while the app
 # isn't open

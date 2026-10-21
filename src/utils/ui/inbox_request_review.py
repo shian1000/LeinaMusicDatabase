@@ -66,6 +66,7 @@ from utils.database.inbox_requests import (
     auto_report,
     check_link_cases,
     collect_dead_link_cases,
+    describe_files,
     finish_request_files,
     inbox_available,
     load_case_checks,
@@ -130,8 +131,8 @@ def _show_case(case, position: str) -> None:
               + (f"  {about}" if about else ""))
     _show_bad(case)
     _show_ours(case)
-    files = sorted({r.file_name for r in case.reports})
-    print(f"    [dim]Reported in {', '.join(files)}[/dim]")
+    files = escape(describe_files({r.file_name for r in case.reports}))
+    print(f"    [dim]Reported in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -224,8 +225,8 @@ def _show_found(case, position: str) -> None:
               + (f"  {about}" if about else "") + latest)
     _show_bad(case)
     _show_ours(case)
-    files = sorted({r.file_name for r in case.reports})
-    print(f"    [dim]Found in {', '.join(files)}[/dim]")
+    files = escape(describe_files({r.file_name for r in case.reports}))
+    print(f"    [dim]Found in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -339,8 +340,8 @@ def _show_correction(session, case, position: str) -> None:
     if case.is_video:
         print("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
               "until the database's value changes.[/dim]")
-    files = sorted({r.file_name for r in case.reports})
-    print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {', '.join(files)}[/dim]")
+    files = escape(describe_files({r.file_name for r in case.reports}))
+    print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -551,8 +552,8 @@ def _show_song_request(case, position: str) -> None:
         print(f"    YouTube:      {_url(video_id)}")
     for track_id in case.spotify_track_ids:
         print(f"    Spotify:      https://open.spotify.com/track/{track_id}")
-    files = sorted({r.file_name for r in case.reports})
-    print(f"    [dim]Asked {escape(report.requested_at or '?')}, in {', '.join(files)}[/dim]")
+    files = escape(describe_files({r.file_name for r in case.reports}))
+    print(f"    [dim]Asked {escape(report.requested_at or '?')}, in {files}[/dim]")
     _show_auto_note(case)
 
 

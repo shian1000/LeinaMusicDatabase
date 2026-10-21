@@ -9,6 +9,7 @@ from utils.database.backup import backup_if_needed_today
 from utils.database.migrations import run_all_pending_migrations
 from utils.database.albums import ALBUM_ID_MIGRATION, run_album_backfill
 from utils.database.sharing import share_databases_quietly
+from utils.database.public_database import PUBLISHED, UNCHANGED, daily_publish_enabled, publish_daily
 from utils.database.files_index import scan_library_quietly
 from utils.database.song_references import apply_song_id_changes
 from utils.database.app_lock import hold_app_lock
@@ -45,6 +46,14 @@ def main():
         print("Indexing the music library...")
         scan_library_quietly()
         share_databases_quietly()
+        # The public copy on GitHub for phones without the server - uploads
+        # only when the catalog changed; any failure is tried again tomorrow
+        if daily_publish_enabled():
+            print("Checking the public database on GitHub...")
+            published = publish_daily()
+            if published is not None and published.status != UNCHANGED:
+                colour = "" if published.status == PUBLISHED else "\033[93m"
+                print(f"{colour}Public database: {published.message}\033[0m")
         # Once a day too: an old yt-dlp gets blocked by YouTube sooner
         try:
             offer_ytdlp_update()

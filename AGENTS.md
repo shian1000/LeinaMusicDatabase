@@ -265,6 +265,20 @@ non-trivial work in that area.
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
   `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
+- `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
+  copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one
+  GitHub Release (fixed tag `database` in `GITHUB_DB_REPO`; `music.db`, `tag.db`, then
+  `version.json` last), daily after the backup when changed (switch in Settings → Server → "Public
+  database on GitHub") and from that menu. **Allow-list:** a table or column reaches the public
+  file only when listed in `MUSIC_SPEC` / `TAG_SPEC` (other columns stay, NULLed — same schema as
+  the server's copy); a new migration's data stays private until someone lists it on purpose, and
+  `check_public_database()` refuses the publish otherwise (user / files.db tables, withheld values,
+  local paths, integrity). tag.db: moods only. The tag, asset names and `version.json` are the
+  app's contract. `request_packages.py` (Manage database → "Import a request package") puts a
+  hand-sent `.zip` of the phone's outbox into `Inbox/new/` under the server's own checks; its files
+  are recorded in `Inbox/packages.json` and their user part is a typed name, never a login
+  (`RequestFile.sender` None — no permissions). Details: `docs/runbooks/database.md` → "Public
+  database on GitHub and request packages".
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
@@ -497,6 +511,9 @@ non-trivial work in that area.
 - `YOUTUBE_API_KEY` (optional, `.env`) — a read-only YouTube Data API key for
   `videos_exist_via_api()`. Same rules. The OAuth token in `.secrets/token.json` (playlists) is a
   separate credential and expires; without the key and a valid token the API check is skipped.
+- `GITHUB_DB_TOKEN` (`.env`) — fine-grained GitHub token, Contents: read and write on
+  `GITHUB_DB_REPO` only, for the public database release. Same rules; GitHub errors are
+  reported without it.
 - `.secrets/client_secret.json` (Desktop-app OAuth client, Google Cloud project `<gcp-project>`
   since 2026-10-13) + `.secrets/token.json`, both `chmod 600`. `get_youtube_service()` discards a
   token issued to another client and logs in again in the browser. An OAuth app left in "Testing"

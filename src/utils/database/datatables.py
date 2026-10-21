@@ -55,10 +55,6 @@ class Song(Base):
     track_number = Column(Integer)  # position on the album, NULL = unknown
     disc_number = Column(Integer)   # NULL = 1 / unknown
 
-    nostalgic = Column(Integer)
-    melancholic = Column(Integer)
-    party = Column(Integer)
-
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")
     # Only multi-artist songs have rows here - `artist` stays the primary one.

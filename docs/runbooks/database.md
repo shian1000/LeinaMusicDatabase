@@ -572,6 +572,76 @@ Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscal
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
 
+## Public database on GitHub and request packages
+
+For Leina Radio phones that can't reach the sharing server (friends without Tailscale; the home
+router forwards no ports — owner's rule), two **extra** ways, replacing nothing (app ADR 0014,
+handoff `../MusicDatabaseApp/docs/handoffs/musicdatabase-public-database.md`, answer
+`docs/handoffs/public-database-for-musicdatabaseapp.md`):
+
+**The public copy** (`utils/database/public_export.py`). Built in a temporary folder from
+music.db and tag.db (backup API, read-only; the originals are never touched):
+
+- **Allow-list:** `MUSIC_SPEC` / `TAG_SPEC` name every table kept and the columns whose values are
+  published. Another table is dropped; another column stays in the schema (the phone reads these
+  files and the server's copies with the same code) but is set to NULL; a NOT NULL column nobody
+  listed fails the export. So a new migration's table or column is out until someone lists it.
+  Withheld today: `album_covers.path` (a file in `covers/`). tag.db keeps only `kind = 'mood'` tags
+  and their `song_tags` (the `spellchecked` / `album_checked` markers are the owner's work state).
+  Never in it: anything of `user.db` or `files.db`, the inbox.
+- **Self-check** (`check_public_database()`), on the built files, before anything is uploaded:
+  integrity check; only allowed tables (a `user.db` / `files.db` table name — read from their
+  migrations — is named as such); no views, no triggers on other tables; withheld columns all
+  NULL; no row a filter drops; no text value looking like a local path (`/home/`, `/media/`,
+  `/mnt/`, …, `smb://`, `file:/`, a drive letter, `\\server\`, `~/`, or this machine's own folders
+  from `Settings`). A failure publishes nothing and logs why (`flog`, without the value).
+- **"Changed":** `content_digest()` hashes the schema and every row in a fixed order, so it doesn't
+  depend on SQLite writing identical bytes (it does today, but nothing relies on it).
+
+**Publishing** (`utils/database/public_database.py`, `github_release.py`, plain REST over
+`requests`):
+
+- `GITHUB_DB_REPO` (`owner/repo`) and `GITHUB_DB_TOKEN` in `.env` — a fine-grained token with only
+  Contents: read and write on that repo. Settings → Server → "Public database on GitHub" sets both
+  (the token hidden), shows the last result, publishes, switches the daily publish and prints the
+  token steps. The token never reaches a message, an exception or the log.
+- **The owner's token expires 2026-12-31** (set 2026-10-21). After that every publish fails with
+  "GitHub refused the token (401)" (shown in that menu and at startup): make a new one with the
+  same steps and paste it with "Enter the token".
+- One release with the fixed tag `PUBLIC_DB_RELEASE_TAG` (`database`), created the first time with
+  `make_latest: false`. Phones download
+  `https://github.com/<repo>/releases/download/database/<file>`, so the tag and the asset names are
+  a contract with the app.
+- Assets `music.db`, `tag.db`, then `version.json` **last**
+  (`{"format": 1, "published_at": "…Z", "files": {"music.db": {"size", "sha256", "content_sha256"}, …}}`).
+  Each goes up as `<name>.uploading`, then the old asset is deleted and the new one renamed (the
+  old file is missing only between those two calls); a leftover `.uploading` is deleted first.
+- Only when changed: the published `version.json`'s `content_sha256`s are compared with the new
+  export; equal (and the databases still in the release) → nothing uploaded. "Publish now" then
+  offers to publish anyway.
+- **Daily:** `main.py`, after the daily backup, the library scan and the sharing copy, when the
+  switch (`data/public_database.json`, on by default) is on. Not set up, no network, GitHub
+  refusing, the check failing: recorded and printed, never blocking the start; tried again the
+  next day.
+- Tests: `tests/test_public_database.py` (a fake GitHub on localhost).
+
+**Request packages** (`utils/database/request_packages.py`, Manage database → "Import a request
+package", `utils/ui/request_package_import.py`). A `.zip` of the phone's outbox files, sent by hand:
+
+- Taken only if every entry is what `PUT /inbox/<name>` would take: a top-level file, a request
+  file name (`sharing_server.REQUEST_NAME_RE`), at most `PHONE_REQUEST_MAX_BYTES`, the SQLite
+  header; at most `REQUEST_PACKAGE_MAX_FILES` (1000) files and `REQUEST_PACKAGE_MAX_BYTES` (50 MiB)
+  read in total — sizes counted while reading, not taken from the zip. A folder, `..`, an absolute
+  path, a symlink, an encrypted entry or a name twice refuses the whole package. The inbox limit
+  applies as for the server.
+- A name already in `new/`, `review/`, `processed/` or `rejected/` is skipped and named.
+- Files go to `Inbox/new/` (dot-named `.part`, then renamed) and are recorded first in
+  `Inbox/packages.json` (name → typed sender name, package, time). Such a file's user part is a
+  name typed on the phone, not a login: `RequestFile.sender` is None for it, so it never gets an
+  account's permissions (the automatic pass leaves its corrections for review, "imported from a
+  request package"); the review lists it as "<file> (from <name>, imported from a package)". The
+  automatic pass handles the rest as for any request (dead / found links when our search agrees).
+
 ## Users' databases
 
 Users are managed from the main menu → Users (create, log in, list, rename, change password,

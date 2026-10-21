@@ -68,6 +68,11 @@ class Settings:
     # the home Wi-Fi (SHARING_LAN_INTERFACE; named, not "first private
     # address": docker0/br-* are private too). Empty = Tailscale only.
     sharing_lan_interface: str = os.getenv("SHARING_LAN_INTERFACE", "").strip()
+    # The public copy of the catalog (utils/database/public_database.py):
+    # "owner/repo" whose GitHub Release it goes to, and a fine-grained token
+    # with Contents: read and write on that repo only. Never print or log it.
+    github_db_repo: str = os.getenv("GITHUB_DB_REPO", "").strip()
+    github_db_token: str = os.getenv("GITHUB_DB_TOKEN", "").strip()
 
 
 def drive_unavailable_message(mount) -> str:
