@@ -99,6 +99,35 @@ class Folder(UserBase):
     deleted_at = Column(Integer)  # NULL = live, else a marker without items
 
 
+class SavedSong(UserBase):
+    """A song on one of Leina Radio's lists - liked or "Na później"
+    (migration 0010), synced by saved_sync.py, which does every write to
+    saved_songs."""
+    __tablename__ = "saved_songs"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=False)
+    list = Column(String)  # 'liked' / 'later' / anything newer; NULL on a deleted item
+    song_id = Column(Integer)  # data's song.song_id, rewritten when that song is merged
+    data = Column(String)  # JSON object, the item as the phone sent it
+    revision = Column(Integer, nullable=False, default=0)  # the user's saved_song_revision counter
+    updated_at = Column(Integer, nullable=False)
+    deleted_at = Column(Integer)  # NULL = live, else a marker without data
+
+
+class LaterLink(UserBase):
+    """A link saved "Na później" on Leina Radio (migration 0010), synced by
+    saved_sync.py, which does every write to later_links."""
+    __tablename__ = "later_links"
+
+    id = Column(Integer, primary_key=True)
+    uid = Column(String, unique=True, nullable=False)
+    data = Column(String)  # JSON object, the item as the phone sent it
+    revision = Column(Integer, nullable=False, default=0)  # the user's later_link_revision counter
+    updated_at = Column(Integer, nullable=False)
+    deleted_at = Column(Integer)
+
+
 class Listen(UserBase):
     """A play on one of the user's phones (migration 0009), for Leina
     Radio's listening stats, synced by listen_sync.py, which does every

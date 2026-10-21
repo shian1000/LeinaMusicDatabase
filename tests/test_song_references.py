@@ -2,7 +2,7 @@
 song_id_changes log (deletions logged by the flush listener, merges by
 record_song_merge(), bulk deletes by record_song_deletions()), song ids never
 being reused, and replaying the log into tag.db (global tags) and a user's
-user.db (playlist tracks, private tags) - idempotent, cursor-based, with the
+user.db (playlist tracks, private tags, saved songs following merges) - idempotent, cursor-based, with the
 first tag.db replay dropping tags of songs that no longer exist. Temp-file
 SQLite, no mocking of SQL."""
 
@@ -207,6 +207,32 @@ def test_replay_catches_up_playlists_resolved_against_an_older_shared_copy(env):
     assert tracks == [("from-menu", a_id), ("from-phone", kept_id), ("from-phone", kept_id)]
     assert db.execute("SELECT song_ids_checked_to FROM playlists WHERE uid = 'from-phone'").fetchone() == (None,)
     assert _revisions(db)["from-phone"] == 3
+
+
+def test_replay_points_saved_songs_at_the_merged_song(env):
+    from contextlib import closing
+    from utils.database import saved_sync as ss
+    music, tag, _ = env
+    s = music()
+    keep, dup, gone = _songs(s, "x", "x", "y")
+    keep_id, dup_id, gone_id = keep.id, dup.id, gone.id
+    folder = users.create_user("ania", "secret1")
+    with closing(ss.connect(folder / "user.db")) as conn:
+        for uid, song_id in (("liked-dup", dup_id), ("liked-gone", gone_id)):
+            body = {"list": "liked", "added_at": 1, "updated_at": 1, "song": {"song_id": song_id, "title": "x"}}
+            ss.store_item(conn, ss.SAVED_SONGS, uid, ss.parse_item(ss.SAVED_SONGS, body), 0)
+
+    sr.record_song_merge(s, dup_id, keep_id)
+    s.delete(dup)
+    s.delete(gone)
+    s.commit()
+    sr.apply_song_id_changes(tag_session=tag())
+
+    with closing(ss.connect(folder / "user.db")) as conn:
+        songs = {i["uid"]: i for i in ss.changes_since(conn, ss.SAVED_SONGS, 0)["songs"]}
+    # Merged -> the kept song under a new revision; a deleted song's id stays
+    assert songs["liked-dup"]["song"]["song_id"] == keep_id and songs["liked-dup"]["revision"] == 3
+    assert songs["liked-gone"]["song"]["song_id"] == gone_id and songs["liked-gone"]["revision"] == 2
 
 
 def test_new_user_skips_changes_made_before_it_existed(env):

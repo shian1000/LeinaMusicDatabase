@@ -39,3 +39,8 @@ See [`tests/README.md`](tests/README.md) for what's covered.
 Start at [`AGENTS.md`](AGENTS.md) — project layout, architecture boundaries, database safety
 rules, and the standard commands for this repo. [`docs/index.md`](docs/index.md) is the wider
 documentation entry point (architecture, data model, system registry, runbooks).
+
+## License
+
+GPLv3 — see [`LICENSE`](LICENSE). It uses mutagen (GPLv2 or later), so the whole program stays
+GPL-compatible; the phone app ([MusicDatabaseApp](https://github.com/shian1000/MusicDatabaseApp)) is GPLv3 too.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Read-only diagnostic report for the two SQLite databases: which files, how
+Read-only diagnostic report for the SQLite databases in DB_FILES (music,
+tag, files): which files, how
 many rows each table has, which migrations have been applied, and whether
 main.py is currently running.
 
@@ -32,6 +33,7 @@ from utils.database.backup import ARCHIVE_DIR, DB_FILES
 TABLES_BY_DB = {
     "music": ["artists", "songs"],
     "tag": ["tags", "song_tags"],
+    "files": ["files"],
 }
 
 
@@ -76,7 +78,8 @@ def inspect_one(name: str, path: Path) -> None:
 
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        for table in TABLES_BY_DB[name]:
+        # A database added to DB_FILES later still gets its migrations listed
+        for table in TABLES_BY_DB.get(name, []):
             count = _table_count(conn, table)
             print(f"  {table}: {'?' if count is None else count} row(s)")
 

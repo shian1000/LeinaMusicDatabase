@@ -1135,6 +1135,92 @@ def test_bad_or_unavailable_folder_requests(playlist_server, tmp_path):
     assert _call("GET", f"{unmounted}/users/ola_k/folders", token)[0] == 503
 
 
+# ==================== saved songs and links ====================
+
+SAVED_UID = "3f2b0c" + "0" * 34
+SAVED_SONG = {"song_id": 1234, "title": "Группа крови", "artist": "Кино", "video_id": "abcdefghijk",
+              "playlist_video_id": "pv", "spotify_track_id": "sp"}
+
+
+def _saved_song_body(base_revision=0, updated_at=1000, **extra):
+    return {"list": "liked", "added_at": updated_at, "updated_at": updated_at, "deleted": False,
+            "base_revision": base_revision, "song": SAVED_SONG, **extra}
+
+
+def test_saved_songs_round_trip(playlist_server):
+    start, _, tokens = playlist_server
+    base = f"{start()}/users/ola_k/saved-songs"
+    token = tokens["ola_k"]
+
+    assert _call("GET", base, token) == (200, {"revision": 0, "songs": []})
+    # The song verbatim (id 1234 isn't in the shared music.db), an unknown key kept
+    status, stored = _call("PUT", f"{base}/{SAVED_UID}", token, _saved_song_body(future={"x": "ą"}))
+    assert (status, stored) == (200, {"list": "liked", "added_at": 1000, "song": SAVED_SONG, "future": {"x": "ą"},
+                                      "uid": SAVED_UID, "revision": 1, "updated_at": 1000, "deleted": False})
+    assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "songs": [stored]})
+    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 1, "songs": []})
+
+    # base_revision 0 on an existing uid: older -> 409, newer -> applied
+    assert _call("PUT", f"{base}/{SAVED_UID}", token, _saved_song_body(updated_at=500)) == (409, stored)
+    assert _call("DELETE", f"{base}/{SAVED_UID}?base_revision=0&deleted_at=600", token) == (409, stored)
+    status, deleted = _call("DELETE", f"{base}/{SAVED_UID}?base_revision=1&deleted_at=5000", token)
+    assert (status, deleted) == (200, {"uid": SAVED_UID, "revision": 2, "updated_at": 5000, "deleted": True})
+    assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 2, "songs": [deleted]})
+    status, revived = _call("PUT", f"{base}/{SAVED_UID}", token, _saved_song_body(updated_at=7000))
+    assert status == 200 and revived["revision"] == 3 and revived["deleted"] is False
+    # Saved songs don't touch links or folders
+    assert _call("GET", f"{start()}/users/ola_k/later-links", token) == (200, {"revision": 0, "links": []})
+    assert _call("GET", f"{start()}/users/ola_k/folders", token) == (200, {"revision": 0, "folders": []})
+
+
+def test_later_links_round_trip(playlist_server):
+    start, _, tokens = playlist_server
+    base = f"{start()}/users/ola_k/later-links"
+    token = tokens["ola_k"]
+    link = {"url": "https://youtu.be/abcdefghijk", "service": "youtube", "kind": "Film z YouTube", "person": "Ola",
+            "saved_at": 900, "opened_at": None, "title": None, "artist": None}
+    uid = "a1c40000-0000-4000-8000-000000000001"
+    status, stored = _call("PUT", f"{base}/{uid}", token, {**link, "updated_at": 1000, "base_revision": 0})
+    assert (status, stored) == (200, {**link, "uid": uid, "revision": 1, "updated_at": 1000, "deleted": False})
+    # A DELETE of a uid never seen stores the marker
+    status, deleted = _call("DELETE", f"{base}/never-seen?base_revision=0&deleted_at=2000", token)
+    assert (status, deleted) == (200, {"uid": "never-seen", "revision": 2, "updated_at": 2000, "deleted": True})
+    assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 2, "links": [stored, deleted]})
+
+
+@pytest.mark.parametrize("collection", ["saved-songs", "later-links"])
+@pytest.mark.parametrize("token_of, status", [(None, 401), ("revoked", 401), ("bob", 403)])
+def test_saved_items_need_that_users_token(playlist_server, collection, token_of, status):
+    start, _, tokens = playlist_server
+    base = f"{start()}/users/ola_k/{collection}"
+    token = {"revoked": "not-a-token", None: None}.get(token_of, tokens.get(token_of))
+    assert _call("GET", base, token)[0] == status
+    assert _call("PUT", f"{base}/k3x", token, _saved_song_body())[0] == status
+    assert _call("DELETE", f"{base}/k3x?base_revision=0&deleted_at=1", token)[0] == status
+
+
+def test_bad_or_unavailable_saved_requests(playlist_server, tmp_path):
+    start, _, tokens = playlist_server
+    base = start()
+    url = f"{base}/users/ola_k/saved-songs"
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{url}/k3x", token, {"list": "liked"})[0] == 400
+    assert _call("PUT", f"{url}/k3x", token, _saved_song_body(song="Kino"))[0] == 400
+    assert _call("PUT", f"{url}/k3x", token, _saved_song_body(uid="another"))[0] == 400
+    assert _call("PUT", f"{url}/k3x", token, _saved_song_body(base_revision=None))[0] == 400
+    assert _call("PUT", f"{base}/users/ola_k/later-links/k3x", token, _saved_song_body())[0] == 400  # no url
+    assert _call("PUT", f"{url}/k3x", token, raw=b"not json")[0] == 400
+    assert _call("PUT", f"{url}/bad_uid", token, _saved_song_body())[0] == 400
+    assert _call("PUT", f"{url}/{'x' * 65}", token, _saved_song_body())[0] == 400
+    assert _call("PUT", f"{url}/k3x", token, raw=b"[" + b" " * sharing_server.SAVED_MAX_BODY_BYTES + b"]")[0] == 413
+    assert _call("DELETE", f"{url}/k3x?deleted_at=5", token)[0] == 400
+    assert _call("GET", f"{url}/k3x", token)[0] == 404
+    assert _call("GET", f"{base}/users/ola_k/saved-songs-x", token)[0] == 404
+    assert _call("GET", f"{base}/users/bob/saved-songs", tokens["bob"])[0] == 503  # no user.db
+    unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
+    assert _call("GET", f"{unmounted}/users/ola_k/later-links", token)[0] == 503
+
+
 # ==================== listens ====================
 
 def _listen(uid, listened_ms=183400, **extra):

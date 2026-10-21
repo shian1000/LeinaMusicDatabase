@@ -338,6 +338,16 @@ id PK, uid unique (1-64 [A-Za-z0-9-]), started_at (ms), listened_ms, duration_ms
 artist, album, song_id (music.db, as sent, never checked or remapped), youtube_video_id,
 spotify_track_id, source, playlist_uid, playlist_name, mood_uid, global_mood_id, mood_name,
 extra (JSON of unknown keys), revision    indexes: revision, started_at
+
+saved_songs  (migration 0010)     saved_song_revision: one row, its own counter
+-----------
+id PK, uid unique (1-64 [A-Za-z0-9-]), list ('liked' / 'later' / newer), song_id (data's
+song.song_id; follows merges, a deleted song's id stays), data (JSON, the item as sent),
+revision, updated_at, deleted_at   (a deleted item: no data/list/song_id, nothing archived)
+
+later_links  (migration 0010)     later_link_revision: one row, its own counter
+-----------
+id PK, uid unique, data (JSON, the link as sent), revision, updated_at, deleted_at
 ```
 
 - Same shapes as the phone's own playlist tables and as `tag.db`'s tags. Living in `user.db`

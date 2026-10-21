@@ -60,7 +60,9 @@ When this file disagrees with the code, trust the code and fix this file.
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
 
 Use the venv and the pinned versions. Don't install globally or bump dependencies unless the task
-requires it.
+requires it. The project is GPLv3 (`LICENSE`, user's choice 2026-10-21, same as the phone app): a new
+dependency must be GPL-compatible (MIT, BSD, Apache 2.0, LGPL, GPLv2-or-later, GPLv3 — not
+GPLv2-only or proprietary).
 
 ## Module map
 
@@ -107,7 +109,7 @@ non-trivial work in that area.
   (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
   `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / `GET /users/<name>`
+  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
@@ -241,9 +243,15 @@ non-trivial work in that area.
   handed back, a play only added or lengthened (the longer `listened_ms` wins), fields kept as sent
   (unknown keys in `extra`), `song_id` never checked nor remapped by `song_references`. Details:
   `docs/runbooks/database.md` → "Listening stats on the phone".
+  Leina Radio's liked songs, songs and links saved "Na później" sync through `saved_sync.py`
+  (standard-library, user migration 0010, `/users/<name>/saved-songs` and `/later-links`, one
+  counter each): the folder rules, one item = one song on one list or one link, stored verbatim
+  (JSON `data`, never checked); a DELETE of a uid never seen stores the marker. Saved songs follow
+  song merges (`follow_song_merges()` from `song_references`, the whole log, a deleted id kept).
+  Details: `docs/runbooks/database.md` → "Saved songs and links on the phone".
   `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
-  tracks and private tags (a mood whose songs change gets a new revision too).
+  tracks, private tags and saved songs (a mood whose songs change gets a new revision too).
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
   flush listener; merges must call `record_song_merge()` and bulk `query().delete()` must call
   `record_song_deletions()`. Each referencing file replays the log past its own cursor in

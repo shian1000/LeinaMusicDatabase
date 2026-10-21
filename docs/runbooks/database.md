@@ -538,8 +538,34 @@ final contract, is
 - The rules live in `utils/database/listen_sync.py` (standard-library, built on `playlist_sync.py`).
   Private, no review, no permission. MusicDatabase's menu doesn't show plays yet.
 
+**Saved songs and links on the phone (2026-10-21).** Leina Radio's liked songs ("Polubione
+utwory"), songs saved "Na później" and links saved "Na później" from the link sheet were kept only on
+the phone and lost with a reinstall; they sync with the user's account now. The owner's decisions are
+in the app's `docs/handoffs/musicdatabase-saved-songs.md` (app ADR 0013); the answer, with the final
+contract, is [`docs/handoffs/saved-songs-for-musicdatabaseapp.md`](../handoffs/saved-songs-for-musicdatabaseapp.md).
+
+- `GET /users/<name>/saved-songs?since=` → `{"revision", "songs"}`, `GET /users/<name>/later-links?since=`
+  → `{"revision", "links"}`; `PUT …/<uid>` (the item + `updated_at`, `base_revision`) and
+  `DELETE …/<uid>?base_revision=&deleted_at=` on both. The folder rules: same token rules, answers and
+  conflict rule, one counter per collection (`saved_song_revision`, `later_link_revision`), bodies up to
+  64 KiB, uid 1–64 `[A-Za-z0-9-]`. 503 until that `user.db` has user migration 0010.
+- **One item = one song on one list, or one link**, stored verbatim (`data`, JSON: every key but
+  `uid` / `revision` / `updated_at` / `deleted` / `base_revision`, unknown ones included). A song needs
+  a `list` string, an `added_at` and a `song` object with a string `title`; a link a `url` and a
+  `saved_at`. Never checked against music.db, the URL never fetched. A song's uid is a hash of list +
+  song, so a `base_revision` 0 PUT on an existing uid is normal (the same song on two phones) and the
+  usual rule decides.
+- **Deleting** keeps the row as a marker without data — also for a uid never seen, so other phones
+  drop it. A later PUT with a newer `updated_at` brings it back.
+- **Merges follow:** `apply_song_id_changes()` points saved songs at the song theirs was merged into
+  (`saved_sync.follow_song_merges()`, the whole log each time — idempotent since ids are never
+  reused, and it catches items stored from a phone's older music.db), each under a new revision. A
+  deleted song's id stays: the item still has its title and video.
+- The rules live in `utils/database/saved_sync.py` (standard-library, built on `playlist_sync.py`).
+  Private, no review, no permission. MusicDatabase's menu doesn't show them.
+
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders` and `…/listens` (401 without a token), the same for `http://192.0.2.13:8002/`, and
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `http://192.0.2.13:8002/`, and
 `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and `192.0.2.13`.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.

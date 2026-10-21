@@ -1,7 +1,7 @@
 """
 Keeping references to songs.id valid in the files SQLite can't enforce
 them across: tag.db's song_tags (global tags), every user's user.db
-(playlist tracks, private tags) and files.db (the music library index).
+(playlist tracks, private tags, saved songs) and files.db (the music library index).
 
 1. music.db logs every song id that stops existing in `song_id_changes`
    (migration 0009). A merge is logged by the code that merges
@@ -21,6 +21,8 @@ them across: tag.db's song_tags (global tags), every user's user.db
    that logged something (database_sessions.submit/close). A user.db on an
    unplugged T7 is simply caught up later, which is why it's a log with
    cursors and not an update made on the spot.
+   Leina Radio's saved songs (saved_sync.py) follow merges only, from the
+   whole log rather than the cursor; a deleted song's id stays on them.
    In a user.db every playlist whose tracks changed, and every mood whose
    songs changed, gets a new revision (playlist_sync / mood_sync
    .mark_changed()), so the phones fetch the new ids. Tracks and mood songs
@@ -46,7 +48,7 @@ from sqlalchemy import event, func, select, text
 
 from config.constants import FILE_MATCH_AUTO
 from utils.common.debug import mlog
-from utils.database import mood_sync, playlist_sync
+from utils.database import mood_sync, playlist_sync, saved_sync
 from utils.database.backup import DB_FILES
 from utils.database.datatables import Song, SongIdChange
 from utils.database.user_datatables import user_db_session
@@ -285,6 +287,8 @@ def _replay_user_db(session, changes: list) -> int:
     playlist_sync.mark_changed(raw, changed_playlists)
     if has_moods:
         mood_sync.mark_changed(raw, changed_tags)
+    # The whole log, not past the cursor: see follow_song_merges()
+    touched += saved_sync.follow_song_merges(raw, changes)
     return touched
 
 

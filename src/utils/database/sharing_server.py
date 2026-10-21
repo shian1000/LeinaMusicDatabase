@@ -70,6 +70,12 @@ with every path passed on the command line.
   /users/<name>/folders[/<uid>], a folder being a name + items (refs to
   playlists / moods, stored as sent). A uid is 1-64 characters [A-Za-z0-9-];
   a body over FOLDER_MAX_BODY_BYTES -> 413.
+- Saved songs and links (only with --users; rules in saved_sync.py): the
+  same three calls and answers under /users/<name>/saved-songs[/<uid>]
+  (GET -> {"revision", "songs"}) and /users/<name>/later-links[/<uid>]
+  (GET -> {"revision", "links"}), one item = one song on one list (liked /
+  "Na później") or one link, stored verbatim. A DELETE of a uid never seen
+  stores the marker too. A body over SAVED_MAX_BODY_BYTES -> 413.
 - Plays for the phone's listening stats (only with --users; rules in
   listen_sync.py): GET /users/<name>/listens?since=<revision>&limit=<n> ->
   {"revision", "listens", "more"}, POST /users/<name>/listens with
@@ -134,7 +140,8 @@ import urllib.parse
 from urllib.parse import parse_qs, urlsplit
 
 try:
-    from . import account_auth, covers, folder_sync, global_mood_log, listen_sync, mood_sync, playlist_sync  # as utils.database.sharing_server
+    from . import (account_auth, covers, folder_sync, global_mood_log, listen_sync, mood_sync,  # as utils.database.sharing_server
+                   playlist_sync, saved_sync)
 except ImportError:
     import account_auth  # run as a script by the systemd service (its folder is on sys.path)
     import covers
@@ -143,6 +150,7 @@ except ImportError:
     import listen_sync
     import mood_sync
     import playlist_sync
+    import saved_sync
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
@@ -179,6 +187,10 @@ MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$"
 FOLDERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/folders(?:/(?P<uid>[^/]+))?$")
 # A folder holds only refs; the app has no limit, this is generous
 FOLDER_MAX_BODY_BYTES = 1024 * 1024
+# /users/<name>/saved-songs[/<uid>], /users/<name>/later-links[/<uid>]
+SAVED_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/(?P<collection>saved-songs|later-links)(?:/(?P<uid>[^/]+))?$")
+# One song or link with a few names; generous
+SAVED_MAX_BODY_BYTES = 64 * 1024
 # /users/<name>/listens
 LISTENS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/listens$")
 # The phone sends up to 500 plays, ~250 KB of JSON
@@ -346,6 +358,8 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 self._moods(method)
             elif FOLDERS_PATH_RE.match(path):
                 self._folders(method)
+            elif SAVED_PATH_RE.match(path):
+                self._saved(method)
             elif method in ("GET", "POST") and LISTENS_PATH_RE.match(path):
                 self._listens(method)
             elif method in ("GET", "PUT") and COVERS_PATH_RE.match(path):
@@ -833,6 +847,72 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
                 print(f"Folder {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
             self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
 
+        # ---- saved songs and links (liked / "Na później") ----
+
+        def _saved(self, method: str):
+            url = urlsplit(self.path)
+            match = SAVED_PATH_RE.match(url.path)
+            username, uid = match.group("user"), match.group("uid")
+            collection = saved_sync.COLLECTIONS[match.group("collection")]
+            if (method == "GET") != (uid is None):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            body = None
+            if method == "PUT":
+                body = self._read_json_body(SAVED_MAX_BODY_BYTES)
+                if body is None:
+                    return
+            if not self._authorize(username, f"another user's {collection.path}"):
+                return
+            if uid is not None and not saved_sync.UID_RE.match(uid):
+                self._reply(HTTPStatus.BAD_REQUEST, "not an item uid")
+                return
+            query = parse_qs(url.query)
+            try:
+                if method == "GET":
+                    since = self._query_int(query, "since", default=0)
+                elif method == "PUT":
+                    item = saved_sync.parse_item(collection, body)
+                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
+                    if body.get("uid", uid) != uid:
+                        raise saved_sync.BadItemError("uid: differs from the one in the path")
+                else:
+                    base_revision = self._query_int(query, "base_revision")
+                    deleted_at = self._query_int(query, "deleted_at")
+            except saved_sync.BadItemError as exc:
+                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+
+            log_name = f"{collection.path} of {username}"
+            try:
+                conn = saved_sync.connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
+            except saved_sync.NotMigratedError as exc:
+                print(f"{log_name}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+                return
+            except (OSError, sqlite3.Error) as exc:
+                print(f"{log_name}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            try:
+                if method == "GET":
+                    self._reply_json(HTTPStatus.OK, saved_sync.changes_since(conn, collection, since))
+                    return
+                if method == "PUT":
+                    applied, stored = saved_sync.store_item(conn, collection, uid, item, base_revision)
+                else:
+                    applied, stored = saved_sync.delete_item(conn, collection, uid, base_revision, deleted_at)
+            except (OSError, sqlite3.Error) as exc:
+                print(f"{log_name}: {method} {uid} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            finally:
+                conn.close()
+            if applied:
+                print(f"{collection.label} {stored['uid']} of {username} "
+                      f"{'deleted' if stored['deleted'] else 'stored'}, revision {stored['revision']}", flush=True)
+            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
+
         # ---- listens (plays, for the phone's listening stats) ----
 
         def _listens(self, method: str):
@@ -1277,7 +1357,7 @@ def main(argv=None) -> int:
         server = bind_when_ready(handler, args.port, get_address, label)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
-        inbox += f", logins, playlists, moods, folders, listens and covers for {args.users}" if args.users else ""
+        inbox += f", logins, playlists, moods, folders, saved songs and links, listens and covers for {args.users}" if args.users else ""
         inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
         inbox += f", library files from {args.library}" if args.library else ""
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
