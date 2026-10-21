@@ -14,7 +14,7 @@ installs. Deliberately standard-library only and independent of the rest of
 the app (no settings.py / venv imports), so it runs on the system python3
 with every path passed on the command line.
 
-    python3 sharing_server.py --dir DIR --mount MOUNT --port 8002 [--lan-interface enp2s0] [--inbox DIR] [--users DIR]
+    python3 sharing_server.py --dir DIR [--mount MOUNT] --port 8002 [--lan-interface enp2s0] [--inbox DIR] [--users DIR]
                               [--mood-changes DIR] [--library DIR]
 
 - Tailscale: waits (retrying forever) until `tailscale ip -4` returns an
@@ -30,7 +30,8 @@ with every path passed on the command line.
 - Never binds to 0.0.0.0, and never to an address other than those two.
 - If MOUNT (the external drive holding DIR) isn't mounted, requests for the
   databases get a 503 instead of the server exiting, so the phone shows an
-  error and simply retries the next day.
+  error and simply retries the next day. Without --mount (DIR on the system
+  disk) the same 503 means DIR itself is missing.
 - Uploads (anyone on the home network can send one, like anyone can
   download): only file names of the request format, only SQLite files, at
   most --max-request-bytes each, and nothing once <inbox>/new/ and review/
@@ -325,7 +326,7 @@ def _same_content(path: str, data: bytes) -> bool:
         return False
 
 
-def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
+def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None,
                  max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
                  users_dir: str | None = None, limiter: LoginLimiter | None = None,
@@ -339,6 +340,11 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
     # the check and the commit
     covers_lock = threading.Lock()
     limiter = limiter or LoginLimiter()
+
+    def data_available() -> bool:
+        # On an external drive (--mount): only while it's mounted. Without
+        # one, everything is on the system disk: --dir just has to be there.
+        return os.path.ismount(mount) if mount else os.path.isdir(share_dir)
 
     class ShareHandler(BaseHTTPRequestHandler):
         server_version = "MusicDatabaseShare"
@@ -391,7 +397,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             if name not in SHARED_FILES:
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
-            if not os.path.ismount(mount):
+            if not data_available():
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
             try:
@@ -422,7 +428,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             if library_dir is None or match is None:
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
-            if not os.path.ismount(mount) or not os.path.isdir(library_dir):
+            if not data_available() or not os.path.isdir(library_dir):
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
             files_db = os.path.join(share_dir, "files.db")
@@ -521,7 +527,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             except (OSError, ValueError, TypeError, KeyError):
                 self._reply(HTTPStatus.BAD_REQUEST, "expected JSON {\"username\", \"password\"}")
                 return
-            if not os.path.ismount(mount):
+            if not data_available():
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
             keys = [("address", self.client_address[0]),
@@ -550,7 +556,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
 
         def _logout(self):
             token = self._bearer_token()
-            if token and os.path.ismount(mount):
+            if token and data_available():
                 try:
                     account_auth.revoke_token(users_dir, token)
                 except OSError as exc:
@@ -578,7 +584,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
         def _sender(self) -> str | None:
             """The user the token belongs to, or None after replying (503
             drive not mounted - checked first, tokens live there - or 401)."""
-            if not os.path.ismount(mount):
+            if not data_available():
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return None
             sender = account_auth.token_user(users_dir, self._bearer_token())
@@ -1196,7 +1202,7 @@ def make_handler(share_dir: str, mount: str, inbox_dir: str | None = None,
             if not data.startswith(SQLITE_HEADER):
                 self._reply(HTTPStatus.BAD_REQUEST, "not an SQLite file")
                 return
-            if not os.path.ismount(mount):
+            if not data_available():
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
             # After the mount check: tokens live on the drive too, and a
@@ -1336,7 +1342,8 @@ def address_sources(lan_interface: str | None) -> list[tuple[str, Callable[[], s
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("--dir", required=True, help="folder holding music.db, tag.db and files.db")
-    parser.add_argument("--mount", required=True, help="mount point of the drive holding --dir")
+    parser.add_argument("--mount", help="mount point of the external drive holding --dir "
+                                        "(leave out when --dir is on the system disk)")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--lan-interface", help="also serve on this interface's private IPv4 address")
     parser.add_argument("--inbox", help="accept requests from Leina Radio into this folder (on --mount)")

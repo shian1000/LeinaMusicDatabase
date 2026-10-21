@@ -35,7 +35,7 @@ from config.constants import (
     SHARING_SERVICE_NAME,
     SHARING_STARTUP_DELAY,
 )
-from settings import Settings, drive_unavailable_message
+from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import mlog, slog
 from utils.database.backup import DB_FILES
 from utils.database.files_index import local_library_path
@@ -61,9 +61,10 @@ class SharingUnavailableError(Exception):
 
 def _ensure_sharing_dir() -> None:
     # Never mkdir under an unmounted mount point: the folder would land on the
-    # system disk instead of the external drive.
-    if SHARING_DRIVE_MOUNT is None or not os.path.ismount(SHARING_DRIVE_MOUNT):
-        raise SharingUnavailableError(drive_unavailable_message(SHARING_DRIVE_MOUNT))
+    # system disk instead of the external drive. Without a drive the folder
+    # itself must exist - the owner creates it, so a typo doesn't.
+    if not sharing_dir_available(SHARING_DRIVE_MOUNT, SHARING_DIR):
+        raise SharingUnavailableError(drive_unavailable_message(SHARING_DRIVE_MOUNT, SHARING_DIR))
     SHARING_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -126,7 +127,11 @@ def share_databases_quietly() -> list[Path]:
 # ==================== systemd user service ====================
 
 def _service_unit(python: str) -> str:
-    command = f"{python} {SERVER_SCRIPT} --dir {SHARING_DIR} --mount {SHARING_DRIVE_MOUNT} --port {SHARING_HTTP_PORT}"
+    command = f"{python} {SERVER_SCRIPT} --dir {SHARING_DIR}"
+    # No --mount: SHARING_DIR is on the system disk
+    if SHARING_DRIVE_MOUNT is not None:
+        command += f" --mount {SHARING_DRIVE_MOUNT}"
+    command += f" --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
     command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"

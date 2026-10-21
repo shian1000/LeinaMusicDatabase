@@ -86,6 +86,13 @@ PUBLIC_DB_VERSION_FILE = "version.json"
 PUBLIC_DB_FORMAT = 1
 # The daily publish switch and the last publish's time and result
 PUBLIC_DB_STATE_FILE = "data/public_database.json"
+# Where a fresh install without databases downloads the public catalog from
+# (utils/database/first_run.py) when GITHUB_DB_REPO isn't set: this project's
+# own release
+PUBLIC_CATALOG_DEFAULT_REPO = "shian1000/LeinaMusicDatabase"
+PUBLIC_CATALOG_TIMEOUT = 30
+# Refuse a version.json announcing a bigger file - a sanity cap, the catalog is ~1 MiB
+PUBLIC_CATALOG_MAX_BYTES = 512 * 1024 * 1024
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_API_TIMEOUT = 20
 GITHUB_UPLOAD_TIMEOUT = 120

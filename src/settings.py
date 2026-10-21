@@ -46,12 +46,14 @@ class Settings:
     youtube_api_key: str | None = os.getenv("YOUTUBE_API_KEY")
     export_dir: UPath = UPath(__file__).parent.parent / "import"
     # Where music.db / tag.db are copied for the mobile app to download
-    # (utils/database/sharing.py; SHARING_DIR). Lives on an external drive
-    # (SHARING_DRIVE_MOUNT), which is only there while mounted - the mount is
-    # checked before writing. Either key missing = sharing, users, the inbox
-    # and mood changes are all unavailable, as with an unplugged drive.
+    # (utils/database/sharing.py; SHARING_DIR). It may live on an external
+    # drive (SHARING_DRIVE_MOUNT), which is only there while mounted - the
+    # mount is checked before writing. With SHARING_DRIVE_MOUNT empty it's on
+    # the system disk and only has to exist (sharing_dir_available()).
+    # SHARING_DIR missing = sharing, users, the inbox and mood changes are
+    # all unavailable, as with an unplugged drive.
     sharing_drive_mount: UPath | None = _env_path("SHARING_DRIVE_MOUNT") if _sharing_dir else None
-    sharing_dir: UPath | None = _sharing_dir if sharing_drive_mount else None
+    sharing_dir: UPath | None = _sharing_dir
     # One folder per user (utils/database/users.py): their private user.db
     # (playlists, private tags) and account.json. The originals live here, on
     # the data drive - unlike sharing_dir's music.db/tag.db, these aren't copies.
@@ -75,11 +77,26 @@ class Settings:
     github_db_token: str = os.getenv("GITHUB_DB_TOKEN", "").strip()
 
 
-def drive_unavailable_message(mount) -> str:
-    """Why the data drive (SHARING_DRIVE_MOUNT) can't be used right now."""
+def sharing_dir_available(mount, folder) -> bool:
+    """Whether the sharing folder (SHARING_DIR) can be used right now. On an
+    external drive (`mount` set): only while it's mounted - never create
+    folders under an empty mount point, they'd land on the system disk. On
+    the system disk (`mount` None): the folder exists and is writable."""
+    if folder is None:
+        return False
+    if mount is not None:
+        return os.path.ismount(str(mount))
+    return os.path.isdir(str(folder)) and os.access(str(folder), os.W_OK)
+
+
+def drive_unavailable_message(mount, folder=None) -> str:
+    """Why the sharing folder (SHARING_DIR, maybe on the drive at
+    SHARING_DRIVE_MOUNT) can't be used right now."""
+    if folder is None and mount is None:
+        return "SHARING_DIR isn't set - Settings -> Server -> Folders and network (or .env)"
     if mount is None:
-        return ("SHARING_DIR / SHARING_DRIVE_MOUNT aren't set - "
-                "Settings -> Server -> Folders and network (or .env)")
+        return (f"The sharing folder {folder} doesn't exist or can't be written - create it, "
+                "or set another one in Settings -> Server -> Folders and network")
     return f"Drive {mount} is not mounted - is the external drive plugged in?"
 
 

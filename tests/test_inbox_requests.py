@@ -140,6 +140,16 @@ def test_unmounted_inbox_has_no_requests(env, monkeypatch):
     assert pr.count_new_requests() == 0
 
 
+def test_no_sharing_folder_means_no_inbox_and_no_report(monkeypatch):
+    # A fresh install without SHARING_DIR: main.py's startup reads both
+    monkeypatch.setattr(pr, "INBOX_DIR", None)
+    monkeypatch.setattr(pr, "INBOX_SHARING_DIR", None)
+
+    assert not pr.inbox_available()
+    assert pr.count_new_requests() == 0
+    assert pr.auto_report(unshown_only=True) == []
+
+
 # ==================== cases ====================
 
 def test_settles_what_needs_no_answer(env):

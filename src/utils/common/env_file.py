@@ -20,7 +20,7 @@ class MachineKey:
 
 MACHINE_KEYS = [
     MachineKey("MUSIC_LIBRARY_DIR", "Music library", True),
-    MachineKey("SHARING_DRIVE_MOUNT", "Data drive mount point", True),
+    MachineKey("SHARING_DRIVE_MOUNT", "External drive mount point (empty = none)", True),
     MachineKey("SHARING_DIR", "Sharing folder", True),
     MachineKey("SHARING_LAN_INTERFACE", "LAN interface", False),
 ]

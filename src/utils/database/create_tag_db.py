@@ -1,6 +1,7 @@
 import os
 from sqlalchemy import (
     create_engine,
+    CheckConstraint,
     Column,
     Integer,
     String,
@@ -52,6 +53,16 @@ class SongTag(Base):
 
     def __repr__(self):
         return f"<SongTag(song_id={self.song_id}, tag_id={self.tag_id})>"
+
+
+class AppliedSongChange(Base):
+    """How far tag.db has replayed music.db's song_id_changes (tag migration
+    0002; one row, see utils/database/song_references.py). A model too, so a
+    tag.db made by create_all() for a fresh install has it."""
+    __tablename__ = "applied_song_changes"
+
+    id = Column(Integer, CheckConstraint("id = 1"), primary_key=True)
+    last_change_id = Column(Integer, nullable=False)
 
 
 # --------------------

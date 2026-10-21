@@ -1,30 +1,228 @@
-# MusicDatabase
+# LeinaMusicDatabase
 
-A terminal app for browsing and enriching a local music database (local files + external metadata
-sources such as MusicBrainz, Wikipedia, iTunes, and Genius).
+MusicDatabase is a terminal app that keeps a catalog of music: songs, artists, albums, years,
+genres, moods and YouTube links. It fills the gaps from MusicBrainz, Wikipedia, iTunes, Genius,
+Spotify's and YouTube's public pages, imports your mp3 tags and YouTube playlists, and can index
+your own mp3 collection.
 
-## Setup
+It is also the server for **Leina Radio**, the Android player
+([shian1000/LeinaPlayer](https://github.com/shian1000/LeinaPlayer)): the phone downloads the
+catalog from your MusicDatabase, logs in as one of its users, syncs playlists, moods and
+listening stats with it, plays files from your library and sends corrections back for you to
+review.
+
+You can start from the project owner's catalog (downloaded on the first run) and extend it, or
+start empty.
+
+## Requirements
+
+- **Linux**: Debian 12 or 13, Ubuntu, Linux Mint or similar. (Windows isn't supported yet.)
+- **Python 3.13 or newer.** Check with `python3 --version`. Both Debian releases work; only
+  where Python 3.13 comes from differs, every later step is the same:
+  - Debian 13, Ubuntu 25.04 and newer ship it — install `git` and `python3-venv`:
+
+    ```bash
+    sudo apt install git python3-venv
+    ```
+
+  - Debian 12 (Python 3.11), Ubuntu 24.04 and Linux Mint 22 (Python 3.12) need a newer Python
+    next to the system one. The simplest way is [uv](https://docs.astral.sh/uv/), which installs
+    Python into your home folder and leaves the system's alone:
+
+    ```bash
+    sudo apt install git curl
+    ```
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```
+
+    Open a new terminal (so `uv` is on your `PATH`), then:
+
+    ```bash
+    uv python install 3.13
+    ```
+
+    [pyenv](https://github.com/pyenv/pyenv) works too, if you already use it. Either way only
+    the app's own virtual environment uses 3.13; the sharing server (below) runs on the system
+    `python3`, and Debian 12's 3.11 is fine for it.
+- Nothing needs compiling: every pinned package comes as a ready wheel, or is pure Python.
+- **Optional — Google Chrome or Chromium** (not the snap package): "Fill missing data" (albums,
+  years) reads Spotify, YouTube, Google, Genius and iTunes pages in a hidden browser. Without
+  one, those lookups are skipped and the rest (MusicBrainz, Wikipedia, ...) still works. Selenium
+  downloads the matching driver itself.
+- **Optional — `xclip`** (X11) **or `wl-clipboard`** (Wayland), for "copy to clipboard". Without
+  them the app asks the terminal to do it, which most terminals support.
+- **Optional — [Tailscale](https://tailscale.com/download)**, to reach your server from phones
+  outside your home network (below).
+
+## Install
 
 ```bash
 git clone https://github.com/shian1000/LeinaMusicDatabase.git
-cd MusicDatabase
-
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-cp .env.example .env   # fill in the values described in .env.example
 ```
 
-## Run
+```bash
+cd LeinaMusicDatabase
+```
+
+Make the virtual environment. With a system Python 3.13 (Debian 13, Ubuntu 25.04+):
+
+```bash
+python3 -m venv venv
+```
+
+With uv instead (Debian 12, Ubuntu 24.04, Mint 22):
+
+```bash
+uv venv --python 3.13 --seed venv
+```
+
+(With pyenv: `pyenv install 3.13`, then `"$(pyenv prefix 3.13)/bin/python" -m venv venv`.)
+
+Then install the packages into it:
+
+```bash
+source venv/bin/activate
+```
+
+```bash
+pip install -r requirements.txt
+```
+
+Settings for this computer (folders, network interface, optional keys) live in a file called
+`.env`, which never leaves your computer. You don't have to create it by hand: the app writes the
+folder settings itself (Settings → Server → Folders and network). For the optional keys below,
+copy the example and fill in what you need:
+
+```bash
+cp .env.example .env
+```
+
+## First run
+
+```bash
+source venv/bin/activate
+```
 
 ```bash
 python main.py
 ```
 
-> **Known gap:** a brand-new clone has no `src/database/*.db` files yet, and nothing currently
-> creates them automatically on first run — see
-> [`docs/runbooks/database.md`](docs/runbooks/database.md) → Known gap.
+The first time there's no database yet, so the app asks how to start:
+
+- **Download the public catalog** — the project owner's songs, artists, albums and moods, from
+  the GitHub release [`database`](https://github.com/shian1000/LeinaMusicDatabase/releases/tag/database)
+  (about 1 MB). The files are checked against the release's `version.json` (size and SHA-256)
+  before they're used. It's yours from then on: nothing is synced back to the owner.
+- **Start with an empty database** — then import your own music (Enter database → Manage database → Fetch
+  database data → "Import data from mp3 tags" or "Import data from YouTube playlist").
+
+The databases are in `src/database/` (`music.db`, `tag.db`, later `files.db`), with daily backups
+in `src/database/archive/`. The app moves through menus with the arrow keys and Enter.
+
+To start it later, run the two commands above, or double-click `MusicDatabase.sh` (it opens a
+terminal for itself: your desktop's default one, GNOME Terminal, Konsole, Xfce Terminal or xterm).
+
+## Serving Leina Radio phones
+
+Your PC becomes the phones' server: it serves the catalog on port **8002**, only on your home
+network (one network interface you pick) and, if you use it, on Tailscale. It never listens on
+the internet: **no router port forwarding**, nothing to open. Anyone on your home Wi-Fi can
+download the catalog and your library's files (that needs no password); logging in, playlists
+and everything personal need a user's password.
+
+1. **Pick the folders and the network.** Settings → Server → Folders and network:
+   - **Sharing folder** — where the copies for the phones, the users and the phones' requests
+     live, for example `~/MusicDatabase-Shared` (type the full path). The app offers to create it.
+   - **External drive mount point** — leave it empty when the sharing folder is on your normal
+     disk. Set it only if the folder is on an external drive: then nothing is written while the
+     drive isn't plugged in.
+   - **LAN interface** — "Pick a network interface" and choose the one on your home network
+     (Wi-Fi or cable). Without it the server is reachable only over Tailscale.
+   - **Music library** (optional) — your mp3 folder, so phones can play your files.
+
+   Restart the app (Exit, then `python main.py`): these are read at start.
+2. **Turn sharing on.** Settings → Server → Setup this PC for database sharing. It installs a
+   small server as a systemd *user* service (`musicdatabase-share`, no root needed) that starts a
+   minute after you log in, prints the addresses for the phone and offers to copy the databases
+   right away. After that the copy is refreshed once a day when you start the app, or on demand
+   with Settings → Server → Submit database for sharing.
+3. **Create a user** for each person: Users → Create a new user. Users → Permissions grants
+   extras (editing global moods from the phone, corrections saved without review).
+4. **On the phone**, install Leina Radio
+   ([latest release](https://github.com/shian1000/LeinaPlayer/releases/latest)). In
+   *Ustawienia › Serwer* (Settings › Server) enter the addresses the setup printed:
+   - *Adres serwera (sieć lokalna)* (local network): `http://<your PC's LAN address>:8002/`,
+     e.g. `http://192.168.x.x:8002/`;
+   - *Adres serwera (połączenie zdalne)* (remote), only with Tailscale:
+     `http://<your PC's Tailscale address>:8002/` (`tailscale ip -4` shows it).
+
+   Then log in under *Ustawienia › Konto* (Account) with the user from step 3.
+
+Good to know:
+
+- **Tailscale**: install it on the PC ([tailscale.com/download](https://tailscale.com/download),
+  then `sudo tailscale up`) and the Tailscale app on the phone, signed in to the same tailnet (or
+  share the PC with the phone's owner from Tailscale's admin console). The phone then reaches the
+  server from anywhere; at home it uses the LAN address.
+- **A firewall** (e.g. `ufw`) must allow TCP port 8002 from your home network.
+- **An always-on or headless server**: the sharing server is a systemd *user* service, and
+  systemd runs a user's services only while that user is logged in — log out (or boot without
+  logging in) and the phones can't reach it. On a PC that should serve the phones all the time,
+  turn on *lingering* for the account that runs MusicDatabase, once:
+
+  ```bash
+  sudo loginctl enable-linger <user>
+  ```
+
+  It tells systemd to start that user's own services at boot and keep them running after
+  logout, so the server comes up about a minute after boot with nobody logged in (nothing else
+  about the account changes). `loginctl show-user <user> --property=Linger` shows it;
+  `sudo loginctl disable-linger <user>` turns it off again. Not needed on a desktop you're
+  logged into anyway.
+- **Turning it off**: the setup prints the `systemctl --user` commands for that.
+- After changing the folders or the network interface, run "Setup this PC for database sharing"
+  again, so the server uses the new values.
+
+More detail (what's served, the phone's requests, playlists sync, logging in):
+[`docs/runbooks/database.md`](docs/runbooks/database.md) → "Sharing with the mobile app" and
+the sections after it.
+
+## Optional keys and accounts
+
+Everything below is optional. Each goes into `.env` (see `.env.example` for the exact names) or
+`.secrets/`, which are never committed. Keep them private.
+
+| What | Used for | Without it |
+| --- | --- | --- |
+| `MUSIC_LIBRARY_DIR` (+ `SMB_USERNAME` / `SMB_PASSWORD` for an `smb://` share) | Indexing your mp3 collection (`files.db`), playing its files on the phone, playlists from a folder | No library features; the catalog works |
+| `YOUTUBE_API_KEY` — a YouTube Data API v3 key from the [Google Cloud console](https://console.cloud.google.com/apis/credentials) | Checking whether YouTube videos still exist when settling the phones' reports, without YouTube's bot wall | yt-dlp checks alone, which YouTube sometimes blocks for a while |
+| `.secrets/client_secret.json` — a Google Cloud OAuth client of type "Desktop app", with the YouTube Data API v3 enabled; the browser login then saves `.secrets/token.json` | The YouTube menu (listing your playlists), creating YouTube playlists from songs, and importing *private* playlists | Public and unlisted playlists still import |
+| `GITHUB_DB_REPO` + `GITHUB_DB_TOKEN` — your repository (`owner/repo`) and a fine-grained token with Contents: read and write on it only | Publishing your own public copy of the catalog as a GitHub release (Settings → Server → Public database on GitHub, which explains the token) | Nothing is published. A fresh install downloads the starting catalog from `GITHUB_DB_REPO`, or from this project when it's empty |
+
+MusicBrainz, Wikipedia, iTunes, Genius and the Spotify/YouTube pages need no keys.
+
+## Updating
+
+```bash
+git pull
+```
+
+```bash
+source venv/bin/activate
+```
+
+```bash
+pip install -r requirements.txt
+```
+
+The next start backs up the databases and applies any new schema changes by itself. If you run
+the sharing server, restart it so it runs the new code:
+
+```bash
+systemctl --user restart musicdatabase-share
+```
 
 ## Tests
 
@@ -32,7 +230,8 @@ python main.py
 python -m pytest
 ```
 
-See [`tests/README.md`](tests/README.md) for what's covered.
+About 1,200 tests, all offline (nothing reaches the network or your own databases), under a
+minute. [`tests/README.md`](tests/README.md) says what each file covers.
 
 ## Contributing / working on this with an AI agent
 

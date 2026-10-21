@@ -41,7 +41,7 @@ from utils.discoveries.file_matching_settings import (
     save_closest_auto_accept_score,
 )
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
-from settings import drive_unavailable_message, settings
+from settings import drive_unavailable_message, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
 
 
@@ -240,6 +240,12 @@ def setup_database_sharing():
     if settings.sharing_dir is None:
         print(f"\033[91mCan't set up sharing: {drive_unavailable_message(None)}\033[0m")
         return
+    if not sharing_dir_available(settings.sharing_drive_mount, settings.sharing_dir):
+        # The server waits for it (answers 503 meanwhile), so this is no reason to stop
+        print(f"\033[93m{drive_unavailable_message(settings.sharing_drive_mount, settings.sharing_dir)}\033[0m")
+    if not settings.sharing_lan_interface and tailscale_ipv4() is None:
+        print("\033[93mTailscale has no address on this PC and no LAN interface is set "
+              "(Settings -> Server -> Folders and network): no phone could reach the server yet.\033[0m")
     lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
     print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
@@ -263,6 +269,9 @@ def setup_database_sharing():
         print(f"Local network address for Leina Radio: http://{lan_address}:{SHARING_HTTP_PORT}/")
     print("To turn it off:")
     print(sharing_service_disable_hint())
+    # A fresh setup has nothing to serve until the first copy
+    if ask_yes_no("Copy the databases to the sharing folder now (Submit database for sharing)?"):
+        submit_database_for_sharing()
 
 
 def discovery_modules_menu():
@@ -488,6 +497,7 @@ def _change_machine_key(key) -> None:
             return
     save_env_value(key.name, value)
     print(f"{key.name} {'set to ' + value if value else 'cleared'} in .env.")
+    _offer_to_create_sharing_dir(key.name, value)
     print('Restart the app for this to take effect, then run "Setup this PC for database sharing"'
           " again so the sharing server uses it too.")
 
@@ -510,9 +520,31 @@ def _machine_value_warning(name: str, value: str) -> str | None:
         mount = read_env_value("SHARING_DRIVE_MOUNT")
         if mount and os.path.commonpath([os.path.abspath(path), os.path.abspath(mount)]) != os.path.abspath(mount):
             return f"{path} isn't on the data drive ({mount}): nothing is written there while it isn't mounted."
+        # No drive: a missing folder is offered to be created after saving
+        if not mount and not os.path.exists(path):
+            return None
     if not os.path.isdir(path):
         return f"{path} isn't a folder right now."
+    if name == "SHARING_DIR" and not os.access(path, os.W_OK):
+        return f"{path} can't be written by this user."
     return None
+
+
+def _offer_to_create_sharing_dir(name: str, value: str) -> None:
+    """A sharing folder on the system disk (no SHARING_DRIVE_MOUNT) is used
+    only once it exists - the app never creates it on its own, so a typo
+    doesn't become a folder. On a drive it's created when first written."""
+    if name != "SHARING_DIR" or not value or "://" in value or read_env_value("SHARING_DRIVE_MOUNT"):
+        return
+    path = value.removeprefix("file://")
+    if os.path.exists(path) or not ask_yes_no(f"{path} doesn't exist yet. Create it?"):
+        return
+    try:
+        os.makedirs(path)
+    except OSError as exc:
+        print(f"\033[91mCouldn't create it: {exc}\033[0m")
+        return
+    print(f"Created {path}.")
 
 
 def _pick_lan_interface() -> str | None:

@@ -49,7 +49,10 @@ When this file disagrees with the code, trust the code and fix this file.
 
 ## Standard commands
 
-- Bootstrap: `python3 -m venv venv` → `source venv/bin/activate` → `pip install -r requirements.txt`
+- Bootstrap: `python3 -m venv venv` (Python ≥ 3.13; README.md → Requirements for older systems) →
+  `source venv/bin/activate` → `pip install -r requirements.txt`. The first `python main.py`
+  without databases asks to download the public catalog or start empty
+  (`utils/database/first_run.py`; runbook → "First start without databases").
 - Run the app: `python main.py`
 - The automatic pass over the phone's requests, by hand: `venv/bin/python auto_resolve_requests.py`
   (normally the `musicdatabase-inbox` timer runs it; it does nothing while the app is open)
@@ -278,7 +281,12 @@ non-trivial work in that area.
   hand-sent `.zip` of the phone's outbox into `Inbox/new/` under the server's own checks; its files
   are recorded in `Inbox/packages.json` and their user part is a typed name, never a login
   (`RequestFile.sender` None — no permissions). Details: `docs/runbooks/database.md` → "Public
-  database on GitHub and request packages".
+  database on GitHub and request packages". The same release is also the starting catalog of a
+  fresh install: `first_run.py` (asked by `utils/ui/first_run_prompt.py` from `main.py` while
+  music.db is missing) downloads it, checks size + SHA-256 against `version.json` and SQLite
+  integrity, and moves both files in only together; or creates empty databases through the
+  models. So `version.json`'s `files.<name>.size` / `sha256` and `format` are this repo's own
+  contract too. Details: `docs/runbooks/database.md` → "First start without databases".
 - `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
@@ -524,8 +532,10 @@ non-trivial work in that area.
 
 - This machine's folders and network interface load from `.env` (gitignored) into
   `src/settings.py`, every key documented in `.env.example`: `MUSIC_LIBRARY_DIR` (the mp3
-  collection), `SHARING_DRIVE_MOUNT` + `SHARING_DIR` (the data drive and the shared folder on it,
-  which also holds `Users/`, `Inbox/` and `MoodChanges/`), `SHARING_LAN_INTERFACE`, and the
+  collection), `SHARING_DIR` (the shared folder, which also holds `Users/`, `Inbox/` and
+  `MoodChanges/`) + `SHARING_DRIVE_MOUNT` (the external drive it's on; empty = the system disk,
+  where the folder only has to exist — `settings.sharing_dir_available()` is the one rule),
+  `SHARING_LAN_INTERFACE`, and the
   `REMOTE_*` keys read by `MusicDatabase-Remote.sh`. A missing key never falls back to someone's
   real path: the feature is skipped with a message naming the key, as for an unplugged drive
   (`settings.drive_unavailable_message()`; the drive-path `Settings` fields are then `None`).

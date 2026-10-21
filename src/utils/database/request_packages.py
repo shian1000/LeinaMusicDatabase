@@ -32,7 +32,6 @@ from config.constants import (
     REQUEST_PACKAGE_MAX_BYTES,
     REQUEST_PACKAGE_MAX_FILES,
 )
-from settings import drive_unavailable_message
 from utils.common.debug import mlog
 from utils.database import inbox_requests
 from utils.database.sharing_server import REQUEST_NAME_RE, SQLITE_HEADER
@@ -126,7 +125,7 @@ def import_package(path: Path) -> ImportResult:
     Raises PackageError when the package is refused or the inbox can't
     take it (data drive missing, inbox full)."""
     if not inbox_requests.inbox_available():
-        raise PackageError(f"the inbox isn't available: {drive_unavailable_message(inbox_requests.INBOX_DRIVE_MOUNT)}")
+        raise PackageError(f"the inbox isn't available: {inbox_requests.inbox_unavailable_message()}")
     files = read_package(path)
     result = ImportResult()
     fresh = []

@@ -77,7 +77,7 @@ from config.constants import (
     BAD_VIDEO_UNPLAYABLE,
     PHONE_REQUEST_FORMAT,
 )
-from settings import Settings
+from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
 from utils.database.datatables import BadYoutubeVideo, Song
@@ -89,6 +89,7 @@ from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
 
 INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
 INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
+INBOX_SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
 NEW = "new"
 REVIEW = "review"
 PROCESSED = "processed"
@@ -302,7 +303,11 @@ def _decision_key(song_id, video_id) -> str:
 
 def inbox_available() -> bool:
     # Never create inbox folders under an unmounted mount point (system disk)
-    return INBOX_DRIVE_MOUNT is not None and os.path.ismount(INBOX_DRIVE_MOUNT)
+    return INBOX_DIR is not None and sharing_dir_available(INBOX_DRIVE_MOUNT, INBOX_SHARING_DIR)
+
+
+def inbox_unavailable_message() -> str:
+    return drive_unavailable_message(INBOX_DRIVE_MOUNT, INBOX_SHARING_DIR)
 
 
 def _request_paths(folder: str) -> list[Path]:
@@ -478,6 +483,8 @@ def describe_files(names) -> str:
 # ==================== decisions ====================
 
 def _load_json(name: str, default):
+    if INBOX_DIR is None:  # no SHARING_DIR: no inbox, nothing recorded
+        return default
     try:
         value = json.loads((INBOX_DIR / name).read_text())
     except (OSError, ValueError):

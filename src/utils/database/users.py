@@ -39,12 +39,13 @@ from config.constants import (
     USER_PASSWORD_MIN_LENGTH,
     USERNAME_PATTERN,
 )
-from settings import Settings, drive_unavailable_message
+from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.database.account_auth import PERMISSIONS, password_matches, revoke_all_tokens
 from utils.database.account_auth import user_permissions as _user_permissions
 
 USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
 USERS_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
+USERS_SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
 
 
 class UsersUnavailableError(Exception):
@@ -56,11 +57,11 @@ class InvalidUserError(ValueError):
 
 
 def users_available() -> bool:
-    return USERS_DRIVE_MOUNT is not None and os.path.ismount(USERS_DRIVE_MOUNT)
+    return sharing_dir_available(USERS_DRIVE_MOUNT, USERS_SHARING_DIR)
 
 
 def users_unavailable_message() -> str:
-    return drive_unavailable_message(USERS_DRIVE_MOUNT)
+    return drive_unavailable_message(USERS_DRIVE_MOUNT, USERS_SHARING_DIR)
 
 
 def _require_users_dir() -> None:

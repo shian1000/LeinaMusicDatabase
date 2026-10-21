@@ -15,6 +15,7 @@ repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
+import settings as sharing_settings
 from utils.database import sharing, sharing_server
 
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -88,6 +89,90 @@ def test_unmounted_drive_raises_and_creates_nothing(share_env):
 
     # mkdir under an unmounted mount point would fill the system disk instead.
     assert not (share_env["mount"] / "Shared").exists()
+
+
+# ==================== no external drive (SHARING_DRIVE_MOUNT empty) ====================
+
+@pytest.fixture
+def system_disk_env(share_env, monkeypatch):
+    """SHARING_DIR on the system disk: no mount point to check."""
+    monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", None)
+    share_env["state"]["mounted"] = False  # nothing is a mount point
+    return share_env
+
+
+def test_without_a_drive_an_existing_folder_is_shared(system_disk_env):
+    share_dir = system_disk_env["share_dir"]
+    share_dir.mkdir(parents=True)
+
+    published = sharing.share_databases()
+
+    assert published == [share_dir / "music.db", share_dir / "tag.db"]
+    assert _read_value(share_dir / "music.db") == 1
+
+
+def test_without_a_drive_a_missing_folder_is_never_created(system_disk_env):
+    with pytest.raises(sharing.SharingUnavailableError, match="doesn't exist"):
+        sharing.share_databases()
+
+    # A typo in SHARING_DIR mustn't turn into a folder
+    assert not (system_disk_env["mount"] / "Shared").exists()
+
+
+def test_without_a_drive_a_read_only_folder_is_unavailable(system_disk_env, monkeypatch):
+    system_disk_env["share_dir"].mkdir(parents=True)
+    monkeypatch.setattr(sharing_settings.os, "access", lambda path, mode: False)
+
+    with pytest.raises(sharing.SharingUnavailableError):
+        sharing.share_databases()
+
+
+def test_sharing_dir_available_rules(tmp_path, monkeypatch):
+    folder = tmp_path / "shared"
+    mount = tmp_path / "drive"
+    mount.mkdir()
+    monkeypatch.setattr(sharing_settings.os.path, "ismount", lambda p: Path(p) == mount)
+
+    assert not sharing_settings.sharing_dir_available(None, None)
+    assert not sharing_settings.sharing_dir_available(None, folder)  # missing
+    folder.mkdir()
+    assert sharing_settings.sharing_dir_available(None, folder)
+    # With a drive only the mount counts, folder there or not
+    assert sharing_settings.sharing_dir_available(mount, mount / "not-yet")
+    assert not sharing_settings.sharing_dir_available(tmp_path / "unplugged", folder)
+
+
+def test_unavailable_messages_name_the_cause(tmp_path):
+    assert "isn't set" in sharing_settings.drive_unavailable_message(None, None)
+    assert "doesn't exist" in sharing_settings.drive_unavailable_message(None, tmp_path / "x")
+    assert "not mounted" in sharing_settings.drive_unavailable_message(tmp_path, tmp_path / "x")
+
+
+def test_users_and_inbox_work_without_a_drive(tmp_path, monkeypatch):
+    from utils.database import inbox_requests, users
+
+    shared = tmp_path / "shared"
+    monkeypatch.setattr(users, "USERS_DRIVE_MOUNT", None)
+    monkeypatch.setattr(users, "USERS_SHARING_DIR", shared)
+    monkeypatch.setattr(inbox_requests, "INBOX_DRIVE_MOUNT", None)
+    monkeypatch.setattr(inbox_requests, "INBOX_SHARING_DIR", shared)
+    monkeypatch.setattr(inbox_requests, "INBOX_DIR", shared / "Inbox")
+    assert not users.users_available() and not inbox_requests.inbox_available()
+    assert "doesn't exist" in users.users_unavailable_message()
+    assert "doesn't exist" in inbox_requests.inbox_unavailable_message()
+
+    shared.mkdir()
+
+    assert users.users_available() and inbox_requests.inbox_available()
+
+
+def test_service_unit_without_a_drive_has_no_mount_flag(monkeypatch):
+    monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", None)
+
+    unit = sharing._service_unit("/usr/bin/python3")
+
+    assert "--mount" not in unit
+    assert f"--dir {sharing.SHARING_DIR}" in unit
 
 
 def test_quiet_variant_swallows_errors(share_env, monkeypatch):
@@ -214,6 +299,23 @@ def test_server_returns_503_when_drive_unmounted(serve, share_dir, tmp_path):
     base = serve(share_dir, str(tmp_path / "not-a-mount-point"))
 
     assert _request(f"{base}/music.db")[0] == 503
+
+
+def test_server_without_a_mount_serves_while_the_folder_exists(serve, share_dir, tmp_path):
+    base = serve(share_dir, None)
+    assert _request(f"{base}/music.db")[0] == 200
+
+    missing = serve(tmp_path / "gone", None)
+    assert _request(f"{missing}/music.db")[0] == 503
+
+
+def test_server_command_line_takes_no_mount(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(sharing_server, "make_handler", lambda *a, **kw: seen.setdefault("args", a))
+    monkeypatch.setattr(sharing_server, "address_sources", lambda lan: [])
+
+    assert sharing_server.main(["--dir", "/srv/shared", "--port", "8002"]) == 0
+    assert seen["args"][:2] == ("/srv/shared", None)
 
 
 def test_second_socket_on_same_port_serves_the_same_files(serve, share_dir):
@@ -736,6 +838,7 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", tmp_path / "systemd" / "user")
     monkeypatch.setattr(sharing, "_systemctl", lambda *args: calls.append(args))
+    monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", tmp_path / "data-drive")
 
     sharing.install_sharing_service()
     first = sorted((p.name, p.read_text()) for p in sharing.SYSTEMD_USER_DIR.iterdir())

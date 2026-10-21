@@ -108,8 +108,9 @@ and is reviewed here, never applied blindly. See [ADR-0003](../decisions/0003-ph
 
 **Copying** (`utils/database/sharing.py`) puts every file in `backup.DB_FILES` (music, tag,
 files) in `Settings.sharing_dir`
-(`SHARING_DIR` in `.env`, on the drive mounted at `SHARING_DRIVE_MOUNT`; see `.env.example`, or set
-both in Settings → Server → "Folders and network", read at the next start):
+(`SHARING_DIR` in `.env`, either on the system disk or on an external drive mounted at
+`SHARING_DRIVE_MOUNT`; see `.env.example`, or set both in Settings → Server → "Folders and
+network", read at the next start):
 
 - Automatically once a day in `main.py`: after a *successful* daily backup, the startup
   migrations and the library scan (`scan_library_quietly()`, then `share_databases_quietly()`;
@@ -119,11 +120,19 @@ both in Settings → Server → "Folders and network", read at the next start):
 - It uses the online backup API into `music.db.tmp` / `tag.db.tmp` in the same folder. Both temp
   copies are made first, then both are `os.replace()`d in, so a download in progress never gets
   half a file and the pair comes from one moment. Temp names must never be `music.db`/`tag.db`.
-- The data drive is an exFAT external drive, automounted at login and not in fstab. If
-  `Settings.sharing_drive_mount` isn't a mount point, the copy raises `SharingUnavailableError`
-  and never `mkdir`s. Creating the folder under an empty mount point would fill the system disk
-  instead of the data drive. With `SHARING_DIR` / `SHARING_DRIVE_MOUNT` unset in `.env` it's the
-  same error, and users, the inbox and mood changes are unavailable too.
+- Where the folder may be is one rule, `settings.sharing_dir_available()`, shared by sharing,
+  users and the inbox (and mirrored in the server's `data_available()`):
+  - **On an external drive** (`SHARING_DRIVE_MOUNT` set — the owner's: an exFAT drive,
+    automounted at login, not in fstab): usable only while the mount point is mounted.
+    Otherwise the copy raises `SharingUnavailableError` and never `mkdir`s — creating the folder
+    under an empty mount point would fill the system disk instead of the drive.
+  - **On the system disk** (`SHARING_DRIVE_MOUNT` empty, e.g. a friend's one-disk PC): usable
+    when `SHARING_DIR` exists and is writable. The app never creates it on its own (a typo
+    mustn't become a folder); "Folders and network" offers to create it when it's set.
+  - With `SHARING_DIR` unset it's the same error, and users, the inbox and mood changes are
+    unavailable too (`drive_unavailable_message()` names which of the three cases it is).
+- The service gets `--mount` only with a drive; without it the server answers 503 while
+  `--dir` is missing, as it does for an unmounted drive.
 
 **Serving** (`utils/database/sharing_server.py`) is a stdlib-only script run on the system
 `python3` by the systemd user units `musicdatabase-share.service` + `.timer` in
@@ -755,10 +764,29 @@ There isn't one. The test suite (`tests/`) mocks the DB layer rather than exerci
 file — see `AGENTS.md` → Testing & verification. If a test ever needs a real database, point
 `create_music_db()` / `create_tag_db()` at a temporary path rather than reusing the dev DB.
 
-## Known gap
+## First start without databases
 
-`create_music_db()` / `create_tag_db()` (the `Base.metadata.create_all()` wrappers that would
-create a brand-new, empty database) are currently **not called anywhere** in the running app — a
-fresh clone with no existing `src/database/*.db` files has nothing to open a session against. This
-predates the backup/migration work on this page and wasn't in scope to fix here; flagging it as a
-known gap rather than leaving it silently undiscovered.
+A fresh clone has no `music.db` / `tag.db`. `main.py` calls `utils/ui/first_run_prompt.ensure_databases()`
+right after taking the app lock, before the backup and the migrations, and asks until one of
+these is done (logic: `utils/database/first_run.py`, tests: `tests/test_first_run.py`):
+
+- **Download the public catalog** — the files the owner's daily publish puts in the GitHub
+  Release `database` (see "Public database on GitHub" above) of `GITHUB_DB_REPO`, or of
+  `PUBLIC_CATALOG_DEFAULT_REPO` (this project) when unset. `version.json` is read first (format
+  must be `PUBLIC_DB_FORMAT`); each file is downloaded to `<name>.download` next to its place,
+  must have exactly the announced size and SHA-256 and pass SQLite's integrity check, and only
+  then are both moved in together. Any failure leaves nothing behind (`CatalogDownloadError`),
+  and the question comes again. An existing database is never overwritten.
+- **Start with an empty database** — `create_music_db()` / `create_tag_db()` (`create_all()` on
+  the models). The migration run right after finds no `schema_version` and adopts every file,
+  as for any database made that way. `tag_db_manager.AppliedSongChange` exists so tag.db gets
+  tag migration 0002's table this way too.
+- Only `tag.db` missing: an empty one, without asking (the owner's tags wouldn't fit someone
+  else's songs).
+
+What a downloaded catalog lacks compared with the owner's own database: tag.db holds only the
+global moods (no `spellchecked` / `album_checked` markers, so every song counts as not yet
+checked), `album_covers.path` is empty and there's no `covers/` folder (Fetch database data →
+"Import covers from mp3 tags" makes them), there's no `files.db` (built by the library scan) and
+no users. `song_id_changes` and `schema_version` come with it, so the startup migrations apply
+on top only what is newer than the published copy.
