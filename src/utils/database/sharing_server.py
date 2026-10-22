@@ -2,8 +2,9 @@
 Minimal HTTP server for the MusicDatabaseApp mobile client: serves exactly
 <dir>/music.db, <dir>/tag.db and <dir>/files.db (the music library index),
 nothing else (no directory listing, any
-other path is a 404), on this machine's Tailscale address and, optionally,
-on one named LAN interface. With --inbox it also takes requests from the
+other path is a 404), on this machine's Tailscale address (unless
+--no-tailscale), optionally on one named LAN interface, and on any exact
+addresses given with --address. With --inbox it also takes requests from the
 phone: `PUT /inbox/<name>.db` stores one request file in <inbox>/new/ for
 Manage database -> "Resolve new requests" (utils/database/inbox_requests.py).
 With --users the phone can also log in as a MusicDatabase user (POST /login,
@@ -14,8 +15,8 @@ installs. Deliberately standard-library only and independent of the rest of
 the app (no settings.py / venv imports), so it runs on the system python3
 with every path passed on the command line.
 
-    python3 sharing_server.py --dir DIR [--mount MOUNT] --port 8002 [--lan-interface enp2s0] [--inbox DIR] [--users DIR]
-                              [--mood-changes DIR] [--library DIR]
+    python3 sharing_server.py --dir DIR [--mount MOUNT] --port 8002 [--lan-interface enp2s0] [--no-tailscale]
+                              [--address ADDR ...] [--inbox DIR] [--users DIR] [--mood-changes DIR] [--library DIR]
 
 - Tailscale: waits (retrying forever) until `tailscale ip -4` returns an
   address and it can bind to it - right after boot Tailscale may not have
@@ -27,7 +28,10 @@ with every path passed on the command line.
   because docker0 / br-* bridges also carry private addresses and must never
   be exposed. Same wait-and-retry loop, in its own thread, so a missing LAN
   never delays or breaks the Tailscale socket (or vice versa).
-- Never binds to 0.0.0.0, and never to an address other than those two.
+- --address (2026-10-21, for a PC without Tailscale or with another VPN):
+  exactly that address, same wait-and-retry loop (the interface may come up
+  later). 0.0.0.0 only when given there - the owner's explicit choice.
+- Never binds to 0.0.0.0 on its own, and never to an address other than those.
 - If MOUNT (the external drive holding DIR) isn't mounted, requests for the
   databases get a 503 instead of the server exiting, so the phone shows an
   error and simply retries the next day. Without --mount (DIR on the system
@@ -1331,11 +1335,21 @@ def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscal
         time.sleep(RETRY_SECONDS)
 
 
-def address_sources(lan_interface: str | None) -> list[tuple[str, Callable[[], str | None]]]:
+def _ipv4(value: str) -> str:
+    try:
+        return str(ipaddress.IPv4Address(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an IPv4 address: {value}")
+
+
+def address_sources(lan_interface: str | None, tailscale: bool = True,
+                    addresses=()) -> list[tuple[str, Callable[[], str | None]]]:
     """(label, address getter) for every socket to serve on."""
-    sources = [("Tailscale", tailscale_ipv4)]
+    sources = [("Tailscale", tailscale_ipv4)] if tailscale else []
     if lan_interface:
         sources.append((f"LAN {lan_interface}", lambda: interface_ipv4(lan_interface)))
+    for address in addresses:
+        sources.append((f"address {address}", lambda address=address: address))
     return sources
 
 
@@ -1346,6 +1360,9 @@ def main(argv=None) -> int:
                                         "(leave out when --dir is on the system disk)")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--lan-interface", help="also serve on this interface's private IPv4 address")
+    parser.add_argument("--no-tailscale", action="store_true", help="don't serve on the Tailscale address")
+    parser.add_argument("--address", action="append", default=[], type=_ipv4,
+                        help="also serve on exactly this IPv4 address (repeatable)")
     parser.add_argument("--inbox", help="accept requests from Leina Radio into this folder (on --mount)")
     parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--inbox-limit-bytes", type=int, default=DEFAULT_INBOX_LIMIT_BYTES)
@@ -1370,12 +1387,13 @@ def main(argv=None) -> int:
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 
+    sources = address_sources(args.lan_interface, tailscale=not args.no_tailscale, addresses=args.address)
+    if not sources:
+        print("No address to serve on: --no-tailscale without --lan-interface or --address", file=sys.stderr, flush=True)
+        return 2
     # One socket per address, each bound and served independently; the
     # process lives as long as any of them does.
-    threads = [
-        threading.Thread(target=bind_and_serve, args=source, name=source[0])
-        for source in address_sources(args.lan_interface)
-    ]
+    threads = [threading.Thread(target=bind_and_serve, args=source, name=source[0]) for source in sources]
     for thread in threads:
         thread.start()
     for thread in threads:

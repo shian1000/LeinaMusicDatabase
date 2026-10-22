@@ -10,6 +10,7 @@ repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
+from utils.database import song_references as sr
 from utils.database.datatables import Base, Artist, Song
 
 # The package's own __init__.py defines a *function* also named
@@ -105,3 +106,84 @@ def test_remove_duplicate_artists_still_merges_exact_name_duplicates(session_fac
     artists = session.query(Artist).all()
     assert len(artists) == 1
     session.close()
+
+
+@pytest.fixture
+def both_passes(tmp_path, monkeypatch):
+    """A file database reached the way the app reaches it: the songs pass
+    through the long-lived global session, the artists pass through sessions
+    of its own - so the songs pass sees the artists pass's merges only if it
+    doesn't trust what the global session already loaded."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    sr.register_song_reference_sync(SessionLocal)
+    global_session = SessionLocal()
+    monkeypatch.setattr(rd, "get_music_session", lambda: SessionLocal())
+    monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (global_session, None))
+    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
+    yield SessionLocal, global_session
+    global_session.close()
+
+
+def _count_rounds(monkeypatch):
+    rounds = []
+    songs_pass, artists_pass = rd.remove_duplicate_songs, rd.remove_duplicate_artists
+    monkeypatch.setattr(rd, "remove_duplicate_songs", lambda *a: rounds.append("songs") or songs_pass(*a))
+    monkeypatch.setattr(rd, "remove_duplicate_artists", lambda *a: rounds.append("artists") or artists_pass(*a))
+    return rounds
+
+
+def test_resolve_duplicated_artists_runs_one_round_when_nothing_is_merged(both_passes, monkeypatch, capsys):
+    SessionLocal, _ = both_passes
+    session = SessionLocal()
+    session.add_all([Song(title="Song A", artist=Artist(name="Akute")), Song(title="Song B", artist=Artist(name="Other"))])
+    session.commit()
+    session.close()
+    rounds = _count_rounds(monkeypatch)
+
+    rd.resolve_duplicated_artists()
+
+    assert rounds == ["songs", "artists"]
+    out = capsys.readouterr().out
+    assert "No duplicate songs found." in out and "No duplicate artists found." in out
+
+
+def test_resolve_duplicated_artists_stops_after_a_round_without_changes(both_passes, monkeypatch, capsys):
+    SessionLocal, _ = both_passes
+    session = SessionLocal()
+    session.add_all([Artist(name="Akute"), Artist(name="akute")])
+    session.commit()
+    session.close()
+    rounds = _count_rounds(monkeypatch)
+
+    rd.resolve_duplicated_artists()
+
+    assert rounds == ["songs", "artists", "songs", "artists"]
+    session = SessionLocal()
+    assert session.query(Artist).count() == 1
+    session.close()
+    # The checking round stays quiet instead of reporting "nothing found" again
+    out = capsys.readouterr().out
+    assert out.count("No duplicate songs found.") == 1 and "No duplicate artists found." not in out
+
+
+def test_resolve_duplicated_artists_catches_song_duplicates_an_artist_merge_creates(both_passes, monkeypatch):
+    SessionLocal, global_session = both_passes
+    session = SessionLocal()
+    session.add_all([Song(title="Savana", artist=Artist(name="Sassja")),
+                     Song(title="savana", artist=Artist(name="sassja"), youtube_video_id="v1")])
+    session.commit()
+    session.close()
+    loaded = global_session.query(Song).all()  # what the app's global session holds already
+    rounds = _count_rounds(monkeypatch)
+
+    rd.resolve_duplicated_artists()
+
+    session = SessionLocal()
+    [song] = session.query(Song).all()
+    assert song.youtube_video_id == "v1"
+    assert session.query(Artist).count() == 1
+    session.close()
+    assert rounds == ["songs", "artists", "songs", "artists", "songs", "artists"]
+    assert len(loaded) == 2

@@ -23,12 +23,6 @@ from config.constants import (
     SPELLING_CHECK_THRESHOLD,
 )
 
-def _is_word_substring(needle: str, haystack: str) -> bool:
-    """Return True if needle appears as whole words within haystack."""
-    pattern = r'\b' + re.escape(needle) + r'\b'
-    return bool(re.search(pattern, haystack))
-
-
 
 def load_blacklist(config_dir):
     blacklist_path = config_dir / "blacklist.txt"
@@ -83,22 +77,6 @@ def _copy_via_osc52(message: str) -> bool:
 def normalize_text(s: str) -> str:
     """Compatibility wrapper that uses the centralized normalizer."""
     return normalize(s)
-
-
-def compare_strings(a: Optional[str], b: Optional[str]) -> bool:
-    na = normalize_text(a or "")
-    nb = normalize_text(b or "")
-
-    if not na or not nb:
-        return False
-
-    if na == nb:
-        return True
-
-    if _is_word_substring(na, nb) or _is_word_substring(nb, na):
-        return True
-
-    return False
 
 
 def truncate_at_word(text: str) -> str:

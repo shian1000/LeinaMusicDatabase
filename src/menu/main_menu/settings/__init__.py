@@ -17,6 +17,14 @@ from utils.discoveries.discovery_settings import (
     save_year_discovery_config,
 )
 from utils.common.env_file import MACHINE_KEYS, read_env_value, save_env_value
+from utils.common.sharing_setup import (
+    lan_interfaces,
+    listening_plan,
+    address_candidates,
+    phone_addresses,
+    value_warning,
+)
+from utils.ui.sharing_wizard import offer_to_create_sharing_dir, run_sharing_wizard
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
 from utils.database.database_sessions import open_and_set_global_database_sessions
@@ -29,7 +37,6 @@ from utils.database.sharing import (
     share_databases,
     sharing_service_disable_hint,
 )
-from utils.database.sharing_server import interface_ipv4, tailscale_ipv4
 from utils.discoveries.discovery_stats import reset_discovery_stats
 from utils.database.fetch_data_settings import load_max_songs_per_fetch, save_max_songs_per_fetch
 from utils.discoveries.file_matching_settings import (
@@ -41,7 +48,7 @@ from utils.discoveries.file_matching_settings import (
     save_closest_auto_accept_score,
 )
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
-from settings import drive_unavailable_message, settings, sharing_dir_available
+from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
 
 
@@ -236,19 +243,34 @@ def submit_database_for_sharing():
 
 def setup_database_sharing():
     """Install the systemd user service that serves the shared databases to
-    the mobile app over Tailscale, starting shortly after every login."""
+    the mobile app, starting shortly after every login - or walk through
+    everything it needs with the setup wizard."""
+    print("This sets this PC up as the server Leina Radio downloads the databases from.")
+    print("The step-by-step setup explains every setting it needs (the sharing folder, an external")
+    print("drive, the addresses to listen on, your music library) and then checks the first copy, users")
+    print("and the service. Nothing is done without asking; safe to stop at any step and to run again.\n")
+    wizard = ask_yes_no("Run the step-by-step setup? (No = just install the service with the current settings)")
+    if wizard is None:
+        return
+    if wizard:
+        run_sharing_wizard()
+        return
     if settings.sharing_dir is None:
         print(f"\033[91mCan't set up sharing: {drive_unavailable_message(None)}\033[0m")
         return
     if not sharing_dir_available(settings.sharing_drive_mount, settings.sharing_dir):
         # The server waits for it (answers 503 meanwhile), so this is no reason to stop
         print(f"\033[93m{drive_unavailable_message(settings.sharing_drive_mount, settings.sharing_dir)}\033[0m")
-    if not settings.sharing_lan_interface and tailscale_ipv4() is None:
-        print("\033[93mTailscale has no address on this PC and no LAN interface is set "
-              "(Settings -> Server -> Folders and network): no phone could reach the server yet.\033[0m")
-    lan = f" and its {settings.sharing_lan_interface} (LAN) address" if settings.sharing_lan_interface else ""
+    plan = listening_plan()
+    if not plan:
+        print("\033[91mWith the current settings the server has no address to listen on - set the LAN interface "
+              "or an address to listen on (Settings -> Server -> Folders and network).\033[0m")
+        return
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
-    print(f"from {settings.sharing_dir} on this PC's Tailscale address{lan}, port {SHARING_HTTP_PORT}.\n")
+    print(f"from {settings.sharing_dir}, port {SHARING_HTTP_PORT}, on:")
+    for what, address in plan:
+        print(f"  {what}: {'every address of this PC' if address == '0.0.0.0' else address or 'no address right now'}")
+    print("A phone must be able to reach one of them.\n")
     if not ask_yes_no("Install (or reinstall) it now?"):
         print("Cancelled.")
         return
@@ -262,11 +284,9 @@ def setup_database_sharing():
         return
     for step in steps:
         print(f"  {step}")
-    address = tailscale_ipv4() or "<this PC's Tailscale IP>"
-    print(f"\nRemote address for Leina Radio: http://{address}:{SHARING_HTTP_PORT}/")
-    if settings.sharing_lan_interface:
-        lan_address = interface_ipv4(settings.sharing_lan_interface) or f"<{settings.sharing_lan_interface} address>"
-        print(f"Local network address for Leina Radio: http://{lan_address}:{SHARING_HTTP_PORT}/")
+    print("\nLeina Radio -> Ustawienia -> Serwer, an address the phone can reach:")
+    for field, address in phone_addresses(plan):
+        print(f"  {field}: {address}")
     print("To turn it off:")
     print(sharing_service_disable_hint())
     # A fresh setup has nothing to serve until the first copy
@@ -468,6 +488,10 @@ def _change_machine_key(key) -> None:
     current = read_env_value(key.name)
     if key.is_path:
         methods = ["Open file manager", "Type path manually"]
+    elif key.name == "SHARING_TAILSCALE":
+        methods = [value for value in ("on", "off") if value != current]
+    elif key.name == "SHARING_ADDRESSES":
+        methods = ["Add an address of this PC", "Type them manually (comma-separated)"]
     else:
         methods = ["Pick a network interface", "Type the name manually"]
     if current:
@@ -481,6 +505,11 @@ def _change_machine_key(key) -> None:
         value = str(picked) if picked else None
     elif method == "Pick a network interface":
         value = _pick_lan_interface()
+    elif method in ("on", "off"):
+        value = method
+    elif method == "Add an address of this PC":
+        added = _pick_local_address()
+        value = ",".join(listen_addresses(current) + [added]) if added else None
     elif method == "Clear":
         value = ""
     else:
@@ -489,7 +518,7 @@ def _change_machine_key(key) -> None:
         print("Cancelled.")
         return
     value = value.strip()
-    warning = _machine_value_warning(key.name, value)
+    warning = value_warning(key.name, value)
     if warning:
         print(f"\033[93m{warning}\033[0m")
         if not ask_yes_no("Save it anyway?"):
@@ -497,62 +526,24 @@ def _change_machine_key(key) -> None:
             return
     save_env_value(key.name, value)
     print(f"{key.name} {'set to ' + value if value else 'cleared'} in .env.")
-    _offer_to_create_sharing_dir(key.name, value)
+    if key.name == "SHARING_DIR":
+        offer_to_create_sharing_dir(value)
     print('Restart the app for this to take effect, then run "Setup this PC for database sharing"'
           " again so the sharing server uses it too.")
 
 
-def _machine_value_warning(name: str, value: str) -> str | None:
-    if not value:
+def _pick_local_address() -> str | None:
+    choices = [questionary.Choice(title=f"{address} ({name})", value=address) for name, address in address_candidates()]
+    if not choices:
+        print("No other IPv4 address on this PC.")
         return None
-    if name == "SHARING_LAN_INTERFACE":
-        if not os.path.exists(f"/sys/class/net/{value}"):
-            return f"There's no network interface {value} on this PC."
-        return None
-    if "://" in value and not value.startswith("file://"):
-        if name == "MUSIC_LIBRARY_DIR":
-            return None
-        return f"{name} must be a local folder."
-    path = value.removeprefix("file://")
-    if name == "SHARING_DRIVE_MOUNT" and not os.path.ismount(path):
-        return f"{path} isn't a mount point right now (is the drive plugged in?)."
-    if name == "SHARING_DIR":
-        mount = read_env_value("SHARING_DRIVE_MOUNT")
-        if mount and os.path.commonpath([os.path.abspath(path), os.path.abspath(mount)]) != os.path.abspath(mount):
-            return f"{path} isn't on the data drive ({mount}): nothing is written there while it isn't mounted."
-        # No drive: a missing folder is offered to be created after saving
-        if not mount and not os.path.exists(path):
-            return None
-    if not os.path.isdir(path):
-        return f"{path} isn't a folder right now."
-    if name == "SHARING_DIR" and not os.access(path, os.W_OK):
-        return f"{path} can't be written by this user."
-    return None
-
-
-def _offer_to_create_sharing_dir(name: str, value: str) -> None:
-    """A sharing folder on the system disk (no SHARING_DRIVE_MOUNT) is used
-    only once it exists - the app never creates it on its own, so a typo
-    doesn't become a folder. On a drive it's created when first written."""
-    if name != "SHARING_DIR" or not value or "://" in value or read_env_value("SHARING_DRIVE_MOUNT"):
-        return
-    path = value.removeprefix("file://")
-    if os.path.exists(path) or not ask_yes_no(f"{path} doesn't exist yet. Create it?"):
-        return
-    try:
-        os.makedirs(path)
-    except OSError as exc:
-        print(f"\033[91mCouldn't create it: {exc}\033[0m")
-        return
-    print(f"Created {path}.")
+    choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
+    picked = questionary.select("Which address should the server also listen on?", choices=choices).ask()
+    return None if picked == "__cancel__" else picked
 
 
 def _pick_lan_interface() -> str | None:
-    # Only interfaces with a private address; docker0 / br-* bridges never (see sharing_server)
-    names = sorted(n for n in os.listdir("/sys/class/net")
-                   if n != "lo" and not n.startswith(("docker", "br-", "veth", "tailscale")))
-    choices = [questionary.Choice(title=f"{n} ({address})", value=n)
-               for n in names if (address := interface_ipv4(n))]
+    choices = [questionary.Choice(title=f"{name} ({address})", value=name) for name, address in lan_interfaces()]
     if not choices:
         print("No network interface with a private LAN address found.")
         return None

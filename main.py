@@ -18,6 +18,7 @@ from utils.ui.inbox_request_review import show_auto_changes
 from utils.database.moods import apply_global_mood_changes_quietly
 from utils.ui.ytdlp_update_prompt import offer_ytdlp_update
 from utils.ui.first_run_prompt import ensure_databases
+from utils.ui.sharing_wizard import CONTINUE_SETUP_FLAG, run_sharing_wizard
 from utils.common.debug import slog
 
 def main():
@@ -77,6 +78,9 @@ def main():
     waiting = count_new_requests()
     if waiting:
         print(f"{waiting} new request(s) in the inbox - Enter database -> Manage database -> Resolve new requests")
+    # The sharing setup restarted the app to read the settings it saved
+    if CONTINUE_SETUP_FLAG in sys.argv[1:]:
+        run_sharing_wizard(resume=True)
     #Comment it to unload tests
     # test()
     main_menu()

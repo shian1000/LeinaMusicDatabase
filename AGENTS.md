@@ -110,8 +110,9 @@ non-trivial work in that area.
   (`GET`/`HEAD /library/<id>`, looked up in the shared `files.db`, path checked to stay inside
   the library, byte ranges for the player, no token), and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
   at most 1 MiB each, nothing while `new/` holds 100 MiB), syncs a logged-in user's playlists
-  (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP plus the named LAN interface from
-  `Settings.sharing_lan_interface`. It never binds to `0.0.0.0`, and the interface is chosen by
+  (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP (unless `SHARING_TAILSCALE=off`) plus the named LAN interface from
+  `Settings.sharing_lan_interface` and the exact `SHARING_ADDRESSES`. It never binds to `0.0.0.0` unless
+  that's one of them, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
@@ -167,7 +168,8 @@ non-trivial work in that area.
   "feat." credit or a junk bracket like "(Visualiser)"; remix / cover / live brackets are songs of
   their own) and `merge_songs()`, the one way to fold a duplicate: the kept row (most data) gets
   the other's missing fields and extra artists, references follow via `record_song_merge()`.
-  "Resolve duplicated artists" folds spelling-only ones silently (`remove_duplicate_songs()`);
+  "Resolve duplicated artists" folds spelling-only ones silently (`remove_duplicate_songs()`,
+  with `remove_duplicate_artists()`, the pair repeated only while a round still merged something);
   Manage database → Resolve duplicates → "Resolve duplicated songs"
   (`utils/ui/song_duplicate_review.py`) asks in one checkbox list, version-looking pairs unticked,
   then in a second one whether to credit the featured artists only a folded title named
@@ -411,7 +413,9 @@ non-trivial work in that area.
 - `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
   it for "search then resolve to one DB row" rather than re-duplicating.
   `docs/agent-notes/database-search.md`.
-- `src/menu/` — the terminal menu tree (presentation + workflow wiring). Known fragility:
+- `src/menu/` — the terminal menu tree (presentation + workflow wiring). Main menu → Help
+  (`menu/main_menu/help.py`) explains the menus to a newcomer: a renamed or new menu entry it
+  quotes needs its text updated (`tests/test_help_menu.py` checks every quoted label exists). Known fragility:
   importing `menu.song_actions` before `menu.main_menu` triggers a circular import
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
   affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
@@ -423,7 +427,7 @@ non-trivial work in that area.
   that need the submodule (e.g. to monkeypatch its `get_music_session`) must
   `importlib.import_module("menu.main_menu.enter_database.manage_database.resolve_duplicates")`
   instead (see `tests/test_resolve_duplicates.py`).
-- `src/menu/main_menu/enter_database/manage_database/get_rid_of_rubish_data.py` — per-field song
+- `src/menu/main_menu/enter_database/manage_database/clean_names.py` (Manage database → "Clean names") — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
   per-field loop. `seek_nonsense_names()` first auto-strips a known trailing junk annotation off the
   title via `strip_trailing_junk()` (plain suffix and bracket-wrapped, e.g. "Song Music Video" or
@@ -535,7 +539,8 @@ non-trivial work in that area.
   collection), `SHARING_DIR` (the shared folder, which also holds `Users/`, `Inbox/` and
   `MoodChanges/`) + `SHARING_DRIVE_MOUNT` (the external drive it's on; empty = the system disk,
   where the folder only has to exist — `settings.sharing_dir_available()` is the one rule),
-  `SHARING_LAN_INTERFACE`, and the
+  `SHARING_LAN_INTERFACE`, `SHARING_TAILSCALE` (empty = on) + `SHARING_ADDRESSES` (what else the
+  server listens on), and the
   `REMOTE_*` keys read by `MusicDatabase-Remote.sh`. A missing key never falls back to someone's
   real path: the feature is skipped with a message naming the key, as for an unplugged drive
   (`settings.drive_unavailable_message()`; the drive-path `Settings` fields are then `None`).
@@ -546,6 +551,17 @@ non-trivial work in that area.
 - The sharing server's own paths are in its systemd unit (written by "Setup this PC for database
   sharing" from these settings), so changing `.env` reaches the server only after that setup is
   re-run.
+- "Setup this PC for database sharing" first offers the step-by-step setup for a newcomer
+  (`utils/ui/sharing_wizard.py`; validation, suggestions and the read-only checks in
+  `utils/common/sharing_setup.py`, which "Folders and network" shares — `value_warning()`,
+  `lan_interfaces()`): each key explained with REQUIRED / OPTIONAL, stopping at any step safe.
+  Nothing happens without a yes (owner's rule): saving a value, creating the folder, the restart,
+  the first copy, a user, the service, lingering — a "no" is listed under "Not done" in the
+  summary; only reading and checking go unasked. It never recommends Tailscale (or any way of
+  reaching the PC): it lists the addresses the server will listen on (`listening_plan()`). After a
+  change it offers to restart the app in place (`os.execv`, `main.py --continue-sharing-setup` →
+  straight into the checks). A new machine
+  setting the server needs goes into its `SETTING_STEPS` too.
 
 ## Coding conventions
 
@@ -558,7 +574,7 @@ non-trivial work in that area.
   tokens and renders them through prompt_toolkit's formatted-text machinery, so a literal
   `\033[93m...\033[0m` shows up as garbage instead of color. To highlight something in a prompt,
   `print()` a plain colored line above the `questionary` call instead (see `seek_nonsense_names()`
-  in `get_rid_of_rubish_data.py` for the pattern). A `questionary.Choice` title can be coloured,
+  in `clean_names.py` for the pattern). A `questionary.Choice` title can be coloured,
   though, given as prompt_toolkit `(style, text)` tokens: `utils/ui/song_colors.py` builds artist
   (cyan) / title (yellow) labels that way and turns them into ANSI only for `print()`.
 - Every yes/no question goes through `utils/ui/prompts.ask_yes_no()` (a bare Enter means yes,
@@ -568,7 +584,7 @@ non-trivial work in that area.
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong
   to a MusicDatabase user, not to a device.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
-  correction, a rubbish-looking field) should queue them and ask in one batch after the loop, not
+  correction, a junk-looking field) should queue them and ask in one batch after the loop, not
   interrupt per item. Eight places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s

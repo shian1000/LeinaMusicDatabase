@@ -138,7 +138,14 @@ network", read at the next start):
 `python3` by the systemd user units `musicdatabase-share.service` + `.timer` in
 `~/.config/systemd/user/`. Settings → Server → "Setup this PC for database sharing"
 (`install_sharing_service()`) writes them; re-running it overwrites the units and restarts the
-server. Tests: `tests/test_database_sharing.py`.
+server. Tests: `tests/test_database_sharing.py`. The same menu first offers the step-by-step
+setup (`utils/ui/sharing_wizard.py`, logic in `utils/common/sharing_setup.py`, tests
+`tests/test_sharing_wizard.py`): the four `.env` keys one at a time (saved like "Folders and
+network", only when a new value is picked), then — after restarting the app with
+`main.py --continue-sharing-setup`, since `Settings` reads `.env` at start — the addresses it
+will listen on (`listening_plan()`), the first copy, the first user, the units (`service_unit_current()`: the installed unit equals
+what would be written now) and lingering, and a summary with the phone's addresses (a `HEAD
+/music.db` on each tells serving / no copy / 503 / not answering).
 
 - Only `GET`/`HEAD /music.db`, `/tag.db` and `/files.db` are served (`SHARED_FILES`). A change
   to that list needs `systemctl --user restart musicdatabase-share` — the running server read
@@ -163,11 +170,18 @@ server. Tests: `tests/test_database_sharing.py`.
     its id when the file's contents change.
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
-- It listens on at most two addresses, one socket each, with the same handler and port 8002:
-  - **Tailscale:** the address from `tailscale ip -4`. The phone uses this one away from home.
+- It listens on the addresses below, one socket each, with the same handler and port 8002:
+  - **Tailscale:** the address from `tailscale ip -4` (the owner's phone uses it away from home),
+    unless `SHARING_TAILSCALE=off` (`--no-tailscale`; empty = on, so setups from before the key
+    stay the same). Without Tailscale installed its socket just keeps waiting.
   - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`
     (`SHARING_LAN_INTERFACE` in `.env`, e.g. `enp2s0`, passed as `--lan-interface`). The phone uses it on the home Wi-Fi and silently falls
-    back to Tailscale when it doesn't answer. An empty setting means Tailscale only.
+    back to the remote address when it doesn't answer.
+  - **Chosen addresses** (2026-10-21): `SHARING_ADDRESSES` in `.env`, comma-separated, each as
+    `--address` — for a PC without Tailscale or with another VPN. Bound exactly as given.
+  - With none of them the server exits with code 2 instead of serving nobody; the setup doesn't
+    offer to install it then. How the phone reaches an address is the user's choice — the setup,
+    Help and README describe the options and recommend none (owner's rule).
   - The server was Tailscale-only at first. Adding the LAN address on 2026-10-10 was a deliberate
     widening, not a workaround: anyone on the home network can now download the two files
     (read-only, nothing else).
@@ -176,7 +190,7 @@ server. Tests: `tests/test_database_sharing.py`.
     Tailscale-range address on that interface is rejected.
   - Each socket waits and retries every 10 s in its own thread until its address exists. A
     missing LAN address never delays the Tailscale socket, or the other way round.
-  - It never binds to `0.0.0.0`.
+  - It never binds to `0.0.0.0` unless the owner puts it in `SHARING_ADDRESSES` (the setup warns).
   - The phone has the LAN address typed in (the server's address on that interface, from DHCP). If the router hands out a
     different one, local access quietly stops working; the fix is a DHCP reservation on the router.
   - `ufw` is installed but disabled (`ENABLED=no`). If it is ever enabled, open 8002 to

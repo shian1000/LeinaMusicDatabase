@@ -460,7 +460,7 @@ class LocalSongMatcher:
     "yes" here only mislabels one entry rather than skipping a new song: the
     artist may be the main one of a joined "A ft. B" name, and titles are
     also compared without brackets or trailing junk on either side - the
-    files still carry what the import or the rubbish cleanup later removed
+    files still carry what the import or Clean names later removed
     from the database copy. When the artist lookup finds nothing (the shared
     artist search is substring-based, so a typo in the tag - "Liiquid
     Tension Experiment" - leaves it no candidates at all), the song is

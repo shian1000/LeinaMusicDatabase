@@ -52,7 +52,7 @@ like other punctuation. Text copied from Bandcamp carries U+200B inside words
 ("Cz\u200bô\u200brny Ritm Z\u200bł\u200boté Serce"). As spaces, that
 normalized to "cz o rny ritm z l ote serce", so two copies of one album never
 compared equal and Years' "year already in the DB" step missed it. The same removal is
-`strip_format_characters()`. "Get rid of rubbish data" uses it
+`strip_format_characters()`. "Clean names" uses it
 (`remove_invisible_characters()`) to clean stored titles, albums and artist
 names, with `keep_joiner=True` so the zero-width joiner inside emoji sequences
 survives.

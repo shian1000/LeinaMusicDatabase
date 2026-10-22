@@ -23,6 +23,8 @@ MACHINE_KEYS = [
     MachineKey("SHARING_DRIVE_MOUNT", "External drive mount point (empty = none)", True),
     MachineKey("SHARING_DIR", "Sharing folder", True),
     MachineKey("SHARING_LAN_INTERFACE", "LAN interface", False),
+    MachineKey("SHARING_TAILSCALE", "Listen on the Tailscale address too (on/off, empty = on)", False),
+    MachineKey("SHARING_ADDRESSES", "Other addresses to listen on (comma-separated)", False),
 ]
 
 

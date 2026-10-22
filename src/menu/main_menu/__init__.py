@@ -3,7 +3,7 @@ from menu.main_menu.enter_database import enter_database
 from menu.main_menu.users import users_menu
 from menu.main_menu.statistics import show_discovery_stats
 from menu.main_menu.settings import settings_menu
-from menu.main_menu.youtube import youtube_menu
+from menu.main_menu.help import help_menu
 from utils.common.debug import slog
 
 def main_menu():
@@ -11,8 +11,8 @@ def main_menu():
         "Enter database": enter_database,
         "Users": users_menu,
         "Statistics": show_discovery_stats,
-        "YouTube": youtube_menu,
         "Settings": settings_menu,
+        "Help": help_menu,
     }
 
     slog(action_map)

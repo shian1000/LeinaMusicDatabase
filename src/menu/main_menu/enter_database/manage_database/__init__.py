@@ -2,10 +2,10 @@ from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog, mlog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
-from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists, resolve_duplicated_albums
+from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu, divide_artists_menu
 import time
-from menu.main_menu.enter_database.manage_database.get_rid_of_rubish_data import get_rid_of_rubish_data
+from menu.main_menu.enter_database.manage_database.clean_names import clean_names
 from utils.common.text_utils import check_spelling, similarity
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
@@ -43,7 +43,6 @@ def resolve_duplicates():
     action_map = {
         "Resolve duplicated artists": resolve_duplicated_artists,
         "Resolve duplicated songs": resolve_duplicated_songs,
-        "Resolve duplicated albums": resolve_duplicated_albums
     }
 
     execute_menu_item("Resolve duplicates", action_map)
@@ -193,7 +192,7 @@ def manage_database():
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
         "Fix names and tags for mp3 files that are in the database": fix_file_names_and_tags,
         "Spell check existing data": check_spelling_menu,
-        "Get rid of rubish data": get_rid_of_rubish_data
+        "Clean names": clean_names
     }
 
     slog(action_map)

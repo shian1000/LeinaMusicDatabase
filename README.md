@@ -53,8 +53,8 @@ start empty.
   downloads the matching driver itself.
 - **Optional — `xclip`** (X11) **or `wl-clipboard`** (Wayland), for "copy to clipboard". Without
   them the app asks the terminal to do it, which most terminals support.
-- **Optional — [Tailscale](https://tailscale.com/download)**, to reach your server from phones
-  outside your home network (below).
+- **Optional — a way for phones to reach the PC from outside your home network**, if you want
+  that: any VPN works (Tailscale is one; the server listens on its address when it runs here).
 
 ## Install
 
@@ -120,17 +120,31 @@ The first time there's no database yet, so the app asks how to start:
 
 The databases are in `src/database/` (`music.db`, `tag.db`, later `files.db`), with daily backups
 in `src/database/archive/`. The app moves through menus with the arrow keys and Enter.
+**Help** in the main menu explains what each menu is for, every way to add songs, the clean-up
+tools and where to set the PC up as the phones' server.
 
 To start it later, run the two commands above, or double-click `MusicDatabase.sh` (it opens a
 terminal for itself: your desktop's default one, GNOME Terminal, Konsole, Xfce Terminal or xterm).
 
 ## Serving Leina Radio phones
 
-Your PC becomes the phones' server: it serves the catalog on port **8002**, only on your home
-network (one network interface you pick) and, if you use it, on Tailscale. It never listens on
-the internet: **no router port forwarding**, nothing to open. Anyone on your home Wi-Fi can
+Your PC becomes the phones' server: it serves the catalog on port **8002**, only on the
+addresses you choose — your home network's interface, the Tailscale address if Tailscale runs
+here (it can be switched off), and any other address of the PC you add (e.g. another VPN's). A
+phone must be able to reach one of them; how (the home Wi-Fi, a VPN, ...) is up to you. It never
+listens on every address unless you add `0.0.0.0` yourself: **no router port forwarding**,
+nothing to open. Anyone on your home Wi-Fi can
 download the catalog and your library's files (that needs no password); logging in, playlists
 and everything personal need a user's password.
+
+**The quick way:** Settings → Server → Setup this PC for database sharing, and answer yes to
+the step-by-step setup. It goes through the settings below one at a time — what each is for,
+whether it's required, its current value and a suggestion — and lists the addresses the server
+will listen on. Nothing is done without asking: saving a value, creating the folder, restarting
+the app (the settings are read at start), the first copy of the databases, the first user, the
+server service, lingering — each is a yes/no question, and a "no" is listed at the end as not
+done, with exactly what to type in the phone. You can stop at any step (what you saved stays)
+and run it again any time — it starts from the saved values. The steps below are the same thing by hand.
 
 1. **Pick the folders and the network.** Settings → Server → Folders and network:
    - **Sharing folder** — where the copies for the phones, the users and the phones' requests
@@ -139,11 +153,17 @@ and everything personal need a user's password.
      disk. Set it only if the folder is on an external drive: then nothing is written while the
      drive isn't plugged in.
    - **LAN interface** — "Pick a network interface" and choose the one on your home network
-     (Wi-Fi or cable). Without it the server is reachable only over Tailscale.
+     (Wi-Fi or cable).
+   - **Listen on the Tailscale address too** — on (the default) or off; it matters only when
+     Tailscale runs on this PC.
+   - **Other addresses to listen on** — any other IPv4 address of this PC, e.g. another VPN's.
+
+   The server needs at least one of these addresses, and a phone must be able to reach it.
    - **Music library** (optional) — your mp3 folder, so phones can play your files.
 
    Restart the app (Exit, then `python main.py`): these are read at start.
-2. **Turn sharing on.** Settings → Server → Setup this PC for database sharing. It installs a
+2. **Turn sharing on.** Settings → Server → Setup this PC for database sharing, answering no to
+   the step-by-step setup. It installs a
    small server as a systemd *user* service (`musicdatabase-share`, no root needed) that starts a
    minute after you log in, prints the addresses for the phone and offers to copy the databases
    right away. After that the copy is refreshed once a day when you start the app, or on demand
@@ -155,18 +175,18 @@ and everything personal need a user's password.
    *Ustawienia › Serwer* (Settings › Server) enter the addresses the setup printed:
    - *Adres serwera (sieć lokalna)* (local network): `http://<your PC's LAN address>:8002/`,
      e.g. `http://192.168.x.x:8002/`;
-   - *Adres serwera (połączenie zdalne)* (remote), only with Tailscale:
-     `http://<your PC's Tailscale address>:8002/` (`tailscale ip -4` shows it).
+   - *Adres serwera (połączenie zdalne)* (remote), if the phone can reach the PC from elsewhere
+     (e.g. over a VPN): `http://<that address>:8002/`.
 
    Then log in under *Ustawienia › Konto* (Account) with the user from step 3.
 
 Good to know:
 
-- **Tailscale**: install it on the PC ([tailscale.com/download](https://tailscale.com/download),
-  then `sudo tailscale up`) and the Tailscale app on the phone, signed in to the same tailnet (or
-  share the PC with the phone's owner from Tailscale's admin console). The phone then reaches the
-  server from anywhere; at home it uses the LAN address.
-- **A firewall** (e.g. `ufw`) must allow TCP port 8002 from your home network.
+- **Away from home**: the phone needs some way to reach one of the addresses, e.g. a VPN between
+  the phone and the PC. With Tailscale on both, the server's Tailscale address works; with
+  another VPN, add the PC's address in that VPN under "Other addresses to listen on". At home
+  the phone uses the LAN address.
+- **A firewall** (e.g. `ufw`) must allow TCP port 8002 from where the phone connects.
 - **An always-on or headless server**: the sharing server is a systemd *user* service, and
   systemd runs a user's services only while that user is logged in — log out (or boot without
   logging in) and the phones can't reach it. On a PC that should serve the phones all the time,
@@ -182,7 +202,7 @@ Good to know:
   `sudo loginctl disable-linger <user>` turns it off again. Not needed on a desktop you're
   logged into anyway.
 - **Turning it off**: the setup prints the `systemctl --user` commands for that.
-- After changing the folders or the network interface, run "Setup this PC for database sharing"
+- After changing the folders or the addresses, run "Setup this PC for database sharing"
   again, so the server uses the new values.
 
 More detail (what's served, the phone's requests, playlists sync, logging in):
@@ -198,7 +218,7 @@ Everything below is optional. Each goes into `.env` (see `.env.example` for the 
 | --- | --- | --- |
 | `MUSIC_LIBRARY_DIR` (+ `SMB_USERNAME` / `SMB_PASSWORD` for an `smb://` share) | Indexing your mp3 collection (`files.db`), playing its files on the phone, playlists from a folder | No library features; the catalog works |
 | `YOUTUBE_API_KEY` — a YouTube Data API v3 key from the [Google Cloud console](https://console.cloud.google.com/apis/credentials) | Checking whether YouTube videos still exist when settling the phones' reports, without YouTube's bot wall | yt-dlp checks alone, which YouTube sometimes blocks for a while |
-| `.secrets/client_secret.json` — a Google Cloud OAuth client of type "Desktop app", with the YouTube Data API v3 enabled; the browser login then saves `.secrets/token.json` | The YouTube menu (listing your playlists), creating YouTube playlists from songs, and importing *private* playlists | Public and unlisted playlists still import |
+| `.secrets/client_secret.json` — a Google Cloud OAuth client of type "Desktop app", with the YouTube Data API v3 enabled; the browser login then saves `.secrets/token.json` | Creating YouTube playlists from songs and importing *private* playlists | Public and unlisted playlists still import |
 | `GITHUB_DB_REPO` + `GITHUB_DB_TOKEN` — your repository (`owner/repo`) and a fine-grained token with Contents: read and write on it only | Publishing your own public copy of the catalog as a GitHub release (Settings → Server → Public database on GitHub, which explains the token) | Nothing is published. A fresh install downloads the starting catalog from `GITHUB_DB_REPO`, or from this project when it's empty |
 
 MusicBrainz, Wikipedia, iTunes, Genius and the Spotify/YouTube pages need no keys.

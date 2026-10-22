@@ -172,7 +172,7 @@ def fix_lookalike_letters(songs):
             setters[field_name](song, new)
     print(f"Fixed {len(selected)} name(s).")
     if any(entries[i][0][0] == "artist" for i in selected):
-        print('An artist may now share its name with another one - run "Resolve duplicated artists" to merge them.')
+        print('An artist may now share its name with another one - run Manage database → Resolve duplicates → "Resolve duplicated artists" to merge them.')
 
 def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
@@ -180,11 +180,11 @@ def seek_nonsense_names(songs):
     # (plus the free-text replacement each "yes" needs) are asked in one batch
     # once every song has been scanned - same pattern as the import pipeline and
     # the spell-check menu.
-    pending_rubbish_corrections = []
+    pending_corrections = []
     auto_fixed_titles = []
     for song in songs:
         if is_blacklisted_album(song.album):
-            pending_rubbish_corrections.append({
+            pending_corrections.append({
                 "song": song,
                 "field": "album",
                 "old_value": song.album,
@@ -198,7 +198,7 @@ def seek_nonsense_names(songs):
                 auto_fixed_titles.append(f"'{old_title}' -> \033[93m'{stripped_title}'\033[0m")
 
         if is_blacklisted_album(song.title):
-            pending_rubbish_corrections.append({
+            pending_corrections.append({
                 "song": song,
                 "field": "title",
                 "old_value": song.title,
@@ -212,13 +212,13 @@ def seek_nonsense_names(songs):
             print(f"  {change}")
         print("="*70)
 
-    if not pending_rubbish_corrections:
+    if not pending_corrections:
         return
 
     print("\n" + "="*70)
-    print(f"REVIEW: {len(pending_rubbish_corrections)} field(s) look like rubbish and need your review")
+    print(f"REVIEW: {len(pending_corrections)} field(s) look like junk and need your review")
     print("="*70)
-    for correction in pending_rubbish_corrections:
+    for correction in pending_corrections:
         song = correction["song"]
         field = correction["field"]
         old_value = correction["old_value"]
@@ -237,7 +237,7 @@ def seek_nonsense_names(songs):
             context = f"{song.artist.name} - \033[93m{song.title}\033[0m"
         print(f"\n[{field.upper()}] {context}")
 
-        confirmation = ask_yes_no(f"'{old_value}' seems like rubish. Do you wish to edit it?")
+        confirmation = ask_yes_no(f"'{old_value}' looks like junk. Do you wish to edit it?")
         if not confirmation:
             continue
 
@@ -302,11 +302,11 @@ def _load_songs():
     return songs, music_session.query(Artist).all()
 
 
-def get_rid_of_rubish_data():
-    print("Looking for sus album titles . . . . . ")
+def clean_names():
+    print("Cleaning names . . . . . ")
     songs, _artists = _load_songs()
     # Only songs without the "album_checked" marker get the unknown-artist and
-    # rubbish-name checks. Picked here, before the first commit: a commit
+    # junk-name checks. Picked here, before the first commit: a commit
     # expires every loaded row, and reading song.id afterwards reloads each
     # song with a query of its own (~14 s for the whole catalog).
     checked_ids = song_ids_with_tag("album_checked")

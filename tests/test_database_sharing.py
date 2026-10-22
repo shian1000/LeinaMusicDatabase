@@ -312,9 +312,10 @@ def test_server_without_a_mount_serves_while_the_folder_exists(serve, share_dir,
 def test_server_command_line_takes_no_mount(monkeypatch):
     seen = {}
     monkeypatch.setattr(sharing_server, "make_handler", lambda *a, **kw: seen.setdefault("args", a))
-    monkeypatch.setattr(sharing_server, "address_sources", lambda lan: [])
+    monkeypatch.setattr(sharing_server, "address_sources", lambda *a, **k: [])
 
-    assert sharing_server.main(["--dir", "/srv/shared", "--port", "8002"]) == 0
+    # No address at all is an error exit, after the handler is made
+    assert sharing_server.main(["--dir", "/srv/shared", "--port", "8002"]) == 2
     assert seen["args"][:2] == ("/srv/shared", None)
 
 
@@ -776,6 +777,32 @@ def test_lan_interface_adds_a_second_socket(monkeypatch, capsys):
     assert "http://192.0.2.10:8002/" in out
 
 
+def test_without_tailscale_only_the_chosen_addresses_are_served(monkeypatch, capsys):
+    bound = []
+
+    def fake_bind(handler, port, get_address, label):
+        bound.append((label, get_address()))
+        return _FakeServer(get_address(), port)
+
+    monkeypatch.setattr(sharing_server, "bind_when_ready", fake_bind)
+    monkeypatch.setattr(sharing_server, "interface_ipv4", lambda name: "192.0.2.10")
+    monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: pytest.fail("Tailscale asked with --no-tailscale"))
+    sharing_server.main(["--dir", "/d", "--port", "8002", "--no-tailscale", "--lan-interface", "enp2s0",
+                         "--address", "198.51.100.7"])
+    assert sorted(bound) == [("LAN enp2s0", "192.0.2.10"), ("address 198.51.100.7", "198.51.100.7")]
+    assert "http://198.51.100.7:8002/" in capsys.readouterr().out
+
+
+def test_no_address_at_all_is_an_error(monkeypatch):
+    monkeypatch.setattr(sharing_server, "bind_when_ready", lambda *a: pytest.fail("bound something"))
+    assert sharing_server.main(["--dir", "/d", "--port", "8002", "--no-tailscale"]) == 2
+
+
+def test_address_must_be_ipv4():
+    with pytest.raises(SystemExit):
+        sharing_server.main(["--dir", "/d", "--port", "8002", "--address", "home-pc"])
+
+
 def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
     """A LAN interface without an address must not hold up the Tailscale socket."""
     lan_has_address = threading.Event()
@@ -832,6 +859,24 @@ def test_service_unit_lan_interface_flag(monkeypatch, lan_interface, expected_fl
         assert expected_flag in unit
     else:
         assert "--lan-interface" not in unit
+
+
+def test_service_unit_tailscale_and_address_flags(monkeypatch):
+    # The defaults add nothing, so a unit written before these settings stays the same
+    unit = sharing._service_unit("/usr/bin/python3")
+    assert "--no-tailscale" not in unit and "--address" not in unit
+
+    monkeypatch.setattr(sharing, "SHARING_TAILSCALE", False)
+    monkeypatch.setattr(sharing, "SHARING_ADDRESSES", ["198.51.100.7", "0.0.0.0"])
+    unit = sharing._service_unit("/usr/bin/python3")
+    assert " --no-tailscale" in unit and "--address 198.51.100.7 --address 0.0.0.0" in unit
+
+
+def test_settings_read_tailscale_and_addresses():
+    from settings import listen_addresses, tailscale_enabled
+
+    assert tailscale_enabled("") and tailscale_enabled("on") and not tailscale_enabled("Off")
+    assert listen_addresses(" 198.51.100.7, ,10.8.0.2 ") == ["198.51.100.7", "10.8.0.2"]
 
 
 def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):

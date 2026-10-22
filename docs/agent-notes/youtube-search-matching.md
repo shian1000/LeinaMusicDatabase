@@ -150,7 +150,7 @@ it (ID3 `artist`/`title` fields are already separate).
 -> `strip_hashtags()` -> media-extension strip (`_MEDIA_EXTENSION_RE`) over the *raw* video title
 (before any artist/title split), then later runs `strip_artist_from_title()` -> `strip_junk_suffix()`
 -> `text_utils.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
-`TITLE_JUNK_SUFFIXES`, shared with the rubbish-data cleanup - real case: `'“Golden” Official Lyric
+`TITLE_JUNK_SUFFIXES`, shared with Clean names - real case: `'“Golden” Official Lyric
 Video | KPop Demon Hunters | Sony Animation'` -> `"Golden"`; skipped if it would empty the title)
 -> `strip_trailing_dash_year()` (an unbracketed `" - 1982"`, real case: `"Hank Williams Jr. -
 Mr. Weatherman - 1982"`) -> `strip_junk_suffix()` again -> `strip_quote_marks()` -> `clean_file_name_title()` on the resulting song title (the last one also

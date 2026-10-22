@@ -28,6 +28,14 @@ def _env_path(name: str) -> UPath | None:
 _sharing_dir = _env_path("SHARING_DIR")
 
 
+def tailscale_enabled(value: str) -> bool:
+    return (value or "").strip().lower() not in ("off", "no", "false", "0")
+
+
+def listen_addresses(value: str) -> list[str]:
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
 @dataclass
 class Settings:
     database_dir: UPath = _default_database_dir()
@@ -70,6 +78,12 @@ class Settings:
     # the home Wi-Fi (SHARING_LAN_INTERFACE; named, not "first private
     # address": docker0/br-* are private too). Empty = Tailscale only.
     sharing_lan_interface: str = os.getenv("SHARING_LAN_INTERFACE", "").strip()
+    # Whether the server also listens on this PC's Tailscale address
+    # (SHARING_TAILSCALE; empty = on, as before the key existed), and exact
+    # addresses to listen on as well (SHARING_ADDRESSES, comma-separated:
+    # another VPN's address, or 0.0.0.0 when the owner chooses it).
+    sharing_tailscale: bool = tailscale_enabled(os.getenv("SHARING_TAILSCALE", ""))
+    sharing_addresses: tuple = tuple(listen_addresses(os.getenv("SHARING_ADDRESSES", "")))
     # The public copy of the catalog (utils/database/public_database.py):
     # "owner/repo" whose GitHub Release it goes to, and a fine-grained token
     # with Contents: read and write on that repo only. Never print or log it.

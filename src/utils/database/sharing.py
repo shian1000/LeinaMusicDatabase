@@ -43,6 +43,8 @@ from utils.database.files_index import local_library_path
 SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
 SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 SHARING_LAN_INTERFACE = Settings.sharing_lan_interface
+SHARING_TAILSCALE = Settings.sharing_tailscale
+SHARING_ADDRESSES = list(Settings.sharing_addresses)
 PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
 USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
 GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir)) if Settings.global_mood_changes_dir else None
@@ -134,6 +136,11 @@ def _service_unit(python: str) -> str:
     command += f" --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
+    # Both left out by default, so a unit written before they existed stays the same
+    if not SHARING_TAILSCALE:
+        command += " --no-tailscale"
+    for address in SHARING_ADDRESSES:
+        command += f" --address {address}"
     command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
                 f" --inbox-limit-bytes {PHONE_INBOX_LIMIT_BYTES}")
     command += f" --users {USERS_DIR} --mood-changes {GLOBAL_MOOD_CHANGES_DIR}"
@@ -197,6 +204,23 @@ def _systemctl(*args: str) -> None:
     subprocess.run(["systemctl", "--user", *args], check=True, capture_output=True, text=True)
 
 
+def server_python() -> str:
+    # The server is stdlib-only, so it runs on the system interpreter and
+    # keeps working if the venv is rebuilt.
+    return shutil.which("python3", path="/usr/bin:/bin") or sys.executable
+
+
+def service_unit_path() -> Path:
+    return SYSTEMD_USER_DIR / f"{SHARING_SERVICE_NAME}.service"
+
+
+def service_unit_current() -> bool:
+    """Whether the installed server unit is the one install_sharing_service()
+    would write now (same folders, interface and library)."""
+    path = service_unit_path()
+    return path.exists() and path.read_text() == _service_unit(server_python())
+
+
 def install_sharing_service() -> list[str]:
     """
     Write (or overwrite) the user service + timer, enable the timer and
@@ -204,11 +228,9 @@ def install_sharing_service() -> list[str]:
     restarts the server on the current script/paths. Returns a log of the
     steps taken, for the menu to print.
     """
-    # The server is stdlib-only, so it runs on the system interpreter and
-    # keeps working if the venv is rebuilt.
-    python = shutil.which("python3", path="/usr/bin:/bin") or sys.executable
+    python = server_python()
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-    service_path = SYSTEMD_USER_DIR / f"{SHARING_SERVICE_NAME}.service"
+    service_path = service_unit_path()
     timer_path = SYSTEMD_USER_DIR / f"{SHARING_SERVICE_NAME}.timer"
     service_path.write_text(_service_unit(python))
     timer_path.write_text(_timer_unit())

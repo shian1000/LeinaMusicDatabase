@@ -1,33 +1,34 @@
 from utils.database.music_db_manager import get_music_session, Song, Artist
 from sqlalchemy import text
-import questionary
-from utils.database.database_management import edit_db_entry
-from utils.common.text_utils import compare_strings, similarity
-from utils.database.database_sessions import get_global_database_sessions
-from utils.database.tags_management import has_tag_on_song
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_references import apply_song_id_changes
 from utils.database.song_duplicates import find_duplicate_groups, merge_songs, spelling_key
 from utils.database.database_sessions import open_and_set_global_database_sessions
-from config.constants import SIMILARITY_THRESHOLD, SINGLES_ALBUM
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize, normalize_apostrophes
 from utils.common.script_utils import fix_mixed_script_words
 
-def remove_duplicate_songs():
+def remove_duplicate_songs(report_none: bool = True) -> int:
     """Fold the songs of one artist (and kind) whose titles differ only in
     spelling - case, punctuation, apostrophes - into one, without asking:
     those are duplicates for certain. Nothing is lost (song_duplicates.
     merge_songs()); near duplicates ("feat.", "(Visualiser)") are for
     "Resolve duplicated songs", which asks. A full album and its title track
-    share a title but aren't duplicates (different kind)."""
+    share a title but aren't duplicates (different kind). Returns how many
+    songs were merged away."""
     session, _ = open_and_set_global_database_sessions()
+    # remove_duplicate_artists() moves songs to another artist through a
+    # session of its own; songs this long-lived one already holds would keep
+    # their old artist_id and hide the duplicates that merge made.
+    session.flush()
+    session.expire_all()
     groups = find_duplicate_groups(session, spelling_key)
     if not groups:
-        print("No duplicate songs found.")
-        return
+        if report_none:
+            print("No duplicate songs found.")
+        return 0
 
     print(f"Found {sum(len(g) - 1 for g in groups)} duplicate song(s):")
     for kept, *dropped in groups:
@@ -36,14 +37,19 @@ def remove_duplicate_songs():
             merge_songs(session, kept, song)
     session.commit()
     apply_song_id_changes()
-    print(f"Merged {sum(len(g) - 1 for g in groups)} duplicate song(s).")
+    merged = sum(len(g) - 1 for g in groups)
+    print(f"Merged {merged} duplicate song(s).")
+    return merged
 
 
 def _artist_key(name: str) -> str:
     return normalize_apostrophes(fix_mixed_script_words(name)).lower()
 
 
-def remove_duplicate_artists():
+def remove_duplicate_artists(report_none: bool = True) -> int:
+    """Merge artists whose names differ only in case, apostrophe or a
+    look-alike letter, or match another artist's synonym, without asking.
+    Returns how many artists were removed."""
     session = get_music_session()
 
     all_artists = session.query(Artist).order_by(Artist.name).all()
@@ -87,9 +93,10 @@ def remove_duplicate_artists():
                 break
 
     if not duplicates:
-        print("No duplicate artists found.")
+        if report_none:
+            print("No duplicate artists found.")
         session.close()
-        return
+        return 0
 
     print(f"Found {len(duplicates)} duplicate(s):")
 
@@ -116,118 +123,14 @@ def remove_duplicate_artists():
     session.commit()
     session.close()
     print(f"\nRemoved {len(duplicates)} duplicate artist(s).")
-
-
+    return len(duplicates)
 
 
 def resolve_duplicated_artists():
-    remove_duplicate_songs()
-    remove_duplicate_artists()
-    remove_duplicate_songs()
-    remove_duplicate_artists()
-
-def resolve_duplicated_albums():
-    sessions = get_global_database_sessions()
-    music_session, _ = sessions
-
-    # fetch all songs that have a non-empty album
-    all_songs = (
-        music_session
-        .query(Song)
-        .join(Artist)
-        .filter(Song.album != None)
-        .filter(Song.album != "")
-        .order_by(Artist.name, Song.title)
-        .all()
-    )
-
-    # cluster albums by fuzzy compare_strings matching
-    clusters = []  # each cluster: {'key': representative_album, 'songs': [Song,...], 'albums': set()}
-    for s in all_songs:
-        album = (s.album or "").strip()
-        if not album or album == SINGLES_ALBUM:
-            continue
-        placed = False
-        for cl in clusters:
-            if compare_strings(album, cl['key']):
-                cl['songs'].append(s)
-                cl['albums'].add(album)
-                placed = True
-                break
-        if not placed:
-            clusters.append({'key': album, 'songs': [s], 'albums': {album}})
-
-    # only consider clusters that span more than one artist
-    raw_target_clusters = [c for c in clusters if len({song.artist.id for song in c['songs']}) > 1]
-
-    # further filter clusters: ensure there's at least one pair of different album strings
-    # in the cluster whose similarity >= SIMILARITY_THRESHOLD. If not, skip prompting.
-    target_clusters = []
-    for c in raw_target_clusters:
-        albums = list(c['albums'])
-        max_sim = 0.0
-        # compare representative key against all distinct album strings in cluster
-        for a in albums:
-            if a == c['key']:
-                continue
-            sim = similarity(c['key'], a)
-            print(f"Similarity between {c['key']} and {a} is {sim}")
-            if sim > max_sim:
-                max_sim = sim
-        if max_sim >= SIMILARITY_THRESHOLD:
-            target_clusters.append(c)
-    if not target_clusters:
-        print("No duplicated albums found.")
-        return
-
-    for cl in target_clusters:
-        songs_list = list(cl['songs'])
-        rep_album = cl['key']
-        # double-check: ensure cluster has at least one album string similar enough to rep_album
-        albums_in_cl = [a for a in cl['albums'] if a != rep_album]
-        if not any(similarity(rep_album, a) >= SIMILARITY_THRESHOLD for a in albums_in_cl):
-            # nothing similar enough, skip this cluster
-            continue
-        # loop until duplicates resolved or user done
-        while True:
-            # group remaining songs by artist
-            artists_map = {}
-            for s in songs_list:
-                artists_map.setdefault(s.artist.id, []).append(s)
-
-            if len(artists_map) <= 1:
-                break
-
-            choices = []
-            id_to_artist = {}
-            for artist_id, slist in artists_map.items():
-                artist_name = slist[0].artist.name
-                # collect the album text(s) as stored for this artist in the cluster
-                album_vals = sorted({(s.album or "").strip() for s in slist if (s.album or "").strip()})
-                if album_vals:
-                    album_repr = "; ".join(album_vals)
-                    label = f"{artist_name} — \"{album_repr}\" — {len(slist)} song(s)"
-                else:
-                    label = f"{artist_name} — {len(slist)} song(s)"
-                choices.append(label)
-                id_to_artist[label] = artist_id
-
-            choices.append("Done")
-
-            answer = questionary.select(
-                f"Album cluster '{rep_album}' appears for multiple artists. From which artist should the album be removed?",
-                choices=choices,
-            ).ask()
-
-            if not answer or answer == "Done":
-                break
-
-            sel_artist_id = id_to_artist.get(answer)
-            sel_songs = artists_map.get(sel_artist_id, [])
-
-            # Remove album value from selected artist's songs in this cluster
-            for song in sel_songs:
-                edit_db_entry(song, "album", "")
-                # remove from local list so it's not considered in further iterations
-                if song in songs_list:
-                    songs_list.remove(song)
+    # Merging artists can make two songs of the merged artist duplicates, and
+    # merging songs can leave artists alike, so the pair repeats - but only
+    # while a round still merged something. Both passes merge without asking,
+    # so a repeated round never asks about anything again.
+    report_none = True
+    while remove_duplicate_songs(report_none) + remove_duplicate_artists(report_none):
+        report_none = False

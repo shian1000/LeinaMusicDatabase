@@ -415,7 +415,7 @@ Rock and Roll", "Confessions on a Dance Floor", "Czerwony album"), and the user 
 exception over editing it. It has to reach the per-candidate checks too, not only the manager's:
 otherwise MusicBrainz skips the album and falls back to another release. Limits: it helps from
 the second song of an album on (the first has nothing in the DB yet), and it also re-admits junk
-already stored for that artist. Rubbish-data cleanup (`get_rid_of_rubish_data.py`) calls it
+already stored for that artist. Clean names (`clean_names.py`) calls it
 *without* an artist on purpose — every stored album trivially exists for its own artist. Tests
 never touch the real DB here: `tests/conftest.py` stubs `artist_has_album()` for every test.
 
