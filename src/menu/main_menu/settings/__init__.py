@@ -16,6 +16,7 @@ from utils.discoveries.discovery_settings import (
     load_year_discovery_config,
     save_year_discovery_config,
 )
+from utils.common import startup_settings
 from utils.common.env_file import MACHINE_KEYS, read_env_value, save_env_value
 from utils.common.sharing_setup import (
     lan_interfaces,
@@ -61,8 +62,44 @@ def settings_menu():
         "Closest songs: minimum score": set_best_guess_min_score,
         "Closest songs: auto-accept score": set_closest_auto_accept_score,
         "Reset statistics records": reset_statistics_records,
+        "Start-up tasks": startup_tasks_menu,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
+
+
+_GITHUB_PUBLISH = "__github__"
+
+
+def startup_tasks_menu():
+    """Which of the start-up tasks run (all on by default). The GitHub one
+    is the daily publish's own switch, shared with Public database on GitHub."""
+    from utils.database import public_database
+
+    print("What MusicDatabase does when it starts - all on by default, a change counts from the next start:\n")
+    for switch in startup_settings.SWITCHES:
+        print(f"\033[1m{switch.label}\033[0m - {switch.explanation}")
+    print("\033[1mDaily publish to GitHub\033[0m - once a day, when the catalog changed: the public copy "
+          "phones without the server download (Settings -> Server -> Public database on GitHub).")
+    print(f"\nAlways done, not switchable: {startup_settings.ALWAYS}.\n")
+    choices = [questionary.Choice(title=switch.label, value=switch.key, checked=startup_settings.enabled(switch))
+               for switch in startup_settings.SWITCHES]
+    choices.append(questionary.Choice(title="Daily publish to GitHub", value=_GITHUB_PUBLISH,
+                                      checked=public_database.daily_publish_enabled()))
+    picked = questionary.checkbox("Start-up tasks (space to tick or untick, Enter to save):", choices=choices).ask()
+    if picked is None:
+        print("Cancelled, nothing changed.")
+        return
+    changed = [switch.label for switch in startup_settings.save_choices(picked)]
+    github = _GITHUB_PUBLISH in picked
+    if github != public_database.daily_publish_enabled():
+        public_database.set_daily_publish(github)
+        changed.append("Daily publish to GitHub")
+    if not changed:
+        print("Nothing changed.")
+        return
+    print(f"Changed: {', '.join(changed)}.")
+    if not startup_settings.enabled(startup_settings.BACKUP):
+        print(f"\033[93mThe daily backup is off: {startup_settings.BACKUP.explanation}\033[0m")
 
 
 def server_menu():

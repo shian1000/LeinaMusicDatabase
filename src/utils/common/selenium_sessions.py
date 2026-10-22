@@ -5,18 +5,10 @@ from typing import Optional
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 
 
 class ChromeDriverLaunchError(RuntimeError):
     """Raised when Chrome/chromedriver fails to start a browser session."""
-
-try:
-    from webdriver_manager.chrome import ChromeDriverManager
-    USE_WDM = True
-except ImportError:
-    USE_WDM = False
-
 
 # -- Global driver state -------------------------------------------------------
 
@@ -113,11 +105,8 @@ def _build_driver(headless: bool = True) -> webdriver.Chrome:
     )
 
     try:
-        if USE_WDM:
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=options)
-        else:
-            driver = webdriver.Chrome(options=options)
+        # Selenium Manager (part of Selenium) finds or downloads the matching driver
+        driver = webdriver.Chrome(options=options)
     except WebDriverException as exc:
         raise ChromeDriverLaunchError(
             "Nie udało się uruchomić przeglądarki Chrome/Chromium do wyszukiwania "

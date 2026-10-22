@@ -56,8 +56,11 @@ When this file disagrees with the code, trust the code and fix this file.
 - Run the app: `python main.py`
 - The automatic pass over the phone's requests, by hand: `venv/bin/python auto_resolve_requests.py`
   (normally the `musicdatabase-inbox` timer runs it; it does nothing while the app is open)
+- Test tools (pytest): `pip install -r requirements-dev.txt` — kept out of `requirements.txt`,
+  which lists only what the app itself needs (every package pinned, the transitive ones too; a
+  package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~900 tests, ~1.5 min, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,250 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -415,7 +418,10 @@ non-trivial work in that area.
   `docs/agent-notes/database-search.md`.
 - `src/menu/` — the terminal menu tree (presentation + workflow wiring). Main menu → Help
   (`menu/main_menu/help.py`) explains the menus to a newcomer: a renamed or new menu entry it
-  quotes needs its text updated (`tests/test_help_menu.py` checks every quoted label exists). Known fragility:
+  quotes needs its text updated (`tests/test_help_menu.py` checks every quoted label exists). Its
+  "Libraries" topic (`LIBRARIES`) describes every library the program imports itself, with the
+  same text in README.md → Libraries: a new direct dependency gets a line in both (the test fails
+  otherwise); "What happens at start-up" is built from `startup_settings` with the switches' state. Known fragility:
   importing `menu.song_actions` before `menu.main_menu` triggers a circular import
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
   affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
@@ -500,7 +506,17 @@ non-trivial work in that area.
 - Backups mostly happen automatically: `main.py` takes one at startup (once per calendar day) and
   another, unconditionally, immediately before applying any pending migration. Don't skip either
   when changing this code path — a schema change without a fresh backup right before it is exactly
-  the failure mode this mechanism exists to remove. Settings → Server → "Back up database now" also lets the
+  the failure mode this mechanism exists to remove. The daily one is the owner's to switch off
+  (Settings → Start-up tasks, `STARTUP_BACKUP=off`); then every start warns once the newest backup
+  is over 7 days old. The pre-migration one never is.
+- Start-up (`utils/ui/startup_tasks.py`, called by `main.py`): switchable, one `.env` key each
+  (`utils/common/startup_settings.py`, empty = on, `off` = skipped, read from the file at start):
+  the daily backup, applying phones' global mood changes, the daily library index, the daily copy
+  for phones, the daily yt-dlp offer, the start-up messages; the daily GitHub publish keeps its own
+  switch in `public_database.py`'s state, shown on the same screen. With the backup off, "the day's
+  first start" comes from `data/startup_state.json`. Never switchable: the app lock wait, the
+  fresh-install database choice, migrations, the album backfill after its migration, applying song
+  id changes, resuming the sharing setup — a new start-up step says which kind it is. Settings → Server → "Back up database now" also lets the
   user trigger `backup_databases()` on demand, for a snapshot right before something risky.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
   `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
@@ -622,7 +638,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`) — ~900 tests, ~1.5 minutes, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,250 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

@@ -100,6 +100,20 @@ def has_backup_today() -> bool:
     return any(ARCHIVE_DIR.glob(f"music.{today}-*.db"))
 
 
+def newest_backup_time(archive_dir: Path | None = None) -> datetime | None:
+    """When the newest backup of music.db was taken (from its name), or None."""
+    archive_dir = archive_dir or ARCHIVE_DIR
+    newest = None
+    for path in archive_dir.glob("music.*.db") if archive_dir.exists() else []:
+        stamp = path.name.split(".")[1].split("_")[0]
+        try:
+            taken = datetime.strptime(stamp, _TIMESTAMP_FORMAT)
+        except ValueError:
+            continue
+        newest = max(newest, taken) if newest else taken
+    return newest
+
+
 def backup_if_needed_today(reason: str = "daily-startup") -> list[Path]:
     """
     Called once at app startup. No-op if a backup already exists for today

@@ -123,6 +123,14 @@ in `src/database/archive/`. The app moves through menus with the arrow keys and 
 **Help** in the main menu explains what each menu is for, every way to add songs, the clean-up
 tools and where to set the PC up as the phones' server.
 
+On the day's first start the app backs the databases up, indexes your music library, refreshes
+the copy for phones, publishes the public copy to GitHub (if you set that up) and offers a newer
+yt-dlp; every start also applies phones' changes to global moods and shows what the automatic
+request check did. Settings → Start-up tasks switches each of these off (all on by default; with
+the daily backup off, every start warns once the newest backup is more than 7 days old).
+Database upgrades, with their own backup right before, always run. Help → "What happens at start-up" lists every
+step in order, with what's on now.
+
 To start it later, run the two commands above, or double-click `MusicDatabase.sh` (it opens a
 terminal for itself: your desktop's default one, GNOME Terminal, Konsole, Xfce Terminal or xterm).
 
@@ -244,7 +252,39 @@ the sharing server, restart it so it runs the new code:
 systemctl --user restart musicdatabase-share
 ```
 
+## Libraries
+
+What each library the program uses itself is for (also in the app: Help → Libraries):
+
+- **SQLAlchemy** — The databases: music.db, tag.db, files.db and each user's user.db are SQLite files read and written through it.
+- **questionary** — The menus, lists to tick and questions in the terminal.
+- **rich** — The coloured tables and summaries in the terminal (song lists, import results).
+- **mutagen** — Reads and writes the tags of music files (artist, title, album, cover) for imports, the music library index and fixing file names and tags.
+- **Pillow** — Opens the cover pictures found in music files, to save them and tell identical ones apart.
+- **musicbrainzngs** — MusicBrainz searches for a song's recordings: its album and release year.
+- **wikipedia** — Wikipedia lookups for a song's album and release year.
+- **requests** — Plain web requests: MusicBrainz (spelling and genres), Wikipedia, lyrics for guessing a song's language, the public catalog's GitHub release and the check for a newer yt-dlp.
+- **beautifulsoup4** — Reads the web pages the lookups get back (Wikipedia, iTunes, Spotify, Google, YouTube).
+- **selenium** — Drives a hidden Chrome/Chromium for the lookups that only work in a real browser (Google, Genius, iTunes, Spotify, YouTube search).
+- **yt-dlp** — YouTube: searching videos for songs, whether a video still plays, importing playlists and downloading a song's audio. Its extras - deno and yt-dlp-ejs (YouTube's JavaScript checks), brotli, pycryptodomex, websockets - are what YouTube needs today.
+- **google-api-python-client, google-auth, google-auth-oauthlib** — The YouTube Data API: creating YouTube playlists from songs, reading private playlists, and checking many videos at once with an API key.
+- **langdetect, pycountry** — Guessing a song's language from its lyrics, and the language's name.
+- **RapidFuzz** — Fuzzy comparison of names when copying songs' files from the music library.
+- **universal_pathlib, smbprotocol** — Paths that may be a local folder or an smb:// network share (the music library on a NAS).
+- **python-dotenv** — Reads and writes this PC's settings in .env.
+- **pyperclip** — Copies a song's artist and title to the clipboard while Clean names or filling in albums and years asks about it, ready to paste into a search.
+- **packaging** — Compares version numbers for the yt-dlp update offer.
+- **pytest** — Runs the tests (requirements-dev.txt; the app doesn't need it).
+
+requirements.txt also pins the packages these need themselves, so every install gets the same versions.
+
 ## Tests
+
+The test tools are kept apart from what the app needs, once:
+
+```bash
+pip install -r requirements-dev.txt
+```
 
 ```bash
 python -m pytest

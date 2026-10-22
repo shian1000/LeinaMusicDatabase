@@ -86,6 +86,8 @@ PUBLIC_DB_VERSION_FILE = "version.json"
 PUBLIC_DB_FORMAT = 1
 # The daily publish switch and the last publish's time and result
 PUBLIC_DB_STATE_FILE = "data/public_database.json"
+# The day main.py last ran its once-a-day tasks (utils/common/startup_settings.py)
+STARTUP_STATE_FILE = "data/startup_state.json"
 # Where a fresh install without databases downloads the public catalog from
 # (utils/database/first_run.py) when GITHUB_DB_REPO isn't set: this project's
 # own release
