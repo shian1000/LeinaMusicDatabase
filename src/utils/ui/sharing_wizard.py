@@ -88,15 +88,18 @@ def _choices(step, current: str, suggested: str | None, env_file: Path) -> list:
     elif step.name == "SHARING_LAN_INTERFACE":
         choices += [questionary.Choice(title=f"This interface: {name} ({address})", value=name)
                     for name, address in setup.lan_interfaces() if name not in (current, suggested)]
-    elif step.name == "SHARING_TAILSCALE":
-        choices += [questionary.Choice(title=value, value=value) for value in ("on", "off") if value != current]
+    elif step.name == "SHARING_VPN":
+        choices += [questionary.Choice(title=f"This interface: {name} ({address})", value=name)
+                    for name, address in setup.vpn_candidates(env_file) if name != current]
+        choices += [questionary.Choice(title=title, value=value)
+                    for title, value in (("tailscale (Tailscale's address, found by itself)", "tailscale"),
+                                         ("off (no VPN)", "off")) if value != current.lower()]
     elif step.name == "SHARING_ADDRESSES":
         choices += [questionary.Choice(title=f"Add this address: {address} ({name})", value=_ADD + address)
                     for name, address in setup.address_candidates(env_file)]
     else:
         choices.append(questionary.Choice(title="Choose a folder in the file browser", value=_BROWSE))
-    if step.name != "SHARING_TAILSCALE":
-        choices.append(questionary.Choice(title="Type it", value=_TYPE))
+    choices.append(questionary.Choice(title="Type it", value=_TYPE))
     if current and not step.required:
         choices.append(questionary.Choice(title="Clear it (leave it empty)", value=_CLEAR))
     choices.append(questionary.Choice(title="Stop the setup", value=_STOP))

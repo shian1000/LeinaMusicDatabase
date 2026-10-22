@@ -137,10 +137,23 @@ class _Out:
 LOCAL = lambda: [("enp2s0", "192.0.2.10"), ("wg0", "10.8.0.2")]
 
 
-def test_tailscale_setting_is_on_or_off(env):
-    assert setup.value_warning("SHARING_TAILSCALE", "off", env) is None
-    assert setup.value_warning("SHARING_TAILSCALE", "ON", env) is None
-    assert setup.value_warning("SHARING_TAILSCALE", "maybe", env) == "Use on or off."
+def test_vpn_is_tailscale_off_or_an_existing_vpn_interface(env, monkeypatch):
+    assert setup.value_warning("SHARING_VPN", "tailscale", env) is None
+    assert setup.value_warning("SHARING_VPN", "OFF", env) is None
+    assert "no network interface nosuchvpn0" in setup.value_warning("SHARING_VPN", "nosuchvpn0", env)
+    monkeypatch.setattr(setup.os.path, "exists", lambda path: True)
+    assert setup.value_warning("SHARING_VPN", "wg0", env) is None
+    assert "container bridge" in setup.value_warning("SHARING_VPN", "docker0", env)
+    save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
+    assert "home network interface" in setup.value_warning("SHARING_VPN", "enp2s0", env)
+
+
+def test_vpn_candidates_are_any_providers_interfaces(env):
+    found = lambda: [("enp2s0", "192.0.2.10"), ("wg0", "10.8.0.2"), ("tun0", "10.9.0.6"),
+                     ("tailscale0", "100.64.0.10"), ("docker0", "172.17.0.1"), ("ppp0", "8.8.8.8")]
+    save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
+    assert setup.vpn_candidates(env, addresses=found) == [
+        ("wg0", "10.8.0.2"), ("tun0", "10.9.0.6"), ("tailscale0", "100.64.0.10")]
 
 
 def test_addresses_must_be_this_pcs_ipv4_addresses(env):
@@ -164,21 +177,29 @@ def test_address_candidates_never_offer_bridges_or_the_other_steps_addresses(env
     save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
     save_env_value("SHARING_ADDRESSES", "10.9.0.2", env)
     assert setup.address_candidates(env, addresses=found) == [("wg0", "10.8.0.2")]
+    # With another VPN chosen, its interface is that step's, and Tailscale's is free to add
+    save_env_value("SHARING_VPN", "wg0", env)
+    assert setup.address_candidates(env, addresses=found) == [("tailscale0", "100.64.0.10")]
 
 
 def test_listening_plan_follows_the_settings(env):
     tailscale = lambda: "100.64.0.10"
     lan = {"enp2s0": "192.0.2.10"}.get
+    vpn = {"wg0": "10.8.0.2"}.get
     # Nothing set: Tailscale's address only when this PC has one, nothing otherwise
-    assert setup.listening_plan(env, tailscale, lan) == [("Tailscale", "100.64.0.10")]
-    assert setup.listening_plan(env, lambda: None, lan) == []
+    assert setup.listening_plan(env, tailscale, lan, vpn) == [("VPN (Tailscale)", "100.64.0.10")]
+    assert setup.listening_plan(env, lambda: None, lan, vpn) == []
     save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
-    save_env_value("SHARING_ADDRESSES", "10.8.0.2", env)
-    assert setup.listening_plan(env, tailscale, lan) == [
-        ("home network (enp2s0)", "192.0.2.10"), ("Tailscale", "100.64.0.10"), ("chosen address", "10.8.0.2")]
-    save_env_value("SHARING_TAILSCALE", "off", env)
-    assert setup.listening_plan(env, tailscale, lan) == [
-        ("home network (enp2s0)", "192.0.2.10"), ("chosen address", "10.8.0.2")]
+    save_env_value("SHARING_ADDRESSES", "198.51.100.7", env)
+    assert setup.listening_plan(env, tailscale, lan, vpn) == [
+        ("home network (enp2s0)", "192.0.2.10"), ("VPN (Tailscale)", "100.64.0.10"),
+        ("chosen address", "198.51.100.7")]
+    save_env_value("SHARING_VPN", "wg0", env)
+    assert setup.listening_plan(env, tailscale, lan, vpn) == [
+        ("home network (enp2s0)", "192.0.2.10"), ("VPN (wg0)", "10.8.0.2"), ("chosen address", "198.51.100.7")]
+    save_env_value("SHARING_VPN", "off", env)
+    assert setup.listening_plan(env, tailscale, lan, vpn) == [
+        ("home network (enp2s0)", "192.0.2.10"), ("chosen address", "198.51.100.7")]
 
 
 def test_linger_state_and_enabling():
@@ -400,16 +421,17 @@ def test_a_value_with_a_warning_is_saved_only_when_confirmed(wizard, env, capsys
     assert read_env_value("SHARING_LAN_INTERFACE", env) == "nosuchif0"
 
 
-def test_tailscale_is_on_or_off_without_typing(wizard, env):
-    step = _step("SHARING_TAILSCALE")
-    wizard["selects"] = [KEEP] * step + ["off"] + _keep_rest(step + 1)
+def test_the_vpn_step_offers_any_providers_interface_tailscale_and_off(wizard, env, monkeypatch):
+    monkeypatch.setattr(setup.os.path, "exists", lambda path: True)
+    step = _step("SHARING_VPN")
+    wizard["selects"] = [KEEP] * step + ["wg0"] + _keep_rest(step + 1)
     wizard["yes"] = [True, False]
 
     wiz.run_sharing_wizard(env_file=env)
 
     offered = [value for _, value in wizard["offered"][step]]
-    assert "on" in offered and "off" in offered and wiz._TYPE not in offered
-    assert read_env_value("SHARING_TAILSCALE", env) == "off"
+    assert "wg0" in offered and "tailscale" in offered and "off" in offered and wiz._TYPE in offered
+    assert read_env_value("SHARING_VPN", env) == "wg0"
 
 
 def test_an_address_is_added_to_the_ones_already_chosen(wizard, env, monkeypatch):

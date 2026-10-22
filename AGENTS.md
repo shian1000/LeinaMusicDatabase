@@ -113,8 +113,9 @@ non-trivial work in that area.
   (`GET`/`HEAD /library/<id>`, looked up in the shared `files.db`, path checked to stay inside
   the library, byte ranges for the player, no token), and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
   at most 1 MiB each, nothing while `new/` holds 100 MiB), syncs a logged-in user's playlists
-  (`/users/<name>/playlists`, below), port 8002, only on the Tailscale IP (unless `SHARING_TAILSCALE=off`) plus the named LAN interface from
-  `Settings.sharing_lan_interface` and the exact `SHARING_ADDRESSES`. It never binds to `0.0.0.0` unless
+  (`/users/<name>/playlists`, below), port 8002, only on the named LAN interface from `Settings.sharing_lan_interface`, the VPN of `SHARING_VPN`
+  (empty / `tailscale` = the Tailscale IP, `off`, or any provider's interface by name → `--vpn-interface`)
+  and the exact `SHARING_ADDRESSES`. It never binds to `0.0.0.0` unless
   that's one of them, and the interface is chosen by
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
@@ -421,7 +422,10 @@ non-trivial work in that area.
   quotes needs its text updated (`tests/test_help_menu.py` checks every quoted label exists). Its
   "Libraries" topic (`LIBRARIES`) describes every library the program imports itself, with the
   same text in README.md → Libraries: a new direct dependency gets a line in both (the test fails
-  otherwise); "What happens at start-up" is built from `startup_settings` with the switches' state. Known fragility:
+  otherwise); "What happens at start-up" is built from `startup_settings` with the switches' state. "Background services (Linux)" explains the four systemd units; its
+  option (`TOPIC_ACTIONS`) prints them via `sharing.unit_files()` — read-only, from disk or from
+  the same `_service_unit()` / `_timer_unit()` / `_inbox_*` the setup writes with: a change to a
+  unit updates that topic's text too. Known fragility:
   importing `menu.song_actions` before `menu.main_menu` triggers a circular import
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
   affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
@@ -555,8 +559,8 @@ non-trivial work in that area.
   collection), `SHARING_DIR` (the shared folder, which also holds `Users/`, `Inbox/` and
   `MoodChanges/`) + `SHARING_DRIVE_MOUNT` (the external drive it's on; empty = the system disk,
   where the folder only has to exist — `settings.sharing_dir_available()` is the one rule),
-  `SHARING_LAN_INTERFACE`, `SHARING_TAILSCALE` (empty = on) + `SHARING_ADDRESSES` (what else the
-  server listens on), and the
+  `SHARING_LAN_INTERFACE`, `SHARING_VPN` (empty = `tailscale`, `off`, or a VPN interface of any
+  provider) + `SHARING_ADDRESSES` (what else the server listens on), and the
   `REMOTE_*` keys read by `MusicDatabase-Remote.sh`. A missing key never falls back to someone's
   real path: the feature is skipped with a message naming the key, as for an unplugged drive
   (`settings.drive_unavailable_message()`; the drive-path `Settings` fields are then `None`).

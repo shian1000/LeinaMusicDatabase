@@ -24,6 +24,7 @@ from utils.common.sharing_setup import (
     address_candidates,
     phone_addresses,
     value_warning,
+    vpn_candidates,
 )
 from utils.ui.sharing_wizard import offer_to_create_sharing_dir, run_sharing_wizard
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
@@ -525,8 +526,9 @@ def _change_machine_key(key) -> None:
     current = read_env_value(key.name)
     if key.is_path:
         methods = ["Open file manager", "Type path manually"]
-    elif key.name == "SHARING_TAILSCALE":
-        methods = [value for value in ("on", "off") if value != current]
+    elif key.name == "SHARING_VPN":
+        methods = ["Pick a VPN interface", "Type the interface name"] + [
+            value for value in ("tailscale", "off") if value != current.lower()]
     elif key.name == "SHARING_ADDRESSES":
         methods = ["Add an address of this PC", "Type them manually (comma-separated)"]
     else:
@@ -542,8 +544,10 @@ def _change_machine_key(key) -> None:
         value = str(picked) if picked else None
     elif method == "Pick a network interface":
         value = _pick_lan_interface()
-    elif method in ("on", "off"):
+    elif method in ("tailscale", "off"):
         value = method
+    elif method == "Pick a VPN interface":
+        value = _pick_vpn_interface()
     elif method == "Add an address of this PC":
         added = _pick_local_address()
         value = ",".join(listen_addresses(current) + [added]) if added else None
@@ -567,6 +571,16 @@ def _change_machine_key(key) -> None:
         offer_to_create_sharing_dir(value)
     print('Restart the app for this to take effect, then run "Setup this PC for database sharing"'
           " again so the sharing server uses it too.")
+
+
+def _pick_vpn_interface() -> str | None:
+    choices = [questionary.Choice(title=f"{name} ({address})", value=name) for name, address in vpn_candidates()]
+    if not choices:
+        print("No network interface that could be a VPN's found (is the VPN connected?).")
+        return None
+    choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
+    picked = questionary.select("Which interface is the VPN's?", choices=choices).ask()
+    return None if picked == "__cancel__" else picked
 
 
 def _pick_local_address() -> str | None:

@@ -54,7 +54,8 @@ start empty.
 - **Optional — `xclip`** (X11) **or `wl-clipboard`** (Wayland), for "copy to clipboard". Without
   them the app asks the terminal to do it, which most terminals support.
 - **Optional — a way for phones to reach the PC from outside your home network**, if you want
-  that: any VPN works (Tailscale is one; the server listens on its address when it runs here).
+  that: any VPN works — the server listens on its interface (Tailscale's address is found by
+  itself).
 
 ## Install
 
@@ -137,8 +138,8 @@ terminal for itself: your desktop's default one, GNOME Terminal, Konsole, Xfce T
 ## Serving Leina Radio phones
 
 Your PC becomes the phones' server: it serves the catalog on port **8002**, only on the
-addresses you choose — your home network's interface, the Tailscale address if Tailscale runs
-here (it can be switched off), and any other address of the PC you add (e.g. another VPN's). A
+addresses you choose — your home network's interface, a VPN's (any provider; by default
+Tailscale's address if Tailscale runs here), and any other address of the PC you add. A
 phone must be able to reach one of them; how (the home Wi-Fi, a VPN, ...) is up to you. It never
 listens on every address unless you add `0.0.0.0` yourself: **no router port forwarding**,
 nothing to open. Anyone on your home Wi-Fi can
@@ -162,9 +163,10 @@ and run it again any time — it starts from the saved values. The steps below a
      drive isn't plugged in.
    - **LAN interface** — "Pick a network interface" and choose the one on your home network
      (Wi-Fi or cable).
-   - **Listen on the Tailscale address too** — on (the default) or off; it matters only when
-     Tailscale runs on this PC.
-   - **Other addresses to listen on** — any other IPv4 address of this PC, e.g. another VPN's.
+   - **VPN** — the VPN the server also listens on: its network interface by name, whatever the
+     provider (e.g. `wg0` for WireGuard, `tun0` for OpenVPN), `tailscale` (the default — its
+     address is found by itself, and it only matters when Tailscale runs here) or `off`.
+   - **Other addresses to listen on** — any other IPv4 address of this PC.
 
    The server needs at least one of these addresses, and a phone must be able to reach it.
    - **Music library** (optional) — your mp3 folder, so phones can play your files.
@@ -191,9 +193,8 @@ and run it again any time — it starts from the saved values. The steps below a
 Good to know:
 
 - **Away from home**: the phone needs some way to reach one of the addresses, e.g. a VPN between
-  the phone and the PC. With Tailscale on both, the server's Tailscale address works; with
-  another VPN, add the PC's address in that VPN under "Other addresses to listen on". At home
-  the phone uses the LAN address.
+  the phone and the PC: pick that VPN's interface under **VPN** (with Tailscale on both, the
+  default already works). At home the phone uses the LAN address.
 - **A firewall** (e.g. `ufw`) must allow TCP port 8002 from where the phone connects.
 - **An always-on or headless server**: the sharing server is a systemd *user* service, and
   systemd runs a user's services only while that user is logged in — log out (or boot without
@@ -209,6 +210,11 @@ Good to know:
   about the account changes). `loginctl show-user <user> --property=Linger` shows it;
   `sudo loginctl disable-linger <user>` turns it off again. Not needed on a desktop you're
   logged into anyway.
+- **What runs in the background**: Help → "Background services (Linux)" explains the four
+  systemd user units the setup installs (`musicdatabase-share` — the server — and
+  `musicdatabase-inbox` — the automatic request check every 15 minutes, each a `.service` plus a
+  `.timer` in `~/.config/systemd/user/`), when they run and how to check, stop or remove them; its
+  "Show the full unit files" prints them as installed, or what the setup would write.
 - **Turning it off**: the setup prints the `systemctl --user` commands for that.
 - After changing the folders or the addresses, run "Setup this PC for database sharing"
   again, so the server uses the new values.

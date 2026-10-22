@@ -2,7 +2,7 @@
 Copy music.db, tag.db and files.db (the music library index) into the
 sharing folder (Settings.sharing_dir) that the MusicDatabaseApp mobile
 client downloads from, plus installing the systemd user service that serves
-that folder over Tailscale (sharing_server.py) and the timer that runs the
+that folder over VPN (sharing_server.py) and the timer that runs the
 automatic pass over the phone's requests (auto_resolve_requests.py).
 
 Contract the app relies on (see docs/runbooks/database.md -> "Sharing with
@@ -23,6 +23,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from config.constants import (
@@ -35,7 +36,7 @@ from config.constants import (
     SHARING_SERVICE_NAME,
     SHARING_STARTUP_DELAY,
 )
-from settings import Settings, drive_unavailable_message, sharing_dir_available
+from settings import VPN_OFF, VPN_TAILSCALE, Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import mlog, slog
 from utils.database.backup import DB_FILES
 from utils.database.files_index import local_library_path
@@ -43,7 +44,7 @@ from utils.database.files_index import local_library_path
 SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
 SHARING_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 SHARING_LAN_INTERFACE = Settings.sharing_lan_interface
-SHARING_TAILSCALE = Settings.sharing_tailscale
+SHARING_VPN = Settings.sharing_vpn
 SHARING_ADDRESSES = list(Settings.sharing_addresses)
 PHONE_INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
 USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
@@ -136,9 +137,12 @@ def _service_unit(python: str) -> str:
     command += f" --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
-    # Both left out by default, so a unit written before they existed stays the same
-    if not SHARING_TAILSCALE:
+    # Nothing added for Tailscale (the default), so a unit written before
+    # SHARING_VPN existed stays the same; another VPN replaces it
+    if SHARING_VPN != VPN_TAILSCALE:
         command += " --no-tailscale"
+    if SHARING_VPN not in (VPN_TAILSCALE, VPN_OFF):
+        command += f" --vpn-interface {SHARING_VPN}"
     for address in SHARING_ADDRESSES:
         command += f" --address {address}"
     command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
@@ -149,7 +153,7 @@ def _service_unit(python: str) -> str:
     if library is not None:
         command += f" --library {library}"
     return f"""[Unit]
-Description=MusicDatabase - serve music.db/tag.db/files.db and the music library's files to the mobile app, log it in and take its requests, over Tailscale and the LAN
+Description=MusicDatabase - serve music.db/tag.db/files.db and the music library's files to the mobile app, log it in and take its requests, over VPN and the LAN
 
 [Service]
 ExecStart={command}
@@ -249,6 +253,37 @@ def install_sharing_service() -> list[str]:
     _systemctl("enable", "--now", f"{INBOX_AUTO_SERVICE_NAME}.timer")
     steps.append(f"Enabled {INBOX_AUTO_SERVICE_NAME}.timer (checks new requests every {INBOX_AUTO_INTERVAL})")
     return steps
+
+
+@dataclass(frozen=True)
+class UnitFile:
+    path: Path
+    installed: bool
+    text: str
+    # Installed, but not what install_sharing_service() would write now
+    outdated: bool = False
+
+
+def unit_files() -> list[UnitFile]:
+    """The four units, read-only for Help: each as installed on disk, or -
+    when it isn't - what install_sharing_service() would write now."""
+    python = server_python()
+    expected = {
+        f"{SHARING_SERVICE_NAME}.service": _service_unit(python),
+        f"{SHARING_SERVICE_NAME}.timer": _timer_unit(),
+        f"{INBOX_AUTO_SERVICE_NAME}.service": _inbox_service_unit(sys.executable),
+        f"{INBOX_AUTO_SERVICE_NAME}.timer": _inbox_timer_unit(),
+    }
+    files = []
+    for name, would_write in expected.items():
+        path = SYSTEMD_USER_DIR / name
+        try:
+            text = path.read_text()
+        except OSError:
+            files.append(UnitFile(path, False, would_write))
+            continue
+        files.append(UnitFile(path, True, text, outdated=text != would_write))
+    return files
 
 
 def sharing_service_disable_hint() -> str:

@@ -3,8 +3,9 @@ Minimal HTTP server for the MusicDatabaseApp mobile client: serves exactly
 <dir>/music.db, <dir>/tag.db and <dir>/files.db (the music library index),
 nothing else (no directory listing, any
 other path is a 404), on this machine's Tailscale address (unless
---no-tailscale), optionally on one named LAN interface, and on any exact
-addresses given with --address. With --inbox it also takes requests from the
+--no-tailscale), optionally on one named LAN interface and one named VPN
+interface (--vpn-interface, any provider), and on any exact addresses given
+with --address. With --inbox it also takes requests from the
 phone: `PUT /inbox/<name>.db` stores one request file in <inbox>/new/ for
 Manage database -> "Resolve new requests" (utils/database/inbox_requests.py).
 With --users the phone can also log in as a MusicDatabase user (POST /login,
@@ -16,7 +17,8 @@ the app (no settings.py / venv imports), so it runs on the system python3
 with every path passed on the command line.
 
     python3 sharing_server.py --dir DIR [--mount MOUNT] --port 8002 [--lan-interface enp2s0] [--no-tailscale]
-                              [--address ADDR ...] [--inbox DIR] [--users DIR] [--mood-changes DIR] [--library DIR]
+                              [--vpn-interface wg0] [--address ADDR ...] [--inbox DIR] [--users DIR]
+                              [--mood-changes DIR] [--library DIR]
 
 - Tailscale: waits (retrying forever) until `tailscale ip -4` returns an
   address and it can bind to it - right after boot Tailscale may not have
@@ -28,6 +30,10 @@ with every path passed on the command line.
   because docker0 / br-* bridges also carry private addresses and must never
   be exposed. Same wait-and-retry loop, in its own thread, so a missing LAN
   never delays or breaks the Tailscale socket (or vice versa).
+- --vpn-interface (2026-10-22): the address of a VPN's interface named by
+  the owner (wg0, tun0, tailscale0...), whatever the provider - private or
+  in 100.64.0.0/10, never public; same wait-and-retry loop. The unit passes
+  it with --no-tailscale, so the VPN is one setting (SHARING_VPN).
 - --address (2026-10-21, for a PC without Tailscale or with another VPN):
   exactly that address, same wait-and-retry loop (the interface may come up
   later). 0.0.0.0 only when given there - the owner's explicit choice.
@@ -1301,24 +1307,42 @@ def interface_ipv4(interface: str) -> str | None:
     or None if it has none (yet). A public or Tailscale-range address is
     rejected - this socket is meant for the home LAN only.
     """
+    for address in _interface_addresses(interface):
+        if address.is_private and not address.is_loopback and address not in TAILSCALE_NETWORK:
+            return str(address)
+    return None
+
+
+def vpn_interface_ipv4(interface: str) -> str | None:
+    """
+    The IPv4 address of a named VPN interface (e.g. "wg0", "tun0"), or None
+    if it has none (yet): a private one or one from 100.64.0.0/10 (where
+    Tailscale and other VPNs hand theirs out) - never a public or loopback one.
+    """
+    for address in _interface_addresses(interface):
+        if not address.is_loopback and (address.is_private or address in TAILSCALE_NETWORK):
+            return str(address)
+    return None
+
+
+def _interface_addresses(interface: str) -> list:
     try:
         out = subprocess.run(
             ["ip", "-4", "-o", "addr", "show", "dev", interface],
             capture_output=True, text=True, timeout=10,
         ).stdout.split()
     except (OSError, subprocess.SubprocessError):
-        return None
+        return []
     # `ip -o` prints one line per address: "2: enp2s0    inet 192.0.2.10/24 brd ..."
+    found = []
     for i, token in enumerate(out[:-1]):
         if token != "inet":
             continue
         try:
-            address = ipaddress.IPv4Interface(out[i + 1]).ip
+            found.append(ipaddress.IPv4Interface(out[i + 1]).ip)
         except ValueError:
             continue
-        if address.is_private and not address.is_loopback and address not in TAILSCALE_NETWORK:
-            return str(address)
-    return None
+    return found
 
 
 def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscale") -> ThreadingHTTPServer:
@@ -1342,12 +1366,14 @@ def _ipv4(value: str) -> str:
         raise argparse.ArgumentTypeError(f"not an IPv4 address: {value}")
 
 
-def address_sources(lan_interface: str | None, tailscale: bool = True,
-                    addresses=()) -> list[tuple[str, Callable[[], str | None]]]:
+def address_sources(lan_interface: str | None, tailscale: bool = True, addresses=(),
+                    vpn_interface: str | None = None) -> list[tuple[str, Callable[[], str | None]]]:
     """(label, address getter) for every socket to serve on."""
     sources = [("Tailscale", tailscale_ipv4)] if tailscale else []
     if lan_interface:
         sources.append((f"LAN {lan_interface}", lambda: interface_ipv4(lan_interface)))
+    if vpn_interface:
+        sources.append((f"VPN {vpn_interface}", lambda: vpn_interface_ipv4(vpn_interface)))
     for address in addresses:
         sources.append((f"address {address}", lambda address=address: address))
     return sources
@@ -1361,6 +1387,7 @@ def main(argv=None) -> int:
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--lan-interface", help="also serve on this interface's private IPv4 address")
     parser.add_argument("--no-tailscale", action="store_true", help="don't serve on the Tailscale address")
+    parser.add_argument("--vpn-interface", help="also serve on this VPN interface's address (any provider)")
     parser.add_argument("--address", action="append", default=[], type=_ipv4,
                         help="also serve on exactly this IPv4 address (repeatable)")
     parser.add_argument("--inbox", help="accept requests from Leina Radio into this folder (on --mount)")
@@ -1387,9 +1414,11 @@ def main(argv=None) -> int:
         print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 
-    sources = address_sources(args.lan_interface, tailscale=not args.no_tailscale, addresses=args.address)
+    sources = address_sources(args.lan_interface, tailscale=not args.no_tailscale, addresses=args.address,
+                              vpn_interface=args.vpn_interface)
     if not sources:
-        print("No address to serve on: --no-tailscale without --lan-interface or --address", file=sys.stderr, flush=True)
+        print("No address to serve on: --no-tailscale without --lan-interface, --vpn-interface or --address",
+              file=sys.stderr, flush=True)
         return 2
     # One socket per address, each bound and served independently; the
     # process lives as long as any of them does.

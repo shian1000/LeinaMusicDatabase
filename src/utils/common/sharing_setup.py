@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config.constants import SHARING_HTTP_PORT
-from settings import listen_addresses, tailscale_enabled
+from settings import VPN_OFF, VPN_TAILSCALE, listen_addresses, vpn_choice
 from utils.common.env_file import ENV_FILE, read_env_value
-from utils.database.sharing_server import interface_ipv4, tailscale_ipv4
+from utils.database.sharing_server import interface_ipv4, tailscale_ipv4, vpn_interface_ipv4
 
 
 @dataclass(frozen=True)
@@ -57,10 +57,11 @@ SETTING_STEPS = [
         "address a phone can reach.",
     ),
     SettingStep(
-        "SHARING_TAILSCALE", "Tailscale address", False,
-        "Matters only when Tailscale runs on this PC: whether the server also listens on this PC's "
-        "Tailscale address (on / off).",
-        "the same as on - the server listens on the Tailscale address whenever this PC has one.",
+        "SHARING_VPN", "VPN to listen on", False,
+        "Only if phones should reach this PC through a VPN, from any provider: which one the server "
+        "also listens on - the VPN's network interface by name (e.g. wg0 for WireGuard, tun0 for "
+        "OpenVPN), \"tailscale\" (Tailscale's address, found by itself), or \"off\".",
+        "the same as \"tailscale\" - the server listens on Tailscale's address whenever this PC has one.",
     ),
     SettingStep(
         "SHARING_ADDRESSES", "Other addresses to listen on", False,
@@ -90,8 +91,8 @@ def value_warning(name: str, value: str, env_file: Path = ENV_FILE, local_addres
         if not os.path.exists(f"/sys/class/net/{value}"):
             return f"There's no network interface {value} on this PC."
         return None
-    if name == "SHARING_TAILSCALE":
-        return None if value.lower() in ("on", "off") else "Use on or off."
+    if name == "SHARING_VPN":
+        return _vpn_warning(value, env_file)
     if name == "SHARING_ADDRESSES":
         return _addresses_warning(value, local_addresses)
     if "://" in value and not value.startswith("file://"):
@@ -117,6 +118,37 @@ def value_warning(name: str, value: str, env_file: Path = ENV_FILE, local_addres
     return None
 
 
+_NOT_VPN = ("docker", "br-", "veth")
+
+
+def _vpn_warning(value: str, env_file: Path) -> str | None:
+    choice = vpn_choice(value)
+    if choice in (VPN_TAILSCALE, VPN_OFF):
+        return None
+    if not os.path.exists(f"/sys/class/net/{choice}"):
+        return f"There's no network interface {choice} on this PC (is the VPN connected?)."
+    if choice == read_env_value("SHARING_LAN_INTERFACE", env_file):
+        return f"{choice} is the home network interface (step before), not a VPN."
+    if choice.startswith(_NOT_VPN):
+        return f"{choice} is a container bridge, not a VPN - it must never be exposed."
+    return None
+
+
+def vpn_candidates(env_file: Path = ENV_FILE, addresses=None) -> list[tuple[str, str]]:
+    """Interfaces that could be a VPN's, to offer for SHARING_VPN: not the
+    home network's, never a docker / bridge one, with a private or
+    100.64.0.0/10 address (what VPNs hand out)."""
+    lan = read_env_value("SHARING_LAN_INTERFACE", env_file)
+    found = []
+    for name, address in (addresses or local_ipv4_addresses)():
+        ip = ipaddress.IPv4Address(address)
+        if name == lan or name.startswith(_NOT_VPN) or name in {n for n, _ in found}:
+            continue
+        if ip.is_private or ip in ipaddress.IPv4Network("100.64.0.0/10"):
+            found.append((name, address))
+    return found
+
+
 def _addresses_warning(value: str, local_addresses=None) -> str | None:
     problems = []
     for address in listen_addresses(value):
@@ -135,13 +167,15 @@ def _addresses_warning(value: str, local_addresses=None) -> str | None:
 
 def address_candidates(env_file: Path = ENV_FILE, addresses=None) -> list[tuple[str, str]]:
     """This PC's addresses worth offering for SHARING_ADDRESSES: not the ones
-    already chosen, not the LAN interface's or Tailscale's (their own steps),
+    already chosen, not the LAN interface's or the VPN's (their own steps),
     never a docker / bridge one (sharing_server's rule for the LAN too)."""
     chosen = set(listen_addresses(read_env_value("SHARING_ADDRESSES", env_file)))
     lan = read_env_value("SHARING_LAN_INTERFACE", env_file)
+    vpn = vpn_choice(read_env_value("SHARING_VPN", env_file))
+    covered = ("tailscale",) if vpn == VPN_TAILSCALE else ()
     return [(name, address) for name, address in (addresses or local_ipv4_addresses)()
-            if address not in chosen and name != lan
-            and not name.startswith(("docker", "br-", "veth", "tailscale"))]
+            if address not in chosen and name not in (lan, vpn)
+            and not name.startswith(_NOT_VPN + covered)]
 
 
 def local_ipv4_addresses(run=subprocess.run) -> list[tuple[str, str]]:
@@ -237,18 +271,21 @@ def restart_needed(env_file: Path = ENV_FILE, environ=os.environ) -> list[str]:
 # ==================== checks (not settings) ====================
 
 def listening_plan(env_file: Path = ENV_FILE, tailscale_address=tailscale_ipv4,
-                   interface_address=interface_ipv4) -> list[tuple[str, str | None]]:
+                   interface_address=interface_ipv4, vpn_address=vpn_interface_ipv4) -> list[tuple[str, str | None]]:
     """(what, address now or None) for every socket the server would open with
     the settings in env_file - the same choice as sharing_server.address_sources()."""
     plan = []
     lan = read_env_value("SHARING_LAN_INTERFACE", env_file)
     if lan:
         plan.append((f"home network ({lan})", interface_address(lan)))
-    if tailscale_enabled(read_env_value("SHARING_TAILSCALE", env_file)):
+    vpn = vpn_choice(read_env_value("SHARING_VPN", env_file))
+    if vpn == VPN_TAILSCALE:
         address = tailscale_address()
-        # Listed only when this PC has one: without Tailscale the setting means nothing
+        # Listed only when this PC has one: without Tailscale the default means nothing
         if address:
-            plan.append(("Tailscale", address))
+            plan.append(("VPN (Tailscale)", address))
+    elif vpn != VPN_OFF:
+        plan.append((f"VPN ({vpn})", vpn_address(vpn)))
     for address in listen_addresses(read_env_value("SHARING_ADDRESSES", env_file)):
         plan.append(("chosen address", address))
     return plan

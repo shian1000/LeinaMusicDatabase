@@ -793,6 +793,35 @@ def test_without_tailscale_only_the_chosen_addresses_are_served(monkeypatch, cap
     assert "http://198.51.100.7:8002/" in capsys.readouterr().out
 
 
+def test_a_vpn_interface_of_any_provider_is_served(monkeypatch):
+    bound = []
+
+    def fake_bind(handler, port, get_address, label):
+        bound.append((label, get_address()))
+        return _FakeServer(get_address(), port)
+
+    monkeypatch.setattr(sharing_server, "bind_when_ready", fake_bind)
+    monkeypatch.setattr(sharing_server, "vpn_interface_ipv4", lambda name: {"wg0": "10.8.0.2"}[name])
+    monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: pytest.fail("Tailscale asked with --no-tailscale"))
+    sharing_server.main(["--dir", "/d", "--port", "8002", "--no-tailscale", "--vpn-interface", "wg0"])
+    assert bound == [("VPN wg0", "10.8.0.2")]
+
+
+@pytest.mark.parametrize("stdout, expected", [
+    ("5: wg0    inet 10.8.0.2/24 scope global wg0", "10.8.0.2"),
+    ("7: tailscale0    inet 100.64.0.10/32 scope global tailscale0", "100.64.0.10"),
+    ("9: ppp0    inet 8.8.8.8/32 scope global ppp0", None),  # public: never
+    ("", None),
+])
+def test_vpn_interface_ipv4_takes_private_or_cgnat_addresses_only(monkeypatch, stdout, expected):
+    class _Out:
+        def __init__(self, out):
+            self.stdout = out
+
+    monkeypatch.setattr(sharing_server.subprocess, "run", lambda *a, **k: _Out(stdout))
+    assert sharing_server.vpn_interface_ipv4("x") == expected
+
+
 def test_no_address_at_all_is_an_error(monkeypatch):
     monkeypatch.setattr(sharing_server, "bind_when_ready", lambda *a: pytest.fail("bound something"))
     assert sharing_server.main(["--dir", "/d", "--port", "8002", "--no-tailscale"]) == 2
@@ -861,21 +890,28 @@ def test_service_unit_lan_interface_flag(monkeypatch, lan_interface, expected_fl
         assert "--lan-interface" not in unit
 
 
-def test_service_unit_tailscale_and_address_flags(monkeypatch):
+def test_service_unit_vpn_and_address_flags(monkeypatch):
     # The defaults add nothing, so a unit written before these settings stays the same
     unit = sharing._service_unit("/usr/bin/python3")
-    assert "--no-tailscale" not in unit and "--address" not in unit
+    assert "--no-tailscale" not in unit and "--vpn-interface" not in unit and "--address" not in unit
 
-    monkeypatch.setattr(sharing, "SHARING_TAILSCALE", False)
+    monkeypatch.setattr(sharing, "SHARING_VPN", "off")
     monkeypatch.setattr(sharing, "SHARING_ADDRESSES", ["198.51.100.7", "0.0.0.0"])
     unit = sharing._service_unit("/usr/bin/python3")
-    assert " --no-tailscale" in unit and "--address 198.51.100.7 --address 0.0.0.0" in unit
+    assert " --no-tailscale" in unit and "--vpn-interface" not in unit
+    assert "--address 198.51.100.7 --address 0.0.0.0" in unit
+
+    # Another provider's VPN replaces Tailscale
+    monkeypatch.setattr(sharing, "SHARING_VPN", "wg0")
+    unit = sharing._service_unit("/usr/bin/python3")
+    assert " --no-tailscale --vpn-interface wg0" in unit
 
 
-def test_settings_read_tailscale_and_addresses():
-    from settings import listen_addresses, tailscale_enabled
+def test_settings_read_the_vpn_and_addresses():
+    from settings import listen_addresses, vpn_choice
 
-    assert tailscale_enabled("") and tailscale_enabled("on") and not tailscale_enabled("Off")
+    assert vpn_choice("") == vpn_choice(" Tailscale ") == "tailscale"
+    assert vpn_choice("OFF") == "off" and vpn_choice("wg0") == "wg0"
     assert listen_addresses(" 198.51.100.7, ,10.8.0.2 ") == ["198.51.100.7", "10.8.0.2"]
 
 

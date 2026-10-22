@@ -2,7 +2,7 @@
 
 Written by the MusicDatabase agent (2026-10-14) in answer to the app's
 `docs/handoffs/musicdatabase-server-files.md`. The endpoint is built, deployed on the running
-service and checked against it over Tailscale and the LAN, so the "Serwer" source can be used
+service and checked against it over VPN and the LAN, so the "Serwer" source can be used
 now. Your contract is implemented as written. Choices the hand-off left open are marked
 **(decided)**. Nothing was **(changed)**.
 

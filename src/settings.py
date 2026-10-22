@@ -28,8 +28,18 @@ def _env_path(name: str) -> UPath | None:
 _sharing_dir = _env_path("SHARING_DIR")
 
 
-def tailscale_enabled(value: str) -> bool:
-    return (value or "").strip().lower() not in ("off", "no", "false", "0")
+VPN_TAILSCALE, VPN_OFF = "tailscale", "off"
+
+
+def vpn_choice(value: str) -> str:
+    """SHARING_VPN as the server uses it: VPN_TAILSCALE (empty too - what it
+    did before the setting existed), VPN_OFF, or a VPN interface's name."""
+    value = (value or "").strip()
+    if value.lower() in ("", VPN_TAILSCALE):
+        return VPN_TAILSCALE
+    if value.lower() in (VPN_OFF, "no", "none"):
+        return VPN_OFF
+    return value
 
 
 def listen_addresses(value: str) -> list[str]:
@@ -76,13 +86,15 @@ class Settings:
     global_mood_changes_dir: UPath | None = sharing_dir / "MoodChanges" if sharing_dir else None
     # Network interface the sharing server also listens on, for the phone on
     # the home Wi-Fi (SHARING_LAN_INTERFACE; named, not "first private
-    # address": docker0/br-* are private too). Empty = Tailscale only.
+    # address": docker0/br-* are private too). Empty = only the VPN and the
+    # addresses below.
     sharing_lan_interface: str = os.getenv("SHARING_LAN_INTERFACE", "").strip()
-    # Whether the server also listens on this PC's Tailscale address
-    # (SHARING_TAILSCALE; empty = on, as before the key existed), and exact
-    # addresses to listen on as well (SHARING_ADDRESSES, comma-separated:
-    # another VPN's address, or 0.0.0.0 when the owner chooses it).
-    sharing_tailscale: bool = tailscale_enabled(os.getenv("SHARING_TAILSCALE", ""))
+    # The VPN the server also listens on (SHARING_VPN, vpn_choice()): the
+    # Tailscale address found by itself (empty = this, as before the setting
+    # existed), "off", or any provider's interface by name (wg0, tun0, ...);
+    # and exact addresses to listen on as well (SHARING_ADDRESSES,
+    # comma-separated, 0.0.0.0 only when the owner chooses it).
+    sharing_vpn: str = vpn_choice(os.getenv("SHARING_VPN", ""))
     sharing_addresses: tuple = tuple(listen_addresses(os.getenv("SHARING_ADDRESSES", "")))
     # The public copy of the catalog (utils/database/public_database.py):
     # "owner/repo" whose GitHub Release it goes to, and a fine-grained token

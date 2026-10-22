@@ -1,9 +1,13 @@
 """Main menu -> Help: every menu label its texts quote ("...") is a real one,
 so the help can't drift from the menus unnoticed; the start-up topic shows
 the switches as they are now; every library the program imports itself is
-described, with the same text in README.md -> Libraries."""
+described, with the same text in README.md -> Libraries; "Background
+services (Linux)" shows the systemd units, installed or as the setup would
+write them, without touching anything (temp SYSTEMD_USER_DIR)."""
 import re
 from pathlib import Path
+
+import pytest
 
 from menu.main_menu import help as help_menu
 
@@ -86,3 +90,74 @@ def test_readme_describes_the_libraries_like_help():
     for name, text in help_menu.LIBRARIES:
         assert f"**{name}** — {' '.join(text.split())}" in readme
     assert help_menu.LIBRARIES_NOTE in readme
+
+
+# ==================== Background services (Linux) ====================
+
+def test_the_background_services_topic_has_the_unit_files_option():
+    assert "Background services (Linux)" in help_menu.TOPICS
+    text = help_menu.topic_text("Background services (Linux)")
+    for unit in ("musicdatabase-share.service", "musicdatabase-share.timer",
+                 "musicdatabase-inbox.service", "musicdatabase-inbox.timer"):
+        assert unit in text
+    assert "Show the full unit files" in help_menu.TOPIC_ACTIONS["Background services (Linux)"]
+
+
+@pytest.fixture
+def units_dir(monkeypatch, tmp_path):
+    from utils.database import sharing
+
+    folder = tmp_path / "systemd-user"
+    monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", folder)
+    monkeypatch.setattr(sharing, "SHARING_DIR", tmp_path / "shared")
+    monkeypatch.setattr(sharing, "install_sharing_service", lambda: pytest.fail("installed something"))
+    monkeypatch.setattr(sharing, "_systemctl", lambda *a: pytest.fail("ran systemctl"))
+    return folder
+
+
+def test_not_installed_shows_what_the_setup_would_write_and_writes_nothing(units_dir, capsys):
+    from utils.database import sharing
+
+    help_menu.show_unit_files()
+
+    out = capsys.readouterr().out
+    assert out.count("NOT installed - what the setup would write now") == 4
+    assert sharing._service_unit(sharing.server_python()).strip() in out
+    assert sharing._inbox_timer_unit().strip() in out
+    assert not units_dir.exists()
+
+
+def test_installed_units_are_shown_as_they_are_on_disk(units_dir, capsys):
+    from utils.database import sharing
+
+    units_dir.mkdir()
+    (units_dir / "musicdatabase-share.service").write_text(sharing._service_unit(sharing.server_python()))
+    (units_dir / "musicdatabase-share.timer").write_text("[Timer]\nOnStartupSec=3min\n")
+    before = {p.name: p.read_text() for p in units_dir.iterdir()}
+
+    help_menu.show_unit_files()
+
+    out = capsys.readouterr().out
+    assert "musicdatabase-share.service\x1b[0m (installed - shown as it is on disk)" in out
+    assert "musicdatabase-share.timer\x1b[0m (installed - shown as it is on disk; the setup would now write" in out
+    assert "OnStartupSec=3min" in out
+    assert out.count("NOT installed") == 2
+    assert {p.name: p.read_text() for p in units_dir.iterdir()} == before
+
+
+def test_the_topic_offers_the_option_and_back(monkeypatch, units_dir, capsys):
+    import questionary
+
+    answers = iter(["Show the full unit files", "Back"])
+
+    class _Ask:
+        def __init__(self, value):
+            self.value = value
+
+        def ask(self):
+            return self.value
+
+    monkeypatch.setattr(questionary, "select", lambda message, choices: _Ask(next(answers)))
+    monkeypatch.setattr(help_menu, "clear_screen", lambda: None)
+    help_menu._show("Background services (Linux)")
+    assert "NOT installed" in capsys.readouterr().out

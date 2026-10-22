@@ -4,6 +4,8 @@ menu paths here in step with the menus (a test checks the topics' paths
 against the real menu labels)."""
 import textwrap
 
+import questionary
+
 from utils.ui.menu_utils import clear_screen, execute_menu_item
 
 BOLD, RESET = "\033[1m", "\033[0m"
@@ -101,20 +103,84 @@ def _startup_text() -> str:
     ])
 
 
+_BACKGROUND_SERVICES = """
+Settings -> Server -> "Setup this PC for database sharing" installs four systemd user units in
+~/.config/systemd/user/ (user units: no root, they run as you). They're only there once you said
+yes to installing the server.
+
+musicdatabase-share.service + musicdatabase-share.timer - the server for phones
+  The timer starts the service a minute after your user's systemd starts (at login, or at boot
+  with lingering on). It serves only music.db, tag.db and files.db from the sharing folder, your
+  music library's files, logging in, syncing users' playlists, moods and saved songs, and takes
+  requests from Leina Radio into the sharing folder's Inbox/. It listens on port 8002 only on the
+  addresses you chose: the home network interface, the VPN's (by default Tailscale's address,
+  or any provider's interface you picked, or none) and any other address you added - never on
+  all of them unless you added 0.0.0.0 yourself.
+  An address that isn't there yet is tried again every 10 seconds. While the sharing folder (or
+  its external drive) is missing it keeps running and answers 503 (unavailable), so the phone just
+  tries again later. If it stops, systemd starts it again after 10 seconds.
+
+musicdatabase-inbox.service + musicdatabase-inbox.timer - the automatic request check
+  The timer runs auto_resolve_requests.py 5 minutes after your systemd starts and then every 15
+  minutes. It looks at new requests from phones and settles only what is safe: a dead YouTube link
+  is replaced when the phone's suggestion and its own search found the same video and it plays
+  here, a found link is saved by the same rule, and a correction is saved when a user with that
+  permission sent it and nothing about it needs a judgement. It never adds a song - you approve
+  each one. Everything else is left for Enter database -> Manage database -> "Resolve new
+  requests", with a note why. It never runs while MusicDatabase is open (MusicDatabase waits for it
+  to finish when it starts), nor while the databases wait for an upgrade. What it changed is shown
+  at the next start (unless Start-up tasks hide the messages) and in "Resolve new requests"; its
+  output is in the journal. After a change it refreshes the copy for phones.
+
+When they run: systemd runs a user's units only while that user is logged in - with lingering on
+(loginctl enable-linger, offered by the setup) from boot, logged in or not.
+
+Checking, stopping, removing (in a terminal):
+  systemctl --user status musicdatabase-share.service       is the server running?
+  systemctl --user list-timers 'musicdatabase-*'            when the timers run next
+  journalctl --user -u musicdatabase-share -u musicdatabase-inbox    what they printed
+  systemctl --user stop musicdatabase-share.service         stop the server until the next login
+  systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service
+      musicdatabase-inbox.timer musicdatabase-inbox.service       turn them off for good
+  then delete the four files in ~/.config/systemd/user/ and run: systemctl --user daemon-reload
+Running the setup again reinstalls them with the current settings; it also prints these commands.
+"""
+
+
+def show_unit_files() -> None:
+    """The four units as installed, or what the setup would write - read-only."""
+    from utils.database.sharing import unit_files
+
+    for unit in unit_files():
+        if unit.installed and unit.outdated:
+            state = "installed - shown as it is on disk; the setup would now write it differently"
+        elif unit.installed:
+            state = "installed - shown as it is on disk"
+        else:
+            state = "NOT installed - what the setup would write now, with the current settings"
+        print(f"{BOLD}{unit.path}{RESET} ({state})")
+        print(unit.text.rstrip("\n"))
+        print()
+
+
+# Options shown under a topic's text, besides going back
+TOPIC_ACTIONS = {"Background services (Linux)": {"Show the full unit files": show_unit_files}}
+
+
 # A topic is its text, or a function making it (for what depends on the settings)
 
 TOPICS = {
     "What MusicDatabase is for": """
-MusicDatabase is a catalog of the music you listen to: artists, songs, albums, years, genres,
-moods (tags), YouTube and Spotify links, and where each song's file is in your music library. It
-fills in what's missing from MusicBrainz, Wikipedia, iTunes, Genius, Spotify and YouTube, and
-helps keep it clean.
+MusicDatabase is a tool for maanging music database. It stores artists, songs, albums, years,
+genres, moods (tags), YouTube and Spotify links, and where each song's file is in your music
+library. It fills in what's missing from MusicBrainz, Wikipedia, iTunes, Genius, Spotify and
+YouTube, and helps keep it clean.
 
-Leina Radio is its Android app. The phone downloads MusicDatabase's catalog (music.db, tag.db and
-files.db) - from this PC when it's set up as a server, or from the public copy on GitHub - and plays
-the songs from the phone's own files, this PC's music library or YouTube. What the phone finds or
-corrects comes back to MusicDatabase as requests, and nothing changes in the catalog until you
-accept them here. MusicDatabase's values always win; the phone only fills gaps for itself.
+Leina Radio is a music player for Android which uses this database. The app works on music.db,
+tag.db and files.db which it can take from the server or from the GitHub repository. It can also
+play music stored on the server. The app can also send requests for database corretion or report new
+findings - you can accept these here. MusicDatabase's values always win; the phone only fills gaps
+for itself.
 """,
     "Day to day: the main menus": """
 Enter database - the catalog itself:
@@ -124,7 +190,8 @@ Enter database - the catalog itself:
   - Manage database: adding songs in bulk, filling in data, requests from phones, clean-ups.
   - Show whole database: everything in one table.
 Users - the accounts Leina Radio logs in with: create, rename, passwords, permissions, their
-  playlists, and the moods (global ones and each user's own).
+  playlists, and the moods (global ones and each user's own). Currently you can only create accounts
+  using LeinaMusicDatabase's terminal.
 Statistics - how often each lookup module (albums, years) found something.
 Settings - lookup modules and their order, matching thresholds, the start-up tasks, and Server:
   the database folder, backups, this PC's folders and network, indexing the music library, sharing
@@ -144,8 +211,7 @@ From mp3 files' tags - Enter database -> Manage database -> Fetch database data 
   artist and title, ...) are asked together at the end.
 From a YouTube playlist - same menu -> "Import data from YouTube playlist": paste the playlist's
   link. Artist and title are read from the video titles; the videos become the songs' YouTube links.
-A single YouTube video - Enter database -> "Download YT song" saves its audio into import/; then
-  import that folder with "Import data from mp3 tags".
+A single YouTube video - Enter database -> "Download YT song" saves its audio into import/.
 By hand - Enter database -> Manage database -> Manual management -> "Add song".
 From Leina Radio - a song played on the phone that MusicDatabase doesn't have is sent as a
   request: Enter database -> Manage database -> "Resolve new requests" (the number in brackets
@@ -192,6 +258,7 @@ download from GitHub.
 """,
     "What happens at start-up": _startup_text,
     "Libraries": _libraries_text,
+    "Background services (Linux)": _BACKGROUND_SERVICES,
     "Installing and more help": """
 Installing MusicDatabase on a new PC (Python, the venv, the first start) is described in README.md
 in the program's folder, also on GitHub: https://github.com/shian1000/LeinaMusicDatabase
@@ -211,6 +278,12 @@ def _show(title: str) -> None:
     print(f"{BOLD}{title}{RESET}\n")
     print(topic_text(title).strip("\n"))
     print()
+    actions = TOPIC_ACTIONS.get(title)
+    while actions:
+        picked = questionary.select(title, choices=[*actions, "Back"]).ask()
+        if picked in (None, "Back"):
+            return
+        actions[picked]()
 
 
 def help_menu() -> None:

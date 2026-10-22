@@ -90,7 +90,7 @@ deliberately, not a script). To restore an archived snapshot:
 ## Sharing with the mobile app
 
 The MusicDatabaseApp phone client (separate Flutter repo, `../MusicDatabaseApp`, its
-`docs/decisions/0002-database-download.md`) downloads the databases once a day over Tailscale.
+`docs/decisions/0002-database-download.md`) downloads the databases once a day over VPN.
 The user enters a **folder URL** (`http://<tailscale ip>:8002/`) and the app fetches exactly
 `<url>/music.db` and `<url>/tag.db` (and, from 2026-10-12, `<url>/files.db` — the music library
 index; the app side is being told). It rejects anything that doesn't start with the
@@ -171,14 +171,16 @@ what would be written now) and lingering, and a summary with the phone's address
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
 - It listens on the addresses below, one socket each, with the same handler and port 8002:
-  - **Tailscale:** the address from `tailscale ip -4` (the owner's phone uses it away from home),
-    unless `SHARING_TAILSCALE=off` (`--no-tailscale`; empty = on, so setups from before the key
-    stay the same). Without Tailscale installed its socket just keeps waiting.
+  - **VPN** (`SHARING_VPN`, 2026-10-22, any provider): empty or `tailscale` — the address from
+    `tailscale ip -4` (the owner's setup; the unit gets no flag, so units from before the key stay
+    the same; without Tailscale installed its socket just keeps waiting); `off` — `--no-tailscale`;
+    an interface name (`wg0`, `tun0`, ...) — `--no-tailscale --vpn-interface <name>`, its private or
+    100.64.0.0/10 address (`vpn_interface_ipv4()`, never a public one).
   - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`
     (`SHARING_LAN_INTERFACE` in `.env`, e.g. `enp2s0`, passed as `--lan-interface`). The phone uses it on the home Wi-Fi and silently falls
     back to the remote address when it doesn't answer.
   - **Chosen addresses** (2026-10-21): `SHARING_ADDRESSES` in `.env`, comma-separated, each as
-    `--address` — for a PC without Tailscale or with another VPN. Bound exactly as given.
+    `--address` — any other address of the PC. Bound exactly as given.
   - With none of them the server exits with code 2 instead of serving nobody; the setup doesn't
     offer to install it then. How the phone reaches an address is the user's choice — the setup,
     Help and README describe the options and recommend none (owner's rule).
