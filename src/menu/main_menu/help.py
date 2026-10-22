@@ -113,9 +113,9 @@ musicdatabase-share.service + musicdatabase-share.timer - the server for phones
   with lingering on). It serves only music.db, tag.db and files.db from the sharing folder, your
   music library's files, logging in, syncing users' playlists, moods and saved songs, and takes
   requests from Leina Radio into the sharing folder's Inbox/. It listens on port 8002 only on the
-  addresses you chose: the home network interface, the VPN's (by default Tailscale's address,
-  or any provider's interface you picked, or none) and any other address you added - never on
-  all of them unless you added 0.0.0.0 yourself.
+  addresses you chose: the home network interface, the VPN's (any provider's interface you
+  picked, or Tailscale's address; none unless you chose one) and any other address you added -
+  never on all of them unless you added 0.0.0.0 yourself.
   An address that isn't there yet is tried again every 10 seconds. While the sharing folder (or
   its external drive) is missing it keeps running and answers 503 (unavailable), so the phone just
   tries again later. If it stops, systemd starts it again after 10 seconds.

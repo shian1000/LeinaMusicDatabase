@@ -32,12 +32,13 @@ VPN_TAILSCALE, VPN_OFF = "tailscale", "off"
 
 
 def vpn_choice(value: str) -> str:
-    """SHARING_VPN as the server uses it: VPN_TAILSCALE (empty too - what it
-    did before the setting existed), VPN_OFF, or a VPN interface's name."""
+    """SHARING_VPN as the server uses it: VPN_TAILSCALE, VPN_OFF (empty too -
+    nothing is listened on unless chosen, the owner's rule), or a VPN
+    interface's name."""
     value = (value or "").strip()
-    if value.lower() in ("", VPN_TAILSCALE):
+    if value.lower() == VPN_TAILSCALE:
         return VPN_TAILSCALE
-    if value.lower() in (VPN_OFF, "no", "none"):
+    if value.lower() in ("", VPN_OFF, "no", "none"):
         return VPN_OFF
     return value
 
@@ -90,8 +91,8 @@ class Settings:
     # addresses below.
     sharing_lan_interface: str = os.getenv("SHARING_LAN_INTERFACE", "").strip()
     # The VPN the server also listens on (SHARING_VPN, vpn_choice()): the
-    # Tailscale address found by itself (empty = this, as before the setting
-    # existed), "off", or any provider's interface by name (wg0, tun0, ...);
+    # Tailscale address found by itself, "off" (empty = this), or any
+    # provider's interface by name (wg0, tun0, ...);
     # and exact addresses to listen on as well (SHARING_ADDRESSES,
     # comma-separated, 0.0.0.0 only when the owner chooses it).
     sharing_vpn: str = vpn_choice(os.getenv("SHARING_VPN", ""))

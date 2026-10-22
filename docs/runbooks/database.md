@@ -171,9 +171,11 @@ what would be written now) and lingering, and a summary with the phone's address
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
 - It listens on the addresses below, one socket each, with the same handler and port 8002:
-  - **VPN** (`SHARING_VPN`, 2026-10-22, any provider): empty or `tailscale` — the address from
+  - **VPN** (`SHARING_VPN`, 2026-10-22, any provider): `tailscale` — the address from
     `tailscale ip -4` (the owner's setup; the unit gets no flag, so units from before the key stay
-    the same; without Tailscale installed its socket just keeps waiting); `off` — `--no-tailscale`;
+    the same; without Tailscale installed its socket just keeps waiting); empty or `off` —
+    `--no-tailscale` (empty meant `tailscale` until 2026-10-22 — the owner's rule: nothing is
+    listened on unless chosen, and Tailscale is never assumed);
     an interface name (`wg0`, `tun0`, ...) — `--no-tailscale --vpn-interface <name>`, its private or
     100.64.0.0/10 address (`vpn_interface_ipv4()`, never a public one).
   - **LAN:** the private IPv4 address of the interface named in `Settings.sharing_lan_interface`

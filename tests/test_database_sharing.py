@@ -891,7 +891,8 @@ def test_service_unit_lan_interface_flag(monkeypatch, lan_interface, expected_fl
 
 
 def test_service_unit_vpn_and_address_flags(monkeypatch):
-    # The defaults add nothing, so a unit written before these settings stays the same
+    # "tailscale" adds nothing, so the owner's unit written before these settings stays the same
+    monkeypatch.setattr(sharing, "SHARING_VPN", "tailscale")
     unit = sharing._service_unit("/usr/bin/python3")
     assert "--no-tailscale" not in unit and "--vpn-interface" not in unit and "--address" not in unit
 
@@ -910,8 +911,9 @@ def test_service_unit_vpn_and_address_flags(monkeypatch):
 def test_settings_read_the_vpn_and_addresses():
     from settings import listen_addresses, vpn_choice
 
-    assert vpn_choice("") == vpn_choice(" Tailscale ") == "tailscale"
-    assert vpn_choice("OFF") == "off" and vpn_choice("wg0") == "wg0"
+    # Empty is no VPN: nothing is listened on unless chosen, Tailscale never assumed
+    assert vpn_choice("") == vpn_choice("OFF") == "off"
+    assert vpn_choice(" Tailscale ") == "tailscale" and vpn_choice("wg0") == "wg0"
     assert listen_addresses(" 198.51.100.7, ,10.8.0.2 ") == ["198.51.100.7", "10.8.0.2"]
 
 

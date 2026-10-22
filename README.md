@@ -54,8 +54,8 @@ start empty.
 - **Optional — `xclip`** (X11) **or `wl-clipboard`** (Wayland), for "copy to clipboard". Without
   them the app asks the terminal to do it, which most terminals support.
 - **Optional — a way for phones to reach the PC from outside your home network**, if you want
-  that: any VPN works — the server listens on its interface (Tailscale's address is found by
-  itself).
+  that: any VPN works — the server listens on its interface (for Tailscale, its address is found
+  by itself).
 
 ## Install
 
@@ -138,8 +138,7 @@ terminal for itself: your desktop's default one, GNOME Terminal, Konsole, Xfce T
 ## Serving Leina Radio phones
 
 Your PC becomes the phones' server: it serves the catalog on port **8002**, only on the
-addresses you choose — your home network's interface, a VPN's (any provider; by default
-Tailscale's address if Tailscale runs here), and any other address of the PC you add. A
+addresses you choose — your home network's interface, a VPN's (any provider), and any other address of the PC you add. A
 phone must be able to reach one of them; how (the home Wi-Fi, a VPN, ...) is up to you. It never
 listens on every address unless you add `0.0.0.0` yourself: **no router port forwarding**,
 nothing to open. Anyone on your home Wi-Fi can
@@ -164,8 +163,8 @@ and run it again any time — it starts from the saved values. The steps below a
    - **LAN interface** — "Pick a network interface" and choose the one on your home network
      (Wi-Fi or cable).
    - **VPN** — the VPN the server also listens on: its network interface by name, whatever the
-     provider (e.g. `wg0` for WireGuard, `tun0` for OpenVPN), `tailscale` (the default — its
-     address is found by itself, and it only matters when Tailscale runs here) or `off`.
+     provider (e.g. `wg0` for WireGuard, `tun0` for OpenVPN), `tailscale` (its address is found
+     by itself) or `off`. Empty means no VPN.
    - **Other addresses to listen on** — any other IPv4 address of this PC.
 
    The server needs at least one of these addresses, and a phone must be able to reach it.

@@ -561,7 +561,7 @@ non-trivial work in that area.
   collection), `SHARING_DIR` (the shared folder, which also holds `Users/`, `Inbox/` and
   `MoodChanges/`) + `SHARING_DRIVE_MOUNT` (the external drive it's on; empty = the system disk,
   where the folder only has to exist — `settings.sharing_dir_available()` is the one rule),
-  `SHARING_LAN_INTERFACE`, `SHARING_VPN` (empty = `tailscale`, `off`, or a VPN interface of any
+  `SHARING_LAN_INTERFACE`, `SHARING_VPN` (`tailscale`, empty = `off`, or a VPN interface of any
   provider) + `SHARING_ADDRESSES` (what else the server listens on), and the
   `REMOTE_*` keys read by `MusicDatabase-Remote.sh`. A missing key never falls back to someone's
   real path: the feature is skipped with a message naming the key, as for an unplugged drive

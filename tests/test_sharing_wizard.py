@@ -176,6 +176,9 @@ def test_address_candidates_never_offer_bridges_or_the_other_steps_addresses(env
                      ("br-1a2b", "172.18.0.1"), ("tailscale0", "100.64.0.10")]
     save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
     save_env_value("SHARING_ADDRESSES", "10.9.0.2", env)
+    # No VPN chosen: every VPN's address may be added
+    assert setup.address_candidates(env, addresses=found) == [("wg0", "10.8.0.2"), ("tailscale0", "100.64.0.10")]
+    save_env_value("SHARING_VPN", "tailscale", env)
     assert setup.address_candidates(env, addresses=found) == [("wg0", "10.8.0.2")]
     # With another VPN chosen, its interface is that step's, and Tailscale's is free to add
     save_env_value("SHARING_VPN", "wg0", env)
@@ -186,9 +189,10 @@ def test_listening_plan_follows_the_settings(env):
     tailscale = lambda: "100.64.0.10"
     lan = {"enp2s0": "192.0.2.10"}.get
     vpn = {"wg0": "10.8.0.2"}.get
-    # Nothing set: Tailscale's address only when this PC has one, nothing otherwise
-    assert setup.listening_plan(env, tailscale, lan, vpn) == [("VPN (Tailscale)", "100.64.0.10")]
-    assert setup.listening_plan(env, lambda: None, lan, vpn) == []
+    # Nothing set: no address at all, even with Tailscale running here
+    assert setup.listening_plan(env, tailscale, lan, vpn) == []
+    save_env_value("SHARING_VPN", "tailscale", env)
+    assert setup.listening_plan(env, lambda: None, lan, vpn) == [("VPN (Tailscale)", None)]
     save_env_value("SHARING_LAN_INTERFACE", "enp2s0", env)
     save_env_value("SHARING_ADDRESSES", "198.51.100.7", env)
     assert setup.listening_plan(env, tailscale, lan, vpn) == [

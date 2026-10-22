@@ -61,7 +61,7 @@ SETTING_STEPS = [
         "Only if phones should reach this PC through a VPN, from any provider: which one the server "
         "also listens on - the VPN's network interface by name (e.g. wg0 for WireGuard, tun0 for "
         "OpenVPN), \"tailscale\" (Tailscale's address, found by itself), or \"off\".",
-        "the same as \"tailscale\" - the server listens on Tailscale's address whenever this PC has one.",
+        "no VPN - the server listens on no VPN's address.",
     ),
     SettingStep(
         "SHARING_ADDRESSES", "Other addresses to listen on", False,
@@ -280,10 +280,7 @@ def listening_plan(env_file: Path | None = None, tailscale_address=tailscale_ipv
         plan.append((f"home network ({lan})", interface_address(lan)))
     vpn = vpn_choice(read_env_value("SHARING_VPN", env_file))
     if vpn == VPN_TAILSCALE:
-        address = tailscale_address()
-        # Listed only when this PC has one: without Tailscale the default means nothing
-        if address:
-            plan.append(("VPN (Tailscale)", address))
+        plan.append(("VPN (Tailscale)", tailscale_address()))
     elif vpn != VPN_OFF:
         plan.append((f"VPN ({vpn})", vpn_address(vpn)))
     for address in listen_addresses(read_env_value("SHARING_ADDRESSES", env_file)):

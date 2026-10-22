@@ -137,8 +137,8 @@ def _service_unit(python: str) -> str:
     command += f" --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {SHARING_LAN_INTERFACE}"
-    # Nothing added for Tailscale (the default), so a unit written before
-    # SHARING_VPN existed stays the same; another VPN replaces it
+    # Nothing added for Tailscale (the server script's own default), so a
+    # unit written before SHARING_VPN existed stays the same
     if SHARING_VPN != VPN_TAILSCALE:
         command += " --no-tailscale"
     if SHARING_VPN not in (VPN_TAILSCALE, VPN_OFF):
