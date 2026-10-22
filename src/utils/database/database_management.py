@@ -5,7 +5,7 @@ from utils.database.datatables import song_categories, search_only_categories, a
 import time
 from utils.common.debug import slog
 from sqlalchemy import text
-from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
+from utils.database.database_getter import get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
@@ -28,11 +28,9 @@ def edit_db_entry(db_object, category: str, new_value: str):
         artist_name = db_object.name
     elif(type(db_object) == Song):
         if category in artist_categories:
-            db_artist = get_artists_from_db_session(artist_categories[0], artist_id=db_object.artist.id)
-            slog(db_artist[0])
-            slog(db_artist[0].id)
-            edit_db_entry(db_artist[0], category, new_value)
-            return
+            # The Artist row is shared by all its songs: crediting the song to
+            # another artist is artist_reassignment.set_primary_artist()
+            raise ValueError(f"'{category}' belongs to the artist, not to the song")
         valid_categories = song_categories + search_only_categories
         artist_name = db_object.artist.name
         song_title = db_object.title
@@ -88,9 +86,21 @@ def edit_db_entry(db_object, category: str, new_value: str):
     if type(db_object) == Song:
         print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' --> '{new_value}'.")
 
+class ArtistHasSongsError(ValueError):
+    """An artist still credited on songs can't be deleted (songs.artist_id is NOT NULL)."""
+
+
 def delete_db_entry(db_object):
+    """Delete a song or an artist; the caller commits. An artist still on a
+    song raises ArtistHasSongsError before anything changes - deleted, it
+    would only fail at the next commit and take every other unsaved change
+    with it."""
     music_session, tag_session = get_global_database_sessions()
     slog(type(db_object))
+    if isinstance(db_object, Artist) and db_object.id is not None:
+        songs = count_artist_songs(music_session, db_object.id)
+        if songs:
+            raise ArtistHasSongsError(f"'{db_object.name}' still has {songs} song(s)")
     music_session.delete(db_object)
 
 def merge_artists_in_db(merge_from, merge_to):

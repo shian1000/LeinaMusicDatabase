@@ -980,13 +980,12 @@ A separate, human-only annotation — `manage_youtube_playlists.NO_VIDEO_SENTINE
 string `"N/A"`) — can also be written to `Song.youtube_video_id` to record "checked, this song has
 no video on YouTube in any form" (as opposed to the above, where a real video exists but is
 unreachable by search). Writing it is a menu action (`report_no_yt_video()` in
-`menu/song_actions/__init__.py`, "Report no YouTube video" in the songs action menu), but
-*consuming* it is still data-only: `create_yt_playlist()` doesn't skip on it — it normalizes
-`"N/A"` to "no stored link" and runs a normal search every time, exactly as if the field were
-empty, because *is_video_id_valid()* would just fail on a non-id string and there's no mechanism
-yet to have the sentinel actually short-circuit the search. If a future change adds that skip
-behavior, this is the place both to add it and to update. (One consumer outside playlists does
-skip on it: "Fill missing data -> Years"' `youtube_fetcher.get_release_year()` returns no year for
+`menu/song_actions/__init__.py`, "Report no YouTube video" in the songs action menu), and
+`create_yt_playlist()` leaves such a song out of the playlist without validating or searching,
+so the annotation is never overwritten by a found video. It also never adds or saves a found video
+that music.db's `bad_youtube_videos` rules out (for every song, or for that one), and a used-up
+Data API quota (`QuotaExceededError`) saves the progress and returns to the menu. (The other
+consumer: "Fill missing data -> Years"' `youtube_fetcher.get_release_year()` returns no year for
 a song marked `"N/A"` instead of searching. See `discovery-modules.md`.)
 
 The songs action menu separately has a "Remove links" option (`remove_links_from_songs()` in

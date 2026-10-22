@@ -147,6 +147,7 @@ def _patch_playlist_plumbing(monkeypatch):
     search/validate/persist logic under test: auth, playlist creation, and
     all cache disk I/O."""
     monkeypatch.setattr(m, "get_youtube_service", lambda: object())
+    monkeypatch.setattr(m, "_load_bad_videos", lambda: None, raising=False)
     monkeypatch.setattr(m, "load_cache", lambda: None)
     monkeypatch.setattr(m, "create_playlist", lambda youtube, title, description="": "PLAYLIST1")
     monkeypatch.setattr(yt_cache, "save_cache", lambda cache: None)
@@ -244,39 +245,87 @@ def test_create_yt_playlist_does_not_mark_added_when_add_to_playlist_fails(monke
 
 
 # ---------------------------------------------------------
-# create_yt_playlist(): NO_VIDEO_SENTINEL ("N/A") — data-only for now,
-# normalized to "no stored link" so a normal search still runs.
+# create_yt_playlist(): NO_VIDEO_SENTINEL ("N/A") - a confirmed "no video":
+# left out without searching, never overwritten.
 # ---------------------------------------------------------
 
-def test_create_yt_playlist_searches_normally_for_song_marked_no_video_sentinel(monkeypatch):
+def test_create_yt_playlist_leaves_out_a_song_marked_no_video_sentinel(monkeypatch):
     added, committed = _patch_playlist_plumbing(monkeypatch)
 
-    def fail_if_validated(*a, **k):
-        raise AssertionError("is_video_id_valid should not run for the N/A sentinel — it isn't a real id")
+    def fail(*a, **k):
+        raise AssertionError("a song marked N/A is neither validated nor searched")
 
-    monkeypatch.setattr(m, "is_video_id_valid", fail_if_validated)
-    monkeypatch.setattr(m, "search_video", lambda *a, **k: "foundid")
+    monkeypatch.setattr(m, "is_video_id_valid", fail)
+    monkeypatch.setattr(m, "search_video", fail)
 
     song = _fake_song("Сербский Нож", "Рруа", youtube_video_id=m.NO_VIDEO_SENTINEL)
     m.create_yt_playlist([song], "Test Playlist")
 
-    assert added == ["foundid"]
-    assert committed == [True]
-    assert song.youtube_video_id == "foundid"
-
-
-def test_create_yt_playlist_keeps_no_video_sentinel_when_search_finds_nothing(monkeypatch):
-    added, committed = _patch_playlist_plumbing(monkeypatch)
-    monkeypatch.setattr(m, "search_video", lambda *a, **k: None)
-
-    song = _fake_song("Сербский Нож", "Рруа", youtube_video_id=m.NO_VIDEO_SENTINEL)
-    m.create_yt_playlist([song], "Test Playlist")
-
-    # No search hit and no prior real link to clear — the annotation is left
-    # untouched, same as an empty field would be.
     assert added == []
     assert committed == []
     assert song.youtube_video_id == m.NO_VIDEO_SENTINEL
+
+
+# ---------------------------------------------------------
+# create_yt_playlist(): videos in music.db's bad_youtube_videos
+# ---------------------------------------------------------
+
+def _bad_videos(*rows):
+    from utils.database.inbox_requests import BadVideos
+    return BadVideos([SimpleNamespace(video_id=v, song_id=s, reason="gone") for v, s in rows])
+
+
+@pytest.mark.parametrize("bad_for_song", [None, 7])
+def test_create_yt_playlist_never_adds_or_saves_a_rejected_video(monkeypatch, bad_for_song):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "_load_bad_videos", lambda: _bad_videos(("rejectedid", bad_for_song)), raising=False)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: "rejectedid")
+
+    song = _fake_song("Some Artist", "Some Song")
+    song.id = 7
+    m.create_yt_playlist([song], "Test Playlist")
+
+    assert added == []
+    assert committed == []
+    assert song.youtube_video_id is None
+
+
+def test_create_yt_playlist_adds_a_video_rejected_only_for_another_song(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "_load_bad_videos", lambda: _bad_videos(("foundid", 99)), raising=False)
+    monkeypatch.setattr(m, "search_video", lambda *a, **k: "foundid")
+
+    song = _fake_song("Some Artist", "Some Song")
+    song.id = 7
+    m.create_yt_playlist([song], "Test Playlist")
+
+    assert added == ["foundid"]
+    assert song.youtube_video_id == "foundid"
+
+
+# ---------------------------------------------------------
+# create_yt_playlist(): the API quota used up while searching
+# ---------------------------------------------------------
+
+def test_a_used_up_search_quota_saves_the_progress_and_returns(monkeypatch):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    saved_caches = []
+    monkeypatch.setattr(m, "save_cache", lambda cache: saved_caches.append(json.loads(json.dumps(cache))))
+
+    class _Search:
+        def list(self, **kwargs):
+            return SimpleNamespace(execute=lambda: (_ for _ in ()).throw(
+                HttpError(SimpleNamespace(status=403, reason="quota"), b'{"reason": "quotaExceeded"}')))
+
+    youtube = SimpleNamespace(search=lambda: _Search())
+    monkeypatch.setattr(m, "get_youtube_service", lambda: youtube)
+    monkeypatch.setattr(m, "search_video_ytdlp", lambda *a, **k: None)
+
+    first, second = _fake_song("A", "One"), _fake_song("B", "Two")
+    m.create_yt_playlist([first, second], "Test Playlist")  # returns instead of SystemExit
+
+    assert added == []
+    assert saved_caches and not any(e["added"] for e in saved_caches[-1]["songs"].values())
 
 
 # ---------------------------------------------------------

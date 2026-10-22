@@ -376,3 +376,85 @@ def test_rename_artist_without_a_twin_or_when_renaming_anyway(session, ui):
     answers.append("Cancel")
     assert ac.rename_artist(typo, "Sting") is True
     assert _names(session) == ["Sting", "Stingg"]
+
+
+# ---- Clean names: songs of an unknown artist -----------------------------------
+
+def _resolve_unknown(session, monkeypatch):
+    import importlib
+    clean_names = importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")
+    monkeypatch.setattr(clean_names, "get_global_database_sessions", lambda: (session, None))
+    clean_names.resolve_unknown_artist(session.query(Song).order_by(Song.id).all())
+    session.flush()
+
+
+def test_unknown_artist_songs_are_credited_without_renaming_the_shared_row(session, monkeypatch):
+    unknown, queen = _artist(session, "Unknown Artist"), _artist(session, "Queen")
+    rhapsody = _song(session, "Queen - Bohemian Rhapsody", unknown)
+    waterloo = _song(session, "ABBA - Waterloo", unknown)
+    untitled = _song(session, "Untitled", unknown)
+
+    _resolve_unknown(session, monkeypatch)
+
+    assert unknown.name == "Unknown Artist"
+    assert (rhapsody.artist, rhapsody.title) == (queen, "Bohemian Rhapsody")
+    assert (waterloo.artist.name, waterloo.title) == ("ABBA", "Waterloo")
+    assert untitled.artist is unknown
+    assert _names(session) == ["ABBA", "Queen", "Unknown Artist"]
+
+
+def test_only_a_whole_unknown_name_counts(session, monkeypatch):
+    band = _artist(session, "Unknown Mortal Orchestra")
+    song = _song(session, "Multi-Love - Live", band)
+
+    _resolve_unknown(session, monkeypatch)
+
+    assert (song.artist, song.title) == (band, "Multi-Love - Live")
+    assert ar.is_unknown_artist(Artist(name=" unknown ")) and ar.is_unknown_artist(Artist(name=""))
+
+
+def test_editing_an_artist_field_from_a_song_is_refused(session):
+    artist = _artist(session, "Unknown Artist")
+    song = _song(session, "Queen - Bohemian Rhapsody", artist)
+
+    with pytest.raises(ValueError):
+        database_management.edit_db_entry(song, "artist name", "queen")
+    assert artist.name == "Unknown Artist"
+
+
+# ---- deleting an artist that still has songs ------------------------------------
+
+def test_an_artist_with_songs_is_not_deleted_and_other_changes_survive(session, monkeypatch, capsys):
+    import menu.artist_actions as artist_actions
+
+    monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(artist_actions, "ask_yes_no", lambda question: True)
+    monkeypatch.setattr(artist_actions, "display_artists", lambda artists: None)
+    monkeypatch.setattr(artist_actions, "submit_global_database_session", session.commit)
+    queen, empty = _artist(session, "Queen"), _artist(session, "Nobody")
+    song = _song(session, "Bohemian Rhapsody", queen)
+    session.commit()
+    song.year = 1975  # an unsaved change made before
+
+    artist_actions.remove_artists([queen, empty])
+
+    out = capsys.readouterr().out
+    assert "Not deleted: 'Queen' still has 1 song(s)" in out and "Deleted 1 artist(s)." in out
+    session.expire_all()
+    assert _names(session) == ["Queen"]
+    assert session.query(Song).one().year == 1975
+
+
+def test_delete_db_entry_refuses_an_artist_credited_as_an_additional_artist(session, monkeypatch):
+    monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    queen, bowie = _artist(session, "Queen"), _artist(session, "David Bowie")
+    song = _song(session, "Under Pressure", queen)
+    add_additional_artist(song, bowie, "main")
+    session.flush()
+
+    with pytest.raises(database_management.ArtistHasSongsError):
+        database_management.delete_db_entry(bowie)
+    database_management.delete_db_entry(song)
+    database_management.delete_db_entry(bowie)
+    session.commit()
+    assert _names(session) == ["Queen"]

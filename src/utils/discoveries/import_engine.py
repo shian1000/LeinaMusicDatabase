@@ -765,6 +765,34 @@ def _entry_label(metadata: dict) -> str:
     return metadata.get("_label") or f"{metadata.get('artist_name')} - {metadata.get('title')}"
 
 
+def _settle_song_conflicts(pending_conflicts: list) -> tuple[list, list]:
+    """Ask about each new entry that found a similar song (resolve_song()):
+    use that song, or add the entry as a new one. An entry this review has
+    added already - the same song twice in one import - is never added a
+    second time. Returns (the songs added, [(entry label, why skipped)])."""
+    added, skipped = [], []
+    for conflict in pending_conflicts:
+        metadata = conflict["metadata"]
+        artist_obj = conflict["artist_obj"]
+        existing_song = conflict["existing_song"]
+        added_now = find_existing_song(metadata["title"], [s for s in added if s.artist_id == artist_obj.id],
+                                       metadata.get("duration_s"))
+        if added_now is not None:
+            print(f"[green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan] was added a moment ago "
+                  "from this import - not added twice")
+            skipped.append((_entry_label(metadata), "Added already in this import"))
+            _backfill_youtube_link(metadata, added_now)
+            continue
+        print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan]")
+        if ask_yes_no("Do you wish to use the song already in the database?"):
+            skipped.append((_entry_label(metadata), "Song already exists"))
+            _backfill_youtube_link(metadata, existing_song)
+        else:
+            added.append(create_song_entry(metadata, artist_obj))
+        print()
+    return added, skipped
+
+
 def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries=None) -> list:
     """Resolve/create DB entries for a batch of already-extracted metadata
     dicts, shared by every import source (mp3 tags, YouTube playlists, ...).
@@ -944,22 +972,13 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
         print("\n" + "="*70)
         print(f"REVIEW: {len(pending_song_conflicts)} song(s) found a similar match in the database")
         print("="*70)
-        for conflict in pending_song_conflicts:
-            conflict_metadata = conflict["metadata"]
-            conflict_artist_obj = conflict["artist_obj"]
-            existing_song = conflict["existing_song"]
-            print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{conflict_metadata['title']}[/green] by [cyan]{conflict_artist_obj.name}[/cyan]")
-            confirmation = ask_yes_no("Do you wish to use the song already in the database?")
-            if confirmation:
-                skipped_count = skipped_count + 1
-                skipped_songs.append(_entry_label(conflict_metadata))
-                reason_for_skipping.append("Song already exists")
-                _backfill_youtube_link(conflict_metadata, existing_song)
-            else:
-                new_song_obj = create_song_entry(conflict_metadata, conflict_artist_obj)
-                added_count = added_count + 1
-                added_songs.append(new_song_obj)
-            print()
+        new_songs, skipped = _settle_song_conflicts(pending_song_conflicts)
+        added_count += len(new_songs)
+        added_songs += new_songs
+        for label, reason in skipped:
+            skipped_count += 1
+            skipped_songs.append(label)
+            reason_for_skipping.append(reason)
 
     new_artists = music_session.query(Artist).filter(Artist.id > max_artist_id_before).all()
     if new_artists:

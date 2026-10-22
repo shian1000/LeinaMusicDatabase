@@ -10,6 +10,10 @@ from datetime import datetime
 _ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT / "src"))
 
+from _sandbox import enter_sandbox
+
+enter_sandbox()
+
 # Monkey-patch to add timing information
 original_time = time.time
 timing_data = {

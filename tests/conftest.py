@@ -37,6 +37,19 @@ from utils.database import database_location  # noqa: E402
 env_file.ENV_FILE = _ISOLATED_DIR / ".env"
 database_location.load_database_dir_override = lambda: str(_ISOLATED_DIR / "no-database")
 
+# The logs too: debug.log is appended to whatever the verbosity, and
+# manage_youtube_playlists.py attaches youtube_link_cache.log at import unless
+# its logger already has a handler.
+import logging  # noqa: E402
+
+from utils.common import debug  # noqa: E402
+
+debug.DEBUG_LOG_FILE = _ISOLATED_DIR / "debug.log"
+_link_log = logging.getLogger("youtube_link_cache")
+_link_log.addHandler(logging.FileHandler(_ISOLATED_DIR / "youtube_link_cache.log", encoding="utf-8"))
+_link_log.setLevel(logging.INFO)
+_link_log.propagate = False
+
 
 def pytest_unconfigure(config):
     shutil.rmtree(_ISOLATED_DIR, ignore_errors=True)

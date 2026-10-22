@@ -13,6 +13,7 @@ See docs/runbooks/database.md for the full picture (why this exists, how to
 restore, retention).
 """
 
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -52,16 +53,30 @@ def _unique_dest_path(name: str, timestamp: str) -> Path:
     return dest_path
 
 
+class BackupFailedError(Exception):
+    """The daily backup couldn't be taken (full disk, unreadable database, ...)."""
+
+
 def _backup_one(src_path: Path, name: str, timestamp: str) -> Path:
+    """Copied under a hidden temporary name first and renamed when complete: an
+    interrupted backup must never leave a truncated file that counts as one
+    (has_backup_today() and newest_backup_time() go by the names)."""
     dest_path = _unique_dest_path(name, timestamp)
+    partial = dest_path.with_name(f".{dest_path.name}.partial")
     src_conn = sqlite3.connect(str(src_path))
-    dest_conn = sqlite3.connect(str(dest_path))
     try:
-        with dest_conn:
-            src_conn.backup(dest_conn)
+        dest_conn = sqlite3.connect(str(partial))
+        try:
+            with dest_conn:
+                src_conn.backup(dest_conn)
+        finally:
+            dest_conn.close()
+        os.replace(partial, dest_path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
     finally:
         src_conn.close()
-        dest_conn.close()
     return dest_path
 
 
@@ -120,13 +135,14 @@ def backup_if_needed_today(reason: str = "daily-startup") -> list[Path]:
     (checked by scanning archive/ filenames, not a separate marker file, to
     stay consistent with the pre-existing naming convention).
 
-    Failures are logged and swallowed, never raised -- a backup problem
-    (e.g. a full disk) must not block the user from opening the app.
+    Returns the new backups, [] when today's exists already. A failure (e.g.
+    a full disk) raises BackupFailedError, for the caller to show and carry
+    on - it must not block the user from opening the app.
     """
     if has_backup_today():
         return []
     try:
         return backup_databases(reason=reason)
     except Exception as exc:
-        slog(f"Daily database backup failed (non-fatal): {exc}")
-        return []
+        slog(f"Daily database backup failed: {exc}", priority=3)
+        raise BackupFailedError(str(exc) or type(exc).__name__) from exc

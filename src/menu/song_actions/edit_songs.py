@@ -5,7 +5,7 @@ from utils.common.debug import slog
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
 from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object, search_and_pick_db_object
-from utils.database.database_management import edit_db_entry, delete_db_entry, add_db_entry
+from utils.database.database_management import ArtistHasSongsError, edit_db_entry, delete_db_entry, add_db_entry
 from utils.database.song_artists import (
     additional_artists,
     additional_artist_role,
@@ -22,6 +22,9 @@ from utils.ui.song_kind_prompt import set_kind_of_songs
 from utils.database.song_kinds import kind_label
 from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
 import time
+
+HAS_SONGS_HINT = ("Credit its songs to another artist first (Song actions -> Change artist), "
+                  "or merge it into another artist (Manage database -> Merge artists).")
 
 _ROLE_CHOICES = {
     f"{ADDITIONAL_ARTIST_ROLE_MAIN} (co-artist, \"A x B\")": ADDITIONAL_ARTIST_ROLE_MAIN,
@@ -170,11 +173,16 @@ def edit_entry_menu(mode: str = None, db_object = None):
     if choice == delete_option:
         label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
         confirmation = ask_yes_no(f"Do you really want to delete {label}?")
-        if confirmation:
-            delete_db_entry(db_object)
-            print(f"Deleted {label}")
-        else:
+        if not confirmation:
             print("Aborted")
+            return
+        try:
+            delete_db_entry(db_object)
+        except ArtistHasSongsError as exc:
+            print(f"Not deleted: {exc}. {HAS_SONGS_HINT}")
+            return
+        submit_global_database_session()
+        print(f"Deleted {label}")
         return
     category = field_options.get(choice)
     if category is None:

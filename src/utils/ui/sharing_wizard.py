@@ -22,7 +22,7 @@ import questionary
 from config.constants import INBOX_AUTO_SERVICE_NAME, SHARING_HTTP_PORT, SHARING_SERVICE_NAME
 from settings import listen_addresses
 from utils.common import sharing_setup as setup
-from utils.common.env_file import ENV_FILE, read_env_value, save_env_value
+from utils.common.env_file import read_env_value, save_env_value
 from utils.ui.menu_utils import open_file_browser_terminal
 from utils.ui.prompts import ask_yes_no
 
@@ -144,7 +144,7 @@ def _new_value(step, current: str, suggested: str | None, env_file: Path) -> str
             return value
 
 
-def offer_to_create_sharing_dir(value: str, env_file: Path = ENV_FILE) -> bool:
+def offer_to_create_sharing_dir(value: str, env_file: Path | None = None) -> bool:
     """Ask before creating a missing sharing folder - the app never creates it
     on its own, so a typo doesn't become a folder. On an external drive it may
     be created only while the drive is mounted. Whether it exists now."""
@@ -382,7 +382,7 @@ def _checks(env_file: Path) -> None:
     _summary(env_file, report)
 
 
-def run_sharing_wizard(resume: bool = False, env_file: Path = ENV_FILE) -> None:
+def run_sharing_wizard(resume: bool = False, env_file: Path | None = None) -> None:
     try:
         if resume:
             print(f"{BOLD}Setup of this PC for database sharing - continued after the restart{RESET}")

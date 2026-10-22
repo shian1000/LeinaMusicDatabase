@@ -352,3 +352,33 @@ def test_ytdlp_saying_gone_beats_the_api_listing(env, youtube):
     pr.check_link_cases([case])
 
     assert case.plays == {"sugg0": False}
+
+
+# ==================== unreadable state files are never overwritten ====================
+
+@pytest.mark.parametrize("content", ["{not json", "[1, 2]"])
+def test_an_unreadable_decisions_file_is_never_overwritten(env, content):
+    path = env["inbox"] / pr.DECISIONS_FILE
+    path.write_text(content)
+
+    assert pr.load_decisions() == {}  # read-only use carries on
+    with pytest.raises(pr.InboxFileError):
+        pr.save_decision("dead0", {"decision": "keep"})
+    assert path.read_text() == content
+
+
+def test_an_unreadable_report_is_never_overwritten(env):
+    path = env["inbox"] / pr.REPORT_FILE
+    path.write_text("[{\"text\": \"changed\", \"shown\": false}")  # cut short
+
+    assert pr.auto_report() == []
+    with pytest.raises(pr.InboxFileError):
+        pr.add_auto_report([{"text": "another change"}])
+    with pytest.raises(pr.InboxFileError):
+        pr.mark_auto_report_shown()
+    assert path.read_text().startswith("[{\"text\": \"changed\"")
+
+
+def test_a_missing_decisions_file_is_started(env):
+    pr.save_decision("dead0", {"decision": "keep"})
+    assert pr.load_decisions() == {"dead0": {"decision": "keep"}}

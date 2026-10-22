@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import dotenv_values, set_key, unset_key
 
+# Looked up when a function runs, never bound as a default argument, so the
+# tests' swap of ENV_FILE (tests/conftest.py) reaches every caller
 ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
@@ -28,15 +30,17 @@ MACHINE_KEYS = [
 ]
 
 
-def read_env_value(name: str, env_file: Path = ENV_FILE) -> str:
+def read_env_value(name: str, env_file: Path | None = None) -> str:
     """The value saved in .env ("" when unset), not the one this process started with."""
+    env_file = env_file or ENV_FILE
     if not env_file.exists():
         return ""
     return (dotenv_values(env_file).get(name) or "").strip()
 
 
-def save_env_value(name: str, value: str, env_file: Path = ENV_FILE) -> None:
+def save_env_value(name: str, value: str, env_file: Path | None = None) -> None:
     """Set name in .env, keeping every other line; an empty value removes the key."""
+    env_file = env_file or ENV_FILE
     value = value.strip()
     if not env_file.exists():
         if not value:

@@ -10,12 +10,17 @@ YELLOW, RESET = "\033[93m", "\033[0m"
 
 def _daily() -> bool:
     """Whether this is the day's first start, taking the daily backup when it's on."""
-    from utils.database.backup import backup_if_needed_today, newest_backup_time
+    from utils.database.backup import BackupFailedError, backup_if_needed_today, newest_backup_time
 
     if switches.enabled(switches.BACKUP):
         # The day's first backup has always marked the first start; the marker
         # keeps turning the backup off later the same day from running them twice
-        daily = bool(backup_if_needed_today())
+        try:
+            daily = bool(backup_if_needed_today())
+        except BackupFailedError as exc:
+            print(f"{YELLOW}The daily backup of the databases failed: {exc}. It's tried again at the next "
+                  f"start - or now from Settings -> Server -> Back up database now.{RESET}")
+            return switches.first_start_today()
         if daily:
             switches.mark_daily_tasks_run()
         return daily
@@ -77,7 +82,7 @@ def _offer_ytdlp_update() -> None:
 
 
 def _show_messages() -> None:
-    from utils.database.inbox_requests import auto_report, count_new_requests, mark_auto_report_shown
+    from utils.database.inbox_requests import InboxFileError, auto_report, count_new_requests, mark_auto_report_shown
     from utils.ui.inbox_request_review import show_auto_changes
 
     # What the background request check changed since the last start
@@ -87,6 +92,8 @@ def _show_messages() -> None:
             print(f"Changed automatically from Leina Radio's requests ({len(changes)}):")
             show_auto_changes(changes)
             mark_auto_report_shown()
+    except InboxFileError as exc:
+        print(f"{YELLOW}{exc}{RESET}")
     except OSError as exc:
         slog(f"Reading the automatic request check's report failed (non-fatal): {exc}", priority=3)
     waiting = count_new_requests()

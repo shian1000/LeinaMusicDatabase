@@ -142,6 +142,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from email.utils import formatdate
 from http import HTTPStatus
@@ -219,6 +220,17 @@ COVER_CACHE_CONTROL = "private, max-age=31536000, immutable"
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 # /library/<files.id>
 LIBRARY_PATH_RE = re.compile(r"^/library/(?P<id>[1-9][0-9]{0,17})$")
+# The synced collections answer only these; anything else is 405, never a
+# handler reading a POST as a DELETE
+ITEM_METHODS = ("GET", "PUT", "DELETE")
+# A number in a query or a Content-Length: ASCII digits only (str.isdigit()
+# also takes "²"), at most 18 - an SQLite integer
+PLAIN_INT_RE = re.compile(r"[0-9]{1,18}")
+
+
+def plain_int(text: str | None) -> int | None:
+    """`text` as a non-negative integer, None when it isn't a plain one."""
+    return int(text) if text is not None and PLAIN_INT_RE.fullmatch(text) else None
 # Copy of config.constants.LIBRARY_AUDIO_EXTENSIONS (this script can't import
 # it; a test keeps the two equal). Compared lowercased.
 LIBRARY_AUDIO_EXTENSIONS = (".mp3",)
@@ -360,6 +372,26 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         server_version = "MusicDatabaseShare"
         sys_version = ""
 
+        def send_response(self, code, message=None):
+            self._responded = True
+            super().send_response(code, message)
+
+        def handle_one_request(self):
+            # Whatever a handler didn't expect gets an answer (500) and the
+            # traceback in the log - not a connection dropped without one
+            self._responded = False
+            try:
+                super().handle_one_request()
+            except Exception:
+                print(f"{self.command} {urlsplit(self.path or '').path}: unexpected error", flush=True)
+                traceback.print_exc()
+                self.close_connection = True
+                if not self._responded:
+                    try:
+                        self._reply(HTTPStatus.INTERNAL_SERVER_ERROR)
+                    except OSError:
+                        pass
+
         def do_HEAD(self):
             self._serve(send_body=False)
 
@@ -368,7 +400,10 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if users_dir is None:
                 return False
             path = urlsplit(self.path).path
-            if PLAYLISTS_PATH_RE.match(path):
+            item_paths = (PLAYLISTS_PATH_RE, MOODS_PATH_RE, FOLDERS_PATH_RE, SAVED_PATH_RE)
+            if method not in ITEM_METHODS and any(r.match(path) for r in item_paths):
+                self._reply(HTTPStatus.METHOD_NOT_ALLOWED, headers={"Allow": ", ".join(ITEM_METHODS)})
+            elif PLAYLISTS_PATH_RE.match(path):
                 self._playlists(method)
             elif MOODS_PATH_RE.match(path):
                 self._moods(method)
@@ -523,7 +558,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         def _login(self):
             length = self.headers.get("Content-Length")
-            if length is None or not length.isdigit():
+            if plain_int(length) is None:
                 self._reply(HTTPStatus.LENGTH_REQUIRED)
                 return
             if int(length) > LOGIN_MAX_BODY_BYTES:
@@ -622,7 +657,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         def _read_json_body(self, limit: int):
             """The parsed body, or None after replying (411/413/400)."""
             length = self.headers.get("Content-Length")
-            if length is None or not length.isdigit():
+            if plain_int(length) is None:
                 self._reply(HTTPStatus.LENGTH_REQUIRED)
                 return None
             if int(length) > limit:
@@ -1004,7 +1039,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             data = None
             if method == "PUT":
                 length = self.headers.get("Content-Length")
-                if length is None or not length.isdigit():
+                if plain_int(length) is None:
                     self._reply(HTTPStatus.LENGTH_REQUIRED)
                     return
                 if int(length) > covers.MAX_COVER_BYTES:
@@ -1078,7 +1113,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 if method == "GET":
                     since = self._query_int(parse_qs(url.query), "since", default=0)
                 else:
-                    if not mood_id.isdigit() or int(mood_id) < 1:
+                    if (plain_int(mood_id) or 0) < 1:
                         raise mood_sync.BadMoodError("expected /global-mood-covers/<mood id>")
                     mood_id = int(mood_id)
                     change = mood_sync.parse_global_cover(body)
@@ -1139,7 +1174,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply_json(HTTPStatus.FORBIDDEN, {"error": "permission", "permission": permission})
                 return
             mood_id, requested = match.group("mood"), match.group("song")
-            if not (mood_id.isdigit() and requested.isdigit() and int(requested) >= 1):
+            if plain_int(mood_id) is None or (plain_int(requested) or 0) < 1:
                 self._reply(HTTPStatus.BAD_REQUEST, "expected /global-moods/<mood id>/songs/<song id>")
                 return
             mood_id, requested = int(mood_id), int(requested)
@@ -1174,9 +1209,10 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 if default is None:
                     raise playlist_sync.BadPlaylistError(f"{name}: missing")
                 return default
-            if not values[0].isdigit():
+            value = plain_int(values[0])
+            if value is None:
                 raise playlist_sync.BadPlaylistError(f"{name}: expected an integer >= 0")
-            return int(values[0])
+            return value
 
         # ---- inbox ----
 
@@ -1193,7 +1229,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, "not a request file name")
                 return
             length = self.headers.get("Content-Length")
-            if length is None or not length.isdigit():
+            if plain_int(length) is None:
                 self._reply(HTTPStatus.LENGTH_REQUIRED)
                 return
             length = int(length)

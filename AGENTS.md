@@ -62,7 +62,7 @@ When this file disagrees with the code, trust the code and fix this file.
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
 - Full suite: `venv/bin/python -m pytest` — ~1,250 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
-  collection)
+  collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
 
 Use the venv and the pinned versions. Don't install globally or bump dependencies unless the task
@@ -457,7 +457,9 @@ non-trivial work in that area.
   covers — keep it in sync with the tests). `tests/test_scripts.py` is an explicit scratch file
   (its own docstring: "meant to be a mess"), excluded from collection via `tests/conftest.py`.
   `tests/manual/` holds manual diagnostic scripts (real imports + live network), excluded from
-  collection via its own `conftest.py`.
+  collection via its own `conftest.py`. Each calls `_sandbox.enter_sandbox()` before importing the
+  app: the databases are copied into a temp folder and the app (database folder, `.env`, `debug.log`,
+  `youtube_link_cache.log`, verbosity) is pointed there - a new script must do the same.
 
 ## Architecture boundaries
 
@@ -647,7 +649,10 @@ non-trivial work in that area.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
-  with "unable to open database file". Give it temp-file databases; never undo the isolation.
+  with "unable to open database file". It also sends `debug.log` and `youtube_link_cache.log` to that
+  temp folder. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
+  default bound at import would keep pointing at the real `.env`.
 - Don't claim a check passed unless you ran it in this workspace.
 - Ask before creating or changing regression tests unless the task explicitly requires it.
 - If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.

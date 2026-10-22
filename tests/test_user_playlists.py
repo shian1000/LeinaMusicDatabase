@@ -404,6 +404,43 @@ def test_rename_to_song_cleans_the_name_and_never_overwrites(tmp_path, music_ses
     assert other.exists()
 
 
+def test_rename_to_song_never_overwrites_a_file_differing_only_in_case(tmp_path, music_session):
+    from utils.discoveries.mp3_utils import rename_to_song
+
+    teksanski = music_session.query(Song).filter(Song.title == "Teksański").one()
+    right = tmp_path / "Hey - Teksański.mp3"
+    right.write_bytes(b"the right one")
+    lower = tmp_path / "hey - teksański.mp3"
+    lower.write_bytes(b"another file")
+
+    with pytest.raises(FileExistsError):
+        rename_to_song(lower, teksanski)
+    assert right.read_bytes() == b"the right one"
+    assert lower.read_bytes() == b"another file"
+
+    right.unlink()
+    assert rename_to_song(lower, teksanski) == right
+    assert right.read_bytes() == b"another file" and not lower.exists()
+
+
+def test_rename_to_song_renames_one_file_seen_under_two_spellings(tmp_path, music_session, monkeypatch):
+    # A case-insensitive filesystem: the new spelling "exists" and is the same file
+    import pathlib
+    from utils.discoveries.mp3_utils import rename_to_song
+
+    teksanski = music_session.query(Song).filter(Song.title == "Teksański").one()
+    lower = tmp_path / "hey - teksański.mp3"
+    lower.write_bytes(b"the song")
+    right = tmp_path / "Hey - Teksański.mp3"
+    real_exists = pathlib.Path.exists
+    monkeypatch.setattr(pathlib.Path, "exists", lambda p, **kw: p == right or real_exists(p, **kw))
+    monkeypatch.setattr(pathlib.Path, "samefile", lambda p, other: {p, pathlib.Path(other)} == {lower, right})
+
+    assert rename_to_song(lower, teksanski) == right
+    assert right.read_bytes() == b"the song"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Hey - Teksański.mp3"]
+
+
 @pytest.mark.parametrize("title, expected", [
     ("T03: Mimiga Town", "Mimiga Town"), ("03. Song", "Song"), ("03 - Song", "Song"),
     ("Track 5) Song", "Song"),

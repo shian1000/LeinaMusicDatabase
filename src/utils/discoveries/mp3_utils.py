@@ -166,8 +166,14 @@ def rename_to_song(file: Path, song) -> Path:
     target = file.with_name(song_file_name(song, file.suffix))
     if target == file:
         return file
-    # Same name in other case only: a case-insensitive filesystem sees one file
-    if target.exists() and target.name.casefold() != file.name.casefold():
-        raise FileExistsError(f"{target} already exists")
+    if target.exists():
+        if not target.samefile(file):
+            raise FileExistsError(f"{target} already exists")
+        # Same name in other case only, on a case-insensitive filesystem: one
+        # file under two spellings, renamed through a free name in between
+        step = file.with_name(f".{file.name}.renaming")
+        file.rename(step)
+        step.rename(target)
+        return target
     file.rename(target)
     return target

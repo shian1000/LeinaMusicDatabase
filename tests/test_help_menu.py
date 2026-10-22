@@ -45,10 +45,11 @@ def test_texts_fit_100_columns():
 
 
 def test_the_start_up_topic_shows_each_switch_as_it_is_now(monkeypatch, tmp_path):
+    from utils.common import env_file
     from utils.common import startup_settings as switches
     from utils.database import public_database
 
-    monkeypatch.setattr(switches, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(env_file, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(public_database, "daily_publish_enabled", lambda: False)
     switches.set_enabled(switches.BACKUP, False)
 

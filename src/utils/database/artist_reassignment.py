@@ -38,6 +38,35 @@ def artists_named(session, name: str, exclude: Artist | None = None) -> list[Art
             if wanted in (normalize(a.name or ""), normalize(a.name_latin or ""))]
 
 
+# Artist names meaning "not known", matched whole after casefold(): "Unknown
+# Mortal Orchestra" is a real artist
+UNKNOWN_ARTIST_NAMES = ("", "unknown", "unknown artist")
+
+
+def is_unknown_artist(artist: Artist) -> bool:
+    return (artist.name or "").strip().casefold() in UNKNOWN_ARTIST_NAMES
+
+
+def credit_unknown_artist_song(session, song: Song) -> Artist | None:
+    """A song by an unknown artist whose title reads "Artist - Title": credit
+    it to that artist (the oldest one named so, else a new row) and keep the
+    rest as its title, both as written. The unknown artist's row is never
+    renamed - it keeps its other songs. Returns the artist the song is
+    credited to now, None when the song isn't one of these. Caller commits."""
+    if not is_unknown_artist(song.artist) or " - " not in (song.title or ""):
+        return None
+    name, title = (part.strip() for part in song.title.split(" - ", 1))
+    if not title or name.casefold() in UNKNOWN_ARTIST_NAMES:
+        return None
+    found = artists_named(session, name)
+    artist = found[0] if found else Artist(name=name)
+    if not found:
+        session.add(artist)
+    song.title = title
+    set_primary_artist(session, song, artist)
+    return artist
+
+
 def set_primary_artist(session, song: Song, artist: Artist, keep_old_as: str | None = None) -> None:
     """Credit `song` to `artist` instead of its current primary artist. If
     `artist` was one of the song's additional artists, that link goes (it

@@ -38,11 +38,15 @@ def make_yt_playlist_menu(songs_objects):
               "current Google Cloud project into .secrets/client_secret.json and try again.")
 
 def add_tags_menu(song_objects):
-    tag = input("What tags do you wish to add to these songs?")
-    for song in song_objects:
-        add_tag_to_song(song_objects, tag)
+    tag = input("What tag do you wish to add to these songs? ").strip()
+    if not tag:
+        print("Aborted - a tag can't be empty")
+        return
+    failed = [song for song in song_objects if not add_tag_to_song(song, tag)]
     submit_global_database_session()
-    print(f"Added {tag} to songs")
+    print(f"Added '{tag}' to {len(song_objects) - len(failed)} song(s)")
+    for song in failed:
+        print(f"  Not added to: {song.artist.name} - {song.title}")
 
 
 def report_no_yt_video(songs_objects):

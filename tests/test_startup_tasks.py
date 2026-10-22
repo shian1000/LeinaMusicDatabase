@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
+from utils.common import env_file
 from utils.common import startup_settings as switches
 from utils.common.env_file import read_env_value
 from utils.ui import startup_tasks as startup
@@ -105,6 +106,65 @@ def test_backup_off_is_quiet_while_the_newest_is_recent(backup, monkeypatch, cap
     assert capsys.readouterr().out == ""
 
 
+def test_a_failed_daily_backup_is_shown_and_the_day_still_starts(backup, monkeypatch, capsys):
+    from utils.database import backup as backup_module
+
+    def fail():
+        raise backup_module.BackupFailedError("database or disk is full")
+
+    monkeypatch.setattr(switches, "enabled", lambda switch, env_file=None: True)
+    monkeypatch.setattr(backup_module, "backup_if_needed_today", fail)
+    assert startup._daily() is True  # first_start_today()
+    out = capsys.readouterr().out
+    assert "daily backup of the databases failed: database or disk is full" in out
+
+
+@pytest.fixture
+def archive(monkeypatch, tmp_path):
+    import sqlite3
+    from utils.database import backup as backup_module
+
+    music = tmp_path / "music.db"
+    with sqlite3.connect(music) as conn:
+        conn.execute("CREATE TABLE songs (title TEXT)")
+    monkeypatch.setattr(backup_module, "ARCHIVE_DIR", tmp_path / "archive")
+    monkeypatch.setattr(backup_module, "DB_FILES", {"music": music})
+    monkeypatch.setattr(backup_module, "user_db_files", lambda: {})
+    return backup_module
+
+
+def test_the_daily_backup_is_taken_once_a_day(archive):
+    created = archive.backup_if_needed_today()
+    assert [p.parent for p in created] == [archive.ARCHIVE_DIR]
+    assert archive.backup_if_needed_today() == []
+    assert archive.has_backup_today()
+
+
+def test_an_interrupted_backup_leaves_no_file_counting_as_one(archive, monkeypatch):
+    import sqlite3
+    from types import SimpleNamespace
+
+    class _Source:
+        def __init__(self, path):
+            self.conn = sqlite3.connect(path)
+
+        def backup(self, dest):
+            self.conn.backup(dest)
+            raise OSError("database or disk is full")
+
+        def close(self):
+            self.conn.close()
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(archive, "sqlite3", SimpleNamespace(
+        connect=lambda path: _Source(path) if path.endswith("music.db") else real_connect(path)))
+
+    with pytest.raises(archive.BackupFailedError):
+        archive.backup_if_needed_today()
+    assert list(archive.ARCHIVE_DIR.iterdir()) == []
+    assert not archive.has_backup_today() and archive.newest_backup_time() is None
+
+
 def test_backup_warning():
     now = datetime(2026, 10, 22, 12, 0)
     assert "no backup of the databases at all" in switches.backup_warning(None, now)
@@ -162,7 +222,7 @@ def test_the_settings_screen_saves_the_ticks_and_the_github_switch(monkeypatch, 
     from utils.database import public_database
 
     env = tmp_path / ".env"
-    monkeypatch.setattr(switches, "ENV_FILE", env)
+    monkeypatch.setattr(env_file, "ENV_FILE", env)
     github = {"on": True}
     monkeypatch.setattr(public_database, "daily_publish_enabled", lambda: github["on"])
     monkeypatch.setattr(public_database, "set_daily_publish", lambda on: github.__setitem__("on", on))

@@ -49,3 +49,7 @@ youtube_link_cache.log
 yt_playlist_cache.json
 MusicDatabase - ToDo.txt
 debug_spotify.html
+
+# Local code review (owner only, Polish)
+/docs/code-review-2026-10.md
+/docs/code-review-2026-10.xlsx

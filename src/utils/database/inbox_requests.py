@@ -462,7 +462,7 @@ def package_entry(name: str) -> dict | None:
 
 
 def record_package_files(entries: dict) -> None:
-    files = package_files()
+    files = _load_json(PACKAGES_FILE, {}, for_update=True)
     files.update(entries)
     _save_json(PACKAGES_FILE, files)
 
@@ -482,14 +482,33 @@ def describe_files(names) -> str:
 
 # ==================== decisions ====================
 
-def _load_json(name: str, default):
+class InboxFileError(Exception):
+    """An inbox JSON file is there but can't be read: it's never overwritten,
+    so its history (the owner's decisions, the automatic pass's report) isn't lost."""
+
+
+def _load_json(name: str, default, for_update: bool = False):
+    """The file's value, `default` when there's none. An unreadable file reads
+    as `default` too, except `for_update` (about to be written back): then
+    InboxFileError, the file left as it is."""
     if INBOX_DIR is None:  # no SHARING_DIR: no inbox, nothing recorded
         return default
+    path = INBOX_DIR / name
     try:
-        value = json.loads((INBOX_DIR / name).read_text())
-    except (OSError, ValueError):
+        value = json.loads(path.read_text())
+    except FileNotFoundError:
         return default
-    return value if isinstance(value, type(default)) else default
+    except (OSError, ValueError) as exc:
+        problem = str(exc)
+    else:
+        if isinstance(value, type(default)):
+            return value
+        problem = f"not a JSON {type(default).__name__}"
+    if for_update:
+        raise InboxFileError(f"{path} can't be read ({problem}) - left as it is, nothing written to it. "
+                             "Fix it or move it away, then try again.")
+    flog(f"Inbox: {path} can't be read ({problem}), taken as empty")
+    return default
 
 
 def _save_json(name: str, value) -> None:
@@ -508,7 +527,7 @@ def load_decisions() -> dict:
 
 
 def save_decision(key: str, entry: dict) -> None:
-    decisions = load_decisions()
+    decisions = _load_json(DECISIONS_FILE, {}, for_update=True)
     decisions[key] = entry
     _save_json(DECISIONS_FILE, decisions)
 
@@ -556,7 +575,7 @@ def add_auto_report(entries: list[dict], shown: bool = False) -> None:
     `shown` = the owner has seen it already (the pass ran in the app)."""
     if not entries:
         return
-    report = _load_json(REPORT_FILE, [])
+    report = _load_json(REPORT_FILE, [], for_update=True)
     report += [{**entry, "shown": shown} for entry in entries]
     _save_json(REPORT_FILE, report)
 
@@ -567,7 +586,7 @@ def auto_report(unshown_only: bool = False) -> list[dict]:
 
 
 def mark_auto_report_shown() -> None:
-    report = _load_json(REPORT_FILE, [])
+    report = _load_json(REPORT_FILE, [], for_update=True)
     if any(isinstance(e, dict) and not e.get("shown") for e in report):
         _save_json(REPORT_FILE, [{**e, "shown": True} if isinstance(e, dict) else e for e in report])
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from config.constants import SHARING_HTTP_PORT
 from settings import VPN_OFF, VPN_TAILSCALE, listen_addresses, vpn_choice
-from utils.common.env_file import ENV_FILE, read_env_value
+from utils.common.env_file import read_env_value
 from utils.database.sharing_server import interface_ipv4, tailscale_ipv4, vpn_interface_ipv4
 
 
@@ -81,7 +81,7 @@ SETTING_STEPS = [
 ]
 
 
-def value_warning(name: str, value: str, env_file: Path = ENV_FILE, local_addresses=None) -> str | None:
+def value_warning(name: str, value: str, env_file: Path | None = None, local_addresses=None) -> str | None:
     """Why `value` probably won't work for `name` (None when it looks fine or
     is empty). The external drive is read from env_file, so save
     SHARING_DRIVE_MOUNT before checking SHARING_DIR."""
@@ -134,7 +134,7 @@ def _vpn_warning(value: str, env_file: Path) -> str | None:
     return None
 
 
-def vpn_candidates(env_file: Path = ENV_FILE, addresses=None) -> list[tuple[str, str]]:
+def vpn_candidates(env_file: Path | None = None, addresses=None) -> list[tuple[str, str]]:
     """Interfaces that could be a VPN's, to offer for SHARING_VPN: not the
     home network's, never a docker / bridge one, with a private or
     100.64.0.0/10 address (what VPNs hand out)."""
@@ -165,7 +165,7 @@ def _addresses_warning(value: str, local_addresses=None) -> str | None:
     return " ".join(problems) or None
 
 
-def address_candidates(env_file: Path = ENV_FILE, addresses=None) -> list[tuple[str, str]]:
+def address_candidates(env_file: Path | None = None, addresses=None) -> list[tuple[str, str]]:
     """This PC's addresses worth offering for SHARING_ADDRESSES: not the ones
     already chosen, not the LAN interface's or the VPN's (their own steps),
     never a docker / bridge one (sharing_server's rule for the LAN too)."""
@@ -203,7 +203,7 @@ def _inside(path: str, folder: str) -> bool:
     return os.path.commonpath([path, folder]) == folder
 
 
-def can_create_sharing_dir(path: str, env_file: Path = ENV_FILE) -> bool:
+def can_create_sharing_dir(path: str, env_file: Path | None = None) -> bool:
     """Whether a missing sharing folder may be created: on the system disk
     always, on the external drive only while it's mounted - never under an
     empty mount point."""
@@ -245,7 +245,7 @@ def lan_interfaces(net_dir: str = "/sys/class/net", address_of=interface_ipv4) -
     return found
 
 
-def suggestion(name: str, env_file: Path = ENV_FILE, home: Path | None = None,
+def suggestion(name: str, env_file: Path | None = None, home: Path | None = None,
                interfaces=None) -> str | None:
     """A sensible value to offer for `name`, or None."""
     home = home or Path.home()
@@ -261,7 +261,7 @@ def suggestion(name: str, env_file: Path = ENV_FILE, home: Path | None = None,
     return None
 
 
-def restart_needed(env_file: Path = ENV_FILE, environ=os.environ) -> list[str]:
+def restart_needed(env_file: Path | None = None, environ=os.environ) -> list[str]:
     """The settings whose .env value isn't the one this process started with
     (settings.py reads .env once, at startup)."""
     return [step.name for step in SETTING_STEPS
@@ -270,7 +270,7 @@ def restart_needed(env_file: Path = ENV_FILE, environ=os.environ) -> list[str]:
 
 # ==================== checks (not settings) ====================
 
-def listening_plan(env_file: Path = ENV_FILE, tailscale_address=tailscale_ipv4,
+def listening_plan(env_file: Path | None = None, tailscale_address=tailscale_ipv4,
                    interface_address=interface_ipv4, vpn_address=vpn_interface_ipv4) -> list[tuple[str, str | None]]:
     """(what, address now or None) for every socket the server would open with
     the settings in env_file - the same choice as sharing_server.address_sources()."""

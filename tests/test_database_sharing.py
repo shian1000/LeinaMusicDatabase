@@ -1056,6 +1056,62 @@ def test_playlist_round_trip(playlist_server):
     assert db.execute("SELECT song_ids_checked_to FROM playlists").fetchone() == (None,)
 
 
+@pytest.mark.parametrize("collection", ["playlists", "moods", "folders", "saved-songs", "later-links"])
+def test_only_get_put_and_delete_reach_a_synced_collection(playlist_server, collection):
+    start, users_dir, tokens = playlist_server
+    base = f"{start()}/users/ola_k/playlists"
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{base}/{UID}", token, _body())[0] == 200
+
+    url = f"{base.rsplit('/', 1)[0]}/{collection}/{UID}?base_revision=1&deleted_at=1791839796631"
+    status, _ = _call("POST", url, token, payload={})
+    assert status == 405
+    assert _call("GET", f"{base}?since=0", token)[1]["playlists"][0]["deleted"] is False
+
+
+def _raw_status(url, method="GET", headers=None):
+    """The status line of the answer, or None when the server closed without one."""
+    import http.client
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=10)
+    try:
+        conn.putrequest(method, f"{parts.path}?{parts.query}" if parts.query else parts.path)
+        for key, value in (headers or {}).items():
+            conn.putheader(key, value)
+        conn.endheaders()
+        return conn.getresponse().status
+    except (http.client.RemoteDisconnected, ConnectionError):
+        return None
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("since", ["%C2%B2", "99999999999999999999", "-1", "1.5"])
+def test_a_malformed_number_in_a_query_is_400(playlist_server, since):
+    start, users_dir, tokens = playlist_server
+    url = f"{start()}/users/ola_k/playlists?since={since}"
+    assert _raw_status(url, headers={"Authorization": f"Bearer {tokens['ola_k']}"}) == 400
+
+
+def test_a_malformed_content_length_is_411(playlist_server):
+    start, users_dir, tokens = playlist_server
+    url = f"{start()}/users/ola_k/playlists/{UID}"
+    headers = {"Authorization": f"Bearer {tokens['ola_k']}", "Content-Length": "²"}
+    assert _raw_status(url, "PUT", headers) == 411
+
+
+def test_an_unexpected_failure_still_gets_an_answer(playlist_server):
+    start, users_dir, tokens = playlist_server
+    base = f"{start()}/users/ola_k/playlists"
+    token = tokens["ola_k"]
+    assert _call("PUT", f"{base}/{UID}", token, _body())[0] == 200
+
+    # A timestamp past the year 9999: the archive's datetime() fails
+    url = f"{base}/{UID}?base_revision=1&deleted_at={10 ** 17}"
+    assert _raw_status(url, "DELETE", {"Authorization": f"Bearer {token}"}) == 500
+
+
 def test_playlist_conflicts_are_409_with_the_stored_playlist(playlist_server):
     start, _, tokens = playlist_server
     url = f"{start()}/users/ola_k/playlists/{UID}"

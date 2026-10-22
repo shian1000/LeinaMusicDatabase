@@ -45,11 +45,13 @@ CLIENT_SECRET_PATH = ".secrets/client_secret.json"
 # empty/unset (never checked) and from a real video_id (found, possibly
 # stale), as opposed to the existing "excluded from search results" escape
 # hatch (see docs/agent-notes/youtube-search-matching.md), where a real
-# video_id does exist and is stored instead. For now this is a data-only
-# record with no dedicated runtime behavior yet: create_yt_playlist()
-# normalizes it to "no stored link" and searches normally, same as an empty
-# field — there's no mechanism yet to have it actually skip the search.
+# video_id does exist and is stored instead. create_yt_playlist() leaves such
+# a song out without searching, and never overwrites the annotation.
 NO_VIDEO_SENTINEL = "N/A"
+
+
+class QuotaExceededError(Exception):
+    """The YouTube Data API's daily quota is used up: stop for today, keep the progress."""
 
 # Dedicated, always-on log file for the "reuse/validate/persist
 # Song.youtube_video_id" flow in create_yt_playlist() — separate from the
@@ -433,7 +435,7 @@ def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | 
         if e.resp.status == 403 and b"quotaExceeded" in e.content:
             print("🛑 Quota exceeded — progress saved.")
             save_cache(cache)
-            raise SystemExit(1)
+            raise QuotaExceededError() from e
         raise
 
     items = response.get("items", [])
@@ -1377,7 +1379,7 @@ def _search_video_api_once(
     except HttpError as e:
         if e.resp.status == 403 and b"quotaExceeded" in e.content:
             print("🛑 YouTube API quota exceeded. Stopping.")
-            raise SystemExit(1)
+            raise QuotaExceededError() from e
         raise
 
     items = response.get("items", [])
@@ -1777,8 +1779,20 @@ def add_video_to_playlist(youtube, playlist_id: str, video_id: str) -> bool:
     return False
 
 
+def _load_bad_videos():
+    """music.db's bad_youtube_videos (inbox_requests.BadVideos), read through
+    the menu's session the songs come from; None when no session is open."""
+    from utils.database.database_sessions import get_global_database_sessions
+    # inbox_requests imports this module
+    from utils.database.inbox_requests import load_bad_videos
+
+    sessions = get_global_database_sessions()
+    return load_bad_videos(sessions[0]) if sessions else None
+
+
 def create_yt_playlist(song_list, playlist_name: str):
     youtube = get_youtube_service()
+    bad_videos = _load_bad_videos()
 
     # Load cache if it exists
     cache = load_cache()
@@ -1850,13 +1864,11 @@ def create_yt_playlist(song_list, playlist_name: str):
             # still resolves — a link can go stale after it was set.
             video_id = entry.get("video_id")
 
-            # NO_VIDEO_SENTINEL isn't a real id to validate — there's no
-            # behavior difference from an empty/unset field yet (no code
-            # currently branches on the two differently), so it's normalized
-            # to "no stored link" here and falls through to a normal search
-            # below, same as any other song without a stored video_id.
+            song = songs_by_key.get(key)
             if video_id == NO_VIDEO_SENTINEL:
-                video_id = None
+                _logger.info(f"Skipped {artist} - {title}: marked as having no video (N/A)")
+                print(f"  ⏭ {artist} - {title}: marked as having no video on YouTube (N/A), left out")
+                continue
 
             stored_video_id_was_invalid = False
             if video_id:
@@ -1874,6 +1886,11 @@ def create_yt_playlist(song_list, playlist_name: str):
                     youtube, artist, title, artist_synonyms=artist_synonyms, language=language,
                     artist_credits=artist_credits, title_latin=title_latin, full_album=full_album,
                 )
+                rejected = bad_videos.why(video_id, getattr(song, "id", None)) if bad_videos and video_id else None
+                if rejected:
+                    _logger.info(f"Found only video_id={video_id} for {artist} - {title}, rejected before: {rejected}")
+                    print(f"  ✖ The video found was rejected before ({rejected}), not added")
+                    video_id = None
                 if not video_id:
                     _logger.info(f"No video found for {artist} - {title}")
                     print("  ❌ No video found")
@@ -1884,7 +1901,6 @@ def create_yt_playlist(song_list, playlist_name: str):
                         # again) on every future run.
                         entry["video_id"] = None
                         save_cache(cache)
-                        song = songs_by_key.get(key)
                         if song is not None:
                             save_video_id_to_song(song, None)
                         else:
@@ -1895,7 +1911,6 @@ def create_yt_playlist(song_list, playlist_name: str):
 
                 # Step 3: a newly-found video is saved back to the DB so
                 # future playlist runs don't need to search for it again.
-                song = songs_by_key.get(key)
                 if song is not None:
                     save_video_id_to_song(song, video_id)
                 else:
@@ -1909,16 +1924,19 @@ def create_yt_playlist(song_list, playlist_name: str):
             entry["added"] = True
             save_cache(cache)
 
-    except HttpError as e:
-        save_cache(cache)
-        if is_quota_exceeded(e):
+    except (HttpError, QuotaExceededError) as e:
+        # cache is None when creating the playlist itself failed: nothing to resume
+        if cache:
+            save_cache(cache)
+        if isinstance(e, QuotaExceededError) or is_quota_exceeded(e):
             print("\n🚫 YouTube API quota exceeded.")
             print("💾 Progress saved — you can resume later.")
             return
         raise
 
     except KeyboardInterrupt:
-        save_cache(cache)
+        if cache:
+            save_cache(cache)
         print("\n⏸ Interrupted by user. Progress saved.")
         return
 

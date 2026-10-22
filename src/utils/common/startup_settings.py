@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from config.constants import STARTUP_STATE_FILE
-from utils.common.env_file import ENV_FILE, read_env_value, save_env_value
+from utils.common.env_file import read_env_value, save_env_value
 
 OFF = "off"
 # With the daily backup off, every start warns once the newest backup is older
@@ -68,12 +68,12 @@ SWITCHES = [BACKUP, MOOD_CHANGES, LIBRARY_INDEX, SHARE_COPY, YTDLP_UPDATE, MESSA
 
 
 def enabled(switch: StartupSwitch, env_file: Path | None = None) -> bool:
-    return read_env_value(switch.key, env_file or ENV_FILE).lower() != OFF
+    return read_env_value(switch.key, env_file).lower() != OFF
 
 
 def set_enabled(switch: StartupSwitch, on: bool, env_file: Path | None = None) -> None:
     # On is the default: the key is removed rather than written as "on"
-    save_env_value(switch.key, "" if on else OFF, env_file or ENV_FILE)
+    save_env_value(switch.key, "" if on else OFF, env_file)
 
 
 def save_choices(on_keys, env_file: Path | None = None) -> list[StartupSwitch]:

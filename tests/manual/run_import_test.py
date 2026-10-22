@@ -10,8 +10,9 @@ sys.path.insert(0, str(_ROOT / "src"))
 
 import time
 
-# Enable debug output
-(_ROOT / ".debug").write_text("verbosity = 1\n")
+from _sandbox import enter_sandbox
+
+enter_sandbox(verbosity=1)
 
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
 

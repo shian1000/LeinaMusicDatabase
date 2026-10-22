@@ -13,6 +13,7 @@ import json
 from utils.database.database_getter import extract_db_object_info
 from utils.database.datatables import Artist, Song, artist_categories, song_categories, search_only_categories
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
+from utils.database.database_sessions import DatabaseCommitError
 from utils.database.song_artists import song_artist_label
 from config.constants import (
     RECENT_DIRS_FILE,
@@ -94,14 +95,19 @@ def execute_menu_item(
 
         action: Optional[Callable[[], Optional[str]]] = action_map.get(choice)
         if action:
-            action_name: Optional[str] = action()
+            try:
+                action_name: Optional[str] = action()
+            except DatabaseCommitError as exc:
+                # Rolled back already: the menu goes on with the saved state
+                print(f"\033[91m{exc}\033[0m")
+                action_name = None
             if action_name == exit_label or one_time:
                 running = False
                 break
 
 
 
-def open_file_browser_terminal(current_path: str = os.getcwd()) -> Optional[UPath]:
+def open_file_browser_terminal(current_path: Optional[str] = None) -> Optional[UPath]:
     """
     Interactive file browser using terminal/console UI.
     
@@ -112,23 +118,32 @@ def open_file_browser_terminal(current_path: str = os.getcwd()) -> Optional[UPat
         current_path: Starting directory path (defaults to current working directory)
     
     Returns:
-        UPath: The selected directory path, or None if the user exits.
+        UPath: The selected directory path, or None if the user exits
+        (Exit, Esc or Ctrl+C).
     """
-    if not os.path.isdir(current_path):
+    if not current_path or not os.path.isdir(current_path):
         current_path = os.getcwd()
 
     current_path = os.path.abspath(current_path)
-    
-    subdirs: list[str] = sorted([
-        d for d in os.listdir(current_path) 
-        if os.path.isdir(os.path.join(current_path, d)) and not d.startswith(".")
-    ])
+
+    try:
+        subdirs: list[str] = sorted([
+            d for d in os.listdir(current_path)
+            if os.path.isdir(os.path.join(current_path, d)) and not d.startswith(".")
+        ])
+    except OSError as exc:
+        # e.g. no permission: it can still be selected or left
+        print(f"Can't list {current_path}: {exc.strerror or exc}")
+        subdirs = []
     
     options: list[str] = [FILE_BROWSER_SELECT_OPTION, FILE_BROWSER_BACK_OPTION, FILE_BROWSER_EXIT_OPTION] + subdirs
     title: str = f"{DEFAULT_FILE_BROWSER_QUESTION}\nCurrent Path: {current_path}"
 
     option: Optional[str] = questionary.select(title, options).ask()
-    
+
+    if option is None:
+        return None
+
     if option == FILE_BROWSER_SELECT_OPTION:
         return UPath(current_path)
     
@@ -206,8 +221,11 @@ def pick_from_db_objects(
         back_label: Label for the back/cancel option
     
     Returns:
-        Optional: Selected database object, or None if user selects back
+        Optional: Selected database object, or None if user selects back,
+        presses Esc / Ctrl+C, or there's nothing to pick
     """
+    if not entries_objects:
+        return None
     if isinstance(entries_objects[0], Artist):
         entries_names: list[tuple] = extract_db_object_info(entries_objects, f"{artist_categories[0]}")
     else:
@@ -237,9 +255,9 @@ def pick_from_db_objects(
     sel_obj_index: Optional[int] = questionary.select(question, choices=choices, style=style).ask()
     slog(sel_obj_index)
 
-    if sel_obj_index == DIALOG_NO_RESULT:
+    if sel_obj_index is None or sel_obj_index == DIALOG_NO_RESULT:
         return None
-    
+
     return entries_objects[sel_obj_index]
 
 

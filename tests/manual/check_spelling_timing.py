@@ -9,8 +9,9 @@ sys.path.insert(0, str(_ROOT / "src"))
 
 import time
 
-# Enable debug
-(_ROOT / ".debug").write_text("verbosity = 0\n")
+from _sandbox import enter_sandbox
+
+enter_sandbox(verbosity=0)
 
 from utils.common.text_utils import check_spelling
 

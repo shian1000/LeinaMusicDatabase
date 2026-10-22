@@ -191,3 +191,30 @@ def test_feat_credits_and_the_ones_the_kept_song_lacks(session, monkeypatch):
         database_sessions.set_global_database_sessions(None)
     assert [a.name for a in additional_artists(apt_feat)] == ["Bruno Mars", "Someone New"]
     assert session.query(Artist).filter(Artist.name == "Bruno Mars").count() == 1
+
+
+# ---- the same new song twice in one import's review ------------------------------
+
+def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
+    from types import SimpleNamespace
+    from utils.discoveries import import_engine
+
+    artist = SimpleNamespace(id=7, name="Bob Marley")
+    similar = SimpleNamespace(title="Is This Love (Live)", artist=artist, kind=None)
+    created = []
+
+    def create(metadata, artist_obj):
+        song = SimpleNamespace(title=metadata["title"], artist_id=artist_obj.id, kind=None, title_latin=None)
+        created.append(song)
+        return song
+
+    monkeypatch.setattr(import_engine, "create_song_entry", create)
+    monkeypatch.setattr(import_engine, "ask_yes_no", lambda question: False)  # "add it as a new one"
+    monkeypatch.setattr(import_engine, "_backfill_youtube_link", lambda metadata, song: None)
+    conflict = {"metadata": {"title": "Is This Love", "artist_name": "Bob Marley"},
+                "artist_obj": artist, "existing_song": similar}
+
+    added, skipped = import_engine._settle_song_conflicts([conflict, dict(conflict)])
+
+    assert [s.title for s in added] == ["Is This Love"] and len(created) == 1
+    assert skipped == [("Bob Marley - Is This Love", "Added already in this import")]

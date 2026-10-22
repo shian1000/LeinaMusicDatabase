@@ -3,13 +3,13 @@ from utils.common.text_utils import is_blacklisted_album
 import time
 import questionary
 from utils.ui.prompts import ask_yes_no
+from utils.database.artist_reassignment import credit_unknown_artist_song
 from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import get_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
 from config.constants import TITLE_JUNK_SUFFIXES
-from utils.database.datatables import Artist, song_categories, artist_categories
-from utils.common.debug import slog
+from utils.database.datatables import Artist, artist_categories
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
 from utils.common.script_utils import fix_mixed_script_words
@@ -256,41 +256,23 @@ def seek_nonsense_names(songs):
                 print("Can't delete title name entirely")
 
 def resolve_unknown_artist(songs):
-        # Editing an unknown-artist/title split is unconditional (there's no
-        # yes/no decision to defer) - the per-song "Press anything to continue"
-        # was only there to pause and show what changed, one song at a time.
-        # Apply edits during the scan as before, but collect what changed and
-        # print it as a single summary at the end instead of blocking per song.
-        changes = []
-        for song in songs:
-            lowered_artist = song.artist.name.strip().lower()
-            lowered_title = song.title.strip().lower()
-            slog(lowered_artist)
-            slog(lowered_title)
-            if "unknown" in lowered_artist or not lowered_artist:
-                print(f"Went through because lowered_artist is {lowered_artist} (song is {song.artist.name} - {song.title} [song_id is {song.id}])")
-                new_artist = ""
-                new_title = ""
-                if " - " in lowered_artist:
-                    new_artist, new_title = lowered_artist.split(" - ", 1)
-                elif " - " in lowered_title:
-                    new_artist, new_title = lowered_title.split(" - ", 1)
-                if new_artist:
-                    old_artist = song.artist.name
-                    edit_db_entry(song, song_categories[1], new_artist)
-                    changes.append(f"song_id {song.id}: artist '{old_artist}' -> \033[93m'{new_artist}'\033[0m")
-                if new_title:
-                    old_title = song.title
-                    edit_db_entry(song, song_categories[0], new_title)
-                    changes.append(f"song_id {song.id}: title '{old_title}' -> \033[93m'{new_title}'\033[0m")
+    """Songs by an unknown artist with an "Artist - Title" title are credited
+    to that artist (artist_reassignment.credit_unknown_artist_song()); what
+    changed is printed as one summary at the end."""
+    session, _ = get_global_database_sessions()
+    changes = []
+    for song in songs:
+        old_label = f"{song.artist.name} - {song.title}"
+        artist = credit_unknown_artist_song(session, song)
+        if artist is not None:
+            changes.append(f"song_id {song.id}: '{old_label}' -> \033[93m'{artist.name}' - '{song.title}'\033[0m")
 
-        if changes:
-            print("\n" + "="*70)
-            print(f"Resolved {len(changes)} unknown-artist field(s):")
-            for change in changes:
-                print(f"  {change}")
-            print("="*70)
-
+    if changes:
+        print("\n" + "="*70)
+        print(f"Credited {len(changes)} song(s) of an unknown artist:")
+        for change in changes:
+            print(f"  {change}")
+        print("="*70)
 
 
 def _load_songs():

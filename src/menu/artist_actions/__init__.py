@@ -2,9 +2,9 @@ import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.ui.menu_utils import execute_menu_item, pick_from_db_objects
 from utils.database.database_sessions import submit_global_database_session
-from utils.database.database_management import delete_db_entry
+from utils.database.database_management import ArtistHasSongsError, delete_db_entry
 from utils.ui.display_utils import display_artists
-from menu.song_actions.edit_songs import edit_entry_menu
+from menu.song_actions.edit_songs import HAS_SONGS_HINT, edit_entry_menu
 
 
 def add_synonym_menu(artist_objects):
@@ -64,11 +64,17 @@ def remove_artists(artist_objects):
         print("Aborted")
         return
 
+    deleted = 0
     for artist in artist_objects:
-        delete_db_entry(artist)
+        try:
+            delete_db_entry(artist)
+        except ArtistHasSongsError as exc:
+            print(f"Not deleted: {exc}. {HAS_SONGS_HINT}")
+            continue
+        deleted += 1
 
     submit_global_database_session()
-    print(f"Deleted {len(artist_objects)} artist(s).")
+    print(f"Deleted {deleted} artist(s).")
 
 
 def edit_artist_menu(artist_objects):

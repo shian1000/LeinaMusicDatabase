@@ -30,6 +30,19 @@ def open_and_set_global_database_sessions() -> Tuple[Session, Session]:
             _GLOBAL_DATABASE_SESSION = open_database_sessions()
         return _GLOBAL_DATABASE_SESSION
     
+class DatabaseCommitError(Exception):
+    """Saving the menu's changes failed; they were rolled back, so the
+    sessions keep working (no PendingRollbackError until a restart)."""
+
+
+def _commit(session: Session) -> None:
+    try:
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        raise DatabaseCommitError(f"Saving to the database failed, the unsaved changes were undone: {exc}") from exc
+
+
 def close_global_database_sessions(commit: bool = True) -> None:
     global _GLOBAL_DATABASE_SESSION
     with _GLOBAL_DB_LOCK:
@@ -37,25 +50,21 @@ def close_global_database_sessions(commit: bool = True) -> None:
             return
         music_session, tag_session = _GLOBAL_DATABASE_SESSION
         if commit:
-            music_session.commit()
-            tag_session.commit()
+            _commit(music_session)
+            _commit(tag_session)
             apply_song_id_changes(tag_session=tag_session)
             music_session.close()
             tag_session.close()
         _GLOBAL_DATABASE_SESSION = None
 
 def submit_global_database_session() -> None:
+    """Commit both global sessions; DatabaseCommitError (after a rollback) when that fails."""
     global _GLOBAL_DATABASE_SESSION
     with _GLOBAL_DB_LOCK:
         if _GLOBAL_DATABASE_SESSION is None:
             return
         music_session, tag_session = _GLOBAL_DATABASE_SESSION
-        music_session.commit()
-        tag_session.commit()
+        _commit(music_session)
+        _commit(tag_session)
         # Deleted/merged songs: their tags and users' playlist entries follow
         apply_song_id_changes(tag_session=tag_session)
-
-
-
-
-
