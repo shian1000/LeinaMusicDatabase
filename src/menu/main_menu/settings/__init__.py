@@ -23,10 +23,11 @@ from utils.common.sharing_setup import (
     listening_plan,
     address_candidates,
     phone_addresses,
+    restart_needed,
     value_warning,
     vpn_candidates,
 )
-from utils.ui.sharing_wizard import offer_to_create_sharing_dir, run_sharing_wizard
+from utils.ui.sharing_wizard import offer_to_create_sharing_dir, restart_to_continue, run_sharing_wizard
 from utils.database.database_location import load_database_dir_override, save_database_dir_override
 from utils.database.backup import backup_databases
 from utils.database.database_sessions import open_and_set_global_database_sessions
@@ -34,6 +35,7 @@ from utils.database.files_index import FILES_DB_PATH, LibraryUnavailableError, s
 from utils.database.users import users_available, users_unavailable_message
 from utils.database.moods import apply_global_mood_changes_quietly
 from utils.database.sharing import (
+    NoListenAddressError,
     SharingUnavailableError,
     install_sharing_service,
     share_databases,
@@ -293,6 +295,15 @@ def setup_database_sharing():
     if wizard:
         run_sharing_wizard()
         return
+    # The service is written from the settings read at start-up, the checks
+    # below read .env - they must agree (else e.g. a server with no address)
+    changed = restart_needed()
+    if changed:
+        print(f"\033[93mChanged in .env since MusicDatabase started: {', '.join(changed)}. The service is "
+              "written from the settings read at start-up, so MusicDatabase needs a restart first.\033[0m")
+        if ask_yes_no("Restart MusicDatabase now and continue with the setup's checks?"):
+            restart_to_continue()
+        return
     if settings.sharing_dir is None:
         print(f"\033[91mCan't set up sharing: {drive_unavailable_message(None)}\033[0m")
         return
@@ -314,6 +325,9 @@ def setup_database_sharing():
         return
     try:
         steps = install_sharing_service()
+    except NoListenAddressError as exc:
+        print(f"\033[91mNot installed: {exc}\033[0m")
+        return
     except subprocess.CalledProcessError as exc:
         print(f"\033[91mSetup failed: {' '.join(exc.cmd)}\n{exc.stderr.strip()}\033[0m")
         return

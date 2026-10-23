@@ -62,6 +62,11 @@ class SharingUnavailableError(Exception):
     """The sharing folder can't be written right now (e.g. the data drive isn't plugged in)."""
 
 
+class NoListenAddressError(Exception):
+    """The server unit would have no address to listen on: the server would
+    exit at once ("No address to serve on")."""
+
+
 def _ensure_sharing_dir() -> None:
     # Never mkdir under an unmounted mount point: the folder would land on the
     # system disk instead of the external drive. Without a drive the folder
@@ -159,6 +164,7 @@ Description=MusicDatabase - serve music.db/tag.db/files.db and the music library
 ExecStart={command}
 Restart=always
 RestartSec=10
+RestartPreventExitStatus=2
 """
 
 
@@ -225,13 +231,27 @@ def service_unit_current() -> bool:
     return path.exists() and path.read_text() == _service_unit(server_python())
 
 
+def service_unit_has_address() -> bool:
+    """Whether the unit _service_unit() writes gives the server an address -
+    from the settings this process started with, which are what it writes,
+    not .env (that may have changed since; see sharing_setup.restart_needed())."""
+    return bool(SHARING_LAN_INTERFACE or SHARING_VPN != VPN_OFF or SHARING_ADDRESSES)
+
+
 def install_sharing_service() -> list[str]:
     """
     Write (or overwrite) the user service + timer, enable the timer and
     (re)start the server now. Idempotent: re-running replaces the units and
     restarts the server on the current script/paths. Returns a log of the
     steps taken, for the menu to print.
+
+    Raises NoListenAddressError, writing nothing, when the server would have
+    no address to listen on - never an installed server that can't start.
     """
+    if not service_unit_has_address():
+        raise NoListenAddressError(
+            "the server would have no address to listen on (SHARING_LAN_INTERFACE, SHARING_VPN and "
+            "SHARING_ADDRESSES are all empty in the settings MusicDatabase started with)")
     python = server_python()
     SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
     service_path = service_unit_path()

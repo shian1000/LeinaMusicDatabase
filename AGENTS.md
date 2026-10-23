@@ -572,7 +572,12 @@ non-trivial work in that area.
   drive. `Settings` reads `.env` once at startup, so a change needs a restart.
 - The sharing server's own paths are in its systemd unit (written by "Setup this PC for database
   sharing" from these settings), so changing `.env` reaches the server only after that setup is
-  re-run.
+  re-run. Gotcha: the unit is written from the `Settings` read at startup, while `listening_plan()`
+  and the setup's checks read `.env` — they disagree until a restart. So every path that installs
+  the unit checks `sharing_setup.restart_needed()` first, and `install_sharing_service()` itself
+  refuses (`NoListenAddressError`) when the unit would have no address; the unit's
+  `RestartPreventExitStatus=2` keeps a server that still exits with "No address to serve on" from
+  restarting every 10 s.
 - "Setup this PC for database sharing" first offers the step-by-step setup for a newcomer
   (`utils/ui/sharing_wizard.py`; validation, suggestions and the read-only checks in
   `utils/common/sharing_setup.py`, which "Folders and network" shares — `value_warning()`,

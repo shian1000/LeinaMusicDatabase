@@ -203,6 +203,11 @@ what would be written now) and lingering, and a summary with the phone's address
 - `Restart=always`, not `on-failure`: on 2026-10-10 a stray SIGTERM (something killing whatever
   was on port 8002) stopped it for good, because `on-failure` treats a clean SIGTERM as success.
   `systemctl --user stop` still stops it normally.
+- `RestartPreventExitStatus=2`: exit code 2 is a setup error ("No address to serve on", a bad
+  argument), which a restart can't fix - it stays failed instead of restarting every 10 s (Elosy,
+  2026-10-22). The setup never writes such a unit anyway: `install_sharing_service()` refuses when
+  the settings MusicDatabase started with give no address, and "just install the service" asks for a
+  restart first when `.env` changed since start-up (the unit is written from the settings read then).
 - The timer uses `OnStartupSec=1min`, counted from the user's systemd manager start. With
   `Linger=no` (the owner chose this on 2026-10-10) that means one minute after login, not after
   boot. That's fine here because the machine logs into GNOME, and the data drive is only mounted after login

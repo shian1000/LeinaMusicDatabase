@@ -919,6 +919,7 @@ def test_settings_read_the_vpn_and_addresses():
 
 def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     calls = []
+    monkeypatch.setattr(sharing, "SHARING_VPN", "tailscale")
     monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", tmp_path / "systemd" / "user")
     monkeypatch.setattr(sharing, "_systemctl", lambda *args: calls.append(args))
     monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", tmp_path / "data-drive")
@@ -941,6 +942,8 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert f"--mount {sharing.SHARING_DRIVE_MOUNT}" in service
     assert str(sharing.SERVER_SCRIPT) in service
     assert "Restart=always" in service
+    # "No address to serve on" (exit 2) stops it instead of a restart every 10 s
+    assert "RestartPreventExitStatus=2" in service
     assert "OnStartupSec=1min" in timer
     assert "WantedBy=timers.target" in timer
     # The automatic request check: the venv's python (and yt-dlp on PATH), every 15 minutes
@@ -952,6 +955,34 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
         ("daemon-reload",), ("enable", "musicdatabase-share.timer"), ("restart", "musicdatabase-share.service"),
         ("enable", "--now", "musicdatabase-inbox.timer"),
     ] * 2
+
+
+@pytest.mark.parametrize("lan, vpn, addresses, has_address", [
+    ("", "off", [], False),
+    ("enp2s0", "off", [], True),
+    ("", "tailscale", [], True),
+    ("", "wg0", [], True),
+    ("", "off", ["198.51.100.7"], True),
+])
+def test_service_unit_has_address(monkeypatch, lan, vpn, addresses, has_address):
+    monkeypatch.setattr(sharing, "SHARING_LAN_INTERFACE", lan)
+    monkeypatch.setattr(sharing, "SHARING_VPN", vpn)
+    monkeypatch.setattr(sharing, "SHARING_ADDRESSES", addresses)
+    assert sharing.service_unit_has_address() is has_address
+
+
+def test_install_without_an_address_writes_and_starts_nothing(tmp_path, monkeypatch):
+    # Elosy 2026-10-22: a unit with --no-tailscale and no address restarted for ever
+    monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", tmp_path / "systemd" / "user")
+    monkeypatch.setattr(sharing, "_systemctl", lambda *args: pytest.fail("ran systemctl"))
+    monkeypatch.setattr(sharing, "SHARING_LAN_INTERFACE", "")
+    monkeypatch.setattr(sharing, "SHARING_VPN", "off")
+    monkeypatch.setattr(sharing, "SHARING_ADDRESSES", [])
+
+    with pytest.raises(sharing.NoListenAddressError):
+        sharing.install_sharing_service()
+
+    assert not sharing.SYSTEMD_USER_DIR.exists()
 
 
 # ==================== playlists ====================

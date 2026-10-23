@@ -516,6 +516,24 @@ def test_the_service_isnt_offered_without_an_address(tmp_path, monkeypatch, env)
     assert "no address" in report.not_done[0]
 
 
+def test_an_install_refused_for_no_address_is_listed_as_not_done(tmp_path, monkeypatch, env):
+    # .env has an address, the settings the unit is written from don't
+    from utils.database import sharing
+
+    def no_address():
+        raise sharing.NoListenAddressError("no address")
+
+    monkeypatch.setattr(wiz, "ask_yes_no", lambda message: True)
+    monkeypatch.setattr(sharing, "service_unit_current", lambda: False)
+    monkeypatch.setattr(sharing, "service_unit_path", lambda: tmp_path / "missing.service")
+    monkeypatch.setattr(sharing, "install_sharing_service", no_address)
+    monkeypatch.setattr(setup, "service_active", lambda name: False)
+    monkeypatch.setattr(setup, "listening_plan", lambda env_file: [("home network (enp2s0)", "192.0.2.10")])
+    report = wiz.Report()
+    wiz._check_service(env, report)
+    assert "no address" in report.not_done[0]
+
+
 def test_declined_lingering_is_listed_with_the_command(monkeypatch):
     monkeypatch.setattr(wiz, "ask_yes_no", lambda message: False)
     monkeypatch.setattr(setup, "linger_enabled", lambda: False)
@@ -546,3 +564,28 @@ def test_setup_database_sharing_offers_the_wizard_first(monkeypatch):
     monkeypatch.setattr(settings_menu, "install_sharing_service", lambda: pytest.fail("installed without asking"))
     settings_menu.setup_database_sharing()
     assert ran == [True]
+
+
+def test_setup_without_the_wizard_needs_a_restart_after_a_change(monkeypatch):
+    # .env changed since start-up: the unit would be written from the old settings
+    from menu.main_menu import settings as settings_menu
+
+    answers = iter([False, False])
+    monkeypatch.setattr(settings_menu, "ask_yes_no", lambda message: next(answers))
+    monkeypatch.setattr(settings_menu, "restart_needed", lambda: ["SHARING_LAN_INTERFACE"])
+    monkeypatch.setattr(settings_menu, "restart_to_continue", lambda: pytest.fail("restarted without a yes"))
+    monkeypatch.setattr(settings_menu, "install_sharing_service", lambda: pytest.fail("installed on old settings"))
+    settings_menu.setup_database_sharing()
+
+
+def test_setup_without_the_wizard_restarts_on_a_yes(monkeypatch):
+    from menu.main_menu import settings as settings_menu
+
+    restarted = []
+    answers = iter([False, True])
+    monkeypatch.setattr(settings_menu, "ask_yes_no", lambda message: next(answers))
+    monkeypatch.setattr(settings_menu, "restart_needed", lambda: ["SHARING_LAN_INTERFACE"])
+    monkeypatch.setattr(settings_menu, "restart_to_continue", lambda: restarted.append(True))
+    monkeypatch.setattr(settings_menu, "install_sharing_service", lambda: pytest.fail("installed on old settings"))
+    settings_menu.setup_database_sharing()
+    assert restarted == [True]
