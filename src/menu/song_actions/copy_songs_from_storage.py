@@ -1,6 +1,6 @@
 from upath import UPath
 import questionary
-from utils.common.file_management import copy_songs_using_index, library_index_uri
+from utils.common.file_management import LIBRARY_INDEX_NAME, copy_songs_using_index, library_index_uri
 from utils.ui.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
 from utils.common.debug import slog
 from settings import settings
@@ -21,11 +21,10 @@ def copy_songs_from_storage(songs):
         print("Warning: Could not reach the storage to check for an index file. The operation will be aborted.")
         return "Back"
 
+    # Songs are found only through the index; this program doesn't build it
     if not index_exists:
-        choice = questionary.select("Index file not found. Would you like to create an index before proceeding further?", choices=["Yes", "No"]).ask()
-
-        if choice == "No":
-            print("Sorry, not implemented")
+        print(f"No library index ({LIBRARY_INDEX_NAME}) in the music library folder - copying needs it.")
+        return "Back"
 
     recent_dirs = load_recent_dirs()
 
@@ -53,10 +52,7 @@ def copy_songs_from_storage(songs):
     slog(songs)
 
     try:
-        if index_exists and index_file.exists():
-            copy_songs_using_index(songs, index_file, paste_destination)
-        else:
-            print("TODO - operating without using index")
+        copy_songs_using_index(songs, index_file, paste_destination)
     except Exception as e:
         slog(e, "copy_songs_from_storage - copy operation failed")
         print("Warning: Copy operation failed due to storage/network error. Returning to menu.")

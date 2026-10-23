@@ -4,7 +4,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from menu.main_menu import main_menu
-from tests.test_scripts import test
 from utils.database.app_lock import hold_app_lock
 from utils.ui.first_run_prompt import ensure_databases
 from utils.ui.sharing_wizard import CONTINUE_SETUP_FLAG, run_sharing_wizard
@@ -24,8 +23,6 @@ def main():
     # The sharing setup restarted the app to read the settings it saved
     if CONTINUE_SETUP_FLAG in sys.argv[1:]:
         run_sharing_wizard(resume=True)
-    #Comment it to unload tests
-    # test()
     main_menu()
 
 if __name__ == "__main__":

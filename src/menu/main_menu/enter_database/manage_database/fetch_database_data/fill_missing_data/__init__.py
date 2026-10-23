@@ -6,7 +6,6 @@ from utils.ui.genre_review import fill_missing_genres
 
 def fill_missing_data():
     action_map = {
-        "Artists and title": lambda: print("Not yet implemented :)"),
         "Albums": fill_missing_albums,
         "Years": fill_missing_years,
         "Genres": fill_missing_genres,

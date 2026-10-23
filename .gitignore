@@ -1,4 +1,4 @@
-# Pywwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwon
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -44,7 +44,6 @@ file_matching_config.json
 # Disposable debug dumps
 debug.log
 debug.html
-tests/!DOCTYPE_html_html.txt
 youtube_link_cache.log
 yt_playlist_cache.json
 MusicDatabase - ToDo.txt

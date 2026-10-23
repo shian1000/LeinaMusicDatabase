@@ -183,7 +183,6 @@ def song_actions(songs_objects):
         "Add tags": lambda: add_tags_menu(songs_objects),
         "Copy songs from local storage": lambda: copy_songs_from_storage(songs_list),
         "Make YT playlist": lambda: make_yt_playlist_menu(songs_objects),
-        "Make TXT file": lambda: print("In progress"),
         "Remove check protection": lambda: remove_check_protection(songs_objects),
         "Report no YouTube video": lambda: report_no_yt_video(songs_objects),
         "Set YouTube link": lambda: set_youtube_link(songs_objects),

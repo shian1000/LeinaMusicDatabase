@@ -753,7 +753,7 @@ bootstrap moment actually execute.
 
 ### Adding a migration
 
-1. Edit the model in `datatables.py` (music) or `create_tag_db.py` (tag) — this file is still the
+1. Edit the model in `datatables.py` (music) or `tag_db_manager.py` (tag) — this file is still the
    schema's source of truth for the *current* shape.
 2. Add `migrations/<db_name>/NNNN_description.sql` with the matching DDL, e.g.
    `ALTER TABLE songs ADD COLUMN rating INTEGER;`. Use the next number after whatever's already in

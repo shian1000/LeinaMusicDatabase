@@ -3,7 +3,7 @@
 Scope: `database_getter.py` (the query API the menus call to turn a user's search
 string into `Song` / `Artist` rows) and the song/artist **category** system in
 `datatables.py`. Schema itself is just the SQLAlchemy models — `datatables.py`
-for `music.db` (`artists`, `songs`), `create_tag_db.py` for `tag.db` (`tags`,
+for `music.db` (`artists`, `songs`), `tag_db_manager.py` for `tag.db` (`tags`,
 `song_tags`).
 
 ## `get_artists_from_db_session()` returns alphabetical order, not best match

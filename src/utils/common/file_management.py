@@ -1,4 +1,4 @@
-from src.settings import settings
+from settings import settings
 from upath import UPath
 from pathlib import Path
 from utils.common.debug import slog

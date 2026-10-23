@@ -10,9 +10,6 @@ from menu.main_menu.enter_database.show_whole_database import show_whole_databas
 from utils.database.database_sessions import open_and_set_global_database_sessions, close_global_database_sessions
 from utils.youtube.manage_youtube_playlists import download_youtube_video
 
-def fetch_songs_from_txt_file_menu():
-    print("WIP")
-
 def download_yt_song_menu():
     link = questionary.text("Enter YouTube link:").ask()
     if not link:
@@ -27,7 +24,6 @@ def enter_database():
     action_map = {
         "Fetch songs": fetch_songs,
         "Fetch artists": fetch_artists,
-        "Fetch songs from txt file": fetch_songs_from_txt_file_menu,
         "Download YT song": download_yt_song_menu,
         "Manage database": manage_database,
         "Show whole database": show_whole_database

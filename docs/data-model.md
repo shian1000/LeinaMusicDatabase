@@ -1,11 +1,11 @@
 # Data model
 
 Two shared SQLite databases (plus one private `user.db` per user, see the end), each its own SQLAlchemy `Base` / engine / session — see
-`src/utils/database/datatables.py` (`music.db`) and `src/utils/database/create_tag_db.py`
+`src/utils/database/datatables.py` (`music.db`) and `src/utils/database/tag_db_manager.py`
 (`tag.db`). Both live under `src/database/` (gitignored — runtime data, not fixtures; see
 `AGENTS.md` → Database safety before writing to either directly).
 
-`datatables.py`/`create_tag_db.py` are authoritative for the *current* shape; schema history is
+`datatables.py`/`tag_db_manager.py` are authoritative for the *current* shape; schema history is
 tracked by the migration runner (`src/utils/database/migrations.py` — see
 [`runbooks/database.md`](runbooks/database.md) before adding a column). If this page and the code
 disagree, trust the code and fix this page.

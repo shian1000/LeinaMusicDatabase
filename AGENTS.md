@@ -38,7 +38,7 @@ Durable content that used to sprawl across root-level session reports (`OPTIMIZA
 ## Sources of truth
 
 1. Source code. There is no migration tool yet — the SQLAlchemy models are authoritative for
-   schema: `src/utils/database/datatables.py` for `music.db`, `src/utils/database/create_tag_db.py`
+   schema: `src/utils/database/datatables.py` for `music.db`, `src/utils/database/tag_db_manager.py`
    for `tag.db`.
 2. Tests and `requirements.txt` (pinned).
 3. This file.
@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,250 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,340 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -82,8 +82,8 @@ non-trivial work in that area.
   immediately — why: `docs/runbooks/database.md`. `local_library_dir` is the mp3 collection
   (`MUSIC_LIBRARY_DIR`), on the data drive since 2026-10-12 (an older copy on another disk is no
   longer the source). Its old
-  `.mp3_index.sqlite3` (made by some external tool; still used by "Copy songs from storage" and
-  `tags_fetcher`) stores local paths on the data drive; `files.db` below is meant to replace it.
+  `.mp3_index.sqlite3` (made by some external tool; still used by "Copy songs from storage")
+  stores local paths on the data drive; `files.db` below is meant to replace it.
 - `src/utils/database/files_index.py` — `files.db`, the music library index: one row per audio
   file under `local_library_dir` (path relative to it), its `songs.id` matched with
   `read_file_metadata()` + `LocalSongMatcher`, artist/title from tags as a fallback. Settings →
@@ -428,8 +428,8 @@ non-trivial work in that area.
   unit updates that topic's text too. Known fragility:
   importing `menu.song_actions` before `menu.main_menu` triggers a circular import
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
-  affect `main.py` itself (its own import order avoids it), but is why `tests/test_scripts.py` is
-  excluded from pytest collection (`tests/conftest.py`). Not yet fixed; not a reason to avoid
+  affect `main.py` itself (its own import order avoids it); a test or script importing
+  `menu.song_actions` must import `menu.main_menu` first. Not yet fixed; not a reason to avoid
   importing `menu.song_actions` normally through `main.py`'s own path. Separately,
   `manage_database/resolve_duplicates.py` (the submodule) is shadowed by
   `manage_database/__init__.py`'s own `resolve_duplicates()` *function* of the same name — a plain
@@ -454,8 +454,7 @@ non-trivial work in that area.
   artist/title split unconditionally (no yes/no there) but prints one summary instead of pausing
   per song.
 - `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
-  covers — keep it in sync with the tests). `tests/test_scripts.py` is an explicit scratch file
-  (its own docstring: "meant to be a mess"), excluded from collection via `tests/conftest.py`.
+  covers — keep it in sync with the tests). App code never imports from `tests/`.
   `tests/manual/` holds manual diagnostic scripts (real imports + live network), excluded from
   collection via its own `conftest.py`. Each calls `_sandbox.enter_sandbox()` before importing the
   app: the databases are copied into a temp folder and the app (database folder, `.env`, `debug.log`,
@@ -506,7 +505,7 @@ non-trivial work in that area.
   index, `migrations/files/`, next to music.db) is a fourth. Those files and tag.db point at
   `songs.id` with plain integers, so deleting or merging a song must go through the ORM (or log
   itself via `song_references.py`), and `songs.id` must never be set or reused by hand. `datatables.py` /
-  `create_tag_db.py` are the schema's source of truth for the *current* shape; schema history is
+  `tag_db_manager.py` are the schema's source of truth for the *current* shape; schema history is
   tracked by the migration runner in `src/utils/database/migrations.py`. Full procedure (backups,
   restore, adding a migration): [`docs/runbooks/database.md`](docs/runbooks/database.md).
 - Backups mostly happen automatically: `main.py` takes one at startup (once per calendar day) and
@@ -649,7 +648,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,250 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,340 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

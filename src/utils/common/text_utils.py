@@ -1,13 +1,9 @@
 import re
 import unicodedata
-from typing import Optional
-import tkinter as tk
 from utils.common.debug import slog
-import requests
 from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
-import time
 import base64
 import sys
 from utils.common.normalizer import normalize

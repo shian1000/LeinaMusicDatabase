@@ -27,7 +27,7 @@ and the full suite passes (1178 tests). What I decided where your handoff left i
   migration run adopts every migration file. I found one gap there and fixed it: tag.db's
   `applied_song_changes` table (tag migration 0002) wasn't in the models, so an empty tag.db had
   no cursor table and every start logged a failed song-reference update. It's a model now
-  (`AppliedSongChange` in `tag_db_manager.py` / `create_tag_db.py`). Checked against the owner's
+  (`AppliedSongChange` in `tag_db_manager.py`). Checked against the owner's
   schema: same tables, columns, indexes and triggers. The only differences are declared type
   names with the same affinity (VARCHAR vs TEXT).
 - **Only tag.db missing:** an empty one is created without asking **(decided)**, because the
