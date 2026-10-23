@@ -15,7 +15,7 @@ from utils.common.normalizer import name_key, normalize
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
 from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track
 from utils.discoveries.import_engine import LocalSongMatcher
-from utils.youtube.import_from_playlist import PLACEHOLDER_TITLES, playlist_item_metadata
+from utils.youtube.import_from_playlist import is_placeholder_title, playlist_item_metadata
 
 # Pairs found through the database outrank any by name
 _SAME_SONG_SCORE = 10.0
@@ -38,7 +38,7 @@ def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry
     entries = []
     for item in items:
         title = (item.get("title") or "").strip()
-        if not title or title.strip("[]") in PLACEHOLDER_TITLES:
+        if not title or is_placeholder_title(title):
             continue
         metadata = playlist_item_metadata(item)
         if not metadata.get("artist_name") and not metadata.get("title"):

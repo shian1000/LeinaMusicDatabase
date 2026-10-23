@@ -459,6 +459,12 @@ def get_artists_from_db_session(
             slog(words)
             return []
 
+        if category == artist_categories[2]:  # "artist id": a whole number, never a substring
+            if not query.isascii() or not query.isdigit():
+                print(f"'{query}' isn't an artist id - type a whole number.")
+                return []
+            return db_query.filter(Artist.id == int(query)).all()
+
         # Determine if the query contains any ASCII alphanumeric characters,
         # same logic as get_songs_from_db_session.
         query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in query)

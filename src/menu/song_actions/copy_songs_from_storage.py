@@ -1,6 +1,6 @@
 from upath import UPath
 import questionary
-from utils.common.file_management import copy_songs_using_index, get_proper_uri
+from utils.common.file_management import copy_songs_using_index, library_index_uri
 from utils.ui.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
 from utils.common.debug import slog
 from settings import settings
@@ -10,10 +10,7 @@ def copy_songs_from_storage(songs):
     if not settings.local_library_dir_str:
         print("No music library: MUSIC_LIBRARY_DIR isn't set - Settings -> Server -> Folders and network (or .env).")
         return "Back"
-    source_path_str = get_proper_uri()
-
-    index_file_str = (f"{source_path_str}.mp3_index.sqlite3")
-    index_file = UPath(index_file_str)
+    index_file = UPath(library_index_uri())
 
     # Check index existence but guard against remote filesystem/network errors (SMB, fsspec, etc.)
     try:

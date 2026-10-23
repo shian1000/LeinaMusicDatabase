@@ -65,6 +65,15 @@ def get_proper_uri():
     return uri
 
 
+LIBRARY_INDEX_NAME = ".mp3_index.sqlite3"
+
+
+def library_index_uri() -> str:
+    """The library's .mp3_index.sqlite3, inside the library folder: get_proper_uri()
+    may or may not end in "/" (str(UPath) drops it for a local folder)."""
+    return f"{get_proper_uri().rstrip('/')}/{LIBRARY_INDEX_NAME}"
+
+
 def create_temp_index(index_file):
     local_index = Path("/tmp/.mp3_index.sqlite3")
     local_index.write_bytes(index_file.read_bytes())

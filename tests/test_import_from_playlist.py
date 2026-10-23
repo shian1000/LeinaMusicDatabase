@@ -429,3 +429,29 @@ def test_quoted_title_without_feat_bracket_is_split_as_usual():
 def test_trailing_reupload_bracket_is_stripped():
     assert _build("DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")["title"] == "BRUNETKI I BLONDYNKI"
     assert _build("Artist - Song [Re-upload]")["title"] == "Song"
+
+
+# ---------------------------------------------------------
+# Deleted / private videos (YT-01)
+# ---------------------------------------------------------
+
+def test_ytdlp_playlist_skips_deleted_and_private_videos(monkeypatch):
+    import json
+    lines = [
+        {"id": "aaaaaaaaaaa", "title": "Artist - Song", "channel": "Artist"},
+        {"id": "bbbbbbbbbbb", "title": "[Private video]", "channel": None},
+        {"id": "ccccccccccc", "title": "[Deleted video]", "channel": None},
+    ]
+    stdout = "\n".join(json.dumps(line) for line in lines)
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=stdout))
+
+    items = m._fetch_playlist_items_ytdlp("PLx")
+
+    assert [item["video_id"] for item in items] == ["aaaaaaaaaaa"]
+
+
+def test_placeholder_titles_are_recognised_with_or_without_brackets():
+    assert m.is_placeholder_title("Private video")
+    assert m.is_placeholder_title("[Deleted video]")
+    assert not m.is_placeholder_title("Private Video Blues")
+    assert not m.is_placeholder_title(None)

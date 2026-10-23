@@ -27,6 +27,12 @@ from config.constants import YTDLP_PLAYLIST_LANG
 # import batch as "unknown artist/title" entries.
 PLACEHOLDER_TITLES = {"Private video", "Deleted video"}
 
+
+def is_placeholder_title(title: str | None) -> bool:
+    """A deleted / private video: the API titles it "Private video", yt-dlp's
+    --flat-playlist "[Private video]"."""
+    return (title or "").strip().strip("[]") in PLACEHOLDER_TITLES
+
 # Trailing "(...)"/"[...]" annotations that don't identify a genuinely
 # different version of the song - just upload metadata - so they're stripped
 # from the imported title entirely (e.g. "Mr. Vain (Original Radio Edit)" ->
@@ -436,7 +442,7 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
         except json.JSONDecodeError:
             continue
         video_id = info.get("id")
-        if not video_id:
+        if not video_id or is_placeholder_title(info.get("title")):
             continue
         items.append({
             "video_id": video_id,
@@ -467,7 +473,7 @@ def _fetch_playlist_items_api(playlist_id: str) -> list:
         for entry in response.get("items", []):
             snippet = entry.get("snippet", {})
             title = snippet.get("title", "")
-            if title in PLACEHOLDER_TITLES:
+            if is_placeholder_title(title):
                 continue
             video_id = snippet.get("resourceId", {}).get("videoId")
             if not video_id:

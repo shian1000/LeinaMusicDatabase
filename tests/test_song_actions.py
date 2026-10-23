@@ -41,3 +41,45 @@ def test_add_tags_refuses_an_empty_tag(tag_session, monkeypatch, capsys):
 
     assert tag_session.query(Tag).count() == 0
     assert "Aborted" in capsys.readouterr().out
+
+
+# ---- Copy songs from storage: the library index (COM-01) ----
+
+def _library_settings(library: str):
+    from upath import UPath
+    return SimpleNamespace(local_library_dir_str=library, local_library_dir=UPath(library),
+                           smb_username="user", smb_password="secret")
+
+
+def test_copy_from_local_storage_finds_the_index_inside_the_library(tmp_path, monkeypatch):
+    import importlib
+    from utils.common import file_management as fm
+    copy_menu = importlib.import_module("menu.song_actions.copy_songs_from_storage")
+    (tmp_path / ".mp3_index.sqlite3").write_bytes(b"")
+    library = _library_settings(f"{tmp_path}/")
+    monkeypatch.setattr(fm, "settings", library)
+    monkeypatch.setattr(copy_menu, "settings", library)
+    monkeypatch.setattr(copy_menu, "load_recent_dirs", lambda: [])
+    asked = []
+
+    def select(message, choices):
+        asked.append(message)
+        return SimpleNamespace(ask=lambda: "Back")
+    monkeypatch.setattr(copy_menu.questionary, "select", select)
+
+    copy_menu.copy_songs_from_storage([("Artist", "Song")])
+
+    assert asked == ["Where do you want the files to be copied into: "]
+
+
+@pytest.mark.parametrize("library, expected", [
+    ("/media/x/Music/", "/media/x/Music/.mp3_index.sqlite3"),
+    ("/media/x/Music", "/media/x/Music/.mp3_index.sqlite3"),
+    ("smb://nas/share/Music/", "smb://user:secret@nas/share/Music/.mp3_index.sqlite3"),
+    ("smb://nas/share/Music", "smb://user:secret@nas/share/Music/.mp3_index.sqlite3"),
+])
+def test_library_index_uri_is_inside_the_library_folder(library, expected, monkeypatch):
+    from utils.common import file_management as fm
+    monkeypatch.setattr(fm, "settings", _library_settings(library))
+
+    assert fm.library_index_uri() == expected
