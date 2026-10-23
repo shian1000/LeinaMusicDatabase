@@ -91,20 +91,31 @@ def fuzzy_match(a, b):
     return False
 
 
-def query_database(engine, query):
-    slog(query)
+def _artist_initial(artist) -> str:
+    name = normalize(artist or "")
+    return name[0] if name else ""
 
-    sql, params = query
-    artist = params["artist"]
-    title = params["title"]
 
-    sql = text("SELECT path, artist, title FROM files WHERE LOWER(artist) LIKE :artist_first_char")
-
+def load_index_rows(engine) -> dict[str, list]:
+    """Every file row (path, artist, title) of the library index, by the
+    first character of its normalize()d artist - one query for a whole copy,
+    and both sides normalized ("Ølafur Arnalds" under "o", which LOWER() in
+    SQL never gave)."""
     with Session(engine) as session:
-        candidates = session.execute(sql, {"artist_first_char": normalize(artist)[0] + '%'}).fetchall()
+        rows = session.execute(text("SELECT path, artist, title FROM files")).fetchall()
+    by_initial = {}
+    for row in rows:
+        initial = _artist_initial(row.artist)
+        if initial:
+            by_initial.setdefault(initial, []).append(row)
+    return by_initial
 
-    for row in candidates:
-        if fuzzy_match(artist, row.artist) and fuzzy_match(title, row.title):
+
+def find_in_index(rows_by_initial: dict[str, list], artist: str, title: str) -> str | None:
+    """The path of the indexed file matching artist and title
+    (fuzzy_match()), or None - also for an empty artist."""
+    for row in rows_by_initial.get(_artist_initial(artist), []):
+        if fuzzy_match(artist, row.artist) and fuzzy_match(title, row.title or ""):
             slog(row.path)
             return row.path
 
@@ -148,18 +159,14 @@ def copy_songs_using_index(
 
     engine = create_engine(f"sqlite:///{usable_index_path}")
 
-    with engine.connect():
-        for artist, title in songs:
-            query = (text("SELECT path FROM files WHERE LOWER(artist) = :artist AND LOWER(title) = :title"),
-                    {"artist": normalize(artist), "title": normalize(title)})
-
-            path_from_db = query_database(engine, query)
-            if not path_from_db:
-                print(f"Couldn't find {query[1]}. Skipping")
-            else:
-                copy_file_to_destination(path_from_db, paste_destination)
-
+    rows_by_initial = load_index_rows(engine)
     engine.dispose()
+    for artist, title in songs:
+        path_from_db = find_in_index(rows_by_initial, artist, title)
+        if not path_from_db:
+            print(f"Couldn't find {artist} - {title}. Skipping")
+        else:
+            copy_file_to_destination(path_from_db, paste_destination)
 
 
 

@@ -923,6 +923,12 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", tmp_path / "systemd" / "user")
     monkeypatch.setattr(sharing, "_systemctl", lambda *args: calls.append(args))
     monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", tmp_path / "data-drive")
+    # conftest's empty .env leaves them None, which the unit used to get as the text "None"
+    share = tmp_path / "data-drive" / "share"
+    monkeypatch.setattr(sharing, "SHARING_DIR", share)
+    monkeypatch.setattr(sharing, "PHONE_INBOX_DIR", share / "Inbox")
+    monkeypatch.setattr(sharing, "USERS_DIR", share / "Users")
+    monkeypatch.setattr(sharing, "GLOBAL_MOOD_CHANGES_DIR", share / "MoodChanges")
 
     sharing.install_sharing_service()
     first = sorted((p.name, p.read_text()) for p in sharing.SYSTEMD_USER_DIR.iterdir())
@@ -978,6 +984,7 @@ def test_install_without_an_address_writes_and_starts_nothing(tmp_path, monkeypa
     monkeypatch.setattr(sharing, "SHARING_LAN_INTERFACE", "")
     monkeypatch.setattr(sharing, "SHARING_VPN", "off")
     monkeypatch.setattr(sharing, "SHARING_ADDRESSES", [])
+    monkeypatch.setattr(sharing, "SHARING_DIR", tmp_path / "share")
 
     with pytest.raises(sharing.NoListenAddressError):
         sharing.install_sharing_service()
@@ -1901,3 +1908,34 @@ def test_library_client_hanging_up_mid_body_leaves_the_server_serving(library_se
 
     assert _get(f"{base}/library/1")[2] == AUDIO
     assert "Traceback" not in capsys.readouterr().err
+
+
+def test_service_unit_quotes_paths_with_spaces(monkeypatch):
+    # SRV-12: systemd splits ExecStart= at spaces - a drive called "My Drive" gave the server
+    # wrong arguments
+    import shlex
+    monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", Path("/media/owner/My Drive"))
+    monkeypatch.setattr(sharing, "SHARING_DIR", Path("/media/owner/My Drive/Share 100%"))
+    monkeypatch.setattr(sharing, "USERS_DIR", Path("/media/owner/My Drive/Share 100%/Users"))
+
+    unit = sharing._service_unit("/usr/bin/python3")
+
+    assert '--mount "/media/owner/My Drive"' in unit
+    assert '--dir "/media/owner/My Drive/Share 100%%"' in unit  # % is a specifier
+    exec_start = next(line for line in unit.splitlines() if line.startswith("ExecStart="))
+    args = shlex.split(exec_start.removeprefix("ExecStart=").replace("%%", "%"))
+    assert args[args.index("--dir") + 1] == "/media/owner/My Drive/Share 100%"
+    assert args[args.index("--users") + 1] == "/media/owner/My Drive/Share 100%/Users"
+    # plain paths stay unquoted, so units written before stay the same
+    assert args[0] == "/usr/bin/python3" and exec_start.startswith("ExecStart=/usr/bin/python3 ")
+
+
+def test_install_refuses_without_a_sharing_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(sharing, "SHARING_DIR", None)
+    monkeypatch.setattr(sharing, "SYSTEMD_USER_DIR", tmp_path / "systemd" / "user")
+    monkeypatch.setattr(sharing, "_systemctl", lambda *args: pytest.fail("systemctl called"))
+
+    with pytest.raises(sharing.SharingUnavailableError, match="SHARING_DIR"):
+        sharing.install_sharing_service()
+
+    assert not (tmp_path / "systemd").exists()

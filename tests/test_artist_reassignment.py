@@ -458,3 +458,78 @@ def test_delete_db_entry_refuses_an_artist_credited_as_an_additional_artist(sess
     database_management.delete_db_entry(bowie)
     session.commit()
     assert _names(session) == ["Queen"]
+
+
+# ---- renames by Spell check / Clean names onto an existing name (UI-13) -------
+
+def _clean_names_module(monkeypatch, session):
+    import importlib
+    import menu.main_menu  # noqa: F401  (import order, see AGENTS.md)
+    # the package's clean_names() function shadows the submodule
+    return importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")
+
+
+def test_clean_names_holds_a_rename_onto_another_artists_name(session, ui, monkeypatch):
+    answers, _, _ = ui
+    cn = _clean_names_module(monkeypatch, session)
+    sting, spaced = _artist(session, "Sting"), _artist(session, " Sting")
+    song = _song(session, "Fields of Gold", spaced)
+    held = {}
+
+    cn.strip_leading_spaces([song], held)
+
+    assert spaced.name == " Sting"  # not two artists called "Sting"
+    assert held == {spaced.id: (spaced, "Sting")}
+    answers.append("Merge")
+    ac.review_held_artist_renames(held)
+    session.expire_all()
+    assert _names(session) == ["Sting"] and song.artist_id == sting.id
+
+
+def test_clean_names_renames_when_no_other_artist_has_the_name(session, ui, monkeypatch):
+    cn = _clean_names_module(monkeypatch, session)
+    spaced = _artist(session, " Sting")
+    song = _song(session, "Fields of Gold", spaced)
+    held = {}
+
+    cn.strip_leading_spaces([song], held)
+
+    assert spaced.name == "Sting" and held == {}
+
+
+def test_lookalike_letters_fix_onto_another_artists_name_is_held(session, ui, monkeypatch):
+    cn = _clean_names_module(monkeypatch, session)
+    _artist(session, "Björk")
+    mixed = _artist(session, "Вjörk")  # Cyrillic В
+    song = _song(session, "Army of Me", mixed)
+    monkeypatch.setattr(cn.questionary, "checkbox", lambda *a, **kw: _Answer([0]))
+    held = {}
+
+    cn.fix_lookalike_letters([song], held)
+
+    assert mixed.name == "Вjörk"
+    assert held[mixed.id][1] == "Björk"
+
+
+def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, monkeypatch):
+    answers, _, _ = ui
+    import menu.main_menu  # noqa: F401
+    import importlib
+    md = importlib.import_module("menu.main_menu.enter_database.manage_database")
+    sting, caps = _artist(session, "Sting"), _artist(session, "STING")
+    song = _song(session, "Fields of Gold", caps)
+    monkeypatch.setattr(md, "get_songs_from_db_session", lambda *a: [song])
+    monkeypatch.setattr(md, "has_tag_on_song", lambda *a: False)
+    monkeypatch.setattr(md, "add_tag_to_song", lambda *a: None)
+    monkeypatch.setattr(md, "_find_local_spellcheck_match", lambda s: None)
+    monkeypatch.setattr(md, "is_full_album", lambda s: False)
+    monkeypatch.setattr(md, "submit_global_database_session", session.flush)
+    monkeypatch.setattr(md, "check_spelling", lambda a, t: {"corrected_artist": "Sting", "corrected_title": t})
+    monkeypatch.setattr(md, "ask_yes_no", lambda q: True)
+    monkeypatch.setattr(md, "_MENU_SPELLCHECK_CACHE", {})
+    answers.append("Merge")
+
+    md.check_spelling_menu()
+
+    session.expire_all()
+    assert _names(session) == ["Sting"] and song.artist_id == sting.id

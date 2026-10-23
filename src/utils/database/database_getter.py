@@ -94,6 +94,14 @@ CATEGORY_DB_FILTERS = {
 }
 
 
+# Searched by an equal whole number only (the text in "isn't ..."), never by
+# the substring fallback
+_WHOLE_NUMBER_CATEGORIES = {
+    song_categories[3]: "a year",  # "year"
+    song_categories[7]: "an artist id",  # "artist id"
+}
+
+
 # The Python fallback and every display path read each song's additional
 # artists; without this that's one lazy query per song over the whole DB.
 _EAGER_ADDITIONAL_ARTISTS = selectinload(Song.additional_artist_links).selectinload(AdditionalSongArtist.artist)
@@ -387,11 +395,9 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     if category is None:
         return base_query.all()
     
-    # Determine if the query contains any ASCII alphanumeric characters.
-    # Use isalnum() instead of isalpha() so numeric-only queries (like artist IDs)
-    # are treated as suitable for DB-level filtering (and won't match substrings
-    # inside other numbers, because the category-specific filter will use
-    # equality for artist_id).
+    # Determine if the query contains any ASCII alphanumeric characters
+    # (isalnum(), so a number counts too): only then is DB-level LIKE
+    # filtering tried first.
     query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in (query or ""))
 
     category = _validate_category(category, song_categories + search_only_categories)
@@ -409,6 +415,17 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
 
     if category == "tag":
         return _songs_by_tag(words, base_query, tag_session)
+
+    if category in _WHOLE_NUMBER_CATEGORIES:
+        # Equal, never a substring: no Python fallback, which would find
+        # artist id 5 in 15, 50, ... once SQL found nothing
+        if not all(w.isascii() and w.isdigit() for w in words):
+            print(f"'{query.strip()}' isn't {_WHOLE_NUMBER_CATEGORIES[category]} - type a whole number.")
+            return []
+        filtered_query = base_query
+        for word in words:
+            filtered_query = filtered_query.filter(CATEGORY_DB_FILTERS[category](word))
+        return filtered_query.all()
 
     # Primary DB-level filtering
     if (query_has_any_standard_latin_characters):

@@ -25,7 +25,9 @@ Each source is now just a **metadata builder**: it turns its own input (mp3
 files on disk, or a YouTube playlist's videos - see
 `docs/agent-notes/youtube-search-matching.md` for that side) into a list of
 plain dicts (`artist_name`, `title` required; `album`, `year`, `language`,
-`origin`, `youtube_video_id`, `_label` optional - `_label` is what shows up in
+`origin`, `youtube_video_id`, `_label` optional - except that `create_song_entry()`
+reads `metadata["year"]` directly, so a new song's dict must carry the `year` key
+(None is fine; a missing key is a `KeyError` - "Add song" passes every key) - `_label` is what shows up in
 skip/timing messages instead of the default `"<artist> - <title>"`), then hands
 that list to `run_import_batch()`. `run_import_batch()` itself doesn't know or
 care which source it came from - a metadata dict missing `artist_name`/`title`

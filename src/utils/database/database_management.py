@@ -12,79 +12,60 @@ from utils.database.albums import reassign_artist_albums
 from rich import print
 
 
-def edit_db_entry(db_object, category: str, new_value: str):
+# What edit_db_entry() can change: category -> attribute. The rest of
+# song_categories / artist_categories ("tag", "artist id", ...) are search
+# categories only.
+EDITABLE_ARTIST_FIELDS = {
+    artist_categories[0]: "name",  # "artist name"
+    artist_categories[1]: "origin",  # "artist origin"
+}
+EDITABLE_SONG_FIELDS = {
+    song_categories[0]: "title",  # "title"
+    song_categories[2]: "album",  # "album"
+    song_categories[3]: "year",  # "year"
+    song_categories[4]: "language",  # "language"
+}
 
-    # remove_tag_from_song(db_object, "spellchecked")
-    # remove_tag_from_song(db_object, "album_checked")
 
-    #setup
+def edit_db_entry(db_object, category: str, new_value: str) -> bool:
+    """Set one field of a song or an artist (the caller commits). A category
+    it can't edit, or a year that isn't a number, is reported and changes
+    nothing. True = changed."""
     category = category.strip().lower()
     new_value = new_value.strip()
     slog(db_object)
 
     #checking if we should work with Artist or Song table
     if(type(db_object) == Artist):
-        valid_categories = artist_categories
-        artist_name = db_object.name
+        fields = EDITABLE_ARTIST_FIELDS
+        label = f"'{db_object.name}'"
     elif(type(db_object) == Song):
         if category in artist_categories:
             # The Artist row is shared by all its songs: crediting the song to
             # another artist is artist_reassignment.set_primary_artist()
             raise ValueError(f"'{category}' belongs to the artist, not to the song")
-        valid_categories = song_categories + search_only_categories
-        artist_name = db_object.artist.name
-        song_title = db_object.title
+        fields = EDITABLE_SONG_FIELDS
+        label = f"'{db_object.title}' by '{db_object.artist.name}'"
     else:
         print(f"db_object is neither Artist nor Song. It's {type(db_object)}. Aborting")
-        return
-    slog(valid_categories)
-    old_value = None
+        return False
 
-    #checking if the category is valid for the given db_object
-    if category not in valid_categories:
-        print(f"Invalid category '{category}'. Editable options: {', '.join(sorted(valid_categories))}")
-        return
-
-    #interpretting what category to work with
-    if category == artist_categories[0]:
-        old_value = db_object.name or "---"
-        db_object.name = new_value
-
-    if category == artist_categories[1]:
-        old_value = db_object.origin or "---"
-        db_object.origin = new_value
-
-    if category == song_categories[0]:
-        old_value = db_object.title or "---"
-        db_object.title = new_value
-
-    if isinstance(db_object, Artist):
-        slog(db_object)
-        slog(db_object.name)
-        slog(db_object.id)
-
-    if category == song_categories[2]:
-        old_value = db_object.album or "---"
-        db_object.album = new_value
-
-    if category == song_categories[3]:
-        if not new_value.isdigit():
+    if category not in fields:
+        print(f"Can't edit '{category}' here. Editable: {', '.join(fields)}")
+        return False
+    attribute = fields[category]
+    value = new_value
+    if attribute == "year":
+        if not new_value.isascii() or not new_value.isdigit():
             print(f"Year must be a number, got '{new_value}'.")
-            return
-        old_value = str(db_object.year) if db_object.year else "---"
-        db_object.year = int(new_value)
+            return False
+        value = int(new_value)
 
-    if category == song_categories[4]:
-        old_value = db_object.language or "---"
-        db_object.language = new_value
-
-    if not old_value:
-        old_value = "---"
-
-    if type(db_object) == Artist:
-        print(f"Updated {category} for '{artist_name}: {old_value} --> {new_value}")
-    if type(db_object) == Song:
-        print(f"Updated {category} for '{song_title}' by '{artist_name}': '{old_value}' --> '{new_value}'.")
+    old_value = getattr(db_object, attribute)
+    setattr(db_object, attribute, value)
+    old_text = "---" if old_value in (None, "") else str(old_value)
+    print(f"Updated {category} for {label}: '{old_text}' --> '{new_value}'.")
+    return True
 
 class ArtistHasSongsError(ValueError):
     """An artist still credited on songs can't be deleted (songs.artist_id is NOT NULL)."""
@@ -156,28 +137,19 @@ def merge_artists_in_db(merge_from, merge_to):
         print(f"Artist {merge_from_name} (id {from_id}) still has {remaining} song(s); not deleting.")
 
 
+def artist_primary_songs(artist: Artist) -> list[Song]:
+    """The songs crediting `artist` as their primary artist, oldest first."""
+    music_session, _ = get_global_database_sessions()
+    return music_session.query(Song).filter(Song.artist_id == artist.id).order_by(Song.id).all()
+
+
 def divide_artist(db_object):
     """Split an artist so each song (except the first) becomes assigned to a newly created
-    artist record with the same name.
-
-    Behavior:
-    - Validates that db_object is an Artist
-    - Fetches all songs for that artist
-    - Shows the list to the user and asks for confirmation
-    - For every song except the first one, creates a new Artist(name=old_name) and
-      reassigns the song to that new artist
-    - Commits the changes to the global music session
+    artist record with the same name (the menu shows the songs and asks first).
+    Commits the changes to the global music session.
     """
-    
     music_session, _ = get_global_database_sessions()
-    artist_id = int(db_object.id)
-    songs = (
-        music_session
-        .query(Song)
-        .filter(Song.artist_id == artist_id)
-        .order_by(Song.id)
-        .all()
-    )
+    songs = artist_primary_songs(db_object)
 
     original_name = db_object.name
     for s in songs[1:]:

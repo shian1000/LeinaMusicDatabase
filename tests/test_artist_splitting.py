@@ -219,3 +219,32 @@ def test_apply_keeps_every_song_of_a_shared_album_linked():
     assert [s.album_id for s in songs] == [album_id, album_id]
     assert session.get(albums.Album, album_id).artist.name == "Albo Inaczej"
     session.close()
+
+
+def test_apply_gives_the_joined_artists_album_rows_to_the_first_part():
+    # DB-11: an album row the joined artist still owns without songs (one with only a cover,
+    # or one whose title the first part already had) used to lose its artist - a compilation
+    from utils.database import albums
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    albums.register_album_sync(factory)
+    session = factory()
+
+    joined = Artist(name="Futro x Fisz")
+    session.add(Song(title="Track", artist=joined, album="Debiut"))
+    session.add(Artist(name="Fisz"))
+    session.commit()
+    empty = albums.Album(title="Okładka", artist=joined)
+    session.add(empty)
+    session.commit()
+    empty_id = empty.id
+
+    (candidate,) = split.find_split_candidates(session, [joined])
+    split.apply_artist_split(session, candidate)
+    session.commit()
+
+    album = session.get(albums.Album, empty_id)
+    assert album is not None and album.artist is not None
+    assert album.artist.name == "Futro"
+    session.close()

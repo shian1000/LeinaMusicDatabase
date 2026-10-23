@@ -161,3 +161,27 @@ def test_password_change_rename_and_delete_revoke_the_phones_tokens(users_env, t
     assert account_auth.revoke_token(users_env, kept)
     assert account_auth.token_user(users_env, kept) is None
     assert not account_auth.revoke_token(users_env, kept)
+
+
+def test_tokens_json_writes_wait_for_another_process_holding_its_lock(users_env):
+    # SRV-08: the server and the app both rewrite tokens.json; a lock only inside one process let
+    # a login read just before a password change write the revoked tokens back
+    import fcntl
+    import threading
+    from utils.database import account_auth
+
+    users.create_user("ania", "secret1")
+    folder = users_env / "ania"
+    token = account_auth.issue_token(users_env, "ania")
+
+    # another open file description of the lock file = how another process holds it
+    with open(folder / account_auth.TOKENS_LOCK_FILENAME, "a") as other:
+        fcntl.flock(other, fcntl.LOCK_EX)
+        revoke = threading.Thread(target=account_auth.revoke_all_tokens, args=(folder,))
+        revoke.start()
+        revoke.join(timeout=0.3)
+        assert revoke.is_alive()  # waits for the lock
+        assert account_auth.token_user(users_env, token) == "ania"
+        fcntl.flock(other, fcntl.LOCK_UN)
+    revoke.join(timeout=5)
+    assert account_auth.token_user(users_env, token) is None

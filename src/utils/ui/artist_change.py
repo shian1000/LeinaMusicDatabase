@@ -246,3 +246,25 @@ def rename_artist(artist: Artist, new_name: str) -> bool:
     else:
         print("Aborted")
     return True
+
+
+def has_artist_twin(artist: Artist, new_name: str) -> bool:
+    """Another artist already has `new_name` (after normalize())."""
+    session, _ = get_global_database_sessions()
+    return bool(artists_named(session, new_name, exclude=artist))
+
+
+def review_held_artist_renames(held: dict[int, tuple[Artist, str]]) -> None:
+    """Renames a scan (Spell check, Clean names) held back, keyed by artist
+    id, because another artist already has the new name: one by one, merge
+    into it, rename anyway or cancel (rename_artist())."""
+    if not held:
+        return
+    print("\n" + "=" * 70)
+    print(f"REVIEW: {len(held)} artist rename(s) onto a name another artist already has")
+    print("=" * 70)
+    for artist, new_name in held.values():
+        print(f'"{artist.name}"  ->  "{new_name}"')
+        if not rename_artist(artist, new_name):
+            artist.name = new_name
+    submit_global_database_session()

@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,340 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,390 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
@@ -209,7 +209,9 @@ non-trivial work in that area.
   standard-library only because `sharing_server.py` imports it too). Tokens are kept only as hashes in
   `Users/<name>/tokens.json`; re-password / rename / delete must keep dropping them
   (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
-  `docs/runbooks/database.md` → "Logging in from the phone". Permissions the owner grants
+  `docs/runbooks/database.md` → "Logging in from the phone". Both the server and the app rewrite
+  `tokens.json`, so every read-modify-write holds an flock on `.tokens.lock` next to it
+  (`account_auth._tokens_locked()`), not just a thread lock. Permissions the owner grants
   (Users → Permissions, `users.set_permissions()`) live in `account.json`, not `user.db`; a new one
   goes into `account_auth.PERMISSIONS` + `constants.PERMISSION_LABELS`. Leina Radio ignores names it
   doesn't know, so adding one needs no app change; renaming or removing one does. The server reads them per
@@ -642,7 +644,11 @@ non-trivial work in that area.
   (`utils/ui/artist_change.change_songs_artist()` → `artist_reassignment.set_primary_artist()`:
   the song is credited to another, found or new, artist; an artist left without songs can be
   merged into it or deleted), while the artist's name / origin / Latin form are edited only from
-  Artist actions → Edit (renaming onto an existing name offers a merge). "Swap title and artist
+  Artist actions → Edit (renaming onto an existing name offers a merge). Spell check and Clean names
+  never rename an artist onto a name another artist already has (`artist_change.has_artist_twin()`):
+  that rename is held and asked at the end with the same merge offer
+  (`review_held_artist_renames()`). `edit_db_entry()` changes only `EDITABLE_SONG_FIELDS` /
+  `EDITABLE_ARTIST_FIELDS` (anything else is reported, not "Updated"); the editor offers only those. "Swap title and artist
   names" (`swap_titles_and_artist_names()`, the single-song editor and Song actions share it)
   renames the artist row only when it has no other song, or when the user picks "for all its
   songs"; otherwise the song moves to an artist named like its old title
@@ -652,7 +658,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,340 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,390 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

@@ -19,6 +19,7 @@ Two call sites:
 """
 
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -134,29 +135,47 @@ def share_databases_quietly() -> list[Path]:
 
 # ==================== systemd user service ====================
 
+# Left unquoted in a unit, so units written before quoting stay the same
+_SYSTEMD_PLAIN_ARG = re.compile(r"[A-Za-z0-9_./:@+=,-]+")
+
+
+def _arg(value, variables: bool = True) -> str:
+    """One argument of a unit's ExecStart= (or an Environment= assignment,
+    `variables` False): systemd splits the line at spaces, so anything but
+    plain characters goes in double quotes with \\ and " escaped, % (a
+    specifier) doubled, and $ (a variable, ExecStart= only) too."""
+    text = str(value)
+    if _SYSTEMD_PLAIN_ARG.fullmatch(text):
+        return text
+    text = text.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    if variables:
+        text = text.replace("$", "$$")
+    return f'"{text}"'
+
+
 def _service_unit(python: str) -> str:
-    command = f"{python} {SERVER_SCRIPT} --dir {SHARING_DIR}"
+    command = f"{_arg(python)} {_arg(SERVER_SCRIPT)} --dir {_arg(SHARING_DIR)}"
     # No --mount: SHARING_DIR is on the system disk
     if SHARING_DRIVE_MOUNT is not None:
-        command += f" --mount {SHARING_DRIVE_MOUNT}"
+        command += f" --mount {_arg(SHARING_DRIVE_MOUNT)}"
     command += f" --port {SHARING_HTTP_PORT}"
     if SHARING_LAN_INTERFACE:
-        command += f" --lan-interface {SHARING_LAN_INTERFACE}"
+        command += f" --lan-interface {_arg(SHARING_LAN_INTERFACE)}"
     # Nothing added for Tailscale (the server script's own default), so a
     # unit written before SHARING_VPN existed stays the same
     if SHARING_VPN != VPN_TAILSCALE:
         command += " --no-tailscale"
     if SHARING_VPN not in (VPN_TAILSCALE, VPN_OFF):
-        command += f" --vpn-interface {SHARING_VPN}"
+        command += f" --vpn-interface {_arg(SHARING_VPN)}"
     for address in SHARING_ADDRESSES:
-        command += f" --address {address}"
-    command += (f" --inbox {PHONE_INBOX_DIR} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
+        command += f" --address {_arg(address)}"
+    command += (f" --inbox {_arg(PHONE_INBOX_DIR)} --max-request-bytes {PHONE_REQUEST_MAX_BYTES}"
                 f" --inbox-limit-bytes {PHONE_INBOX_LIMIT_BYTES}")
-    command += f" --users {USERS_DIR} --mood-changes {GLOBAL_MOOD_CHANGES_DIR}"
+    command += f" --users {_arg(USERS_DIR)} --mood-changes {_arg(GLOBAL_MOOD_CHANGES_DIR)}"
     # The library's files for /library/<files.id>; an smb:// library isn't served
     library = local_library_path()
     if library is not None:
-        command += f" --library {library}"
+        command += f" --library {_arg(library)}"
     return f"""[Unit]
 Description=MusicDatabase - serve music.db/tag.db/files.db and the music library's files to the mobile app, log it in and take its requests, over VPN and the LAN
 
@@ -189,9 +208,9 @@ Description=MusicDatabase - settle new requests from the phone on its own where 
 
 [Service]
 Type=oneshot
-WorkingDirectory={REPO_ROOT}
-Environment=PATH={path}
-ExecStart={python} {INBOX_AUTO_SCRIPT}
+WorkingDirectory={str(REPO_ROOT).replace("%", "%%")}
+Environment={_arg(f"PATH={path}", variables=False)}
+ExecStart={_arg(python)} {_arg(INBOX_AUTO_SCRIPT)}
 Nice=10
 """
 
@@ -246,8 +265,11 @@ def install_sharing_service() -> list[str]:
     steps taken, for the menu to print.
 
     Raises NoListenAddressError, writing nothing, when the server would have
-    no address to listen on - never an installed server that can't start.
+    no address to listen on - never an installed server that can't start -
+    and SharingUnavailableError when SHARING_DIR isn't set.
     """
+    if SHARING_DIR is None:
+        raise SharingUnavailableError(drive_unavailable_message(None))
     if not service_unit_has_address():
         raise NoListenAddressError(
             "the server would have no address to listen on (SHARING_LAN_INTERFACE, SHARING_VPN and "

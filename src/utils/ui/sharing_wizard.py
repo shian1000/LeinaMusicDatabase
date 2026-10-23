@@ -265,6 +265,7 @@ def _check_users(report: Report) -> None:
 def _check_service(env_file: Path, report: Report) -> None:
     from utils.database.sharing import (
         NoListenAddressError,
+        SharingUnavailableError,
         install_sharing_service,
         service_unit_current,
         service_unit_path,
@@ -296,6 +297,10 @@ def _check_service(env_file: Path, report: Report) -> None:
     except NoListenAddressError as exc:
         _say(f"Not installed: {exc}", RED)
         report.skip("the sharing server (no address to listen on)")
+        return
+    except SharingUnavailableError as exc:
+        _say(f"Not installed: {exc}", RED)
+        report.skip("the sharing server (no sharing folder)")
         return
     except subprocess.CalledProcessError as exc:
         _say(f"Setup failed: {' '.join(exc.cmd)}\n{(exc.stderr or '').strip()}", RED)

@@ -3,9 +3,9 @@ from utils.ui.prompts import ask_yes_no
 import time
 from utils.database.database_getter import get_artists_from_db_session, extract_db_object_info
 from utils.common.debug import slog, mlog
-from utils.database.database_sessions import submit_global_database_session, get_global_database_sessions
-from utils.database.database_management import merge_artists_in_db, divide_artist
-from utils.database.datatables import artist_categories, Song, song_categories
+from utils.database.database_sessions import submit_global_database_session
+from utils.database.database_management import artist_primary_songs, merge_artists_in_db, divide_artist
+from utils.database.datatables import artist_categories, song_categories
 from rich import print
 from questionary import Style
 from utils.ui.menu_utils import pick_from_db_objects, ask_for_entires_list
@@ -68,19 +68,13 @@ def divide_artists_menu():
         return
     
     obj = pick_from_db_objects(artist_objects, question=q0)
+    if obj is None:  # Back, Esc or Ctrl+C
+        return
 
-    music_session, _ = get_global_database_sessions()
-    artist_id = int(obj.id)
-    songs = (
-        music_session
-        .query(Song)
-        .filter(Song.artist_id == artist_id)
-        .order_by(Song.id)
-        .all()
-    )
+    songs = artist_primary_songs(obj)
 
     if not songs:
-        print(f"Artist '{obj.name}' (id {artist_id}) has no songs. Nothing to do.")
+        print(f"Artist '{obj.name}' (id {obj.id}) has no songs. Nothing to do.")
         return
 
     print(f"Found {len(songs)} song(s) for artist '{obj.name}':")

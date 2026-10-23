@@ -88,28 +88,32 @@ def fill_missing_years():
             submit_global_database_session()  # keep the years taken from the database
             return
 
-        for (artist_name, album_name), songs in groups.items():
-            print()
-            label = f"{artist_name} - {album_name}"
-            print(f"Checking release year for \033[93m{label}\033[0m")
-            result = (release_year_from_stored_link(songs)
-                      or discover_release_year_result(
-                          artist_name, album_name, False, modules, artist_match_synonyms(songs[0].artist),
-                          alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
-                          album_songs=songs,
-                      ))
-            _collect(label, result, songs, results, review_results)
+        try:
+            for (artist_name, album_name), songs in groups.items():
+                print()
+                label = f"{artist_name} - {album_name}"
+                print(f"Checking release year for \033[93m{label}\033[0m")
+                result = (release_year_from_stored_link(songs)
+                          or discover_release_year_result(
+                              artist_name, album_name, False, modules, artist_match_synonyms(songs[0].artist),
+                              alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
+                              album_songs=songs,
+                          ))
+                _collect(label, result, songs, results, review_results)
 
-        for song in singles:
-            print()
-            label = f"{song.artist.name} - {song.title}"
-            print(f"Checking release year for single \033[93m{label}\033[0m")
-            result = (release_year_from_stored_link([song])
-                      or discover_release_year_result(
-                          song.artist.name, song.title, True, modules, artist_match_synonyms(song.artist), song=song,
-                          alt_script_query=cyrillic_search_variant(song.title, [song.artist.name, song.album]),
-                      ))
-            _collect(label, result, [song], results, review_results)
+            for song in singles:
+                print()
+                label = f"{song.artist.name} - {song.title}"
+                print(f"Checking release year for single \033[93m{label}\033[0m")
+                result = (release_year_from_stored_link([song])
+                          or discover_release_year_result(
+                              song.artist.name, song.title, True, modules, artist_match_synonyms(song.artist), song=song,
+                              alt_script_query=cyrillic_search_variant(song.title, [song.artist.name, song.album]),
+                          ))
+                _collect(label, result, [song], results, review_results)
+        except KeyboardInterrupt:
+            # The lookups are slow (a browser per module): keep what was found
+            print("\nStopped - the years found so far are saved.")
     finally:
         close_global_driver()
 

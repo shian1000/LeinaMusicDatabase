@@ -21,6 +21,7 @@ from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
 import questionary
 from utils.ui.prompts import ask_yes_no
+from utils.ui.artist_change import has_artist_twin, rename_artist
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
@@ -123,7 +124,9 @@ def check_spelling_menu():
 
         if new_artist != song.artist.name:
             print(f"{RED}{song.artist.name}{RESET} -> {GREEN}{new_artist}{RESET}")
-            if should_auto_confirm(song.artist.name, new_artist):
+            # Never automatic onto a name another artist has: that's a merge
+            # question, asked in the review below
+            if should_auto_confirm(song.artist.name, new_artist) and not has_artist_twin(song.artist, new_artist):
                 print("Auto-confirmed")
                 song.artist.name = new_artist
             elif song.artist.id not in pending_artist_corrections:
@@ -162,8 +165,10 @@ def check_spelling_menu():
         for correction in pending_artist_corrections.values():
             print(f"{RED}{correction['old_name']}{RESET} -> {GREEN}{correction['new_name']}{RESET}")
             if ask_yes_no("Do you wish to correct this artist name?"):
-                print("Confirmed")
-                correction["artist"].name = correction["new_name"]
+                # An artist with that name already: merge into it instead
+                if not rename_artist(correction["artist"], correction["new_name"]):
+                    print("Confirmed")
+                    correction["artist"].name = correction["new_name"]
 
         for correction in pending_title_corrections:
             song = correction["song"]

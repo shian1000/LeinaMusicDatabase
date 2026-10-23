@@ -19,7 +19,7 @@ from config.constants import (
 )
 from utils.common.normalizer import normalize
 from utils.common.text_utils import is_soundtrack_artist
-from utils.database.albums import link_songs
+from utils.database.albums import link_songs, reassign_artist_albums
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import add_additional_artist
@@ -284,6 +284,10 @@ def apply_artist_split(session, candidate: SplitCandidate, created: dict[str, Ar
 
     session.flush()
     if not joined.songs and not joined.additional_song_links:
+        # Album rows it still owns go to the first part, like every artist
+        # removal (artist_reassignment.remove_unused_artist()): deleted with
+        # them, their artist_id would be NULL - a compilation
+        reassign_artist_albums(session, joined.id, primary.id)
         session.delete(joined)
     session.flush()
     # Songs sharing an album move one by one; the first ones lost their album

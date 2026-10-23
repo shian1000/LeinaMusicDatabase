@@ -212,7 +212,9 @@ From mp3 files' tags - Enter database -> Manage database -> Fetch database data 
 From a YouTube playlist - same menu -> "Import data from YouTube playlist": paste the playlist's
   link. Artist and title are read from the video titles; the videos become the songs' YouTube links.
 A single YouTube video - Enter database -> "Download YT song" saves its audio into import/.
-By hand - Enter database -> Manage database -> Manual management -> "Add song".
+By hand - Enter database -> Manage database -> Manual management -> "Add song": title and artist
+  are required, the rest optional; it is checked like an import (spelling, an existing artist or
+  a similar song).
 From Leina Radio - a song played on the phone that MusicDatabase doesn't have is sent as a
   request: Enter database -> Manage database -> "Resolve new requests" (the number in brackets
   is how many wait). A phone without a server sends a .zip package instead - "Import a request

@@ -3,9 +3,15 @@ from utils.ui.prompts import ask_yes_no
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.common.debug import slog
 from utils.database.database_sessions import submit_global_database_session
-from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
-from utils.ui.menu_utils import pick_from_db_objects, get_list_of_properties_from_db_object, search_and_pick_db_object
-from utils.database.database_management import ArtistHasSongsError, edit_db_entry, delete_db_entry, add_db_entry
+from utils.ui.menu_utils import pick_from_db_objects, search_and_pick_db_object
+from utils.database.database_management import (
+    EDITABLE_ARTIST_FIELDS,
+    EDITABLE_SONG_FIELDS,
+    ArtistHasSongsError,
+    delete_db_entry,
+    edit_db_entry,
+)
+from utils.discoveries.import_engine import run_import_batch
 from utils.database.song_artists import (
     additional_artists,
     additional_artist_role,
@@ -102,16 +108,13 @@ def edit_entry_menu(mode: str = None, db_object = None):
     else:
         mode = "Artist" if isinstance(db_object, Artist) else "Song"
 
-    action_map = artist_categories if mode == "Artist" else song_categories
-
-
-    properties_list = get_list_of_properties_from_db_object(db_object)
-    fields = list(zip(action_map, properties_list))
+    # Only what edit_db_entry() can change; for a song the artist row's own
+    # fields (name, origin, ...) are edited from Artist actions, and "artist"
+    # credits the song to another artist
+    editable = EDITABLE_ARTIST_FIELDS if mode == "Artist" else EDITABLE_SONG_FIELDS
+    fields = [(category, getattr(db_object, attribute)) for category, attribute in editable.items()]
     artist_option = None
     if mode == "Song":
-        # The artist row's own fields (name, origin, ...) are edited from
-        # Artist actions; here "artist" credits the song to another artist
-        fields = [(category, value) for category, value in fields if category not in artist_categories]
         artist_option = f"artist ({db_object.artist.name})"
     # menu label -> category edited by typing a new value
     field_options = {f"{category} ({value})": category for category, value in fields}
@@ -236,89 +239,38 @@ def edit_songs_menu(songs_objects):
             slog(selected_song.artist.id)
             edit_entry_menu(db_object=selected_song)
 
+def _ask_text(question: str, required: bool = False, number: bool = False) -> str | None:
+    """Typed text, stripped; None = cancelled (Ctrl+C / Esc)."""
+    def validate(value: str):
+        value = value.strip()
+        if required and not value:
+            return "Can't be blank"
+        if number and value and not (value.isascii() and value.isdigit()):
+            return "Type a whole number"
+        return True
+    answer = questionary.text(question, validate=validate).ask()
+    return None if answer is None else answer.strip()
+
+
 def add_songs_menu():
-    exit_label = "/exit"
-    user_input = ""
-    song_labels = []
-    artist_labels = []
-
-    picked_artist = None
-
-    for category in song_categories:
-        user_input = None
-        user_input = input(f"Type the {category} of the song (type '{exit_label}' to abort): ")
-        if user_input == exit_label:
-            break
-
-        if(category == song_categories[0]):
-            while user_input == None:
-                user_input = input(f"{category} can't be blank")
-            existing_songs = get_songs_from_db_session(category, user_input)
-            if(existing_songs):
-                print("NOTE: There are songs in the database that fully or partially match this name already: ")
-                for song in existing_songs:
-                    print(f"{song.artist.name} - {song.title}")
-
-        if(category == song_categories[1]):
-            while user_input == None:
-                user_input = input(f"{category} can't be blank")
-            existing_artists = get_artists_from_db_session(category, user_input)
-            if(existing_artists):
-                print("Do you want to use an existing artist?: ")
-                picked_artist = pick_from_db_objects(existing_artists, back_label="Add new")
-                if picked_artist:
-                    user_input = None
-
-        if category == song_categories[3]:
-            while user_input and not user_input.isdigit():
-                user_input = input("Type numericals only: ")
-        
-        song_labels.append(user_input)
-
-    if user_input == exit_label:
-        return
-
-    if (song_labels[1]):
-        artist_labels.append(song_labels[1])
-    else:
-        artist_labels.append("")
-
-    if (song_labels[5]):
-        artist_labels.append(song_labels[5])
-    else:
-        artist_labels.append("")
-
-
-    print(song_labels)
-    print(artist_labels)
-
-    artist_object = Artist()
-    song_object = Song()
-
-    if picked_artist is None:
-        if(artist_labels[0]):
-            artist_object.name = artist_labels[0]
-        if(artist_labels[1]):
-            artist_object.origin = artist_labels[1]
-        artist_object = add_db_entry(artist_object)
-        print(artist_object)
-        print(artist_object.id)
-    else:
-        artist_object = picked_artist
-        print(artist_object)
-        print(artist_object.id)
-
-    if song_labels[0]:
-        song_object.title = song_labels[0]
-    song_object.artist_id = artist_object.id
-    if song_labels[2]:
-        song_object.album = song_labels[2]
-    if song_labels[3]:
-        song_object.year = int(song_labels[3])
-    if song_labels[4]:
-        song_object.language = song_labels[4]
-
-    add_db_entry(song_object)
-
-    if user_input == exit_label:
-        return None
+    """Add one song by hand. Title and artist are required, the rest
+    optional; it goes through the import like every other source
+    (run_import_batch(): spelling, an existing artist or a similar song
+    found, the album row)."""
+    print("Add a song by hand (Ctrl+C cancels).")
+    metadata = {}
+    for key, question, required, number in (
+        ("title", "Title:", True, False),
+        ("artist_name", "Artist:", True, False),
+        ("album", "Album (optional):", False, False),
+        ("year", "Year (optional):", False, True),
+        ("language", "Language (optional):", False, False),
+        ("origin", "Artist's origin (optional):", False, False),
+    ):
+        answer = _ask_text(question, required, number)
+        if answer is None:
+            print("Aborted")
+            return
+        # every key present: the import reads metadata["year"]
+        metadata[key] = (int(answer) if number else answer) if answer else None
+    run_import_batch([metadata])

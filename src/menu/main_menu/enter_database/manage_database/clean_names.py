@@ -13,6 +13,7 @@ from utils.database.datatables import Artist, artist_categories
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
 from utils.common.script_utils import fix_mixed_script_words
+from utils.ui.artist_change import has_artist_twin, review_held_artist_renames
 
 
 _CLEANUP_FIELDS = [
@@ -82,49 +83,70 @@ def strip_trailing_junk(title: str) -> str:
             return title
         title = new_title
 
-def _apply_field_cleanup(songs, needs_transform, transform, action_description):
+def _hold_artist_rename(held, artist, new_name) -> bool:
+    """An artist row is shared, so it isn't renamed onto a name another
+    artist already has: the rename is held in `held` (artist id -> (artist,
+    new name)) for review_held_artist_renames(). True = held."""
+    if held is None or (artist.id not in held and not has_artist_twin(artist, new_name)):
+        return False
+    held[artist.id] = (artist, new_name)
+    return True
+
+
+def _apply_field_cleanup(songs, needs_transform, transform, action_description, held=None):
     """
     Apply `transform` to each song's title/artist name/album whenever
     `needs_transform` matches the current value, logging which fields changed.
     Album is skipped when empty/None; title and artist name are always present.
+    An artist rename onto another artist's name goes to `held` instead
+    (_hold_artist_rename()); a later cleanup works on the held name.
     """
     for song in songs:
         changed_fields = []
         for field_name, get_value, set_value in _CLEANUP_FIELDS:
             value = get_value(song)
+            is_artist = field_name == "artist"
+            if is_artist and held and song.artist.id in held:
+                value = held[song.artist.id][1]
             if value and needs_transform(value):
                 new_value = transform(value)
+                if is_artist and _hold_artist_rename(held, song.artist, new_value):
+                    changed_fields.append(f"artist: '{new_value}' (held: another artist has that name)")
+                    continue
                 set_value(song, new_value)
                 changed_fields.append(f"{field_name}: '{new_value}'")
 
         if changed_fields:
             print(f"{action_description} \033[93m{', '.join(changed_fields)}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
 
-def convert_characters_encoding(songs):
+def convert_characters_encoding(songs, held=None):
     _apply_field_cleanup(
         songs,
         needs_transform=lambda v: "&amp;" in v,
         transform=lambda v: v.replace("&amp;", "&"),
         action_description="Converted",
+        held=held,
     )
 
-def strip_leading_spaces(songs):
+def strip_leading_spaces(songs, held=None):
     _apply_field_cleanup(
         songs,
         needs_transform=lambda v: v.startswith(" "),
         transform=lambda v: v.lstrip(),
         action_description="Stripped leading spaces in",
+        held=held,
     )
 
-def replace_double_spaces(songs):
+def replace_double_spaces(songs, held=None):
     _apply_field_cleanup(
         songs,
         needs_transform=lambda v: "  " in v,
         transform=lambda v: re.sub(r" {2,}", " ", v),
         action_description="Replaced double spaces in",
+        held=held,
     )
 
-def remove_invisible_characters(songs):
+def remove_invisible_characters(songs, held=None):
     # Zero-width spaces etc. copied in from Bandcamp-style pages
     # ("Cz\u200bô\u200brny Ritm ..."); the emoji joiner is kept
     _apply_field_cleanup(
@@ -132,13 +154,15 @@ def remove_invisible_characters(songs):
         needs_transform=lambda v: strip_format_characters(v, keep_joiner=True) != v,
         transform=lambda v: strip_format_characters(v, keep_joiner=True),
         action_description="Removed invisible characters in",
+        held=held,
     )
 
-def fix_lookalike_letters(songs):
+def fix_lookalike_letters(songs, held=None):
     """Words mixing Latin and Cyrillic look-alike letters ("Вjörk",
     "Рiдна") in titles, artist names and albums: every fix in one checkbox
     list (all ticked), applied after the scan. One entry per artist and per
-    album text, however many songs share it."""
+    album text, however many songs share it. An artist fix onto another
+    artist's name goes to `held` (_hold_artist_rename())."""
     proposals = {}  # (field, key) -> [old, new, songs]
     for song in songs:
         for field_name, get_value, _ in _CLEANUP_FIELDS:
@@ -166,13 +190,15 @@ def fix_lookalike_letters(songs):
         print("Aborted, nothing fixed.")
         return
     setters = {name: set_value for name, _, set_value in _CLEANUP_FIELDS}
+    fixed = 0
     for i in selected:
         (field_name, _), (old, new, owners) = entries[i]
+        if field_name == "artist" and _hold_artist_rename(held, owners[0].artist, new):
+            continue
         for song in owners:
             setters[field_name](song, new)
-    print(f"Fixed {len(selected)} name(s).")
-    if any(entries[i][0][0] == "artist" for i in selected):
-        print('An artist may now share its name with another one - run Manage database → Resolve duplicates → "Resolve duplicated artists" to merge them.')
+        fixed += 1
+    print(f"Fixed {fixed} name(s).")
 
 def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
@@ -293,16 +319,18 @@ def clean_names():
     # song with a query of its own (~14 s for the whole catalog).
     checked_ids = song_ids_with_tag("album_checked")
     unchecked = [song for song in songs if song.id not in checked_ids]
-    convert_characters_encoding(songs)
-    remove_invisible_characters(songs)
-    strip_leading_spaces(songs)
-    replace_double_spaces(songs)
+    held = {}
+    convert_characters_encoding(songs, held)
+    remove_invisible_characters(songs, held)
+    strip_leading_spaces(songs, held)
+    replace_double_spaces(songs, held)
     resolve_unknown_artist(unchecked)
     submit_global_database_session()
     # The commit expired every song: reload them all in two queries rather
     # than one per song (~20 s)
     songs, _artists = _load_songs()
-    fix_lookalike_letters(songs)
+    fix_lookalike_letters(songs, held)
     submit_global_database_session()
     seek_nonsense_names(unchecked)
     submit_global_database_session()
+    review_held_artist_renames(held)

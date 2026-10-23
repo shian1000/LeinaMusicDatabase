@@ -23,6 +23,7 @@ one is revoked by /logout, and all of a user's are dropped when the password
 is changed, the user renamed or deleted (users.py).
 """
 
+import fcntl
 import hashlib
 import hmac
 import json
@@ -30,6 +31,7 @@ import os
 import re
 import secrets
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +39,7 @@ from pathlib import Path
 USERNAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{1,31}$"
 ACCOUNT_FILENAME = "account.json"
 TOKENS_FILENAME = "tokens.json"
+TOKENS_LOCK_FILENAME = ".tokens.lock"
 TOKEN_BYTES = 32
 # Every permission there is (also config.constants.PERMISSION_LABELS); the
 # names are part of the phone contract
@@ -52,6 +55,18 @@ _DUMMY_HASH = "scrypt$16384$8$1$" + "00" * 16 + "$" + "00" * 64
 # The server answers requests in threads; one lock around every tokens.json
 # read-modify-write in this process
 _tokens_lock = threading.Lock()
+
+
+@contextmanager
+def _tokens_locked(folder: Path):
+    """Around every read-modify-write of a user's tokens.json. Two processes
+    write it - the server (login, logout) and the app (revoke_all_tokens()) -
+    so besides the thread lock an flock on a file next to it: without it, a
+    login read just before a password change wrote the revoked tokens back."""
+    with _tokens_lock:
+        with open(folder / TOKENS_LOCK_FILENAME, "a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            yield
 
 
 def normalize_username(username) -> str | None:
@@ -138,7 +153,7 @@ def issue_token(users_dir, username: str) -> str:
     """A new token for an existing user (call check_login() first)."""
     token = secrets.token_urlsafe(TOKEN_BYTES)
     folder = Path(users_dir) / username
-    with _tokens_lock:
+    with _tokens_locked(folder):
         tokens = _read_tokens(folder)
         tokens.append({"hash": _token_hash(token),
                        "created_at": datetime.now().astimezone().isoformat(timespec="seconds")})
@@ -162,8 +177,8 @@ def revoke_token(users_dir, token) -> bool:
     if not isinstance(token, str) or not token:
         return False
     wanted = _token_hash(token)
-    with _tokens_lock:
-        for folder in _user_folders(users_dir):
+    for folder in _user_folders(users_dir):
+        with _tokens_locked(folder):
             tokens = _read_tokens(folder)
             kept = [t for t in tokens if not hmac.compare_digest(t["hash"], wanted)]
             if len(kept) != len(tokens):
@@ -174,5 +189,8 @@ def revoke_token(users_dir, token) -> bool:
 
 def revoke_all_tokens(user_folder) -> None:
     """Log a user out everywhere (password changed, renamed, deleted)."""
-    with _tokens_lock:
-        (Path(user_folder) / TOKENS_FILENAME).unlink(missing_ok=True)
+    folder = Path(user_folder)
+    if not folder.is_dir():
+        return
+    with _tokens_locked(folder):
+        (folder / TOKENS_FILENAME).unlink(missing_ok=True)

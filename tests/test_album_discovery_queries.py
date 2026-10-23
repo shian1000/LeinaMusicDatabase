@@ -35,6 +35,11 @@ ALBUM_QUERY_REGRESSION_CASES = [
      "Pochodnia - gościnnie Kasia Sienkiewicz", "T.Love", "Pochodnia"),
     ("goscinnie_in_parentheses", "T.Love",
      "Pochodnia (gościnnie Kasia Sienkiewicz)", "T.Love", "Pochodnia"),
+    # "feat" found inside a word cut the title to "" - every fetcher was first asked with an empty title
+    ("feat_inside_a_word", "Sabrina Carpenter", "Feather", "Sabrina Carpenter", "Feather"),
+    ("feat_inside_a_word_later", "Breaking Benjamin", "Without You Defeated", "Breaking Benjamin",
+     "Without You Defeated"),
+    ("feat_still_cut", "Sabrina Carpenter", "Feather feat. Someone", "Sabrina Carpenter", "Feather"),
 ]
 
 

@@ -325,7 +325,7 @@ def setup_database_sharing():
         return
     try:
         steps = install_sharing_service()
-    except NoListenAddressError as exc:
+    except (NoListenAddressError, SharingUnavailableError) as exc:
         print(f"\033[91mNot installed: {exc}\033[0m")
         return
     except subprocess.CalledProcessError as exc:

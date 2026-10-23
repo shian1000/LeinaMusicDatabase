@@ -29,7 +29,10 @@ round-trip through `get_artists_from_db_session()` to "get it again".
 `get_songs_from_db_session` and `get_artists_from_db_session` both fall back to a
 Python-side filter — normalize each word, casefold, require every word to be a
 substring of the normalized field — when DB-level `LIKE` filtering can't be
-trusted (non-ASCII queries) or returns nothing.
+trusted (non-ASCII queries) or returns nothing. Not for the song categories
+`"year"` and `"artist id"` (`_WHOLE_NUMBER_CATEGORIES`): those are an equal whole
+number only, the SQL result even when empty - the substring fallback found
+artist id 5 in 15, 50, 105 - and text that isn't a number gets a message.
 
 That logic lives in exactly one place: `database_getter._normalized_python_filter(
 candidates, words, get_field)`. Any new fallback-filtering call site in this file

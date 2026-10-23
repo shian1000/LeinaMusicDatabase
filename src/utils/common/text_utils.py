@@ -75,31 +75,24 @@ def normalize_text(s: str) -> str:
     return normalize(s)
 
 
-def truncate_at_word(text: str) -> str:
- 
-    stop_words=[
-        "feat",
-        "&",
-        "ft.",
-        # Polish guest credit, e.g. "Pochodnia - gościnnie Kasia Sienkiewicz"
-        "gościnnie",
-        "goscinnie",
-        " и ",
-        " i ",
-        ", "
-    ]
+# Where a guest credit or a second artist starts. Words only as whole words:
+# "feat" inside "Feather" or "Defeated" cut the title to nothing
+_TRUNCATE_AT_RE = re.compile(
+    r"(?<!\w)(?:feat\b|ft\.|"
+    # Polish guest credit, e.g. "Pochodnia - gościnnie Kasia Sienkiewicz"
+    r"gościnnie\b|goscinnie\b)"
+    r"|&| и | i |, ",
+    re.IGNORECASE,
+)
 
-    earliest_index = len(text)
- 
-    for word in stop_words:
-        idx = text.lower().find(word.lower())
-        if idx != -1 and idx < earliest_index:
-            earliest_index = idx
- 
-    if earliest_index == len(text):
-        return text.rstrip()
+
+def truncate_at_word(text: str) -> str:
+    """`text` up to the first guest credit / joining word ("feat", "ft.",
+    "&", " i ", ", " ...), or all of it when that would leave nothing."""
+    match = _TRUNCATE_AT_RE.search(text)
     # Drop the separator left dangling before the credit ("Pochodnia - gościnnie X" -> "Pochodnia")
-    return text[:earliest_index].rstrip(" -–—")
+    truncated = text[:match.start()].rstrip(" -–—") if match else ""
+    return truncated if truncated.strip() else text.rstrip()
 
 
 def normalize_japanese_title(text: str) -> str:
