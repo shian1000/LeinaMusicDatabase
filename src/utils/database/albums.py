@@ -485,11 +485,49 @@ def unlink_songs(session, songs: list[Song]) -> None:
 # Merging albums, artist merges
 # --------------------
 
+_PENDING_COVER_FILES = "album_cover_files_after_commit"
+
+
+def _after_commit(session, src: Path, dst: Path | None) -> None:
+    """Move `src` to `dst` (None: delete it) once `session` commits;
+    forgotten on a rollback. Done before the commit, a failed or rolled-back
+    merge left the rows pointing at files that were already gone."""
+    if _PENDING_COVER_FILES not in session.info:
+        session.info[_PENDING_COVER_FILES] = []
+        event.listen(session, "after_commit", _apply_cover_files)
+        event.listen(session, "after_rollback", _drop_cover_files)
+    session.info[_PENDING_COVER_FILES].append((src, dst))
+
+
+def _apply_cover_files(session) -> None:
+    pending = session.info.get(_PENDING_COVER_FILES)
+    if not pending:
+        return
+    todo = list(pending)
+    pending.clear()
+    for src, dst in todo:
+        try:
+            if not src.exists():
+                continue
+            if dst is None:
+                src.unlink()
+            else:
+                os.replace(src, dst)
+        except OSError as exc:
+            # The rows are committed: raising would look like the commit failed
+            print(f"Warning: album cover file {src} couldn't be {'deleted' if dst is None else 'renamed'}: {exc}")
+
+
+def _drop_cover_files(session) -> None:
+    session.info.get(_PENDING_COVER_FILES, []).clear()
+
+
 def merge_albums(session, keep: Album, drop: Album) -> None:
     """Move everything of `drop` onto `keep` and delete `drop`: its songs,
     any cover source `keep` lacks (the image file is renamed to keep's id),
     and the Latin form, external ids and year `keep` doesn't have. Caller
-    commits."""
+    commits; the cover files are renamed / deleted only once that commit
+    succeeds (a rollback leaves them as they were, matching the rows)."""
     for song in list(drop.songs):
         song.album_entry = keep
     for attr in ("title_latin", "year", "musicbrainz_release_group_id", "itunes_collection_id",
@@ -506,9 +544,7 @@ def merge_albums(session, keep: Album, drop: Album) -> None:
             path = cover.path
             if path:
                 new_path = cover_filename(keep.id, cover.source)
-                src, dst = covers_dir() / path, covers_dir() / new_path
-                if src.exists():
-                    os.replace(src, dst)
+                _after_commit(session, covers_dir() / path, covers_dir() / new_path)
                 path = new_path
             keep.covers.append(AlbumCover(
                 source=cover.source, url=cover.url, path=path, width=cover.width,
@@ -517,9 +553,7 @@ def merge_albums(session, keep: Album, drop: Album) -> None:
             ))
             kept_sources.add(cover.source)
         elif cover.path:
-            stale_file = covers_dir() / cover.path
-            if stale_file.exists():
-                stale_file.unlink()
+            _after_commit(session, covers_dir() / cover.path, None)
         drop.covers.remove(cover)
     session.flush()
     session.delete(drop)

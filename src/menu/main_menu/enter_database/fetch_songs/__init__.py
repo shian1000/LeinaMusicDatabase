@@ -14,7 +14,7 @@ def fetch_artists():
     action_map = artist_categories + exit_label
 
     category = questionary.select("What category do you wish to search for?", choices=action_map).ask()
-    if category == exit_label[0]:
+    if category in (None, exit_label[0]):  # None: Esc / Ctrl+C
         return
 
     querry = input("What are you looking for: ")
@@ -40,7 +40,7 @@ def fetch_songs():
     action_map = search_only_categories + song_categories + exit_label
 
     category = questionary.select("What category do you wish to search for?", choices=action_map).ask()
-    if category == exit_label[0]:
+    if category in (None, exit_label[0]):  # None: Esc / Ctrl+C
         return
 
     if category == search_only_categories[1]:

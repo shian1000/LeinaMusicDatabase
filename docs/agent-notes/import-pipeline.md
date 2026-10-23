@@ -86,7 +86,12 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
    `docs/agent-notes/youtube-search-matching.md`.
 2. **Disk-backed cache** — `utils/common/spellcheck_cache.py`, persisted to
    `data/spellcheck_cache.json` (gitignored under `/data/`). Keyed by
-   `(artist.strip().lower(), title.strip().lower())`. Stores **no-match results
+   `(artist.strip().lower(), title.strip().lower())`, so a hit may come from
+   another spelling of the input: `check_spelling()` hands it back rebased on the
+   current input (`_cached_for_input()`) - a field that didn't take MusicBrainz's
+   spelling (no match, or similarity below the threshold) is the input as asked
+   now, never the earlier spelling, or "ABBA" after "Abba" looked like a
+   correction. Stores **no-match results
    too** — those are the slowest to produce (they run both queries and eat any
    backoff), so not caching them would leave the worst case uncached. Atomic
    write (tmp + `os.replace`), autosave every 20 new entries, explicit

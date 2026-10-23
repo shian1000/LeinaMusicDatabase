@@ -1,4 +1,5 @@
 import sys
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -455,3 +456,48 @@ def test_placeholder_titles_are_recognised_with_or_without_brackets():
     assert m.is_placeholder_title("[Deleted video]")
     assert not m.is_placeholder_title("Private Video Blues")
     assert not m.is_placeholder_title(None)
+
+
+@pytest.mark.parametrize("typed", [[None], ["", ""], ["Queen", None], ["  ", "Song"]])
+def test_add_manually_with_nothing_typed_skips_the_entry(monkeypatch, typed):
+    # YT-05: Ctrl+C (None) or Enter ("") in "Add manually" went into the import
+    # as an artist / title of None or ""
+    answers = iter(typed + [None] * 2)
+    monkeypatch.setattr(m.questionary, "select", lambda *a, **k: SimpleNamespace(ask=lambda: m._SWAP_CHOICE_MANUAL))
+    monkeypatch.setattr(m.questionary, "text", lambda *a, **k: SimpleNamespace(ask=lambda: next(answers)))
+    metadata = {"artist_name": "Bohemian Rhapsody", "title": "Queen"}
+
+    remaining, skipped = m._review_artist_title_swaps([(metadata, _fake_artist("Queen"))])
+
+    assert remaining == []
+    assert skipped == [("Bohemian Rhapsody - Queen", "Possible artist/title swap - nothing typed, not added")]
+
+
+def test_add_manually_takes_what_was_typed(monkeypatch):
+    answers = iter([" Queen ", "Bohemian Rhapsody"])
+    monkeypatch.setattr(m.questionary, "select", lambda *a, **k: SimpleNamespace(ask=lambda: m._SWAP_CHOICE_MANUAL))
+    monkeypatch.setattr(m.questionary, "text", lambda *a, **k: SimpleNamespace(ask=lambda: next(answers)))
+    metadata = {"artist_name": "Bohemian Rhapsody", "title": "Queen"}
+
+    remaining, skipped = m._review_artist_title_swaps([(metadata, _fake_artist("Queen"))])
+
+    assert skipped == [] and remaining == [{"artist_name": "Queen", "title": "Bohemian Rhapsody"}]
+
+
+def test_official_match_survives_an_unavailable_hit_in_the_search(monkeypatch):
+    # YT-09: yt-dlp exits 1 when one hit is unavailable but still prints the
+    # others; the exit code alone threw them away, so special channels lost
+    # their official-match lookup
+    import json
+    hit = {"channel": "Eartha Kitt - Topic", "track": "Santa Baby", "artist": "Eartha Kitt"}
+    result = SimpleNamespace(returncode=1, stdout=json.dumps(hit) + "\n",
+                             stderr="ERROR: [youtube] abc: Video unavailable")
+    monkeypatch.setattr(m, "_run_ytdlp_search", lambda query, max_results: result)
+    logged = []
+    monkeypatch.setattr(m, "_log_ytdlp_errors", lambda query, res: logged.append(query), raising=False)
+
+    assert m._find_official_match_via_search("Eartha Kitt - Santa Baby (1953)") == ("Eartha Kitt", "Santa Baby")
+    assert logged == ["Eartha Kitt - Santa Baby (1953)"]
+
+    result.stdout = ""
+    assert m._find_official_match_via_search("Eartha Kitt - Santa Baby (1953)") is None

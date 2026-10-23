@@ -294,6 +294,35 @@ def test_merging_albums_keeps_one_id_and_moves_cover(session, covers):
     assert not (covers / f"{drop_id}.jpg").exists()
 
 
+def test_rolled_back_album_merge_leaves_the_cover_files(session, covers):
+    # DB-10: the cover file was renamed / deleted before the caller's commit;
+    # after a rollback the rows still named files that were gone
+    a, b = _artists(session, "A", "B")
+    keep = al.assign_songs_to_album(session, [_song(session, "x", a, "OST")], "OST", a)
+    drop = al.assign_songs_to_album(session, [_song(session, "y", b, "OST")], "OST", b)
+    keep.covers.append(AlbumCover(source="file", path=f"{keep.id}.jpg", status="found"))
+    drop.covers.append(AlbumCover(source="file", path=f"{drop.id}.jpg", status="found"))
+    drop.covers.append(AlbumCover(source="itunes", path=f"{drop.id}_itunes.jpg", status="found"))
+    session.commit()
+    files = {name: covers / name for name in (f"{keep.id}.jpg", f"{drop.id}.jpg", f"{drop.id}_itunes.jpg")}
+    for path in files.values():
+        path.write_bytes(b"jpeg")
+    drop_id = drop.id
+
+    al.merge_albums(session, keep, drop)
+    assert all(path.exists() for path in files.values())  # nothing touched before the commit
+    session.rollback()
+    assert all(path.exists() for path in files.values())
+    assert {c.path for c in session.get(Album, drop_id).covers} == {f"{drop_id}.jpg", f"{drop_id}_itunes.jpg"}
+
+    # Merged again and committed: now the files follow
+    al.merge_albums(session, keep, session.get(Album, drop_id))
+    session.commit()
+    assert not files[f"{drop_id}.jpg"].exists()  # keep had a "file" cover: drop's is deleted
+    assert {c.path for c in keep.covers} == {f"{keep.id}.jpg", al.cover_filename(keep.id, "itunes")}
+    assert (covers / al.cover_filename(keep.id, "itunes")).exists()
+
+
 def test_artist_merge_reassigns_and_merges_albums(session):
     a, dup = _artists(session, "Akute", "akuteofficial")
     s1 = _song(session, "x", a, "Debut")

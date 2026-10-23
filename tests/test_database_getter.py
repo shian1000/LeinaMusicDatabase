@@ -1,5 +1,6 @@
 """The search layer (src/utils/database/database_getter.py) on an
-in-memory music.db: searching artists by id, songs by artist id and year."""
+in-memory music.db: searching artists by id, songs by artist id and year,
+and an unknown category."""
 import sys
 from pathlib import Path
 
@@ -68,3 +69,17 @@ def test_song_search_by_year_is_exact_and_refuses_what_isnt_a_number(session, ca
     for query in ("199x", "lata 80", "²"):
         assert g.get_songs_from_db_session("year", query) == []
         assert "isn't a year" in capsys.readouterr().out
+
+
+def test_an_unknown_category_finds_nothing_instead_of_a_keyerror(session, capsys):
+    # DB-22: _validate_category() printed the valid options and returned None,
+    # which every caller used as a dict key
+    _artists(session, 1)
+    session.add(Song(title="Old", artist_id=1))
+    session.commit()
+
+    assert g.get_songs_from_db_session("colour", "red") == []
+    assert g.get_artists_from_db_session("colour", "red") == []
+    assert g.get_songs_with_empty_category("colour") == []
+    assert capsys.readouterr().out.count("Invalid category 'colour'") == 3
+

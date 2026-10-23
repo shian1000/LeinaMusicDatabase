@@ -1,7 +1,8 @@
 """Latin forms of names in other alphabets (songs.title_latin,
 artists.name_latin, albums.title_latin; utils/database/latin_names.py):
 suggestions (utils/common/romanize.py), migration 0011, what's still
-missing, search and matching using them, merges keeping them, a "Singles"
+missing (and the Fill in menu when nothing is ticked), search and matching
+using them, merges keeping them, a "Singles"
 album copying its song's form, and the YouTube retry with the Latin title.
 In-memory SQLite with the album listener on, no mocking of SQL."""
 
@@ -300,3 +301,29 @@ def test_single_album_copies_its_songs_latin_form(session):
     session.flush()
 
     assert song.album_entry.title_latin == "Kukushka"
+
+
+@pytest.mark.parametrize("picked, says", [([], "Nothing picked."), (None, "Nothing picked.")])
+def test_fill_latin_forms_ticking_nothing_isnt_reported_as_all_done(session, monkeypatch, capsys, picked, says):
+    # UI-10: unticking every kind gave () like "nothing is missing", and the
+    # menu said every name already has a Latin form
+    from types import SimpleNamespace
+    from utils.ui import latin_forms_review as review
+    _song(session, "Группа крови", _artist(session, "Кино"))
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review.questionary, "checkbox", lambda *a, **k: SimpleNamespace(ask=lambda: picked))
+
+    review.fill_latin_forms()
+
+    out = capsys.readouterr().out
+    assert says in out and "already has a Latin form" not in out
+
+
+def test_fill_latin_forms_with_nothing_missing_says_so(session, monkeypatch, capsys):
+    from utils.ui import latin_forms_review as review
+    _song(session, "Song", _artist(session, "Latin Artist"))
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+
+    review.fill_latin_forms()
+
+    assert "Every name in another alphabet already has a Latin form." in capsys.readouterr().out

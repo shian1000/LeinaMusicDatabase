@@ -35,6 +35,13 @@ _rate_lock = threading.Lock()
 _last_request_ts = 0.0
 
 
+def lucene_quote(text: str) -> str:
+    """`text` as a quoted Lucene phrase for a MusicBrainz search: a quote or
+    backslash in it (12" Mix) would otherwise end the phrase early and break
+    the query."""
+    return '"' + (text or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 class MBStats:
     """Process-wide counters for MusicBrainz traffic. Call :meth:`reset` at the
     start of a batch job and :meth:`format_summary` at the end."""

@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,410 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,450 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -195,7 +195,8 @@ non-trivial work in that area.
   `albums.py` owns `albums` / `album_covers` and keeps `songs.album_id` in step with the
   `songs.album` text through a `before_flush` listener on the music session factory. Change the
   text and the row follows; never set `album_id` by hand. Raw-SQL artist merges bypass the listener,
-  so every artist merge must also call `reassign_artist_albums()`. The listener only relinks the
+  so every artist merge must also call `reassign_artist_albums()`. `merge_albums()` renames /
+  deletes cover files only once its session commits (`after_commit`), so a rollback leaves them. The listener only relinks the
   songs being flushed: when a song leaves a title it shared with another artist, the songs left
   behind keep `album_id` NULL until someone calls `link_songs()` on them (`artist_reassignment`'s
   `_link_album_title()` does). Titles several main artists
@@ -548,8 +549,9 @@ non-trivial work in that area.
 
 ## Secrets
 
-- `SMB_USERNAME` / `SMB_PASSWORD` load from `.env` (gitignored) into `src/settings.py`, used to
-  build `smb://` URIs for the local library. Never hardcode, print, or log these.
+- `SMB_USERNAME` / `SMB_PASSWORD` load from `.env` (gitignored) into `src/settings.py`, passed to
+  UPath as options for an `smb://` library (`file_management.library_index_path()`), never put into
+  a URI, which ends up in messages and `debug.log`. Never hardcode, print, or log these.
 - `YOUTUBE_API_KEY` (optional, `.env`) — a read-only YouTube Data API key for
   `videos_exist_via_api()`. Same rules. The OAuth token in `.secrets/token.json` (playlists) is a
   separate credential and expires; without the key and a valid token the API check is skipped.
@@ -663,7 +665,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,410 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,450 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

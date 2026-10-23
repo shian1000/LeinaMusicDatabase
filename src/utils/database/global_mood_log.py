@@ -139,15 +139,14 @@ def read_history(changes_dir) -> list[dict]:
 def global_mood_name(tag_db_path, mood_id: int) -> str | None:
     """The name of global mood `mood_id` in this tag.db (the shared copy the
     phone downloads), or None when there's no such mood - unknown, a marker,
-    or a copy from before tags.kind."""
+    or a copy from before tags.kind. Raises sqlite3.Error when the copy can't
+    be read (missing, locked, damaged): the server answers 503 then, not "no
+    such mood", or the phone would drop a mood that still exists."""
+    conn = sqlite3.connect(f"file:{tag_db_path}?mode=ro", uri=True, timeout=15)
     try:
-        conn = sqlite3.connect(f"file:{tag_db_path}?mode=ro", uri=True, timeout=15)
-    except sqlite3.Error:
-        return None
-    try:
+        if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(tags)")}:
+            return None
         row = conn.execute("SELECT name FROM tags WHERE id = ? AND kind = 'mood'", (mood_id,)).fetchone()
-    except sqlite3.Error:
-        return None
     finally:
         conn.close()
     return row[0] if row else None

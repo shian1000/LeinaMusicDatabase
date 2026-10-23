@@ -14,6 +14,7 @@ from utils.youtube.manage_youtube_playlists import (
     _parse_synonyms,
     _run_ytdlp_search,
     _is_official_release,
+    _log_ytdlp_errors,
 )
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
@@ -583,7 +584,12 @@ def _find_official_match_via_search(raw_title: str, max_results: int = 5) -> tup
         return None
 
     result = _run_ytdlp_search(raw_title, max_results)
-    if result is None or result.returncode != 0 or not result.stdout.strip():
+    if result is None:
+        return None
+    # Judged by stdout, not the exit code: yt-dlp exits 1 when one hit is
+    # unavailable, with the other hits still printed (as _search_video_ytdlp_once())
+    _log_ytdlp_errors(raw_title, result)
+    if not result.stdout.strip():
         return None
 
     folded_raw_title = "".join(_fold_char(c) for c in raw_title)
@@ -935,9 +941,13 @@ def _review_artist_title_swaps(flagged: list) -> tuple:
             metadata["artist_name"], metadata["title"] = metadata["title"], metadata["artist_name"]
             remaining.append(metadata)
         elif choice == _SWAP_CHOICE_MANUAL:
-            metadata["artist_name"] = questionary.text("Artist:").ask()
-            metadata["title"] = questionary.text("Title:").ask()
-            remaining.append(metadata)
+            artist = (questionary.text("Artist:").ask() or "").strip()
+            title = (questionary.text("Title:").ask() or "").strip() if artist else ""
+            if not (artist and title):  # Ctrl+C or nothing typed: skipped, like _review_missing_artists()
+                pre_skipped.append((label, "Possible artist/title swap - nothing typed, not added"))
+            else:
+                metadata["artist_name"], metadata["title"] = artist, title
+                remaining.append(metadata)
         elif choice == _SWAP_CHOICE_SKIP:
             pre_skipped.append((label, "Possible artist/title swap - user chose not to add"))
         else:

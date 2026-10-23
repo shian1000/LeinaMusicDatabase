@@ -472,7 +472,8 @@ permission is the trust — but everything is recorded (`utils/database/global_m
 - The server checks the token (401), the permission (403 with JSON
   `{"error": "permission", "permission": "edit_global_moods"}`, which the phone tells apart from
   the plain-text "another user" 403), that the mood is a mood in the *shared* `tag.db` (404
-  `{"error": "mood"}`) and resolves the song against the shared `music.db` (merged → kept song;
+  `{"error": "mood"}`; 503 when that copy can't be read, so the phone retries instead of
+  taking the mood for gone) and resolves the song against the shared `music.db` (merged → kept song;
   deleted or unknown → 404 `{"error": "song"}`). It then writes one JSON file into
   `Settings.global_mood_changes_dir/pending/` (`--mood-changes`, `.../Database/MoodChanges`) and
   answers 202 `{"mood_id", "song_id", "action"}`. **It never writes `tag.db`**: the original is on

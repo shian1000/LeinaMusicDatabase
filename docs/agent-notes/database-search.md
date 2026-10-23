@@ -61,10 +61,12 @@ Categories are split three ways in `datatables.py`:
 
 `get_songs_from_db_session` accepts `song_categories + search_only_categories`.
 `get_artists_from_db_session` accepts **only** `artist_categories` — `"name"` is
-not valid there. Passing it anyway fails category validation; the resulting
-`None` is then used as a dict key and the call crashes with `KeyError: None`.
+not valid there. Passing it anyway fails category validation: `_validate_category()`
+prints the valid options and returns `None`, and every caller then returns `[]`
+(it used to use that `None` as a dict key and crash with `KeyError: None`), so a
+wrong list now looks like "Nothing found" rather than a crash.
 
-This exact bug broke the "Fetch artists" menu: `fetch_songs.fetch_artists()` had
+This exact bug once broke the "Fetch artists" menu: `fetch_songs.fetch_artists()` had
 copy-pasted `search_only_categories + artist_categories` from its sibling
 `fetch_songs()`, where `"name"` *is* valid. **Never build an artist-search
 category list that includes `search_only_categories`.**

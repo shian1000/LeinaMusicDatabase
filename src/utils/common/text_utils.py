@@ -118,6 +118,22 @@ def make_fuzzy(text: str) -> str:
     return " ".join(t + "~" for t in tokens if t)
 
 
+def _cached_for_input(cached: dict, artist: str, title: str, threshold: float) -> dict:
+    """A cached check_spelling() result for this spelling of the input. The
+    cache key ignores case, so the entry may come from "Abba" when "ABBA" is
+    asked: a field that didn't take MusicBrainz's spelling (nothing found, or
+    too unlike it) is this input, not the earlier spelling, or the caller
+    would see a "correction" to it."""
+    result = dict(cached)
+    if not (cached.get("found") and cached.get("artist_similarity", 0) >= threshold):
+        result["corrected_artist"] = artist
+    if not (cached.get("found") and cached.get("title_similarity", 0) >= threshold):
+        result["corrected_title"] = title
+    result["input_artist"], result["input_title"] = artist, title
+    result["corrected"] = result["corrected_artist"] != artist or result["corrected_title"] != title
+    return result
+
+
 def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     Queries MusicBrainz to verify/correct spelling.
@@ -129,7 +145,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     if cached is not None:
         MBStats.cache_hits += 1
         slog(f"[SPELLCHECK CACHE HIT] Artist: '{artist}' | Title: '{title}'")
-        return cached
+        return _cached_for_input(cached, artist, title, threshold)
     MBStats.cache_misses += 1
 
     def normalized_similarity(a, b):

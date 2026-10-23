@@ -1,5 +1,6 @@
 """The menu's global sessions (utils/database/database_sessions.py): a failed
-commit is rolled back, so the menu keeps working. In-memory SQLite."""
+commit is rolled back, so the menu keeps working; closing them always closes
+and unsets them. In-memory SQLite."""
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -50,3 +51,25 @@ def test_the_menu_shows_a_failed_save_and_goes_on(sessions, monkeypatch, capsys)
 
     assert "Saving to the database failed" in capsys.readouterr().out
     assert [s.title for s in sessions.query(Song)] == ["Waterloo"]
+
+
+def test_closing_without_commit_rolls_back_and_closes(sessions):
+    # DB-06: commit=False only dropped the global reference - the sessions
+    # stayed open with their unsaved changes
+    tags = database_sessions.get_global_database_sessions()[1]
+    sessions.add(Song(title="Waterloo", artist=Artist(name="ABBA")))
+    sessions.flush()
+    database_sessions.close_global_database_sessions(commit=False)
+    assert database_sessions.get_global_database_sessions() is None
+    assert not sessions.in_transaction() and not tags.in_transaction()
+    assert sessions.query(Song).count() == 0
+
+
+def test_a_failed_commit_on_close_still_closes_and_unsets(sessions):
+    # DB-06: a failing commit left the sessions open and set globally
+    sessions.add(Song(title="No artist"))  # songs.artist_id is NOT NULL
+    with pytest.raises(database_sessions.DatabaseCommitError):
+        database_sessions.close_global_database_sessions(commit=True)
+    assert database_sessions.get_global_database_sessions() is None
+    assert not sessions.in_transaction() and len(sessions.identity_map) == 0 and not sessions.new
+

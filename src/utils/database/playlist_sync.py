@@ -420,7 +420,12 @@ def _archive(user_folder, payload: dict, deleted_at: int, subdir: Path = ARCHIVE
     """Write a deleted playlist (or mood) to <user folder>/<subdir>/<uid>.<stamp>.json."""
     folder = Path(user_folder) / subdir
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.fromtimestamp(deleted_at / 1000).strftime(ARCHIVE_STAMP_FORMAT)
+    try:
+        stamp = datetime.fromtimestamp(deleted_at / 1000).strftime(ARCHIVE_STAMP_FORMAT)
+    except (ValueError, OverflowError, OSError):
+        # deleted_at is the phone's number; one past year 9999 still deletes,
+        # the file is just named by the server's clock
+        stamp = datetime.now().strftime(ARCHIVE_STAMP_FORMAT)
     data = json.dumps({**payload, "deleted_at": deleted_at}, ensure_ascii=False, indent=2) + "\n"
     suffix = 1
     while True:

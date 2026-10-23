@@ -229,15 +229,13 @@ def _songs_by_tag(words: list[str], db_query, tag_session) -> list[Song]:
     return []
 
 def _validate_category(category: str, valid_categories: set) -> str | None:
-    slog(category)
+    """`category` lowercased, or None after printing the valid ones - the
+    caller then finds nothing."""
     normalized = category.strip().lower()
-    slog(normalized)
     valid_lower = {c.lower() for c in valid_categories}
-    slog(valid_categories)
     if normalized not in valid_lower:
         print(f"Invalid category '{normalized}'. Valid options: {', '.join(sorted(valid_lower))}")
         return None
-    slog(normalized)
     return normalized
 
 def _normalized_python_filter(candidates: list, words: list[str], get_field) -> list:
@@ -321,6 +319,8 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
 
     valid_categories = list(column_map.keys())
     category = _validate_category(category, valid_categories)
+    if category is None:
+        return []
 
     col = column_map[category]
     return db_query.filter(or_(col == None, col == "")).all()
@@ -401,6 +401,8 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
     query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in (query or ""))
 
     category = _validate_category(category, song_categories + search_only_categories)
+    if category is None:
+        return []
     words = [w for w in (query or "").strip().split() if w]
     slog(category, words)
 
@@ -468,6 +470,8 @@ def get_artists_from_db_session(
 
     valid_categories = artist_categories
     category = _validate_category(category, valid_categories)
+    if category is None:
+        return []
 
     if query:
         query = query.strip()

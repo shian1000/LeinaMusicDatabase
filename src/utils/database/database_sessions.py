@@ -44,18 +44,27 @@ def _commit(session: Session) -> None:
 
 
 def close_global_database_sessions(commit: bool = True) -> None:
+    """Commit (or, with commit=False, roll back) and close both global
+    sessions. They are closed and unset even when the commit fails - the
+    DatabaseCommitError still reaches the caller - so no connection or
+    half-done change is left behind."""
     global _GLOBAL_DATABASE_SESSION
     with _GLOBAL_DB_LOCK:
         if _GLOBAL_DATABASE_SESSION is None:
             return
         music_session, tag_session = _GLOBAL_DATABASE_SESSION
-        if commit:
-            _commit(music_session)
-            _commit(tag_session)
-            apply_song_id_changes(tag_session=tag_session)
+        _GLOBAL_DATABASE_SESSION = None
+        try:
+            if commit:
+                _commit(music_session)
+                _commit(tag_session)
+                apply_song_id_changes(tag_session=tag_session)
+            else:
+                music_session.rollback()
+                tag_session.rollback()
+        finally:
             music_session.close()
             tag_session.close()
-        _GLOBAL_DATABASE_SESSION = None
 
 def submit_global_database_session() -> None:
     """Commit both global sessions; DatabaseCommitError (after a rollback) when that fails."""

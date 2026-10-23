@@ -1141,15 +1141,32 @@ def test_a_malformed_content_length_is_411(playlist_server):
     assert _raw_status(url, "PUT", headers) == 411
 
 
-def test_an_unexpected_failure_still_gets_an_answer(playlist_server):
+def test_an_unexpected_failure_still_gets_an_answer(playlist_server, monkeypatch):
     start, users_dir, tokens = playlist_server
     base = f"{start()}/users/ola_k/playlists"
     token = tokens["ola_k"]
     assert _call("PUT", f"{base}/{UID}", token, _body())[0] == 200
 
-    # A timestamp past the year 9999: the archive's datetime() fails
-    url = f"{base}/{UID}?base_revision=1&deleted_at={10 ** 17}"
+    def broken(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(sharing_server.playlist_sync, "delete_playlist", broken)
+    url = f"{base}/{UID}?base_revision=1&deleted_at=5000"
     assert _raw_status(url, "DELETE", {"Authorization": f"Bearer {token}"}) == 500
+
+
+@pytest.mark.parametrize("collection", ["playlists", "moods"])
+def test_a_deletion_time_past_the_year_9999_still_deletes(playlist_server, collection):
+    # SRV-04: datetime() of such a deleted_at failed while naming the archive,
+    # so the deletion was dropped (500); the file is named by the server's clock now
+    start, users_dir, tokens = playlist_server
+    base = f"{start()}/users/ola_k/{collection}"
+    token = tokens["ola_k"]
+    body = _body() if collection == "playlists" else _mood_body()
+    assert _call("PUT", f"{base}/{UID}", token, body)[0] == 200
+    status, deleted = _call("DELETE", f"{base}/{UID}?base_revision=1&deleted_at={10 ** 17}", token)
+    assert status == 200 and deleted["deleted"] and deleted["updated_at"] == 10 ** 17
+    assert len(list((users_dir / "ola_k" / "archive" / collection).iterdir())) == 1
 
 
 def test_playlist_conflicts_are_409_with_the_stored_playlist(playlist_server):
@@ -1369,6 +1386,26 @@ def test_global_mood_changes_are_checked(mood_server, tmp_path):
     # Revoked: refused on the next request
     (users_dir / "ola_k" / "account.json").write_text('{"username": "ola_k", "permissions": []}')
     assert _call("PUT", f"{base}/global-moods/1/songs/4", token)[0] == 403
+
+
+def test_unreadable_shared_tag_db_is_not_taken_for_a_missing_mood(mood_server, share_dir):
+    # SRV-03: a damaged / missing shared tag.db answered 404 {"error": "mood"},
+    # so the phone dropped a mood that still exists; it's 503 now (retry)
+    start, _, tokens, changes = mood_server
+    base = start()
+    token = tokens["ola_k"]
+    (share_dir / "tag.db").write_bytes(b"not a database" * 100)
+    assert _call("PUT", f"{base}/global-moods/1/songs/4", token)[0] == 503
+    (share_dir / "tag.db").unlink()
+    assert _call("PUT", f"{base}/global-moods/1/songs/4", token)[0] == 503
+    assert not (changes / "pending").exists() or not list((changes / "pending").iterdir())
+    # A copy from before tags.kind has no global moods: still 404
+    tag = sqlite3.connect(share_dir / "tag.db")
+    tag.execute("CREATE TABLE tags (id INTEGER PRIMARY KEY, name VARCHAR NOT NULL UNIQUE)")
+    tag.execute("INSERT INTO tags VALUES (1, 'Siłownia')")
+    tag.commit()
+    tag.close()
+    assert _call("PUT", f"{base}/global-moods/1/songs/4", token) == (404, {"error": "mood", "mood_id": 1})
 
 
 # ==================== folders ====================

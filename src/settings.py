@@ -57,8 +57,8 @@ class Settings:
     # Empty = no library: indexing and serving its files are skipped.
     local_library_dir_str: str = os.getenv("MUSIC_LIBRARY_DIR", "").strip()
     local_library_dir: UPath | None = UPath(local_library_dir_str) if local_library_dir_str else None
-    smb_username: str = os.getenv("SMB_USERNAME")
-    smb_password: str = os.getenv("SMB_PASSWORD")
+    smb_username: str | None = os.getenv("SMB_USERNAME")
+    smb_password: str | None = os.getenv("SMB_PASSWORD")
     # A YouTube Data API key (Google Cloud console -> Credentials -> API key,
     # "YouTube Data API v3"), only for reading public video data such as
     # whether a video still exists. Unlike the OAuth token it doesn't expire.

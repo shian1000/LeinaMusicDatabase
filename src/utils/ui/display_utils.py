@@ -7,14 +7,12 @@ in formatted tables using the rich library.
 from typing import Optional, List, Tuple, Any, Dict
 from rich.console import Console
 from rich.table import Table
-from utils.database.music_db_manager import get_music_session
-from utils.database.datatables import Song, Artist, AdditionalSongArtist
-from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
-from sqlalchemy import func, text
-from sqlalchemy.orm import Session, selectinload
+from utils.database.datatables import Song, Artist
+from sqlalchemy.orm import Session
 from utils.common.debug import slog
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
+from utils.database.tags_management import tag_names_by_song
 from utils.database.song_kinds import is_full_album
 
 
@@ -172,39 +170,9 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     console.print(table)
 
 def display_songs_with_tags(songs: List[Song]) -> None:
-    """
-    Display a formatted table of songs with their associated tags.
-    
-    Joins song and tag data from the database and displays in a
-    formatted table showing tags for each song.
-    
-    Args:
-        songs: List of Song objects to display (currently unused,
-               all songs are queried from database)
-    """
-    music_session: Session
-    tag_session: Session
-    music_session, tag_session = get_global_database_sessions()
-    console = Console()
-
-    # Fetch all song-tag relationships
-    song_tags = tag_session.query(SongTag).all()
-    tag_ids = {st.tag_id for st in song_tags}
-
-    # Build tag lookup dictionary
-    tags_by_id = {}
-    if tag_ids:
-        tags = tag_session.query(Tag).filter(Tag.id.in_(tag_ids)).all()
-        tags_by_id = {tag.id: tag.name for tag in tags}
-
-    # Build song-to-tags mapping
-    song_tag_map = {}
-    for st in song_tags:
-        song_tag_map.setdefault(st.song_id, []).append(tags_by_id.get(st.tag_id, "?"))
-
-    tag_session.close()
-
-    # Create and populate table
+    """A table of `songs` with their tags (tag.db). The menu's global
+    sessions stay open - other screens still hold their objects."""
+    tags_by_song = tag_names_by_song(song.id for song in songs)
     table = _create_table("Songs & Tags", [
         ("Title", "cyan", None),
         ("Artist", "magenta", None),
@@ -212,26 +180,12 @@ def display_songs_with_tags(songs: List[Song]) -> None:
         ("Year", None, "right"),
         ("Tags", "yellow", None),
     ])
-
-    # Query all songs ordered by artist name and year
-    all_songs = (
-        music_session.query(Song)
-        .join(Artist)
-        .options(selectinload(Song.additional_artist_links).selectinload(AdditionalSongArtist.artist))
-        .order_by(Artist.name, Song.year)
-        .all()
-    )
-
-    for song in all_songs:
-        tag_list = song_tag_map.get(song.id, [])
-        tag_str = ", ".join(sorted(tag_list)) if tag_list else "—"
+    for song in songs:
         table.add_row(
             song.title,
             song_artist_label(song),
             song.album or "—",
             str(song.year) if song.year else "—",
-            tag_str,
+            ", ".join(tags_by_song.get(song.id, [])) or "—",
         )
-
-    music_session.close()
-    console.print(table)
+    Console().print(table)

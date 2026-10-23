@@ -35,16 +35,25 @@ def save_playlist(username: str, name: str, tracks: list, source: str | None = N
         return conn.execute("SELECT id FROM playlists WHERE uid = ?", (uid,)).fetchone()[0]
 
 
+class PlaylistChangedError(Exception):
+    """A phone changed the playlist while it was being deleted here, with a
+    newer time than this deletion: the phone's version stays."""
+
+
 def delete_playlist(username: str, playlist_id: int) -> Path | None:
     """Delete a playlist here and on the user's phones (they get the marker
-    at their next sync). Returns the archive file it was copied to first."""
+    at their next sync). Returns the archive file it was copied to first,
+    None when it was already gone. Raises PlaylistChangedError when a phone's
+    newer change won (playlist_sync's conflict rule) - it isn't deleted."""
     folder = user_dir(username)
     with closing(playlist_sync.connect(folder / USER_DB_FILENAME)) as conn:
         row = conn.execute("SELECT uid, revision FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
         if row is None:
             return None
-        _, _, archived = playlist_sync.delete_playlist(conn, folder, row["uid"], row["revision"],
-                                                       playlist_sync.now_ms())
+        applied, _, archived = playlist_sync.delete_playlist(conn, folder, row["uid"], row["revision"],
+                                                             playlist_sync.now_ms())
+        if not applied:
+            raise PlaylistChangedError(row["uid"])
         return archived
 
 

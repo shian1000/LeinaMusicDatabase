@@ -31,13 +31,15 @@ def _describe(candidate: LatinCandidate) -> str:
 
 
 def _pick_kinds(session) -> tuple | None:
+    """The kinds ticked; () when nothing lacks a Latin form, None when the
+    user cancelled or ticked none."""
     counts = {kind: len(missing_latin_forms(session, (kind,))) for kind in _KIND_LABELS}
     if not any(counts.values()):
         return ()
     choices = [questionary.Choice(f"{label} ({counts[kind]} without one)", value=kind, checked=bool(counts[kind]))
                for kind, label in _KIND_LABELS.items()]
     picked = questionary.checkbox("Which names do you want to go through?", choices=choices).ask()
-    return None if picked is None else tuple(picked)
+    return tuple(picked) if picked else None
 
 
 def _accept_suggestions(candidates: list[LatinCandidate]) -> set:
@@ -83,6 +85,7 @@ def fill_latin_forms() -> None:
     session, _ = open_and_set_global_database_sessions()
     kinds = _pick_kinds(session)
     if kinds is None:
+        print("Nothing picked.")
         return
     candidates = missing_latin_forms(session, kinds) if kinds else []
     if not candidates:

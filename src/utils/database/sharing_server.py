@@ -101,7 +101,8 @@ with every path passed on the command line.
   whose account.json grants "edit_global_moods" (otherwise 403 with JSON
   {"error": "permission", "permission": "edit_global_moods"}). The mood and
   song are checked against the shared copies in --dir (404 with JSON
-  {"error": "mood"} / {"error": "song"}); the change is only recorded in
+  {"error": "mood"} / {"error": "song"}; 503 when the shared tag.db can't be
+  read, so a mood isn't taken for gone); the change is only recorded in
   --mood-changes/pending/ (202) - MusicDatabase applies it to the original
   tag.db later (global_mood_log.py). The server never writes tag.db.
 - Covers (only with --users; covers.py): PUT /users/<name>/covers/<sha256>
@@ -1180,7 +1181,12 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             mood_id, requested = int(mood_id), int(requested)
             # Both checked against the copies the phone downloads: a mood or
             # song it knows is in them
-            mood_name = global_mood_log.global_mood_name(os.path.join(share_dir, "tag.db"), mood_id)
+            try:
+                mood_name = global_mood_log.global_mood_name(os.path.join(share_dir, "tag.db"), mood_id)
+            except sqlite3.Error as exc:
+                print(f"Reading the shared tag.db for global mood {mood_id} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
             if mood_name is None:
                 self._reply_json(HTTPStatus.NOT_FOUND, {"error": "mood", "mood_id": mood_id})
                 return

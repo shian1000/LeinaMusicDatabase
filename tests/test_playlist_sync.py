@@ -323,3 +323,27 @@ def test_menu_playlists_sync_like_the_phones(users_env):
     assert changed["revision"] == 3
     assert [(p["revision"], p["deleted"]) for p in changed["playlists"]] == [(2, False), (3, True)]
     assert delete_playlist("ania", 12345) is None
+
+
+def test_menu_deletion_that_loses_to_a_phones_newer_change_says_so(users_env, monkeypatch):
+    # SRV-05: the revision is read before the deletion's transaction; a phone
+    # change in between with a newer time wins, and the menu said "Deleted"
+    # anyway. Now delete_playlist() raises and the playlist is still there.
+    from utils.database import user_playlists
+    from utils.database.user_playlists import PlaylistChangedError, delete_playlist, list_playlists, save_playlist
+
+    folder = users.create_user("ania", "secret1")
+    track = SimpleNamespace(song_id=1, title="Karma", artist="Hey", youtube_video_id=None, duration_s=None)
+    playlist_id = save_playlist("ania", "Mix", [track])
+    original = ps.delete_playlist
+
+    def phone_edits_first(conn, user_folder, uid, base_revision, deleted_at):
+        ps.store_playlist(conn, "ania", uid, _playlist(name="From the phone", updated_at=deleted_at + 60_000), 1)
+        return original(conn, user_folder, uid, base_revision, deleted_at)
+
+    monkeypatch.setattr(user_playlists.playlist_sync, "delete_playlist", phone_edits_first)
+    with pytest.raises(PlaylistChangedError):
+        delete_playlist("ania", playlist_id)
+    assert [(p[0], p[1]) for p in list_playlists("ania")] == [(playlist_id, "From the phone")]
+    assert not (folder / "archive" / "playlists").exists()
+

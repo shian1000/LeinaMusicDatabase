@@ -35,7 +35,7 @@ from config.constants import (
     SINGLES_ALBUM,
 )
 from utils.common.debug import flog, slog
-from utils.common.musicbrainz_client import mb_get
+from utils.common.musicbrainz_client import lucene_quote, mb_get
 from utils.common.normalizer import name_key, normalize
 from utils.database.genres import canonical_genre, genre_key, is_known_genre
 from utils.database.latin_names import artist_match_synonyms, song_titles
@@ -121,16 +121,16 @@ class GenreLookup:
     # ---------- requests ----------
 
     def _search_recordings(self, title: str, artist: str, release: str | None = None) -> list:
-        query = f'recording:"{_escape(title)}" AND artist:"{_escape(artist)}" AND video:false'
+        query = f'recording:{lucene_quote(title)} AND artist:{lucene_quote(artist)} AND video:false'
         if release:
-            query += f' AND release:"{_escape(release)}"'
+            query += f' AND release:{lucene_quote(release)}'
         data = _get_json(f"{MUSICBRAINZ_WS_ROOT}recording/", {"query": query, "limit": MUSICBRAINZ_API_LIMIT})
         return (data or {}).get("recordings") or []
 
     def _search_artist(self, name: str, names: set) -> str | None:
         key = name_key(name)
         if key not in self._artist_searches:
-            data = _get_json(f"{MUSICBRAINZ_WS_ROOT}artist/", {"query": f'artist:"{_escape(name)}"', "limit": 5})
+            data = _get_json(f"{MUSICBRAINZ_WS_ROOT}artist/", {"query": f'artist:{lucene_quote(name)}', "limit": 5})
             found = [a for a in (data or {}).get("artists") or []
                      if name_key(a.get("name")) in names
                      or any(name_key(alias.get("name")) in names for alias in a.get("aliases") or [])]
@@ -156,10 +156,6 @@ def _get_json(url: str, params: dict) -> dict | None:
     except ValueError:
         slog(f"[Genres] not JSON from {url}")
         return None
-
-
-def _escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _artist_names(song) -> set:

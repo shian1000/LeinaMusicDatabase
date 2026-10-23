@@ -1,6 +1,8 @@
 from utils.database.database_sessions import get_global_database_sessions
 from utils.database.tag_db_manager import Tag, SongTag
-from utils.common.debug import slog
+from sqlalchemy.exc import SQLAlchemyError
+
+from utils.common.debug import flog, slog
 
 
 def _validate_song_and_tag(song, tag: str):
@@ -30,6 +32,16 @@ def _validate_song_and_tag(song, tag: str):
 
     _, tag_session = sessions
     return tag_session, tag
+
+
+def _failed(tag_session, what: str, exc: SQLAlchemyError) -> bool:
+    """A failed query or flush leaves the global tag.db session needing a
+    rollback - without it the next commit fails somewhere else entirely.
+    Rolled back (its other unsaved tag changes too), shown and logged."""
+    tag_session.rollback()
+    print(f"{what} failed, unsaved tag changes were undone: {exc}")
+    flog(f"tags_management: {what} failed: {exc}")
+    return False
 
 
 def add_tag_to_song(song, tag: str) -> bool:
@@ -81,9 +93,8 @@ def add_tag_to_song(song, tag: str) -> bool:
         
         return True
         
-    except Exception as e:
-        slog(f"Error adding tag to song: {e}")
-        return False
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Adding tag '{tag}' to song {song.id}", e)
 
 
 def song_ids_with_tag(tag: str) -> set[int]:
@@ -101,6 +112,22 @@ def song_ids_with_tag(tag: str) -> set[int]:
         .all()
     )
     return {song_id for (song_id,) in rows}
+
+
+def tag_names_by_song(song_ids) -> dict[int, list[str]]:
+    """The tag names of each of `song_ids` that has any, sorted, in one query
+    on the global tag.db session (left open)."""
+    sessions = get_global_database_sessions()
+    ids = set(song_ids)
+    if sessions is None or not ids:
+        return {}
+    _, tag_session = sessions
+    names = {}
+    for song_id, name in (tag_session.query(SongTag.song_id, Tag.name)
+                          .join(Tag, SongTag.tag_id == Tag.id).all()):
+        if song_id in ids:
+            names.setdefault(song_id, []).append(name)
+    return {song_id: sorted(tags) for song_id, tags in names.items()}
 
 
 def has_tag_on_song(song, tag: str) -> bool:
@@ -139,9 +166,8 @@ def has_tag_on_song(song, tag: str) -> bool:
         slog(song_tag is not None)
         return song_tag is not None
         
-    except Exception as e:
-        slog(f"Error checking tag on song: {e}")
-        return False
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Checking tag '{tag}' on song {song.id}", e)
 
 
 def remove_tag_from_song(song, tag: str) -> bool:
@@ -189,6 +215,5 @@ def remove_tag_from_song(song, tag: str) -> bool:
         
         return True
         
-    except Exception as e:
-        slog(f"Error removing tag from song: {e}")
-        return False
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Removing tag '{tag}' from song {song.id}", e)

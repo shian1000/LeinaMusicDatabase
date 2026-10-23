@@ -51,27 +51,38 @@ def is_local_dir(uri_str: str):
 
 
 def get_proper_uri():
-    uri_upath = settings.local_library_dir
-    uri_str = settings.local_library_dir_str
-
-    if (is_local_dir(uri_str)):
-        uri = str(uri_upath)
-    else:
-        parsed = urlparse(uri_str)
-        scheme = f"{parsed.scheme}://"
-        remainder = uri_str[len(scheme):]
-        uri = f"{scheme}{settings.smb_username}:{settings.smb_password}@{remainder}"
-
-    return uri
+    """The music library folder as a URI. Never with the SMB login in it -
+    that goes to UPath as options (library_index_path()) - so the URI can be
+    shown or logged."""
+    if is_local_dir(settings.local_library_dir_str):
+        return str(settings.local_library_dir)
+    return settings.local_library_dir_str
 
 
 LIBRARY_INDEX_NAME = ".mp3_index.sqlite3"
+
+
+class MissingSmbLoginError(Exception):
+    """The library is on an SMB share, but SMB_USERNAME / SMB_PASSWORD aren't set."""
 
 
 def library_index_uri() -> str:
     """The library's .mp3_index.sqlite3, inside the library folder: get_proper_uri()
     may or may not end in "/" (str(UPath) drops it for a local folder)."""
     return f"{get_proper_uri().rstrip('/')}/{LIBRARY_INDEX_NAME}"
+
+
+def library_index_path() -> UPath:
+    """library_index_uri() as a UPath, with the SMB login for a share.
+    MissingSmbLoginError when a share has none, instead of trying to log in
+    as "None"."""
+    uri = library_index_uri()
+    if is_local_dir(settings.local_library_dir_str):
+        return UPath(uri)
+    if not (settings.smb_username and settings.smb_password):
+        raise MissingSmbLoginError("The music library is on a network share, but SMB_USERNAME / SMB_PASSWORD "
+                                   "aren't set in .env.")
+    return UPath(uri, username=settings.smb_username, password=settings.smb_password)
 
 
 def create_temp_index(index_file):

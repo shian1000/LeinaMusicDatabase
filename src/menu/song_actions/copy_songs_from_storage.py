@@ -1,6 +1,7 @@
 from upath import UPath
 import questionary
-from utils.common.file_management import LIBRARY_INDEX_NAME, copy_songs_using_index, library_index_uri
+from utils.common.file_management import (LIBRARY_INDEX_NAME, MissingSmbLoginError, copy_songs_using_index,
+                                          library_index_path)
 from utils.ui.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
 from utils.common.debug import slog
 from settings import settings
@@ -10,7 +11,11 @@ def copy_songs_from_storage(songs):
     if not settings.local_library_dir_str:
         print("No music library: MUSIC_LIBRARY_DIR isn't set - Settings -> Server -> Folders and network (or .env).")
         return "Back"
-    index_file = UPath(library_index_uri())
+    try:
+        index_file = library_index_path()
+    except MissingSmbLoginError as exc:
+        print(exc)
+        return "Back"
 
     # Check index existence but guard against remote filesystem/network errors (SMB, fsspec, etc.)
     try:
@@ -38,14 +43,18 @@ def copy_songs_from_storage(songs):
 
     choice = questionary.select("Where do you want the files to be copied into: ", choices=action_map).ask()
 
+    if choice in (None, "Back"):  # None: Esc / Ctrl+C
+        return "Back"
     if choice == "Open file manager":
-        paste_destination = open_file_browser_terminal(load_recent_dirs()[0])
+        # No recent folder yet (first use): start in the export folder
+        paste_destination = open_file_browser_terminal(recent_dirs[0] if recent_dirs else str(settings.export_dir))
     elif choice == "Type path manually":
-        paste_destination = UPath(input("Type path: "))        
-    elif choice == "Back":
-        return
+        typed = input("Type path: ").strip()
+        paste_destination = UPath(typed) if typed else None
     else:
         paste_destination = UPath(choice)
+    if paste_destination is None:  # left the file browser, or typed nothing
+        return "Back"
 
     save_recent_dirs(str(paste_destination))
 

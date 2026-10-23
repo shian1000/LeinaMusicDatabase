@@ -12,6 +12,7 @@ import requests
 from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
 from config.constants import MUSICBRAINZ_API_USER_AGENT, MUSICBRAINZ_VARIOUS_ARTISTS_ID
+from utils.common.musicbrainz_client import lucene_quote
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
@@ -136,7 +137,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
                 song = spell_check_result["corrected_title"]
     slog(f"{artist} - {song}", priority=1)
     
-    query = f'recording:"{song}" AND artist:"{artist}"'
+    query = f'recording:{lucene_quote(song)} AND artist:{lucene_quote(artist)}'
     slog(query, priority=1)
     try:
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
@@ -148,7 +149,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
 
         if result and not is_blacklisted_album(result, artist):
             if not spell_check:
-                return get_album_name(artist, song, spell_check=True)
+                return get_album_name(artist, song, delay=delay, spell_check=True)
             time.sleep(delay)
             matched_title, matched_artist = _recording_title_artist(result_recording, artist)
             return DiscoveryResult(album=result, matched_title=matched_title, matched_artist=matched_artist)
@@ -188,7 +189,7 @@ def _release_year_from_artist_recordings(artist: str, album: str, delay: float) 
     the artist, never sees it. Searching the artist's recordings on a release
     of that name does, and also proves the artist really is on it - unlike
     accepting any same-named "Various Artists" release."""
-    query_str = f'release:"{album}" AND artist:"{artist}"'
+    query_str = f'release:{lucene_quote(album)} AND artist:{lucene_quote(artist)}'
     with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
         response = musicbrainzngs.search_recordings(query=query_str, limit=10)
 
@@ -236,7 +237,7 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
     """
     try:
         if is_single:
-            query_str = f'recording:"{query}" AND artist:"{artist}"'
+            query_str = f'recording:{lucene_quote(query)} AND artist:{lucene_quote(artist)}'
             with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
                 response = musicbrainzngs.search_recordings(query=query_str, limit=10)
             recordings = response.get("recording-list", [])
@@ -256,7 +257,7 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
                         return YearDiscoveryResult(year=year, matched_title=matched_title, matched_artist=matched_artist)
             return None
 
-        query_str = f'releasegroup:"{query}" AND artist:"{artist}"'
+        query_str = f'releasegroup:{lucene_quote(query)} AND artist:{lucene_quote(artist)}'
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
             response = musicbrainzngs.search_release_groups(query=query_str, limit=10)
         release_groups = response.get("release-group-list", [])

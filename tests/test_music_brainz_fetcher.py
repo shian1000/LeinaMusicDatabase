@@ -86,6 +86,19 @@ def test_get_album_name_returns_the_ep(monkeypatch):
     assert result.matched_title == "Notion"
 
 
+def test_get_album_name_keeps_its_delay_in_the_spell_checked_pass(monkeypatch):
+    # DSC-03: the second (spell-checked) pass called itself without delay=,
+    # so it always slept the default 1.0 s
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings",
+                        lambda query, limit: {"recording-list": NOTION_RECORDINGS})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: {"found": False})
+    slept = []
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", slept.append)
+
+    assert get_album_name("The Rare Occasions", "Notion", delay=0.25).album == "Futureproof"
+    assert slept == [0.25]
+
+
 def test_get_album_name_reports_the_queried_artist_among_several_credits(monkeypatch):
     # "El tango de Roxanne" is credited "Ewan McGregor + José Feliciano + Jacek Koman"; reporting
     # the first credit made the manager discard the result for José Feliciano.
@@ -179,3 +192,32 @@ def test_various_artists_album_and_a_co_artists_album_still_count():
     duet = {"title": "Duet", "artist-credit": _credit(mcgregor, feliciano),
             "release-list": [_by(_release("McGregor Sings", "Album", "2003"), mcgregor)]}
     assert _pick_release([duet])[0] == "McGregor Sings"
+
+
+def test_quotes_and_backslashes_in_names_are_escaped_in_the_query(monkeypatch):
+    # DSC-07: titles were put between quotes unescaped - 'Blue Monday 12" Mix'
+    # ended the phrase early and broke the Lucene query
+    queries = []
+
+    def search(query, limit):
+        queries.append(query)
+        return {"recording-list": []}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", search)
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_release_groups",
+                        lambda query, limit: queries.append(query) or {"release-group-list": []})
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+
+    get_album_name('New "Order"', 'Blue Monday 12" Mix')
+    music_brainz_fetcher.get_release_year("AC\\DC", 'Live "Wire"', is_single=False)
+
+    assert queries[0] == 'recording:"Blue Monday 12\\" Mix" AND artist:"New \\"Order\\""'
+    assert queries[-2:] == ['releasegroup:"Live \\"Wire\\"" AND artist:"AC\\\\DC"',
+                           'release:"Live \\"Wire\\"" AND artist:"AC\\\\DC"']  # the various-artists fallback
+
+
+def test_lucene_quote_is_shared_with_the_genre_lookup():
+    from utils.common.musicbrainz_client import lucene_quote
+    from utils.discoveries import genre_lookup
+
+    assert lucene_quote('a "b" \\c') == '"a \\"b\\" \\\\c"'
+    assert genre_lookup.lucene_quote is lucene_quote

@@ -12,7 +12,8 @@ from settings import settings
 from utils.common.debug import slog
 from utils.database.database_sessions import open_and_set_global_database_sessions
 from utils.database.song_references import apply_song_id_changes
-from utils.database.user_playlists import delete_playlist, list_playlists, playlist_songs, save_playlist
+from utils.database.user_playlists import (PlaylistChangedError, delete_playlist, list_playlists, playlist_songs,
+                                           save_playlist)
 from utils.database.users import (
     InvalidUserError,
     UsersUnavailableError,
@@ -591,7 +592,12 @@ def _delete_playlist(username: str, playlist_id: int, name: str) -> str | None:
     print(f"This deletes '{name}' here and in {username}'s Leina Radio (at its next sync).")
     if not ask_yes_no("Delete it?"):
         return None
-    archived = delete_playlist(username, playlist_id)
+    try:
+        archived = delete_playlist(username, playlist_id)
+    except PlaylistChangedError:
+        print(f"Not deleted: '{name}' was just changed in {username}'s Leina Radio. "
+              "Look at it again and delete it then, if you still want to.")
+        return None
     print(f"Deleted '{name}'." + (f" A copy is kept in {archived}" if archived else ""))
     return _BACK
 
