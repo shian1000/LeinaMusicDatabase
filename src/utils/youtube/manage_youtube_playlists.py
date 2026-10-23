@@ -13,6 +13,7 @@ from pathlib import Path
 import questionary
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
@@ -260,41 +261,75 @@ def _oauth_client_id() -> str | None:
     return (data.get("installed") or data.get("web") or {}).get("client_id")
 
 
-def get_youtube_service():
-    """Authenticate and return a YouTube API service instance."""
+class YouTubeLoginError(Exception):
+    """No usable YouTube login and none can be made here and now - the
+    message says why. Raised instead of opening a login that would hang."""
 
-    creds = None
 
-    # Load cached credentials - unless they belong to another OAuth client
-    # (client_secret.json replaced, e.g. after its Google Cloud project was
-    # deleted): such a token only gets "Project ... has been deleted" errors.
-    if os.path.exists(TOKEN_PATH):
+def _browser_login_possible() -> bool:
+    """The OAuth flow waits for a browser on this machine to come back to a
+    localhost port; in an ssh session without a display (MusicDatabase-
+    Remote.sh) nothing ever does, and the app hangs."""
+    over_ssh = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return has_display or not over_ssh
+
+
+def _saved_credentials():
+    """The saved token, or None when there's none, it can't be read, or it
+    belongs to another OAuth client (client_secret.json replaced, e.g. after
+    its Google Cloud project was deleted: such a token only gets "Project ...
+    has been deleted" errors)."""
+    if not os.path.exists(TOKEN_PATH):
+        return None
+    try:
         creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-        if creds.client_id != _oauth_client_id():
-            print("The saved YouTube login is for another OAuth client - logging in again.")
+    except (OSError, ValueError) as exc:
+        flog(f"[YouTube login] {TOKEN_PATH} unreadable: {exc}")
+        print("The saved YouTube login can't be read - logging in again.")
+        return None
+    if creds.client_id != _oauth_client_id():
+        print("The saved YouTube login is for another OAuth client - logging in again.")
+        return None
+    return creds
+
+
+def get_youtube_service():
+    """Authenticate and return a YouTube API service instance.
+    YouTubeLoginError when Google can't be reached to refresh the login (a
+    network problem isn't a reason to log in again) or a browser login is
+    needed where none can happen (ssh without a display)."""
+    creds = _saved_credentials()
+    if creds and creds.valid:
+        return build("youtube", "v3", credentials=creds)
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        except TransportError as exc:
+            flog(f"[YouTube login] refresh failed, network: {exc}")
+            raise YouTubeLoginError(f"Can't reach Google to refresh the YouTube login ({exc}). "
+                                    "Check the connection and try again.") from exc
+        except RefreshError as exc:
+            # Revoked or expired for good (e.g. "invalid_grant": an OAuth app
+            # left in "Testing" loses it after 7 days) - only a new login helps
+            flog(f"[YouTube login] refresh refused: {exc}")
+            print(f"The saved YouTube login no longer works ({exc}) - logging in again.")
             creds = None
 
-    # If no valid credentials, login with OAuth
     if not creds or not creds.valid:
-        try:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                raise Exception("No valid refresh token")
-        except Exception:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CLIENT_SECRET_PATH, SCOPES
-            )
-            creds = flow.run_local_server(port=0)
+        if not _browser_login_possible():
+            raise YouTubeLoginError(
+                "YouTube needs a new login in a browser, which can't open over ssh. "
+                "Run this once on the computer's own desktop, then try again here.")
+        print("Opening a browser to log in to YouTube...")
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_PATH, SCOPES)
+        creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_PATH, "w") as token:
-            token.write(creds.to_json())
-
-
-        # Save token for next time
-        with open(TOKEN_PATH, "w") as token:
-            token.write(creds.to_json())
-
+    # Save token for next time
+    with open(TOKEN_PATH, "w") as token:
+        token.write(creds.to_json())
+    os.chmod(TOKEN_PATH, 0o600)
     return build("youtube", "v3", credentials=creds)
 
 

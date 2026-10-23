@@ -7,7 +7,8 @@ Not a place for one-off commands — see `AGENTS.md` → Tools before adding ano
 
 **What it does:** prints a read-only report of the SQLite databases (`music.db`, `tag.db`, `files.db`) — file path, size, row
 counts for the key tables, which migrations (`schema_version`) have been applied, whether
-`main.py` is currently running, and how many backups exist in `src/database/archive/`.
+the app (or the automatic inbox pass) is using them right now, and how many backups exist in
+`src/database/archive/`.
 
 **When to use it:** before any direct, out-of-band read/write against `music.db`, `tag.db` or `files.db` —
 exactly the moment `AGENTS.md` → Database safety says to confirm the exact DB state and check for
@@ -27,4 +28,7 @@ python tools/db_inspect.py
 
 **Known limitations:** row/migration counts only — it doesn't run `PRAGMA integrity_check`,
 validate foreign keys, or inspect what's actually inside `archive/` snapshots beyond counting
-them. Detecting whether `main.py` is running relies on `ps`, so it's Linux/macOS-only as written.
+them. Whether the app runs is read from its lock (`utils/database/app_lock.py`, flock, so
+Linux/macOS only): "yes" also while the automatic pass runs, "unknown" (treat as running) when
+the lock can't be checked. It takes the lock exclusively for an instant, so an app starting at
+that moment waits that long; it never creates the lock file.

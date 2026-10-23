@@ -533,3 +533,29 @@ def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, mon
 
     session.expire_all()
     assert _names(session) == ["Sting"] and song.artist_id == sting.id
+
+
+def test_songs_loaded_before_a_merge_follow_it(session, monkeypatch):
+    """DB-12: the merge moves songs in raw SQL. A song loaded before it kept
+    its old artist in the session, and changing it afterwards wrote the
+    deleted artist's id back (or failed with StaleDataError)."""
+    from utils.database import database_management
+    monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    keep, drop = Artist(name="Björk"), Artist(name="Bjork")
+    song = Song(title="Army of Me", artist=drop)
+    session.add_all([keep, drop, song])
+    session.commit()
+    keep_id, drop_id = keep.id, drop.id
+    assert song.artist is drop  # loaded
+
+    song.year = 1995  # pending, not flushed: must survive the merge
+    database_management.merge_artists_in_db(drop, keep)
+
+    assert song.artist is keep  # not the deleted row
+    song.artist.origin = "Iceland"  # was an UPDATE of the deleted row: StaleDataError
+    session.commit()
+
+    session.expire_all()
+    assert song.artist_id == keep_id and keep.origin == "Iceland"
+    assert song.year == 1995
+    assert session.get(Artist, drop_id) is None

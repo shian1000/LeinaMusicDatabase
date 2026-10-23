@@ -21,11 +21,13 @@ reasoning (this repo's schema changed by hand at least 3 times in the past
 with no record of which DB copies got the change -- that's the problem this
 replaces).
 
-Note on safety: a migration file is applied via `executescript()`, which can
-partially apply a multi-statement script before failing. The real safety net
-here is the mandatory backup taken immediately before running any pending
-migration (see `backup_databases`), not transactional rollback -- keep each
-migration file to one logical change so there's nothing to partially apply.
+Note on safety: a migration file and its `schema_version` row are applied in
+one transaction (`_apply_one()`; DDL is transactional in SQLite), so a failure
+or an interruption leaves neither -- the next start runs the file again from a
+clean state instead of re-running half of it ("duplicate column"). A migration
+file must therefore not contain its own BEGIN/COMMIT, nor statements SQLite
+refuses inside a transaction (VACUUM). The mandatory backup taken right before
+any pending migration (see `backup_databases`) stays the last safety net.
 """
 
 import sqlite3
@@ -131,17 +133,31 @@ def _apply_pending(conn: sqlite3.Connection, files: list[Path], label: str, back
     executed = []
     for f in pending:
         try:
-            conn.executescript(f.read_text())
-            conn.execute(
-                "INSERT INTO schema_version (filename) VALUES (?)", (f.name,)
-            )
-            conn.commit()
+            _apply_one(conn, f)
             executed.append(f.name)
             mlog(f"{label}: applied migration {f.name}")
         except Exception as exc:
             slog(f"{label}: migration {f.name} FAILED, stopping here: {exc}")
             raise
     return executed
+
+
+def _apply_one(conn: sqlite3.Connection, f: Path) -> None:
+    """Runs one migration file and records it, all or nothing.
+    executescript() can't take parameters, hence the quoted literal."""
+    name = f.name.replace("'", "''")
+    script = (
+        "BEGIN;\n"
+        f"{f.read_text()}\n;\n"
+        f"INSERT INTO schema_version (filename) VALUES ('{name}');\n"
+        "COMMIT;"
+    )
+    try:
+        conn.executescript(script)
+    except BaseException:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
 
 
 def initialize_db(db_path: Path, track: str, label: str) -> list:

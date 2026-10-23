@@ -245,6 +245,7 @@ def test_kept_link_is_not_asked_again_unless_reported_later(env):
     _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(), _row(4602, "Losing Sleep", "dead1")])
     requests, cases = _cases(env)
     pr.apply_dead_link_decision(cases[0], pr.KEEP)
+    env["session"].commit()
     pr.finish_request_files(requests, cases)  # file stays: second row unanswered
 
     _, cases = _cases(env)
@@ -382,3 +383,70 @@ def test_an_unreadable_report_is_never_overwritten(env):
 def test_a_missing_decisions_file_is_started(env):
     pr.save_decision("dead0", {"decision": "keep"})
     assert pr.load_decisions() == {"dead0": {"decision": "keep"}}
+
+
+# ==================== decisions follow the commit (DB-17) ====================
+
+def test_a_decision_is_recorded_only_when_music_db_commits(env):
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(replacement="new0")])
+    _, [case] = _cases(env)
+
+    pr.apply_dead_link_decision(case, pr.USE_VIDEO, "new0")
+    assert pr.load_decisions() == {}  # not committed yet
+
+    env["session"].commit()
+    assert pr.load_decisions()["4601:dead0"]["decision"] == pr.USE_VIDEO
+
+
+def test_a_rolled_back_decision_leaves_the_case_open(env):
+    """Before: decisions.json said "use video" while music.db never got the
+    link, and the next pass dropped the report as answered earlier."""
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(replacement="new0")])
+    _, [case] = _cases(env)
+
+    pr.apply_dead_link_decision(case, pr.USE_VIDEO, "new0")
+    env["session"].rollback()
+    env["session"].commit()  # a later, unrelated commit doesn't bring it back
+
+    assert pr.load_decisions() == {}
+    _, [case] = _cases(env)
+    assert case.status == pr.OPEN
+    assert env["songs"][0].youtube_video_id == "dead0"
+
+
+def test_an_unreadable_decisions_file_stops_before_any_change(env):
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(replacement="new0")])
+    (env["inbox"] / "decisions.json").write_text("{broken")
+    _, [case] = _cases(env)
+
+    with pytest.raises(pr.InboxFileError):
+        pr.apply_dead_link_decision(case, pr.USE_VIDEO, "new0")
+    assert (env["inbox"] / "decisions.json").read_text() == "{broken"
+
+
+# ==================== ids stored as text (DB-16) ====================
+
+@pytest.fixture
+def untyped_ids(monkeypatch):
+    """A phone file whose song_id column has no type: SQLite then keeps
+    "4601" as text (an INTEGER column would convert it)."""
+    monkeypatch.setitem(globals(), "REQUEST_SQL", REQUEST_SQL.replace("song_id INTEGER NOT NULL", "song_id NOT NULL"))
+
+
+def test_an_id_stored_as_text_is_read_as_its_number(env, untyped_ids):
+    """"4601" as text used to match no song, and the report was closed as
+    "song deleted"."""
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(song_id=" 4601")])
+
+    requests, [case] = _cases(env)
+
+    assert requests[0].error is None and requests[0].dead_links[0].song_id == 4601
+    assert case.status == pr.OPEN and case.song is env["songs"][0]
+
+
+def test_an_id_that_isnt_a_number_makes_the_file_unreadable(env, untyped_ids):
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(song_id="Chromatic")])
+
+    [request] = pr.read_new_requests()
+
+    assert request.error == "dead_youtube_links.song_id 'Chromatic' isn't a whole number"

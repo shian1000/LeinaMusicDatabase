@@ -559,8 +559,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
     pass. A youtube_video_id set is a manual pick: the video comes off
     bad_youtube_videos, and with `old_video_wrong` the replaced one goes on
     it as wrong for the song. The caller commits the music
-    session (for MERGE_ARTIST it must be the global one, which the merge
-    uses). A songs.artist_id correction is answered with MOVE_TO_ARTIST
+    session (MERGE_ARTIST merges in it too). A songs.artist_id correction is answered with MOVE_TO_ARTIST
     (`value` = the existing Artist), NEW_ARTIST (`value` = a name, else the
     phone's) or ACCEPT (the one artist of the phone's name, a new one when
     there is none); `keep_old_as` keeps the old artist on the song as an
@@ -622,7 +621,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         value = target.id
     elif decision == MERGE_ARTIST:
         from utils.database.database_management import merge_artists_in_db
-        merge_artists_in_db(case.row, value)
+        merge_artists_in_db(case.row, value, session)
         value = value.id
     elif decision == RENAME_ALBUM:
         album = song_album_to_rename(case)
@@ -654,6 +653,6 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
         **({"old_video_wrong": old} if old_video_wrong and decision != REJECT else {}),
-    })
+    }, session)
     case.status = DECIDED
     mlog(f"Inbox request: {case.table_name} {case.row_id} {case.column_name}: {old!r} -> {decision} {value!r}")

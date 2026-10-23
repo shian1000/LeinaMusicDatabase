@@ -47,7 +47,7 @@ import weakref
 from sqlalchemy import event, func, select, text
 
 from config.constants import FILE_MATCH_AUTO
-from utils.common.debug import mlog
+from utils.common.debug import flog, mlog
 from utils.database import mood_sync, playlist_sync, saved_sync
 from utils.database.backup import DB_FILES
 from utils.database.datatables import Song, SongIdChange
@@ -312,13 +312,28 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
     Without `force` it does nothing unless a commit has logged something
     since the last run. Uses (and commits) `tag_session`, else the global
     tag session if one is open - a second connection could wait on its
-    lock - else a session of its own. Returns {file label: rows changed}."""
+    lock - else a session of its own. Returns {file label: rows changed}.
+    A file that fails (a locked user.db, a broken files.db) is rolled back,
+    reported and left out; the others are still updated, and the next call
+    tries again even without `force` (every replay is idempotent - each file
+    has its own cursor)."""
     global _changes_pending
     if not (force or _changes_pending):
         return {}
     _changes_pending = False
     changes = load_changes()
     results = {}
+    failed = []
+
+    def replay(label, session, apply):
+        try:
+            results[label] = apply(session)
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            failed.append(label)
+            flog(f"Song id changes: {label} not updated: {exc!r}")
+            print(f"Warning: {label} couldn't follow the merged/deleted songs ({exc}) - tried again later.")
 
     own_session = None
     if tag_session is None:
@@ -329,8 +344,7 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
         from utils.database.tag_db_manager import get_tag_session
         tag_session = own_session = get_tag_session()
     try:
-        results["tag.db"] = _replay_tag_db(tag_session, changes)
-        tag_session.commit()
+        replay("tag.db", tag_session, lambda session: _replay_tag_db(session, changes))
     finally:
         if own_session is not None:
             own_session.close()
@@ -338,11 +352,11 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
     if FILES_DB.exists():
         from utils.database.files_index import files_db_session
         with files_db_session(FILES_DB) as session:
-            results["files.db"] = _replay(session, changes, has_tags=False, has_files=True)
-            session.commit()
+            replay("files.db", session, lambda session: _replay(session, changes, has_tags=False, has_files=True))
 
     for username, path in user_db_files().items():
         with user_db_session(path) as session:
-            results[f"user {username}"] = _replay_user_db(session, changes)
-            session.commit()
+            replay(f"user {username}", session, lambda session: _replay_user_db(session, changes))
+    if failed:
+        _changes_pending = True
     return results

@@ -153,7 +153,7 @@ def apply_found_link_decision(case: FoundLinkCase, decision: str, video_id: str 
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
-    })
+    }, session)
     case.status = DECIDED
     mlog(f"Inbox request: song {case.song_id} found link(s) {', '.join(phone_ids)} -> {decision} {video_id or ''}")
 

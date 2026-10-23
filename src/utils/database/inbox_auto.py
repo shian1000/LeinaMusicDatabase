@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from settings import Settings
-from utils.common.debug import mlog
+from utils.common.debug import flog, mlog
 from utils.database.account_auth import PERMISSION_APPLY_CORRECTIONS, user_permissions
 from utils.database.inbox_field_corrections import (
     ACCEPT,
@@ -66,6 +66,7 @@ from utils.database.inbox_requests import (
     OPEN,
     REVIEW,
     USE_VIDEO,
+    InboxFileError,
     RequestFile,
     add_auto_report,
     apply_dead_link_decision,
@@ -182,12 +183,42 @@ def _current_shown(case):
     return case.row.artist.name if case.is_artist else case.current
 
 
+def _applied(session, case, apply) -> bool:
+    """Run `apply()` and commit; False when it failed. The failure is rolled
+    back, noted on the case (it goes to review/) and logged, so one case
+    can't keep the changes already committed out of auto_report.json."""
+    status = case.status
+    try:
+        apply()
+        session.commit()
+        return True
+    except InboxFileError:
+        raise  # decisions.json can't be read: nothing more can be recorded
+    except Exception as exc:
+        session.rollback()
+        case.status = status
+        case.auto_note = f"couldn't be saved automatically: {exc}"
+        flog(f"Inbox auto: {case.key} failed: {exc!r}")
+        return False
+
+
 def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool = False) -> AutoResult:
     """The automatic pass over `requests` (read from new/). Commits
     `session` (music.db) after each change and adds the changes to
-    auto_report.json (`shown` = the owner is watching, the app ran it).
+    auto_report.json (`shown` = the owner is watching, the app ran it) -
+    also those made before an error stopped the pass.
     `on_case(i, n, case)` is called before each YouTube search, for progress."""
     result = AutoResult()
+    try:
+        _resolve(session, requests, on_case, result)
+    finally:
+        add_auto_report(result.changes, shown=shown)
+        for change in result.changes:
+            mlog(f"Inbox auto: {change['text']}")
+    return result
+
+
+def _resolve(session, requests: list[RequestFile], on_case, result: AutoResult) -> None:
     for request in [r for r in requests if r.error]:
         reject_request_file(request)
         result.rejected.append(request)
@@ -207,8 +238,8 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
         video_id, case.auto_note = link_verdict(case)
         if video_id is None:
             continue
-        apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO)
-        session.commit()
+        if not _applied(session, case, lambda: apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO)):
+            continue
         result.changes.append({
             "at": now_iso(), "kind": "dead_link", "song_id": case.song_id,
             "text": f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id} "
@@ -226,8 +257,8 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
         video_id, case.auto_note = link_verdict(case)
         if video_id is None:
             continue
-        apply_found_link_decision(case, USE_VIDEO, video_id, by=AUTO)
-        session.commit()
+        if not _applied(session, case, lambda: apply_found_link_decision(case, USE_VIDEO, video_id, by=AUTO)):
+            continue
         result.changes.append({
             "at": now_iso(), "kind": "found_link", "song_id": case.song_id,
             "text": f"{_song_label(case.song, case.reports[0])}: YouTube link -> {video_id} "
@@ -254,8 +285,8 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
         if case.auto_note is not None:
             continue
         old = _current_shown(case)
-        apply_field_correction(session, case, ACCEPT, by=AUTO)
-        session.commit()
+        if not _applied(session, case, lambda: apply_field_correction(session, case, ACCEPT, by=AUTO)):
+            continue
         result.changes.append({
             "at": now_iso(), "kind": "field_correction", "song_id": case.song.id if case.song else None,
             "text": f"{_song_label(case.song, case.latest)}: {case.label} {_shown(old)} -> "
@@ -273,7 +304,3 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
     result.to_review = len(left_cases)
     save_case_checks(left_cases)
     result.moved, result.left = finish_request_files(requests, cases, left_to=REVIEW)
-    add_auto_report(result.changes, shown=shown)
-    for change in result.changes:
-        mlog(f"Inbox auto: {change['text']}")
-    return result

@@ -446,3 +446,96 @@ def test_videos_exist_via_api_none_without_service_or_on_error(monkeypatch):
     monkeypatch.setattr(m, "_read_only_youtube_service",
                         lambda: types.SimpleNamespace(videos=lambda: types.SimpleNamespace(list=lambda **k: broken())))
     assert m.videos_exist_via_api(["public00000"]) is None
+
+
+# ==================== YouTube login (YT-07) ====================
+
+class _Creds:
+    def __init__(self, valid=False, expired=True, refresh_token="r", client_id="client", refresh_error=None):
+        self.valid, self.expired, self.refresh_token = valid, expired, refresh_token
+        self.client_id, self.refresh_error = client_id, refresh_error
+
+    def refresh(self, request):
+        if self.refresh_error:
+            raise self.refresh_error
+        self.valid = True
+
+    def to_json(self):
+        return '{"token": "t"}'
+
+
+@pytest.fixture
+def login(tmp_path, monkeypatch):
+    """A token file and a fake OAuth flow; `flows` counts browser logins."""
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    state = {"creds": _Creds(), "flows": 0}
+
+    def load(path, scopes):
+        if isinstance(state["creds"], Exception):
+            raise state["creds"]
+        return state["creds"]
+
+    class Flow:
+        @staticmethod
+        def from_client_secrets_file(path, scopes):
+            return Flow()
+
+        def run_local_server(self, port):
+            state["flows"] += 1
+            return _Creds(valid=True)
+
+    monkeypatch.setattr(m, "TOKEN_PATH", str(token))
+    monkeypatch.setattr(m, "_oauth_client_id", lambda: "client")
+    monkeypatch.setattr(m.Credentials, "from_authorized_user_file", load)
+    monkeypatch.setattr(m, "InstalledAppFlow", Flow)
+    monkeypatch.setattr(m, "build", lambda *args, **kwargs: "service")
+    for name in ("SSH_CONNECTION", "SSH_TTY", "WAYLAND_DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DISPLAY", ":0")
+    state["token"] = token
+    return state
+
+
+def test_a_network_error_while_refreshing_doesnt_open_a_login(login):
+    """Before: any refresh error, a dropped connection too, started the
+    browser login - which hangs over ssh."""
+    from google.auth.exceptions import TransportError
+    login["creds"] = _Creds(refresh_error=TransportError("Name or service not known"))
+
+    with pytest.raises(m.YouTubeLoginError, match="Can't reach Google"):
+        m.get_youtube_service()
+    assert login["flows"] == 0
+
+
+def test_a_revoked_token_logs_in_again(login):
+    from google.auth.exceptions import RefreshError
+    login["creds"] = _Creds(refresh_error=RefreshError("invalid_grant"))
+
+    assert m.get_youtube_service() == "service"
+    assert login["flows"] == 1
+    assert login["token"].stat().st_mode & 0o777 == 0o600
+
+
+def test_a_refreshed_token_needs_no_login(login):
+    assert m.get_youtube_service() == "service"
+    assert login["flows"] == 0
+
+
+def test_an_unreadable_token_file_logs_in_again(login):
+    """Before: the ValueError from a broken token.json crashed the menu."""
+    login["creds"] = ValueError("Expecting value: line 1 column 1")
+
+    assert m.get_youtube_service() == "service"
+    assert login["flows"] == 1
+
+
+def test_no_browser_login_over_ssh_without_a_display(login, monkeypatch):
+    from google.auth.exceptions import RefreshError
+    login["creds"] = _Creds(refresh_error=RefreshError("invalid_grant"))
+    monkeypatch.delenv("DISPLAY")
+    monkeypatch.setenv("SSH_CONNECTION", "192.0.2.10 50000 192.0.2.20 22")
+
+    with pytest.raises(m.YouTubeLoginError, match="over ssh"):
+        m.get_youtube_service()
+    assert login["flows"] == 0

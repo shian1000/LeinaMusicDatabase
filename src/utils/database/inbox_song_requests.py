@@ -211,7 +211,7 @@ def reject_song_request(session, case: SongRequestCase) -> None:
         session.add(RejectedSongRequest(artist=report.artist, title=report.title,
                                         youtube_video_id=report.youtube_video_id,
                                         spotify_track_id=report.spotify_track_id, rejected_at=now_iso()))
-    _decided(case, REJECT)
+    _decided(case, REJECT, session=session)
 
 
 def mark_song_added(case: SongRequestCase, artist: str | None, title: str) -> None:
@@ -220,7 +220,7 @@ def mark_song_added(case: SongRequestCase, artist: str | None, title: str) -> No
     _decided(case, ADD, added_as={"artist": artist, "title": title})
 
 
-def _decided(case: SongRequestCase, decision: str, **extra) -> None:
+def _decided(case: SongRequestCase, decision: str, session=None, **extra) -> None:
     save_decision(case.key, {
         "decision": decision,
         "artist": case.latest.artist,
@@ -228,7 +228,7 @@ def _decided(case: SongRequestCase, decision: str, **extra) -> None:
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **extra,
-    })
+    }, session)
     case.status = DECIDED
     mlog(f"Inbox request: song {case.latest.artist} - {case.latest.title} -> {decision}")
 

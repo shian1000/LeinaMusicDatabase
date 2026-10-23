@@ -212,6 +212,7 @@ def test_rejected_is_not_asked_again_unless_corrected_later(env):
     _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(), _row(row_id=4602)])
     requests, cases = _cases(env)
     fc.apply_field_correction(env["session"], cases[0], fc.REJECT)
+    env["session"].commit()
     pr.finish_request_files(requests, cases)  # stays: the second row is unanswered
 
     _, cases = _cases(env)
@@ -438,3 +439,22 @@ def test_genre_is_correctable_in_the_databases_spelling(env):
     env["session"].commit()
 
     assert env["songs"][0].genre == "Funk Rock, r&b"
+
+
+def test_artist_merge_happens_in_the_session_given(env, monkeypatch):
+    """DB-15: the merge used the global session whatever the caller passed,
+    so committing the caller's session didn't commit the merge."""
+    from utils.database import database_management as dm
+    s = env["session"]
+    monkeypatch.setattr(dm, "get_global_database_sessions",
+                        lambda: pytest.fail("the merge must use the session it was given"))
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db",
+             [_row("artists", 11, "name", "Vulfpeck", "Elise trouw", song_id=4603, title="Dean Town")])
+    _, [case] = _cases(env)
+    [twin] = fc.artist_twins(s, case, case.new_value)
+
+    fc.apply_field_correction(s, case, fc.MERGE_ARTIST, twin)
+    s.commit()
+
+    assert s.get(Artist, 11) is None
+    assert s.get(Song, 4603).artist_id == 10

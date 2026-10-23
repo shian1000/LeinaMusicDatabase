@@ -60,10 +60,11 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,390 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,410 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
-- Before any out-of-band DB write: `ps aux | grep main.py` (see Database safety)
+- Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
+  app is using the databases, from the app lock (see Database safety)
 
 Use the venv and the pinned versions. Don't install globally or bump dependencies unless the task
 requires it. The project is GPLv3 (`LICENSE`, user's choice 2026-10-21, same as the phone app): a new
@@ -124,7 +125,9 @@ non-trivial work in that area.
   name because docker bridges also have private IPs. The app depends on that contract, so don't change
   the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
-  `inbox_requests.py` reads that inbox and settles dead YouTube link reports;
+  `inbox_requests.py` reads that inbox and settles dead YouTube link reports (an answer reaches
+  `decisions.json` only when the music session holding its change commits: `save_decision(...,
+  session)`, so a failed commit leaves the case open; ids in a phone file are checked to be numbers);
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
   artist's origin, an album's title, a YouTube link or music video set by hand, ...; the song's
   artist, `songs.artist_id`, comes as a name and credits only that song to the artist of that name
@@ -530,7 +533,7 @@ non-trivial work in that area.
   id changes, resuming the sharing setup — a new start-up step says which kind it is. Settings → Server → "Back up database now" also lets the
   user trigger `backup_databases()` on demand, for a snapshot right before something risky.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
-  `ps aux | grep main.py`; prefer the app's own edit flow, or ask the user to pause it. A direct
+  `python tools/db_inspect.py` (the app lock; "UNKNOWN" counts as running); prefer the app's own edit flow, or ask the user to pause it. A direct
   write has already been caught racing a live session mid-edit (title cleanup) and clobbering
   in-progress work.
 - Add a schema change via a new file in `migrations/<db_name>/`, never by hand-editing a DB file or
@@ -555,7 +558,9 @@ non-trivial work in that area.
   reported without it.
 - `.secrets/client_secret.json` (Desktop-app OAuth client, Google Cloud project `<gcp-project>`
   since 2026-10-13) + `.secrets/token.json`, both `chmod 600`. `get_youtube_service()` discards a
-  token issued to another client and logs in again in the browser. An OAuth app left in "Testing"
+  token issued to another client and logs in again in the browser; a refresh that fails for lack
+  of network, or a login needed over ssh without a display (it would hang), raises
+  `YouTubeLoginError` instead, which its callers report. An OAuth app left in "Testing"
   gets its refresh token revoked after 7 days (`invalid_grant`); deleting the project behind the
   client gives "Project … has been deleted" (403).
 
@@ -658,7 +663,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,390 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,410 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

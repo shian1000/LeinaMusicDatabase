@@ -8,6 +8,7 @@ from googleapiclient.errors import HttpError
 from rich import print
 
 from utils.youtube.manage_youtube_playlists import (
+    YouTubeLoginError,
     get_youtube_service,
     _is_topic_channel,
     _parse_synonyms,
@@ -514,6 +515,9 @@ def get_playlist_items(playlist_input: str) -> list:
     try:
         items = _fetch_playlist_items_api(playlist_id)
     except HttpError as e:
+        print(f"  ✖ Failed to fetch playlist via API: {e}")
+        return []
+    except YouTubeLoginError as e:
         print(f"  ✖ Failed to fetch playlist via API: {e}")
         return []
 

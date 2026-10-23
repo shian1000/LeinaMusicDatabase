@@ -416,3 +416,47 @@ def test_a_newer_link_set_by_hand_settles_older_dead_link_reports(env):
     assert _names(env["inbox"], "processed") == ["bob_2026-10-14_09-00-00_001.db"]
     assert _names(env["inbox"], "review") == ["bob_2026-10-14_10-00-00_001.db"]
     assert result.to_review == 1
+
+
+# ==================== a failing case (DB-14) ====================
+
+def test_a_case_that_fails_goes_to_review_and_the_rest_is_reported(env, monkeypatch):
+    """Before: the exception left the pass, so the link already committed
+    in music.db never reached auto_report.json and the files stayed in new/."""
+    env["youtube"]["ours"]["dead1"] = "good1"
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", links=[(1, "Chromatic", "dead1", "good1")])
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_002.db", corrections=[_year(2, "Losing Sleep")])
+
+    def broken(session, case, decision, by=None):
+        case.row.year = 2020
+        session.flush()
+        raise ValueError("Several artists are called that")
+    monkeypatch.setattr(ia, "apply_field_correction", broken)
+
+    result = _run(env)
+
+    assert env["songs"][0].youtube_video_id == "good1"
+    assert env["songs"][1].year == 2019  # rolled back
+    [report] = pr.auto_report()
+    assert "good1" in report["text"]
+    assert result.to_review == 1
+    assert _names(env["inbox"], "processed") == ["2026-10-14_10-00-00_001.db"]
+    assert _names(env["inbox"], "review") == ["ania_2026-10-14_10-00-00_002.db"]
+    [case] = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
+    pr.load_case_checks([case], 24)
+    assert case.auto_note == "couldn't be saved automatically: Several artists are called that"
+
+
+def test_changes_are_reported_when_a_later_step_stops_the_pass(env, monkeypatch):
+    env["youtube"]["ours"]["dead1"] = "good1"
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", links=[(1, "Chromatic", "dead1", "good1")])
+
+    def broken(session, requests):
+        raise RuntimeError("song requests unreadable")
+    monkeypatch.setattr(ia, "collect_song_request_cases", broken)
+
+    with pytest.raises(RuntimeError):
+        _run(env)
+
+    [report] = pr.auto_report()
+    assert "good1" in report["text"]

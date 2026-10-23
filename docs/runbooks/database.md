@@ -80,7 +80,8 @@ backup_databases(reason="manual")
 There's no restore tool (a destructive operation like this benefits from a human doing it
 deliberately, not a script). To restore an archived snapshot:
 
-1. Confirm the app isn't running: `ps aux | grep main.py`. Close it first if it is.
+1. Confirm the app isn't running: `python tools/db_inspect.py` (first line, read from the app
+   lock). Close it first if it is.
 2. Copy the chosen file over the live one, e.g.:
    `cp src/database/archive/music.260910-1200.db src/database/music.db`
 3. If the snapshot predates a migration that's since landed, the next `python main.py` run will
@@ -763,11 +764,12 @@ bootstrap moment actually execute.
    trigger only in the `.sql` file would silently never exist there. Hang it on the table it fires
    *on*: `bad_youtube_videos_follow_songs` hangs on `song_id_changes` in `datatables.py`, since
    creating a trigger on a table that doesn't exist yet fails.
-3. **One logical change per file.** The runner applies a file with `executescript()`, which can
-   partially execute a multi-statement script before failing — there's no automatic rollback of a
-   half-applied file. The real safety net is the mandatory backup taken right before the file
-   runs, not transactional rollback: keep files small enough that "partially applied" isn't a
-   state that can happen.
+3. **One logical change per file, no BEGIN/COMMIT in it.** The runner applies a file and its
+   `schema_version` row in one transaction (DDL is transactional in SQLite), so a file that fails
+   or is interrupted leaves nothing of itself and runs again cleanly at the next start. A file
+   that ends the transaction itself (`COMMIT`, `VACUUM`) would split itself from that row again;
+   `tests/test_migrations.py` runs every real file through the runner and fails on that. The
+   mandatory backup taken right before stays the last safety net.
 4. Never edit a migration file after it might have been applied anywhere (your own machine counts
    — once you've run it once, it's shipped). Add a new file for any further change, even a typo
    fix in a comment inside an old one that's already been applied.

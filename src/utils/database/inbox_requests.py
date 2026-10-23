@@ -66,7 +66,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import or_
+from sqlalchemy import event, or_
 from sqlalchemy.orm import object_session
 
 from config.constants import (
@@ -344,6 +344,24 @@ def _columns(conn, table: str) -> set:
     return {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
 
 
+def _with_ids(row, positions, table: str, columns) -> tuple:
+    """The row with the id columns at `positions` as int. SQLite keeps any
+    type in any column, and an id stored as text ("12") would never match a
+    song, so the case would be closed as gone. A digit string is taken as
+    its number; anything else that isn't NULL makes the file unreadable
+    (ValueError)."""
+    row = list(row)
+    for i in positions:
+        value = row[i]
+        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+            continue
+        if isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+            row[i] = int(value.strip())
+            continue
+        raise ValueError(f"{table}.{columns[i]} {value!r} isn't a whole number")
+    return tuple(row)
+
+
 def read_request_file(path: Path) -> RequestFile:
     """Read one request file without changing it. Never raises for a bad file:
     RequestFile.error says what's wrong."""
@@ -380,7 +398,7 @@ def read_request_file(path: Path) -> RequestFile:
                 return request
             select = ", ".join(c if c in have else "NULL" for c in wanted)
             for row in conn.execute(f"SELECT {select} FROM {DEAD_LINKS_TABLE}"):
-                request.dead_links.append(DeadLinkReport(path.name, *row))
+                request.dead_links.append(DeadLinkReport(path.name, *_with_ids(row, [0], DEAD_LINKS_TABLE, wanted)))
         if FIELD_CORRECTIONS_TABLE in tables:
             wanted = ["table_name", "row_id", "column_name", "old_value", "new_value",
                       "song_id", "title", "artist", "corrected_at"]
@@ -389,7 +407,8 @@ def read_request_file(path: Path) -> RequestFile:
                 request.error = f"{FIELD_CORRECTIONS_TABLE} lacks {', '.join(missing)}"
                 return request
             for row in conn.execute(f"SELECT {', '.join(wanted)} FROM {FIELD_CORRECTIONS_TABLE}"):
-                request.field_corrections.append(FieldCorrection(path.name, *row))
+                request.field_corrections.append(
+                    FieldCorrection(path.name, *_with_ids(row, [1, 5], FIELD_CORRECTIONS_TABLE, wanted)))
         if FOUND_LINKS_TABLE in tables:
             wanted = ["song_id", "title", "artist", "video_id", "video_title", "video_channel", "found_at"]
             have = _columns(conn, FOUND_LINKS_TABLE)
@@ -399,7 +418,7 @@ def read_request_file(path: Path) -> RequestFile:
                 return request
             select = ", ".join(c if c in have else "NULL" for c in wanted)
             for row in conn.execute(f"SELECT {select} FROM {FOUND_LINKS_TABLE}"):
-                request.found_links.append(FoundLinkReport(path.name, *row))
+                request.found_links.append(FoundLinkReport(path.name, *_with_ids(row, [0], FOUND_LINKS_TABLE, wanted)))
         if SONG_REQUESTS_TABLE in tables:
             wanted = ["title", "artist", "album", "year", "duration_s", "youtube_video_id",
                       "spotify_track_id", "source", "requested_at"]
@@ -414,6 +433,8 @@ def read_request_file(path: Path) -> RequestFile:
                 request.song_requests.append(SongRequestReport(path.name, *row))
     except sqlite3.Error as exc:
         request.error = f"unreadable: {exc}"
+    except ValueError as exc:
+        request.error = str(exc)
     finally:
         conn.close()
     return request
@@ -526,10 +547,50 @@ def load_decisions() -> dict:
     return _load_json(DECISIONS_FILE, {})
 
 
-def save_decision(key: str, entry: dict) -> None:
+_PENDING_DECISIONS = "inbox_pending_decisions"
+
+
+def save_decision(key: str, entry: dict, session=None) -> None:
+    """Record the answer for `key`. With `session` (the music.db session
+    holding the change it decided), only once that session commits: written
+    before a commit that then failed, the case would count as answered while
+    music.db lacks the change, and the next pass would drop the request as
+    answered earlier. A rollback forgets it. An unreadable decisions.json
+    stops it here, before anything is committed (InboxFileError)."""
+    if session is None:
+        _write_decisions({key: entry})
+        return
+    _load_json(DECISIONS_FILE, {}, for_update=True)
+    if _PENDING_DECISIONS not in session.info:
+        session.info[_PENDING_DECISIONS] = {}
+        event.listen(session, "after_commit", _write_pending_decisions)
+        event.listen(session, "after_rollback", _drop_pending_decisions)
+    session.info[_PENDING_DECISIONS][key] = entry
+
+
+def _write_decisions(entries: dict) -> None:
     decisions = _load_json(DECISIONS_FILE, {}, for_update=True)
-    decisions[key] = entry
+    decisions.update(entries)
     _save_json(DECISIONS_FILE, decisions)
+
+
+def _write_pending_decisions(session) -> None:
+    pending = session.info.get(_PENDING_DECISIONS)
+    if not pending:
+        return
+    entries = dict(pending)
+    pending.clear()
+    try:
+        _write_decisions(entries)
+    except (InboxFileError, OSError) as exc:
+        # music.db is committed already: raising here would look like the
+        # commit failed. The cases are then asked about again.
+        flog(f"Inbox: decisions {', '.join(entries)} not recorded: {exc}")
+        print(f"Warning: the answers were saved in the database, but not in {DECISIONS_FILE}: {exc}")
+
+
+def _drop_pending_decisions(session) -> None:
+    session.info.get(_PENDING_DECISIONS, {}).clear()
 
 
 # ==================== the automatic pass's notes ====================
@@ -865,7 +926,7 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
-    })
+    }, session)
     case.status = DECIDED
     mlog(f"Inbox request: song {case.song_id} dead link {case.dead_video_id} -> {decision} {video_id or ''}")
 

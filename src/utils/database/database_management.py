@@ -5,6 +5,7 @@ from utils.database.datatables import song_categories, search_only_categories, a
 import time
 from utils.common.debug import slog
 from sqlalchemy import text
+from sqlalchemy.orm import object_session
 from utils.database.database_getter import get_global_database_sessions
 from utils.database.tags_management import remove_tag_from_song
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
@@ -84,17 +85,24 @@ def delete_db_entry(db_object):
             raise ArtistHasSongsError(f"'{db_object.name}' still has {songs} song(s)")
     music_session.delete(db_object)
 
-def merge_artists_in_db(merge_from, merge_to):
+def merge_artists_in_db(merge_from, merge_to, session=None):
 
     """Merge two artists in the database.
 
     Parameters
     - merge_from: Artist ORM object (the artist to be removed)
     - merge_to: Artist ORM object (the artist to be kept)
+    - session: the music session to do it in; default the one merge_to
+      belongs to, else the global one. The caller commits.
 
     Behavior:
     1. Reassign all songs that reference merge_from.id to merge_to.id
     2. If merge_from has no songs left afterwards, delete the artist row
+
+    The moves are raw SQL, so afterwards every object in the session is
+    expired (pending changes are flushed first, never lost) and merge_from is
+    expunged: a song loaded before would otherwise keep pointing at the
+    deleted artist, and a later change to it would write that back.
     """
 
     slog(merge_from)
@@ -117,8 +125,12 @@ def merge_artists_in_db(merge_from, merge_to):
         print("Source and target artist are the same; nothing to merge.")
         return
 
-    session, tag_session = get_global_database_sessions()
+    if session is None:
+        session = object_session(merge_to) if isinstance(merge_to, Artist) else None
+    if session is None:
+        session, _ = get_global_database_sessions()
 
+    session.flush()
     session.execute(
         text("UPDATE songs SET artist_id = :to_id WHERE artist_id = :from_id"),
         {"to_id": to_id, "from_id": from_id}
@@ -131,10 +143,15 @@ def merge_artists_in_db(merge_from, merge_to):
     if not remaining:
         if isinstance(merge_to, Artist) and isinstance(merge_from, Artist):
             merge_artist_synonyms(merge_to, merge_from)
+        session.flush()
         session.execute(text("DELETE FROM artists WHERE id = :id"), {"id": from_id})
+        if merge_from in session:
+            session.expunge(merge_from)
         print(f"Artist {merge_from_name} (id {from_id}) has been merged to {merge_to_name} (id {to_id}).")
     else:
         print(f"Artist {merge_from_name} (id {from_id}) still has {remaining} song(s); not deleting.")
+    session.flush()
+    session.expire_all()
 
 
 def artist_primary_songs(artist: Artist) -> list[Song]:

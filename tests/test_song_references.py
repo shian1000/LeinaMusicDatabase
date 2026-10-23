@@ -254,3 +254,46 @@ def test_bulk_deletes_are_logged_explicitly(env):
     s.query(Song).delete(synchronize_session=False)
     s.commit()
     assert sorted(c.old_song_id for c in s.query(SongIdChange)) == ids
+
+
+def test_one_broken_user_db_doesnt_stop_the_others_and_is_tried_again(env, capsys):
+    """Before: the first failing user.db ended the loop (later users never
+    updated) and the pending flag was already cleared, so nothing retried
+    until the next start's forced pass."""
+    music, tag, tmp_path = env
+    s = music()
+    keep, dup = _songs(s, "x", "x")
+    keep_id, dup_id = keep.id, dup.id
+    broken = users.create_user("aaron", "secret1")
+    folder = users.create_user("ania", "secret1")
+    for path in (broken, folder):
+        db = sqlite3.connect(path / "user.db")
+        db.execute("INSERT INTO playlists (id, name, created_at, updated_at) VALUES (1, 'Mix', 0, 0)")
+        db.execute("INSERT INTO playlist_tracks (playlist_id, position, song_id, title) VALUES (1, 0, ?, 'x')",
+                   (dup_id,))
+        db.commit()
+        db.close()
+    db = sqlite3.connect(broken / "user.db")
+    db.execute("DROP TABLE song_tags")
+    db.commit()
+    db.close()
+
+    sr.record_song_merge(s, dup_id, keep_id)
+    s.delete(dup)
+    s.commit()
+    results = sr.apply_song_id_changes(tag_session=tag())
+
+    assert "user aaron" not in results and results["user ania"] == 1
+    db = sqlite3.connect(folder / "user.db")
+    assert db.execute("SELECT song_id FROM playlist_tracks").fetchall() == [(keep_id,)]
+    db.close()
+    assert "user aaron couldn't follow the merged/deleted songs" in capsys.readouterr().out
+    db = sqlite3.connect(broken / "user.db")
+    assert db.execute("SELECT song_id FROM playlist_tracks").fetchall() == [(dup_id,)]  # rolled back
+
+    # Repaired: the next call catches up without being forced
+    db.execute("CREATE TABLE song_tags (song_id INTEGER, tag_id INTEGER, PRIMARY KEY (song_id, tag_id))")
+    db.commit()
+    db.close()
+    assert sr.apply_song_id_changes(tag_session=tag())["user aaron"] == 1
+    assert sr.apply_song_id_changes(tag_session=tag()) == {}
