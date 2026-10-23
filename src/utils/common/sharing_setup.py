@@ -46,19 +46,19 @@ SETTING_STEPS = [
         "SHARING_DIR", "Sharing folder", True,
         "The folder the sharing server gives to Leina Radio: copies of music.db, tag.db and files.db, "
         "plus Users/ (the accounts and their playlists - the originals, not copies), Inbox/ (requests "
-        "sent from phones) and MoodChanges/.",
-        "no server for phones: no users, no syncing, no requests from Leina Radio.",
+        "sent from Leina Radio) and MoodChanges/.",
+        "no server for Leina Radio: no users, no syncing, no requests from it.",
     ),
     SettingStep(
         "SHARING_LAN_INTERFACE", "Home network interface", False,
         "The network interface of your home network (Wi-Fi or cable). The server listens on its "
-        "address, so a phone on the same network reaches this PC.",
+        "address, so Leina Radio on the same network reaches this PC.",
         "the server listens only on the addresses of the next two steps - it needs at least one "
-        "address a phone can reach.",
+        "address Leina Radio can reach.",
     ),
     SettingStep(
         "SHARING_VPN", "VPN to listen on", False,
-        "Only if phones should reach this PC through a VPN, from any provider: which one the server "
+        "Only if Leina Radio should reach this PC through a VPN, from any provider: which one the server "
         "also listens on - the VPN's network interface by name (e.g. wg0 for WireGuard, tun0 for "
         "OpenVPN), \"tailscale\" (Tailscale's address, found by itself), or \"off\".",
         "no VPN - the server listens on no VPN's address.",
@@ -75,8 +75,8 @@ SETTING_STEPS = [
         "MUSIC_LIBRARY_DIR", "Your music library", False,
         "The folder with your own music files (mp3, flac, ...). It's indexed into files.db, so Leina "
         "Radio can play a song's file from this PC (the source \"Serwer\"). An smb://server/share/path/ "
-        "library can be indexed for MusicDatabase but isn't served to phones.",
-        "phones play only their own files and YouTube.",
+        "library can be indexed for MusicDatabase but isn't served to Leina Radio.",
+        "Leina Radio plays only its own files and YouTube.",
     ),
 ]
 

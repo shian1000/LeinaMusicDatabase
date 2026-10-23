@@ -5,7 +5,6 @@ from utils.ui.prompts import ask_yes_no
 from utils.database.datatables import artist_categories, search_only_categories, song_categories
 from menu.song_actions import song_actions
 from menu.artist_actions import artist_actions
-from utils.ui.menu_utils import clear_screen
 from utils.ui.display_utils import display_songs, display_artists
 from utils.database.database_sessions import submit_global_database_session
 
@@ -32,8 +31,6 @@ def fetch_artists():
         if decision:
             artist_actions(artist_objects)
             submit_global_database_session()
-        else:
-            clear_screen
 
 def fetch_songs():
     exit_label = ["Back"]
@@ -64,5 +61,3 @@ def fetch_songs():
         if decision:
             song_actions(songs_objects)
             submit_global_database_session()
-        else:
-            clear_screen

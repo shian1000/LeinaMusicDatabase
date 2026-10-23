@@ -265,8 +265,9 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   one (song, dead video), checks with yt-dlp whether the dead link and the phone's video play and
   runs our own `search_video_ytdlp()` (`check_link_cases()`: one batched Data API call for
   every id, yt-dlp only for candidates the API didn't rule out, the dead link not replayed), then
-  asks per song: keep the suggested link / keep the
-  newfound link (ours) / paste a link / "N/A" / keep the current link / skip. Both are offered even
+  asks per song: use the suggested link / use the
+  link our search found / paste a link / "N/A" / keep the current link / skip ("Use" takes a new
+  video, "Keep" leaves the database's). Both are offered even
   when the check says they don't play. The check is `video_playability()`: True / False / None, where
   None means YouTube blocked it (HTTP 429, "confirm you're not a bot") and is shown as "couldn't
   check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way. Answers go to `Inbox/decisions.json`; only "kept" is read
@@ -323,8 +324,8 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   Settled without asking: the song is gone, it has a link or "N/A" now, or every video named is in
   `bad_youtube_videos` (below). The automatic pass saves a link by the dead-link rule (our search found
   the same video and it plays here; `link_verdict()`), settles the case when none of the videos plays
-  here (Leina Radio then finds another and reports it), and leaves the rest for review: keep Leina
-  Radio's video / our newfound one / paste / "N/A" / "Wrong video" (the song stays without a link,
+  here (Leina Radio then finds another and reports it), and leaves the rest for review: use Leina
+  Radio's video / the one our search found / paste / "N/A" / "Wrong video" (the song stays without a link,
   the videos are remembered as wrong for it) / skip.
 - **Videos found bad** (music.db's `bad_youtube_videos`, migration 0010, owner's request
   2026-10-14; `load_bad_videos()` / `mark_bad_videos()` / `unmark_bad_video()` in

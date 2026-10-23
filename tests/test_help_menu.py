@@ -162,3 +162,46 @@ def test_the_topic_offers_the_option_and_back(monkeypatch, units_dir, capsys):
     monkeypatch.setattr(help_menu, "clear_screen", lambda: None)
     help_menu._show("Background services (Linux)")
     assert "NOT installed" in capsys.readouterr().out
+
+
+_PHONE_WORD = re.compile(r"\bphones?\b", re.IGNORECASE)
+
+
+def _user_strings(path: Path) -> list[str]:
+    """The string literals of a module (f-string parts too), without docstrings."""
+    import ast
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                  if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef))
+                  and node.body and isinstance(node.body[0], ast.Expr)
+                  and isinstance(node.body[0].value, ast.Constant)}
+    return [node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings]
+
+
+def test_help_and_the_sharing_setup_say_leina_radio_not_the_phone():
+    """UI-21: user-facing text names the client "Leina Radio", never "the
+    phone" (AGENTS.md); comments and docstrings may."""
+    assert not [t for t in _texts() if _PHONE_WORD.search(t)]
+    for module in ("utils/ui/sharing_wizard.py", "utils/common/sharing_setup.py",
+                   "menu/main_menu/settings/__init__.py", "menu/main_menu/help.py"):
+        found = [s for s in _user_strings(SRC / module) if _PHONE_WORD.search(s)]
+        assert not found, f"{module}: {found}"
+
+
+@pytest.mark.parametrize("module, function, header", [
+    ("menu.main_menu.enter_database.manage_database.fetch_database_data", "fetch_database_data",
+     "Fetch database data"),
+    ("menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data",
+     "fill_missing_data", "Fill missing data"),
+    ("menu.main_menu.enter_database.manage_database.manual_management", "manual_management",
+     "Manual management"),
+])
+def test_a_submenu_is_headed_by_the_label_that_opens_it(monkeypatch, module, function, header):
+    """UI-23: all three were headed "Manage database", their parent's name."""
+    import importlib
+    menu = importlib.import_module(module)
+    shown = []
+    monkeypatch.setattr(menu, "execute_menu_item", lambda prompt, *a, **k: shown.append(prompt))
+    getattr(menu, function)()
+    assert shown == [header]

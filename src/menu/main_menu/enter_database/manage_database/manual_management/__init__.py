@@ -14,4 +14,4 @@ def manual_management():
 
     slog(action_map)
 
-    execute_menu_item("Manage database", action_map, exit_label="Back")
+    execute_menu_item("Manual management", action_map, exit_label="Back")

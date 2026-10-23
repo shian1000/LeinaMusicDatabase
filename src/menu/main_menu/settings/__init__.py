@@ -82,7 +82,7 @@ def startup_tasks_menu():
     for switch in startup_settings.SWITCHES:
         print(f"\033[1m{switch.label}\033[0m - {switch.explanation}")
     print("\033[1mDaily publish to GitHub\033[0m - once a day, when the catalog changed: the public copy "
-          "phones without the server download (Settings -> Server -> Public database on GitHub).")
+          "Leina Radio downloads without the server (Settings -> Server -> Public database on GitHub).")
     print(f"\nAlways done, not switchable: {startup_settings.ALWAYS}.\n")
     choices = [questionary.Choice(title=switch.label, value=switch.key, checked=startup_settings.enabled(switch))
                for switch in startup_settings.SWITCHES]
@@ -319,7 +319,7 @@ def setup_database_sharing():
     print(f"from {settings.sharing_dir}, port {SHARING_HTTP_PORT}, on:")
     for what, address in plan:
         print(f"  {what}: {'every address of this PC' if address == '0.0.0.0' else address or 'no address right now'}")
-    print("A phone must be able to reach one of them.\n")
+    print("Leina Radio must be able to reach one of them.\n")
     if not ask_yes_no("Install (or reinstall) it now?"):
         print("Cancelled.")
         return
@@ -336,7 +336,7 @@ def setup_database_sharing():
         return
     for step in steps:
         print(f"  {step}")
-    print("\nLeina Radio -> Ustawienia -> Serwer, an address the phone can reach:")
+    print("\nLeina Radio -> Ustawienia -> Serwer, an address it can reach:")
     for field, address in phone_addresses(plan):
         print(f"  {field}: {address}")
     print("To turn it off:")

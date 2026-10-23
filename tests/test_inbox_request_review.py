@@ -232,7 +232,7 @@ def test_an_unreadable_file_is_moved_to_rejected(env, capsys):
 
 def test_using_the_suggested_link_saves_it_and_finishes_the_file(env, capsys):
     _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
-    env["answers"].add(REVIEW_LABEL, "Keep the suggested link (new0)")
+    env["answers"].add(REVIEW_LABEL, "Use the suggested link (new0)")
 
     review.resolve_new_requests()
 
@@ -270,7 +270,7 @@ def test_a_pasted_link_is_used_once_it_is_a_youtube_link(env, capsys):
 def test_skip_keeps_the_file_for_next_time(env, capsys):
     _request(env["inbox"], "2026-10-14_09-00-00_001.db",
              dead=[(4601, "Chromatic", "dead0", "new0"), (4603, "Obsession", "dead2", "new2")])
-    env["answers"].add(REVIEW_LABEL, review._SKIP, "Keep the suggested link (new2)")
+    env["answers"].add(REVIEW_LABEL, review._SKIP, "Use the suggested link (new2)")
 
     review.resolve_new_requests()
 
@@ -301,7 +301,7 @@ def test_stop_leaves_the_rest_and_the_later_parts_unasked(env, stop):
 
 def test_a_found_link_is_saved(env):
     _request(env["inbox"], "2026-10-14_09-00-00_001.db", found=[(4602, "Losing Sleep", "found1")])
-    env["answers"].add(REVIEW_LABEL, "Keep Leina Radio's link (found1)")
+    env["answers"].add(REVIEW_LABEL, "Use Leina Radio's link (found1)")
 
     review.resolve_new_requests()
 
@@ -322,7 +322,7 @@ def test_a_wrong_found_link_leaves_the_song_without_one(env):
 def test_after_the_dead_links_the_found_links_are_asked(env):
     _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")],
              found=[(4602, "Losing Sleep", "found1")])
-    env["answers"].add(REVIEW_LABEL, "Keep the suggested link (new0)", "Keep Leina Radio's link (found1)")
+    env["answers"].add(REVIEW_LABEL, "Use the suggested link (new0)", "Use Leina Radio's link (found1)")
 
     review.resolve_new_requests()
 

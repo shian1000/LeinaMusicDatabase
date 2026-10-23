@@ -442,12 +442,36 @@ def test_artist_has_album_matches_by_name_or_synonym_and_normalized_title(sessio
 def test_blacklisted_title_passes_only_for_an_artist_that_has_it(monkeypatch):
     from utils.common.text_utils import is_blacklisted_album
     monkeypatch.setattr(al, "artist_has_album",
-                        lambda artist_name, title: (artist_name, title) == ("Abradab", "Czerwony album"))
+                        lambda artist_name, title: (artist_name, title) == ("Abradab", "Best of Abradab"))
 
-    assert is_blacklisted_album("Czerwony album")  # "album" is in blacklist.txt
-    assert not is_blacklisted_album("Czerwony album", "Abradab")
-    assert is_blacklisted_album("Czerwony album", "Someone Else")
+    assert is_blacklisted_album("Best of Abradab")  # "best of" is in blacklist.txt
+    assert not is_blacklisted_album("Best of Abradab", "Abradab")
+    assert is_blacklisted_album("Best of Abradab", "Someone Else")
     assert is_blacklisted_album("Greatest Hits", "Abradab")
+
+
+# Real albums whose titles hold a common word, a place or a name: blacklist.txt's
+# [substring] list used to reject them (COM-09)
+@pytest.mark.parametrize("title", [
+    "Rock or Bust", "Morrison Hotel", "Paris", "Gold Dust Woman", "Mellow Gold", "Live Through This",
+    "Selling England by the Pound", "Sgt. Pepper's Lonely Hearts Club Band", "Face the Music",
+    "Dance of the Knights", "Radio K.A.O.S.", "Tokyo", "The Next Episode", "Version 2.0",
+    "Selected Ambient Works Volume II", "The Best Damn Thing", "Czerwony album", "Rock Action",
+    "Music for the People", "I Want to Die in New Orleans",
+])
+def test_a_real_album_with_a_common_word_is_not_blacklisted(title):
+    from utils.common.text_utils import is_blacklisted_album
+    assert not is_blacklisted_album(title)
+
+
+@pytest.mark.parametrize("title", [
+    "Greatest Hits", "The Very Best of ABBA", "Now That's What I Call Music! 47", "Gold", "Rock",
+    "Album", "Live at Montreux 15.07.2016", "Live in Toruń", "FIFA 14 Soundtrack", "Back to Black (MBNN Remix)",
+    "Hity lata 2016", "The Essential Leonard Cohen", "Kuschelrock 25",
+])
+def test_compilations_and_placeholders_are_still_blacklisted(title):
+    from utils.common.text_utils import is_blacklisted_album
+    assert is_blacklisted_album(title)
 
 
 def _review_with(monkeypatch, session, selects, checkboxes=()):

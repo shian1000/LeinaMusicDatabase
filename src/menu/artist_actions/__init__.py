@@ -97,4 +97,5 @@ def artist_actions(artist_objects):
         "Remove from the database": lambda: remove_artists(artist_objects),
     }
 
-    execute_menu_item("What do you want to do with these artists?", action_map, exit_label="Nothing", one_time=True)
+    execute_menu_item("What do you want to do with these artists?", action_map, exit_label="Nothing", one_time=True,
+                      clear=False)

@@ -253,3 +253,15 @@ def test_database_menus_have_no_placeholder_entries(monkeypatch):
     assert {"Fetch songs", "Download YT song"} <= database_labels
     assert fill_labels == {"Albums", "Years", "Genres"}
     assert (database_labels | fill_labels).isdisjoint(PLACEHOLDER_LABELS)
+
+
+@pytest.mark.parametrize("module, objects", [("menu.song_actions", "songs"), ("menu.artist_actions", "artists")])
+def test_the_action_menu_keeps_the_results_table_on_screen(monkeypatch, module, objects):
+    # Fetch songs / artists prints the results, then opens this menu: clearing the
+    # screen first hid the list the user was choosing an action for (UI-11)
+    import importlib
+    actions = importlib.import_module(module)
+    calls = []
+    monkeypatch.setattr(actions, "execute_menu_item", lambda *a, **k: calls.append(k))
+    getattr(actions, "song_actions" if objects == "songs" else "artist_actions")([])
+    assert calls[0]["clear"] is False

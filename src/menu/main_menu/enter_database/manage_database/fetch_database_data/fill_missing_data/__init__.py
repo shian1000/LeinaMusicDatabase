@@ -13,4 +13,4 @@ def fill_missing_data():
 
     slog(action_map)
 
-    execute_menu_item("Manage database", action_map, exit_label="Back")
+    execute_menu_item("Fill missing data", action_map, exit_label="Back")

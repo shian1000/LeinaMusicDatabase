@@ -1252,11 +1252,11 @@ def _resolve_via_db_reference(monkeypatch, artist: str, title: str, video_id: st
     exercises.
     """
     monkeypatch.setattr(m, "get_youtube_service", lambda: object())
-    monkeypatch.setattr(m, "load_cache", lambda: None)
+    monkeypatch.setattr(m, "load_cache", lambda playlist_name: None)
     monkeypatch.setattr(m, "create_playlist", lambda youtube, title, description="": "PLAYLIST1")
     monkeypatch.setattr(yt_cache, "save_cache", lambda cache: None)
     monkeypatch.setattr(m, "save_cache", lambda cache: None)
-    monkeypatch.setattr(m, "clear_cache", lambda: None)
+    monkeypatch.setattr(m, "clear_cache", lambda playlist_name: None)
     monkeypatch.setattr(m, "is_video_id_valid", lambda vid, timeout=20: True)
     monkeypatch.setattr(m, "submit_global_database_session", lambda: None)
 

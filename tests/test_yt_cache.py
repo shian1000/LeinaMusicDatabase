@@ -42,3 +42,49 @@ def test_init_cache_leaves_video_id_none_without_override(monkeypatch):
 
     key = c.make_song_key("Some Artist", "Some Song")
     assert cache["songs"][key]["video_id"] is None
+
+
+# The file holds every unfinished playlist by name (YT-08): starting a new one
+# used to overwrite another's progress.
+
+def test_two_unfinished_playlists_keep_their_own_progress(monkeypatch, tmp_path):
+    monkeypatch.setattr(c, "CACHE_FILE", tmp_path / "yt_playlist_cache.json")
+    rock = c.init_cache("PL1", "Rock", [_fake_song("Queen", "Bicycle")])
+    rock["songs"][c.make_song_key("Queen", "Bicycle")]["added"] = True
+    c.save_cache(rock)
+    c.init_cache("PL2", "Jazz", [_fake_song("Miles Davis", "So What")])
+
+    assert sorted(c.unfinished_playlists()) == ["Jazz", "Rock"]
+    assert c.load_cache("Rock")["songs"][c.make_song_key("Queen", "Bicycle")]["added"] is True
+    assert c.load_cache("Jazz")["playlist_id"] == "PL2"
+    assert c.load_cache("Pop") is None
+
+    c.clear_cache("Rock")
+    assert c.unfinished_playlists() == ["Jazz"]
+    c.clear_cache("Jazz")
+    assert not c.CACHE_FILE.exists()
+
+
+def test_a_cache_file_in_the_old_single_playlist_format_is_still_read(monkeypatch, tmp_path):
+    monkeypatch.setattr(c, "CACHE_FILE", tmp_path / "yt_playlist_cache.json")
+    c.CACHE_FILE.write_text('{"playlist_id": "PL1", "playlist_name": "Rock", "songs": {}}', encoding="utf-8")
+    assert c.load_cache("Rock")["playlist_id"] == "PL1"
+
+    c.init_cache("PL2", "Jazz", [])
+    assert sorted(c.unfinished_playlists()) == ["Jazz", "Rock"]
+
+    c.CACHE_FILE.write_text("null", encoding="utf-8")  # left by a failed start
+    assert c.load_cache("Rock") is None
+
+
+def test_resuming_takes_the_songs_picked_now(monkeypatch, tmp_path):
+    monkeypatch.setattr(c, "CACHE_FILE", tmp_path / "yt_playlist_cache.json")
+    cache = c.init_cache("PL1", "Rock", [_fake_song("Queen", "Bicycle"), _fake_song("Queen", "Innuendo"),
+                                         _fake_song("ABBA", "SOS")])
+    cache["songs"][c.make_song_key("ABBA", "SOS")]["added"] = True
+
+    new, dropped = c.update_cache_songs(cache, [_fake_song("Queen", "Bicycle"), _fake_song("Muse", "Uprising")])
+
+    assert (new, dropped) == (1, 1)
+    assert sorted(c.load_cache("Rock")["songs"]) == sorted(
+        c.make_song_key(*s) for s in [("Queen", "Bicycle"), ("Muse", "Uprising"), ("ABBA", "SOS")])

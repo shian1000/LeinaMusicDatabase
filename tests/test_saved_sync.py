@@ -184,6 +184,21 @@ def test_follow_song_merges(conn):
     assert ss.current_revision(conn, SONGS) == 7
 
 
+def test_follow_song_merges_keeps_the_id_of_a_loop(conn):
+    """SRV-16: a loop in the log (can't happen) left the item on an id of the
+    loop under a new revision; now no id on one is trusted, as for playlist
+    tracks and the inbox (playlist_sync.follow_song_id_changes())."""
+    _put(conn, uid="loop", song={"song_id": 10, "title": "a"})
+    _put(conn, uid="merged", song={"song_id": 2, "title": "b"})
+    changes = [(1, 10, 11), (2, 11, 10), (3, 2, 3)]
+    revision = ss.current_revision(conn, SONGS)
+
+    with ps._transaction(conn):
+        assert ss.follow_song_merges(conn, changes) == 1
+    assert dict(conn.execute("SELECT uid, song_id FROM saved_songs")) == {"loop": 10, "merged": 3}
+    assert ss.current_revision(conn, SONGS) == revision + 1
+
+
 def test_follow_song_merges_before_the_migration_does_nothing(tmp_path):
     db = sqlite3.connect(tmp_path / "user.db")
     db.execute("CREATE TABLE schema_version (filename TEXT)")

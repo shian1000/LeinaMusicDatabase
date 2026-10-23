@@ -40,7 +40,7 @@ BACKUP = StartupSwitch(
     "warns once the newest backup is more than 7 days old.",
 )
 MOOD_CHANGES = StartupSwitch(
-    "STARTUP_MOOD_CHANGES", "Global mood changes from phones",
+    "STARTUP_MOOD_CHANGES", "Global mood changes from Leina Radio",
     "Applies the changes to global moods that permitted users made in Leina Radio. Turned off, they "
     "wait in the sharing folder (Users -> Moods -> Changes from Leina Radio).",
 )
@@ -50,7 +50,7 @@ LIBRARY_INDEX = StartupSwitch(
     "(Settings -> Server -> Index music library does it by hand).",
 )
 SHARE_COPY = StartupSwitch(
-    "STARTUP_SHARE_COPY", "Daily copy for phones",
+    "STARTUP_SHARE_COPY", "Daily copy for Leina Radio",
     "Once a day: refreshes the copies of the databases Leina Radio downloads from this PC "
     "(Settings -> Server -> Submit database for sharing does it by hand).",
 )

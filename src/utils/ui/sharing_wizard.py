@@ -197,13 +197,13 @@ def _print_listening(env_file: Path) -> list:
     plan = setup.listening_plan(env_file)
     if not plan:
         _say("With these settings the server has no address to listen on: set the home network "
-             "interface or an address to listen on - a phone must be able to reach one of them.", RED)
+             "interface or an address to listen on - Leina Radio must be able to reach one of them.", RED)
         return plan
     print(f"The server will listen on (port {SHARING_HTTP_PORT}):")
     for what, address in plan:
         shown = "every address of this PC" if address == "0.0.0.0" else (address or "no address right now")
         print(f"  {what}: {shown}")
-    _say("A phone must be able to reach one of them - on the same home network, over a VPN, or "
+    _say("Leina Radio must be able to reach one of them - on the same home network, over a VPN, or "
          "any other way that leads to this PC.")
     return plan
 
@@ -213,13 +213,13 @@ def _print_listening(env_file: Path) -> list:
 def _check_first_copy(settings, report: Report) -> None:
     from utils.database.sharing import SharingUnavailableError, share_databases
 
-    print(f"\n{BOLD}The databases for the phones{RESET} - REQUIRED")
+    print(f"\n{BOLD}The databases for Leina Radio{RESET} - REQUIRED")
     copy = Path(str(settings.sharing_dir)) / "music.db"
     if copy.exists():
         _say(f"A copy is there ({copy}). MusicDatabase refreshes it once a day when it starts, "
              "and with Settings -> Server -> Submit database for sharing.", GREEN)
         return
-    _say("No copy in the sharing folder yet - phones would get nothing.", YELLOW)
+    _say("No copy in the sharing folder yet - Leina Radio would get nothing.", YELLOW)
     if not _yes("Copy music.db, tag.db and files.db there now?"):
         report.skip("the first copy of the databases (Settings -> Server -> Submit database for sharing)")
         return
@@ -239,11 +239,11 @@ def _check_first_copy(settings, report: Report) -> None:
 def _check_users(report: Report) -> None:
     from utils.database.users import list_usernames, users_available, users_unavailable_message
 
-    print(f"\n{BOLD}A user for the phone{RESET} - OPTIONAL")
-    _say("Leina Radio logs in with a MusicDatabase user (on the phone: Ustawienia -> Konto). Without one "
-         "the phone still downloads the catalog, but nothing syncs (playlists, moods, liked songs, "
+    print(f"\n{BOLD}A user for Leina Radio{RESET} - OPTIONAL")
+    _say("Leina Radio logs in with a MusicDatabase user (in the app: Ustawienia -> Konto). Without one "
+         "it still downloads the catalog, but nothing syncs (playlists, moods, liked songs, "
          "listening stats) and it can't send requests or corrections.")
-    not_done = "a user for the phone (main menu -> Users -> Create a new user)"
+    not_done = "a user for Leina Radio (main menu -> Users -> Create a new user)"
     if not users_available():
         _say(f"Users can't be made yet: {users_unavailable_message()}", YELLOW)
         report.skip(not_done)
@@ -274,7 +274,7 @@ def _check_service(env_file: Path, report: Report) -> None:
 
     print(f"\n{BOLD}The sharing server (systemd user service {SHARING_SERVICE_NAME}){RESET} - REQUIRED")
     _say(f"It serves the sharing folder on port {SHARING_HTTP_PORT}, starts by itself shortly after "
-         f"this user's session starts, and {INBOX_AUTO_SERVICE_NAME} settles phones' requests in the background.")
+         f"this user's session starts, and {INBOX_AUTO_SERVICE_NAME} settles Leina Radio's requests in the background.")
     current = service_unit_current()
     if current and setup.service_active(SHARING_SERVICE_NAME):
         _say("Installed with the current settings and running.", GREEN)
@@ -359,14 +359,14 @@ def _summary(env_file: Path, report: Report) -> None:
             print(f"  - {item}")
     addresses = setup.phone_addresses(plan)
     if addresses:
-        print(f"\n{BOLD}In Leina Radio{RESET}: Ustawienia -> Serwer, an address the phone can reach:")
+        print(f"\n{BOLD}In Leina Radio{RESET}: Ustawienia -> Serwer, an address it can reach:")
         for field, address in addresses:
             print(f"  {field}: {address}")
         _say('"Sieć lokalna" is used on the Wi-Fi picked under "Wi-Fi sieci lokalnej" ("Użyj bieżącego '
              'połączenia"), "połączenie zdalne" everywhere else. Then "Zapisz adresy i pobierz bazę", and log '
              "in under Ustawienia -> Konto with a user from the main menu -> Users.")
-        _say(f"If the phone can't connect, a firewall on this PC (e.g. ufw) must allow TCP port "
-             f"{SHARING_HTTP_PORT} from where the phone connects.")
+        _say(f"If Leina Radio can't connect, a firewall on this PC (e.g. ufw) must allow TCP port "
+             f"{SHARING_HTTP_PORT} from where it connects.")
     print("\nRun this setup again any time: Settings -> Server -> Setup this PC for database sharing.")
 
 

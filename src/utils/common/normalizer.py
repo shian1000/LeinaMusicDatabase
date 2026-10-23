@@ -152,38 +152,61 @@ def compare(a: Optional[str], b: Optional[str], *, threshold: int = 100) -> bool
         return False
     return na == nb
 
-def split_artist_title(name: str):
+def split_artist_title(name: str) -> tuple[str, str] | tuple[None, None]:
     """Split a free-form "Artist - Title" style string into (artist, title).
 
     Used both for mp3 filenames (via extract_unknown_data, given the file's
     stem) and for YouTube video titles (which follow the same loose
     convention but aren't backed by a file at all).
+
+    Three stages, each tried only when the one before finds no separator:
+    a spaced " - " / " – " / " — " / " _ ", then a bare "-" / "~" / "_"
+    (_bare_separator()), then two or more spaces. Both parts come back
+    stripped; (None, None) when no stage finds one, or either part is empty.
     """
     parts = re.split(r" [–—\-_] ", name, maxsplit=1)
     if len(parts) < 2:
-        # Secondary fallback: hyphen/underscore/tilde without surrounding spaces
-        parts = re.split(r"[-_~]", name, maxsplit=1)
-        if len(parts) < 2:
-            # Tertiary fallback: two or more consecutive spaces
+        at = _bare_separator(name)
+        if at is not None:
+            parts = [name[:at], name[at + 1:]]
+        else:
             parts = re.split(r"\s{2,}", name, maxsplit=1)
             if len(parts) < 2:
                 return None, None
 
-            artist, title = (p.strip() for p in parts)
-            if not artist or not title:
-                return None, None
-
-            return artist, title
-
-        artist, title = (p.strip(" -_~") for p in parts)
-        if not artist or not title:
-            return None, None
-
-        return artist, title
-
-    artist, title = parts
-
+    artist, title = (p.strip(" -_~") for p in parts)
+    if not artist or not title:
+        return None, None
     return artist, title
+
+
+def _bare_separator(name: str) -> int | None:
+    """Where split_artist_title()'s second stage splits: the index of a bare
+    "-" / "~" / "_", or None.
+
+    One touching a space wins ("Die Ärzte _Unrockbar_"), then "-", "~" and
+    "_" in that order, each leftmost first ("AC_DC-Thunderstruck" splits at
+    the "-"). A separator tying a single letter to a word, with no space
+    beside it, belongs to the name and never splits: "Jay-Z Song" is not
+    ("Jay", "Z Song"), "X-Ray Spex-Oh Bondage" splits at the second "-".
+    """
+    def run(index, step):
+        # Letters/digits from index on in direction step
+        length = 0
+        while 0 <= index < len(name) and name[index].isalnum():
+            length += 1
+            index += step
+        return length
+
+    candidates = []
+    for at, char in enumerate(name):
+        if char not in "-~_":
+            continue
+        spaced = (at > 0 and name[at - 1].isspace()) or (at + 1 < len(name) and name[at + 1].isspace())
+        if not spaced and 1 in (run(at - 1, -1), run(at + 1, 1)):
+            continue
+        candidates.append((not spaced, "-~_".index(char), at))
+    return min(candidates)[2] if candidates else None
 
 _SITE_NAME_RE = re.compile(
     r"[(\[]?\s*\b[\w-]+(?:\.[\w-]+)*\.(?:" + "|".join(SITE_NAME_TLDS) + r")\b\s*[)\]]?", re.IGNORECASE)

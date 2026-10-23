@@ -169,7 +169,11 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
 - Wraps it in try/except — a crashing module is logged and skipped, not fatal to the whole run.
   (Before this, fetcher exceptions propagated uncaught all the way to the top-level crash handler;
   they accounted for a large share of `debug.log`'s crash entries.)
-- Rejects non-string, empty, or blacklisted albums.
+- Rejects non-string, empty, or blacklisted albums (`src/config/blacklist.txt`, the owner's list:
+  `[exact]` = the whole title, `[substring]` = whole words anywhere in it). A common word, a place
+  or a name belongs in `[exact]` or nowhere, never in `[substring]`: "rock", "paris", "morrison"
+  there rejected "Rock or Bust", "Paris", "Morrison Hotel" (2026-10, `tests/test_albums.py` keeps
+  a list of real titles that must pass).
 - If `matched_title`/`matched_artist` were provided, independently checks their similarity against
   the *query* — not the module's own opinion of whether it matched — using
   `scaled_similarity_threshold()` (the same short-string-aware threshold used elsewhere in the

@@ -91,12 +91,18 @@ playlist" section.
 2. **Bare `-` / `_` / `~`, no surrounding spaces required** — recovers
    `Emade-Pierwszy stopień wtajemniczenia.mp3`, `Die Ärzte _Unrockbar_.mp3`,
    `Haiku Garden ~ Avalanš.mp3`; strips stray `-` / `_` / `~` / spaces off both
-   halves. Intentionally permissive and a genuine last resort: a title with an
-   incidental hyphen and no real artist (`Re-Animator.mp3`) misparses into
-   artist `Re` / title `Animator` here rather than being reported unparseable —
-   acceptable only because stage 1 already failed. Real case: an untagged
-   `Svefn-g-englar.mp3` (Sigur Rós) became artist `Svefn` / title `g-englar`,
-   and the folder playlist added it as a new song. So `read_file_metadata()`
+   halves. Which separator (`_bare_separator()`): one touching a space first,
+   then `-`, `~`, `_` in that order (`AC_DC-Thunderstruck` → `AC_DC`), each
+   leftmost first; one tying a single letter to a word with no space beside it
+   is part of the name and never splits — `Jay-Z Song` gave `Jay` / `Z Song`,
+   `Svefn-g-englar.mp3` (Sigur Rós) gave `Svefn` / `g-englar` and the folder
+   playlist added it as a new song; both now fall through (`X-Ray Spex-Oh
+   Bondage` splits at the second hyphen). An untagged file whose name no stage
+   splits is read with its whole stem as the title and no artist
+   (`read_file_metadata()`), which `LocalSongMatcher` matches by title alone.
+   Still permissive: a title with an incidental hyphen between longer words
+   and no real artist (`Re-Animator.mp3`) misparses into artist `Re` / title
+   `Animator`. So `read_file_metadata()`
    marks a name read through stage 2 or 3 with `unsplit_title` (the whole stem),
    and `LocalSongMatcher` also reads that as a title alone: `match_similar()` (a
    suggestion that is asked about, never taken in `match()`), `_readings()` for
@@ -108,6 +114,9 @@ playlist" section.
 3. **Split on 2+ consecutive spaces** — recovers filenames with no punctuation
    separator at all, e.g. `Akiko Yano  Iroha Ni Konpeitou.mp3`, where the
    artist/title boundary is just a double space.
+
+Every stage returns both parts stripped, and `(None, None)` when nothing
+splits or a part is empty (`"Queen - "`). Tests: `tests/test_split_artist_title.py`.
 
 ## `text_utils` similarity helpers — three functions, not one with three signatures
 

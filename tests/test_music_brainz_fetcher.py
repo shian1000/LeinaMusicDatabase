@@ -127,15 +127,23 @@ def test_album_title_comes_from_the_release_group_not_one_edition():
 
 
 def test_another_songs_single_is_not_this_songs_album():
-    # "rock" is in the user's blacklist, so the album "Death By Rock and Roll" and the singles of
-    # that name drop out; the singles "25" and "And So It Went" carry the song only as an extra track
+    # "remix" is in the user's blacklist, so the album "Death By Rock and Roll Remix" drops out;
+    # the singles "25" and "And So It Went" carry the song only as an extra track
     recordings = [_recording("Death by Rock and Roll", [
-        _release("Death By Rock and Roll", "Album", "2021-02-12"),
-        _release("Death by Rock and Roll", "Single", "2020-05-15"),
+        _release("Death By Rock and Roll Remix", "Album", "2021-02-12"),
         _release("25", "Single", "2020-11-13"),
         _release("And So It Went", "Single", "2021-01-08"),
     ])]
     assert _pick_release(recordings) == (None, None)
+
+
+def test_a_common_word_doesnt_drop_the_real_album():
+    # "rock" in a title no longer blacklists it (COM-09): it's The Pretty Reckless' album
+    recordings = [_recording("Death by Rock and Roll", [
+        _release("Death By Rock and Roll", "Album", "2021-02-12"),
+        _release("25", "Single", "2020-11-13"),
+    ])]
+    assert _pick_release(recordings)[0] == "Death By Rock and Roll"
 
 
 def test_a_single_named_after_the_song_still_counts():
@@ -144,17 +152,17 @@ def test_a_single_named_after_the_song_still_counts():
 
 
 def test_blacklisted_album_the_artist_already_has_is_picked(monkeypatch):
-    # "Death By Rock and Roll" trips the user's "rock" blacklist entry; once the database has it
-    # as The Pretty Reckless' album, it's that artist's real album again
+    # "Death By Rock and Roll Remix" trips the user's "remix" blacklist entry; once the database
+    # has it as The Pretty Reckless' album, it's that artist's real album again
     from utils.database import albums
     monkeypatch.setattr(albums, "artist_has_album",
                         lambda artist_name, title: artist_name == "The Pretty Reckless"
-                        and title == "Death By Rock and Roll")
+                        and title == "Death By Rock and Roll Remix")
     recordings = [_recording("Death by Rock and Roll", [
-        _release("Death By Rock and Roll", "Album", "2021-02-12"),
+        _release("Death By Rock and Roll Remix", "Album", "2021-02-12"),
         _release("25", "Single", "2020-11-13"),
     ])]
-    assert _pick_release(recordings, "The Pretty Reckless")[0] == "Death By Rock and Roll"
+    assert _pick_release(recordings, "The Pretty Reckless")[0] == "Death By Rock and Roll Remix"
     assert _pick_release(recordings)[0] is None
 
 

@@ -122,10 +122,10 @@ The first time there's no database yet, so the app asks how to start:
 The databases are in `src/database/` (`music.db`, `tag.db`, later `files.db`), with daily backups
 in `src/database/archive/`. The app moves through menus with the arrow keys and Enter.
 **Help** in the main menu explains what each menu is for, every way to add songs, the clean-up
-tools and where to set the PC up as the phones' server.
+tools and where to set the PC up as Leina Radio's server.
 
 On the day's first start the app backs the databases up, indexes your music library, refreshes
-the copy for phones, publishes the public copy to GitHub (if you set that up) and offers a newer
+the copy for Leina Radio, publishes the public copy to GitHub (if you set that up) and offers a newer
 yt-dlp; every start also applies phones' changes to global moods and shows what the automatic
 request check did. Settings → Start-up tasks switches each of these off (all on by default; with
 the daily backup off, every start warns once the newest backup is more than 7 days old).

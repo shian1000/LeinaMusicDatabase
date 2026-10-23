@@ -108,7 +108,7 @@ Settings -> Server -> "Setup this PC for database sharing" installs four systemd
 ~/.config/systemd/user/ (user units: no root, they run as you). They're only there once you said
 yes to installing the server.
 
-musicdatabase-share.service + musicdatabase-share.timer - the server for phones
+musicdatabase-share.service + musicdatabase-share.timer - the server for Leina Radio
   The timer starts the service a minute after your user's systemd starts (at login, or at boot
   with lingering on). It serves only music.db, tag.db and files.db from the sharing folder, your
   music library's files, logging in, syncing users' playlists, moods and saved songs, and takes
@@ -117,20 +117,20 @@ musicdatabase-share.service + musicdatabase-share.timer - the server for phones
   picked, or Tailscale's address; none unless you chose one) and any other address you added -
   never on all of them unless you added 0.0.0.0 yourself.
   An address that isn't there yet is tried again every 10 seconds. While the sharing folder (or
-  its external drive) is missing it keeps running and answers 503 (unavailable), so the phone just
-  tries again later. If it stops, systemd starts it again after 10 seconds.
+  its external drive) is missing it keeps running and answers 503 (unavailable), so Leina Radio
+  just tries again later. If it stops, systemd starts it again after 10 seconds.
 
 musicdatabase-inbox.service + musicdatabase-inbox.timer - the automatic request check
   The timer runs auto_resolve_requests.py 5 minutes after your systemd starts and then every 15
-  minutes. It looks at new requests from phones and settles only what is safe: a dead YouTube link
-  is replaced when the phone's suggestion and its own search found the same video and it plays
-  here, a found link is saved by the same rule, and a correction is saved when a user with that
-  permission sent it and nothing about it needs a judgement. It never adds a song - you approve
+  minutes. It looks at new requests from Leina Radio and settles only what is safe: a dead YouTube
+  link is replaced when Leina Radio's suggestion and its own search found the same video and it
+  plays here, a found link is saved by the same rule, and a correction is saved when a user with
+  that permission sent it and nothing about it needs a judgement. It never adds a song - you approve
   each one. Everything else is left for Enter database -> Manage database -> "Resolve new
   requests", with a note why. It never runs while MusicDatabase is open (MusicDatabase waits for it
   to finish when it starts), nor while the databases wait for an upgrade. What it changed is shown
   at the next start (unless Start-up tasks hide the messages) and in "Resolve new requests"; its
-  output is in the journal. After a change it refreshes the copy for phones.
+  output is in the journal. After a change it refreshes the copy for Leina Radio.
 
 When they run: systemd runs a user's units only while that user is logged in - with lingering on
 (loginctl enable-linger, offered by the setup) from boot, logged in or not.
@@ -179,15 +179,15 @@ YouTube, and helps keep it clean.
 Leina Radio is a music player for Android which uses this database. The app works on music.db,
 tag.db and files.db which it can take from the server or from the GitHub repository. It can also
 play music stored on the server. The app can also send requests for database corretion or report new
-findings - you can accept these here. MusicDatabase's values always win; the phone only fills gaps
-for itself.
+findings - you can accept these here. MusicDatabase's values always win; Leina Radio only fills
+gaps for itself.
 """,
     "Day to day: the main menus": """
 Enter database - the catalog itself:
   - Fetch songs / Fetch artists: search, then act on what you found (edit, tags, links, genre,
     change artist, make a YouTube playlist, remove...).
   - Download YT song: save a YouTube video's audio into the import/ folder.
-  - Manage database: adding songs in bulk, filling in data, requests from phones, clean-ups.
+  - Manage database: adding songs in bulk, filling in data, requests from Leina Radio, clean-ups.
   - Show whole database: everything in one table.
 Users - the accounts Leina Radio logs in with: create, rename, passwords, permissions, their
   playlists, and the moods (global ones and each user's own). Currently you can only create accounts
@@ -195,12 +195,12 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
 Statistics - how often each lookup module (albums, years) found something.
 Settings - lookup modules and their order, matching thresholds, the start-up tasks, and Server:
   the database folder, backups, this PC's folders and network, indexing the music library, sharing
-  with phones, and the public copy on GitHub.
+  with Leina Radio, and the public copy on GitHub.
 Help - this.
 
 On the day's first start MusicDatabase backs the databases up, indexes the music library,
-refreshes the copy the phones download, publishes the public copy to GitHub (when set up) and
-offers a newer yt-dlp; every start applies global mood changes from phones and shows what the
+refreshes the copy Leina Radio downloads, publishes the public copy to GitHub (when set up) and
+offers a newer yt-dlp; every start applies global mood changes from Leina Radio and shows what the
 automatic request check did and how many requests wait. Each can be switched off in Settings ->
 "Start-up tasks" (all on by default).
 """,
@@ -215,9 +215,9 @@ A single YouTube video - Enter database -> "Download YT song" saves its audio in
 By hand - Enter database -> Manage database -> Manual management -> "Add song": title and artist
   are required, the rest optional; it is checked like an import (spelling, an existing artist or
   a similar song).
-From Leina Radio - a song played on the phone that MusicDatabase doesn't have is sent as a
+From Leina Radio - a song it played that MusicDatabase doesn't have is sent as a
   request: Enter database -> Manage database -> "Resolve new requests" (the number in brackets
-  is how many wait). A phone without a server sends a .zip package instead - "Import a request
+  is how many wait). Leina Radio without a server sends a .zip package instead - "Import a request
   package" in the same menu.
 While making a playlist from a folder - Users -> Enter user database -> "Create playlist from
   folder" offers to add a file nothing matched as a new song.
@@ -244,18 +244,18 @@ MusicDatabase backs the databases up once a day when it starts (unless switched 
 "Start-up tasks") and always before a database upgrade; Settings -> Server -> "Back up database
 now" takes a snapshot before something big.
 """,
-    "This PC as the server for phones": """
+    "This PC as the server for Leina Radio": """
 To let Leina Radio download the catalog from this PC (and log in, sync playlists, send requests,
 play your music library's files), run Settings -> Server -> "Setup this PC for database sharing"
 and answer yes to the step-by-step setup. It explains each setting (the sharing folder, an
 external drive, the addresses to listen on, your music library) and shows the addresses the
-server will listen on - a phone must be able to reach one of them (the home network, a VPN, ...).
-Then it checks the first copy of the databases, the first user, the server service and lingering,
-and shows exactly what to type in the phone (Leina Radio -> Ustawienia -> Serwer). Nothing is done
+server will listen on - Leina Radio must be able to reach one of them (the home network,
+a VPN, ...). Then it checks the first copy of the databases, the first user, the server service
+and lingering, and shows exactly what to type in Leina Radio (Ustawienia -> Serwer). Nothing is done
 without asking; it's safe to stop and to run again.
 
 The same settings one by one: Settings -> Server -> "Folders and network".
-Without a server: Settings -> Server -> "Public database on GitHub" publishes a copy phones can
+Without a server: Settings -> Server -> "Public database on GitHub" publishes a copy Leina Radio can
 download from GitHub.
 """,
     "What happens at start-up": _startup_text,

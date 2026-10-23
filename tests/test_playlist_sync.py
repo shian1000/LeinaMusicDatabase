@@ -287,6 +287,38 @@ def test_song_ids_follow_merges_and_deletions(tmp_path):
     assert [t["title"] for t in tracks] == ["t1", "t2", "t3", "t5", "t99", "tNone"]
 
 
+@pytest.mark.parametrize("song_id, keep_deleted, expected", [
+    (2, False, 4),        # 2 -> 3 -> 4
+    (4, False, 4),        # not in the log
+    (7, False, None),     # 7 -> 8, 8 deleted
+    (7, True, 8),         # ... the id that was deleted, for saved songs
+    (5, False, None),     # 5 deleted
+    (5, True, 5),
+    (10, False, None),    # 10 -> 11 -> 10: can't happen, never trusted
+    (10, True, None),
+])
+def test_follow_song_id_changes_is_the_one_rule(song_id, keep_deleted, expected):
+    moved = {2: 3, 3: 4, 5: None, 7: 8, 8: None, 10: 11, 11: 10}
+    assert ps.follow_song_id_changes(song_id, moved, keep_deleted=keep_deleted) == expected
+
+
+def test_every_reader_of_the_log_follows_it_the_same_way(tmp_path):
+    """SRV-16: playlist tracks, the inbox's requests and saved songs each had
+    their own walk; on a loop they ended on different ids (None, 10, 10).
+    Saved songs: test_saved_sync.py."""
+    from utils.database import inbox_requests
+    changes = [(1, 10, 11), (2, 11, 10), (3, 2, 3)]
+    music = tmp_path / "music.db"
+    _shared_music_db(music, [3], changes)
+    tracks = [{"song_id": 10, "title": "t"}, {"song_id": 2, "title": "u"}]
+    ps.resolve_song_ids(tracks, music)
+    moved = {old: new for _, old, new in changes}
+
+    assert [t["song_id"] for t in tracks] == [None, 3]
+    assert [inbox_requests.resolve_song_id(s, moved) for s in (10, 2)] == [None, 3]
+
+
+
 def test_unreadable_music_db_leaves_ids_for_the_app_to_check(tmp_path):
     tracks = [{"song_id": 7, "title": "t"}]
     assert ps.resolve_song_ids(tracks, tmp_path / "missing.db") == 0

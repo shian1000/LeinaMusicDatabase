@@ -57,3 +57,31 @@ def test_a_folder_that_cant_be_listed_can_still_be_left(monkeypatch, tmp_path, c
     _answer(monkeypatch, menu_utils.FILE_BROWSER_EXIT_OPTION)
     assert menu_utils.open_file_browser_terminal(str(tmp_path)) is None
     assert "Permission denied" in capsys.readouterr().out
+
+
+def test_a_menu_clears_the_screen_first_by_default(monkeypatch):
+    cleared = []
+    monkeypatch.setattr(menu_utils, "clear_screen", lambda: cleared.append("clear"))
+    _answer(monkeypatch, "Do it")
+    menu_utils.execute_menu_item("Menu", {"Do it": lambda: cleared.append("done")}, one_time=True)
+    assert cleared == ["clear", "done"]
+
+
+def test_a_menu_with_clear_false_keeps_the_table_above_it(monkeypatch):
+    cleared = []
+    monkeypatch.setattr(menu_utils, "clear_screen", lambda: cleared.append("clear"))
+    _answer(monkeypatch, "Do it")
+    menu_utils.execute_menu_item("Menu", {"Do it": lambda: cleared.append("done")}, one_time=True, clear=False)
+    assert cleared == ["done"]
+
+
+@pytest.mark.parametrize("found, allow_one, message", [
+    ([], True, "No artist found for 'abba'."),
+    ([Artist(name="ABBA")], False, "Only one artist found for 'abba' (ABBA)"),
+])
+def test_an_artist_search_that_stops_says_why(monkeypatch, capsys, found, allow_one, message):
+    """UI-20: these went only to the debug log; without DEBUG the menu just came back."""
+    monkeypatch.setattr("builtins.input", lambda prompt="": "abba")
+    monkeypatch.setattr(menu_utils, "get_artists_from_db_session", lambda *a, **k: found)
+    assert menu_utils.ask_for_entires_list(mode="Artist", allow_one_result=allow_one) is None
+    assert message in capsys.readouterr().out

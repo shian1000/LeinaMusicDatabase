@@ -36,6 +36,12 @@ def read_file_metadata(file: Path) -> dict:
             print("The filename didn't have a proper separator")
             print(metadata)
             print(file)
+            if metadata["title"] in {"Unknown Title", None, ""}:
+                # The whole name may be the title ("Svefn-g-englar" by Sigur
+                # Rós, "Jay-Z Song" is not split either): read with no artist,
+                # LocalSongMatcher then tries it as a title alone
+                metadata["title"] = file.stem.strip() or None
+                metadata = _clean_fields(metadata)
         else:
             metadata["artist_name"] = artist
             metadata["title"] = title

@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,530 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,610 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -268,6 +268,9 @@ non-trivial work in that area.
   counter each): the folder rules, one item = one song on one list or one link, stored verbatim
   (JSON `data`, never checked); a DELETE of a uid never seen stores the marker. Saved songs follow
   song merges (`follow_song_merges()` from `song_references`, the whole log, a deleted id kept).
+  Every reader of `song_id_changes` outside the cursor replay (these, the server's
+  `resolve_song_ids()`, the inbox's `resolve_song_id()`) walks a chain with the one rule
+  `playlist_sync.follow_song_id_changes()` — don't write another loop.
   Details: `docs/runbooks/database.md` → "Saved songs and links on the phone".
   `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
@@ -621,7 +624,8 @@ non-trivial work in that area.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - In user-facing text (prints, menu labels, prompts, review notes) the mobile client is "Leina
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong
-  to a MusicDatabase user, not to a device.
+  to a MusicDatabase user, not to a device. `tests/test_help_menu.py` checks the string literals of
+  Help, the sharing wizard, `sharing_setup.py` and Settings for "phone(s)".
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
   interrupt per item. Eight places already do this: `run_import_batch()` (shared by every
@@ -665,7 +669,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,530 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,610 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

@@ -8,12 +8,17 @@ from bs4 import BeautifulSoup, GuessedAtParserWarning
 from utils.common.debug import slog
 from utils.common.text_utils import is_blacklisted_album
 from utils.common.file_management import save_string_to_file
-from config.constants import SINGLES_ALBUM
+from config.constants import MUSICBRAINZ_API_USER_AGENT, SINGLES_ALBUM
 
 # The wikipedia package parses HTML internally without picking a parser,
 # which triggers this warning on every call — silence it here since our
 # own BeautifulSoup calls below all specify "html.parser" explicitly.
 warnings.filterwarnings("ignore", category=GuessedAtParserWarning, module="wikipedia")
+
+# Wikimedia asks for a real contact in the User-Agent, like MusicBrainz: the
+# project's, for our own page fetches and the wikipedia package's API calls
+USER_AGENT = MUSICBRAINZ_API_USER_AGENT
+wikipedia.set_user_agent(USER_AGENT)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +98,7 @@ def _search_with_retry(query: str, retries: int = 3, delay: int = 2) -> list:
 
 
 def _fetch_soup(url: str) -> BeautifulSoup | None:
-    headers = {"User-Agent": "SongAlbumFinder/1.0 (your-email@example.com)"}
+    headers = {"User-Agent": USER_AGENT}
     try:
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()

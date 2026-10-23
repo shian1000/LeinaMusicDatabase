@@ -148,11 +148,11 @@ def _patch_playlist_plumbing(monkeypatch):
     all cache disk I/O."""
     monkeypatch.setattr(m, "get_youtube_service", lambda: object())
     monkeypatch.setattr(m, "_load_bad_videos", lambda: None, raising=False)
-    monkeypatch.setattr(m, "load_cache", lambda: None)
+    monkeypatch.setattr(m, "load_cache", lambda playlist_name: None)
     monkeypatch.setattr(m, "create_playlist", lambda youtube, title, description="": "PLAYLIST1")
     monkeypatch.setattr(yt_cache, "save_cache", lambda cache: None)
     monkeypatch.setattr(m, "save_cache", lambda cache: None)
-    monkeypatch.setattr(m, "clear_cache", lambda: None)
+    monkeypatch.setattr(m, "clear_cache", lambda playlist_name: None)
 
     added = []
     monkeypatch.setattr(
@@ -242,6 +242,44 @@ def test_create_yt_playlist_does_not_mark_added_when_add_to_playlist_fails(monke
     # (see manage_youtube_playlists.py's create_yt_playlist()).
     assert saved_caches[-1]["songs"][key]["added"] is False
     assert song.youtube_video_id == "foundid"
+
+
+def test_resuming_a_playlist_adds_the_songs_picked_now(monkeypatch):
+    """YT-08: the resumed playlist used to get only the songs of the old
+    cache, whatever was picked this time."""
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "is_video_id_valid", lambda video_id, timeout=20: True)
+    monkeypatch.setattr(yt_cache, "save_cache", lambda cache: None)
+    old = _fake_song("Queen", "Bicycle", youtube_video_id="OLD00000001")
+    cache = yt_cache.init_cache("PLAYLIST1", "Test Playlist", [old])
+    monkeypatch.setattr(m, "load_cache", lambda playlist_name: cache if playlist_name == "Test Playlist" else None)
+    monkeypatch.setattr(m.questionary, "select",
+                        lambda *a, **k: SimpleNamespace(ask=lambda: "Resume unfinished playlist"))
+    monkeypatch.setattr(m, "create_playlist", lambda *a, **k: pytest.fail("resuming creates no playlist"))
+
+    m.create_yt_playlist([_fake_song("Muse", "Uprising", youtube_video_id="NEW00000001")], "Test Playlist")
+
+    assert added == ["NEW00000001"]
+
+
+_REAL_CACHE = {name: getattr(yt_cache, name) for name in ("load_cache", "save_cache", "clear_cache")}
+
+
+def test_a_new_playlist_leaves_another_unfinished_one_alone(monkeypatch, tmp_path):
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "is_video_id_valid", lambda video_id, timeout=20: True)
+    monkeypatch.setattr(yt_cache, "CACHE_FILE", tmp_path / "yt_playlist_cache.json")
+    # The real disk cache, which _patch_playlist_plumbing() stubbed out
+    for name, function in _REAL_CACHE.items():
+        monkeypatch.setattr(m, name, function)
+        monkeypatch.setattr(yt_cache, name, function)
+    yt_cache.init_cache("OTHER", "Unfinished", [_fake_song("Queen", "Bicycle")])
+
+    m.create_yt_playlist([_fake_song("Muse", "Uprising", youtube_video_id="NEW00000001")], "Test Playlist")
+
+    assert added == ["NEW00000001"]
+    assert yt_cache.unfinished_playlists() == ["Unfinished"]
+    assert yt_cache.load_cache("Unfinished")["playlist_id"] == "OTHER"
 
 
 # ---------------------------------------------------------

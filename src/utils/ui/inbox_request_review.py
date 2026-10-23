@@ -109,9 +109,9 @@ def _show_ours(case) -> None:
     if case.our_video_id:
         same = " [green](same as Leina Radio's)[/green]" if any(
             r.video_id == case.our_video_id for r in case.replacements) else ""
-        print(f"    Newfound:     {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
+        print(f"    Our search:   {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
     else:
-        print("    Newfound:     [dim]our search found nothing[/dim]")
+        print("    Our search:   [dim]found nothing[/dim]")
 
 
 def _show_case(case, position: str) -> None:
@@ -142,17 +142,19 @@ def _show_auto_note(case) -> None:
 
 def _video_choices(case, label: str) -> list:
     """The phone's videos, ours, those found bad before, paste, "N/A".
+    "Use ..." takes a new video; "Keep ..." (_KEEP) only ever means leaving
+    what the database has.
     Offered even when the check said it doesn't play - the user may know better."""
     choices = []
     for r in case.replacements:
         also = " - our search found it too" if r.video_id == case.our_video_id else ""
         note = _not_playing_note(case.plays.get(r.video_id))
-        choices.append(questionary.Choice(f"Keep {label} ({r.video_id}){also}{note}", (USE_VIDEO, r.video_id)))
+        choices.append(questionary.Choice(f"Use {label} ({r.video_id}){also}{note}", (USE_VIDEO, r.video_id)))
     if case.our_video_id and not any(r.video_id == case.our_video_id for r in case.replacements):
         note = _not_playing_note(case.plays.get(case.our_video_id))
-        choices.append(questionary.Choice(f"Keep the newfound link ({case.our_video_id}){note}", (USE_VIDEO, case.our_video_id)))
+        choices.append(questionary.Choice(f"Use the link our search found ({case.our_video_id}){note}", (USE_VIDEO, case.our_video_id)))
     for r in case.bad_replacements:
-        choices.append(questionary.Choice(f"Keep {label} ({r.video_id}) - found bad before: {case.bad[r.video_id]}",
+        choices.append(questionary.Choice(f"Use {label} ({r.video_id}) - found bad before: {case.bad[r.video_id]}",
                                           (USE_VIDEO, r.video_id)))
     return choices + [
         questionary.Choice(_PASTE, _PASTE),

@@ -18,9 +18,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 from utils.youtube.yt_cache import make_song_key, save_cache
-from utils.youtube.yt_cache import load_cache, init_cache, clear_cache
-from utils.youtube.yt_cache import save_cache
-from utils.youtube.yt_cache import make_song_key
+from utils.youtube.yt_cache import load_cache, init_cache, clear_cache, update_cache_songs
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
 from utils.common.normalizer import APOSTROPHES, normalize
 from utils.youtube.transliteration import is_transliterable, transliterate
@@ -1829,14 +1827,14 @@ def create_yt_playlist(song_list, playlist_name: str):
     youtube = get_youtube_service()
     bad_videos = _load_bad_videos()
 
-    # Load cache if it exists
-    cache = load_cache()
+    # An unfinished playlist of this name; others keep their own progress
+    cache = load_cache(playlist_name)
 
     try:
         # -------------------
         # Handle playlist setup
         # -------------------
-        if cache and cache.get("playlist_name") == playlist_name:
+        if cache:
             choice = questionary.select(
                 f"Unfinished playlist '{playlist_name}' found. What do you want to do?",
                 choices=[
@@ -1849,9 +1847,15 @@ def create_yt_playlist(song_list, playlist_name: str):
             if choice == "Resume unfinished playlist":
                 print("📂 Resuming unfinished playlist")
                 playlist_id = cache["playlist_id"]
+                # The songs picked now, not the ones picked last time
+                new, dropped = update_cache_songs(cache, song_list)
+                if new:
+                    print(f"  {new} song(s) not in it before will be added too")
+                if dropped:
+                    print(f"  {dropped} song(s) not picked this time are left out")
 
             elif choice == "Start over (create new playlist)":
-                clear_cache()
+                clear_cache(playlist_name)
                 playlist_id = create_playlist(
                     youtube,
                     title=playlist_name,
@@ -1979,5 +1983,5 @@ def create_yt_playlist(song_list, playlist_name: str):
     # Completed successfully
     # -------------------
     print("\nPlaylist creation complete!")
-    clear_cache()
+    clear_cache(playlist_name)
 

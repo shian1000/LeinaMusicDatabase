@@ -309,19 +309,37 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
     moved = {old: new for _, old, new in changes}
     for track in tracks:
         song_id = track["song_id"]
-        seen = set()
-        while song_id in moved:
-            if song_id in seen:  # a loop in the log - can't happen, but never spin
-                song_id = None
-                break
-            seen.add(song_id)
-            song_id = moved[song_id]
         # A merge target from the log is trusted; an id the phone sent that
         # is neither a song nor in the log never came from a music.db
-        if song_id is not None and not seen and song_id not in existing:
+        if song_id in moved:
+            song_id = follow_song_id_changes(song_id, moved)
+        elif song_id not in existing:
             song_id = None
         track["song_id"] = song_id
     return changes[-1][0] if changes else 0
+
+
+def follow_song_id_changes(song_id, moved: dict, keep_deleted: bool = False):
+    """The id `song_id` has now, by song_id_changes as {old id: new id, or
+    None = deleted}: every merge followed to the end of the chain, None when
+    the chain ends in a deletion - or, with `keep_deleted`, the id that was
+    deleted (saved songs keep it, see saved_sync.follow_song_merges()). An id
+    not in the log is returned as it is.
+
+    The one rule for every reader of the log (playlist tracks here, saved
+    songs, the inbox's requests). A loop gives None in both modes: it can't
+    happen (a merge target is a live song and ids are never reused), but no
+    id on one is trusted, and the walk never spins."""
+    seen = set()
+    while song_id in moved:
+        if song_id in seen:
+            return None
+        seen.add(song_id)
+        new_id = moved[song_id]
+        if new_id is None:
+            return song_id if keep_deleted else None
+        song_id = new_id
+    return song_id
 
 
 # --------------------

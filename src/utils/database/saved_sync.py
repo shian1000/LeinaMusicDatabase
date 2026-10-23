@@ -225,19 +225,16 @@ def follow_song_merges(conn, changes) -> int:
     Returns how many items changed."""
     if not playlist_sync.is_migrated(conn, REQUIRED_MIGRATION):
         return 0
-    moved = {old: new for _, old, new in changes if new is not None}
-    if not moved:
+    moved = {old: new for _, old, new in changes}
+    if not any(new is not None for new in moved.values()):
         return 0
     rows = conn.execute("SELECT id, song_id, data FROM saved_songs "
                         "WHERE deleted_at IS NULL AND song_id IS NOT NULL").fetchall()
     changed = 0
-    for row_id, song_id, data_text in rows:
-        if song_id not in moved:
+    for row_id, old_id, data_text in rows:
+        song_id = playlist_sync.follow_song_id_changes(old_id, moved, keep_deleted=True)
+        if song_id is None or song_id == old_id:
             continue
-        seen = set()
-        while song_id in moved and song_id not in seen:  # a loop in the log can't happen, but never spin
-            seen.add(song_id)
-            song_id = moved[song_id]
         data = json.loads(data_text)
         data["song"]["song_id"] = song_id
         conn.execute("UPDATE saved_songs SET song_id = ?, data = ?, revision = ? WHERE id = ?",

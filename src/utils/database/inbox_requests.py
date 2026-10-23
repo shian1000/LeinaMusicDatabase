@@ -84,6 +84,7 @@ from utils.database.datatables import BadYoutubeVideo, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.song_references import load_changes
+from utils.database.playlist_sync import follow_song_id_changes
 from utils.database.song_kinds import is_full_album
 from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
 
@@ -744,14 +745,9 @@ def unmark_bad_video(session, video_id: str | None, song_id: int | None) -> None
 # ==================== cases ====================
 
 def resolve_song_id(song_id: int, merged_into: dict) -> int | None:
-    """The id this song has now: followed through merges, None if deleted."""
-    seen = set()
-    while song_id in merged_into and song_id not in seen:
-        seen.add(song_id)
-        song_id = merged_into[song_id]
-        if song_id is None:
-            return None
-    return song_id
+    """The id this song has now: followed through merges, None if deleted
+    (playlist_sync.follow_song_id_changes(), the one rule)."""
+    return follow_song_id_changes(song_id, merged_into)
 
 
 def links_set_by_hand(requests: list[RequestFile], merged_into: dict) -> dict:

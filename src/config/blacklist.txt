@@ -16,12 +16,44 @@ anthology
 retrospective
 definitive collection
 complete collection
+# Common words that are also real album titles' words ("Rock or Bust", "Face the Music"):
+# only a title that is nothing but the word is a placeholder
+pop
+rock
+dance
+music
+muzyka
+radio
+album
+albums
+hits
+club
+version
+volume
+tour
+years
+motion
+guest
+episode
+bounce
+presents
+week
+official
+featured
+released
+audio
+compact
+ultimate
+anniversary
+concert
+festival
+edition
+demos
+the best
 
-# Partial matches — if any of these appear in the title, skip it
+# Partial matches — if any of these appear in the title as whole words, skip it. No
+# common words, places or names here: they'd reject real albums ("Morrison Hotel")
 [substring]
-greatest hits
-best of
-collection
 greatest hits
 best of
 collection
@@ -30,95 +62,53 @@ retrospective
 compilation
 now that's what i call
 the essential
-pop
 itunes
 remix
-germany
-german
-festival
 United Palace Theatre
 1996-2011
-radio
 spotify
-paris
 session
 sessions
-ultimate
-hits
-edition
 awards
 przebojów
 valentine's day
 exercises
-new orleans
-morrison
 2014
 women in music
-london, uk
-england
 collecion
 youtube
 essential
-live
+live at
+live in
+live from
+live on
 хит
-concert
 hottest
-liverpool
-volume
 reedycja
 edycja
 лучшие
-album
-albums
 references
 export
 import
-week
 versie
-rock
 speciale
 fifa
-official
-guest
-tour
-released
-version
-demos
-club
 liva
 remaster
 remasters
 filmography
 videography
-music
-the best
 kolekcja
 collaborative singles
 www
 2016
-episode
-deutschland
-years
-presents
-scotland
-motion
-anniversary
 Kuschelrock
 forza
-featured
 Kampioen
-dance
 spectaculars
-gold
-tokyo
 re-loaded
-muzyka
-bounce
-compact
-fifa
 edits
 uefa
-audio
 need for speed
 kultow
 death stranding

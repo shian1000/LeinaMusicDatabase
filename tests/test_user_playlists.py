@@ -746,10 +746,37 @@ def test_html_entities_in_tags_are_read_as_characters(tmp_path, music_session):
 
 
 def test_file_name_split_on_a_bare_hyphen_is_also_read_whole_as_the_title(tmp_path, music_session):
-    """"Svefn-g-englar.mp3" with no tags is read as "Svefn" - "g-englar";
-    the whole name is Sigur Rós's title, so that song is suggested (asked,
-    never taken by match()), with the whole name's score - also when an
-    artist "Svefn" already exists."""
+    """"Re-Animator.mp3" with no tags is read as "Re" - "Animator"; the
+    whole name may be the title, so that song is suggested (asked, never
+    taken by match()), with the whole name's score - also when an artist
+    "Re" already exists."""
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    animator = Song(title="Re-Animator", artist=Artist(name="Richard Band"))
+    music_session.add(animator)
+    music_session.commit()
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Re-Animator.mp3")
+    _id3_file(folder / "Hey - Karma.mp3")  # spaced separator: no whole-name reading
+
+    metadata = read_file_metadata(folder / "Re-Animator.mp3")
+    assert (metadata["artist_name"], metadata["title"], metadata["unsplit_title"]) == ("Re", "Animator", "Re-Animator")
+    assert "unsplit_title" not in read_file_metadata(folder / "Hey - Karma.mp3")
+
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.match_similar(metadata) is animator
+    assert matcher.match(metadata) is None
+    assert matcher.match_score(metadata, animator) == 1.0
+    assert matcher.match_similar({**metadata, "unsplit_title": None}) is None
+
+
+def test_a_file_name_with_a_hyphen_inside_a_word_is_read_as_the_title(tmp_path, music_session):
+    """"Svefn-g-englar.mp3" with no tags: a hyphen tying a single letter to a
+    word isn't a separator (it used to read artist "Svefn" / title
+    "g-englar"), so the whole name is the title and Sigur Rós's song is
+    suggested by its title alone - never taken by match()."""
     from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
     from utils.discoveries.import_engine import LocalSongMatcher
 
@@ -759,17 +786,13 @@ def test_file_name_split_on_a_bare_hyphen_is_also_read_whole_as_the_title(tmp_pa
     folder = tmp_path / "music"
     folder.mkdir()
     _id3_file(folder / "Svefn-g-englar.mp3")
-    _id3_file(folder / "Hey - Karma.mp3")  # spaced separator: no whole-name reading
 
     metadata = read_file_metadata(folder / "Svefn-g-englar.mp3")
-    assert (metadata["artist_name"], metadata["title"], metadata["unsplit_title"]) == ("Svefn", "g-englar", "Svefn-g-englar")
-    assert "unsplit_title" not in read_file_metadata(folder / "Hey - Karma.mp3")
+    assert (metadata["artist_name"], metadata["title"]) == (None, "Svefn-g-englar")
 
     matcher = LocalSongMatcher(music_session)
     assert matcher.match_similar(metadata) is svefn
     assert matcher.match(metadata) is None
-    assert matcher.match_score(metadata, svefn) == 1.0
-    assert matcher.match_similar({**metadata, "unsplit_title": None}) is None
 
     (track,) = fp.build_folder_playlist(music_session, folder, auto_accept_score=0.99).unmatched
     # "svefn g englar" isn't distinctive enough to take without asking

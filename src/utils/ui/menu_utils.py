@@ -72,7 +72,8 @@ def execute_menu_item(
     prompt: str, 
     action_map: Dict[str, Callable[[], Optional[str]]], 
     exit_label: str = "Back", 
-    one_time: bool = False
+    one_time: bool = False,
+    clear: bool = True
 ) -> None:
     """
     Display a menu and execute the selected action.
@@ -82,8 +83,12 @@ def execute_menu_item(
         action_map: Dict mapping menu options to callable functions
         exit_label: Label for the exit option (default: "Back")
         one_time: If True, exit after first action (default: False)
+        clear: If False, the screen isn't cleared before the menu is shown, so
+            a table printed just above it (the songs or artists to act on)
+            stays visible (default: True)
     """
-    clear_screen()
+    if clear:
+        clear_screen()
     choices: list[str] = list(action_map.keys()) + [exit_label]
     running: bool = True
 
@@ -373,12 +378,15 @@ def ask_for_entires_list(
         slog("Search for songs is not yet implemented")
         return None
 
+    # Printed, not slog(): without DEBUG the user saw nothing and the menu
+    # just came back
     if not allow_no_results and not artists_objects:
-        slog("No such artist found. Aborting")
+        print(f"No artist found for '{query}'.")
         return None
     
     if not allow_one_result and len(artists_objects) == 1:
-        slog("Only one artist found. Aborting")
+        print(f"Only one artist found for '{query}' ({artists_objects[0].name}) - "
+              "search for a name that finds both artists.")
         return None
     
     return artists_objects
