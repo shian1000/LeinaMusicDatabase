@@ -5,43 +5,50 @@ This module centralizes all magic numbers, hardcoded strings, and configuration
 values used throughout the application. This makes them easier to maintain and
 modify in one place.
 """
+from pathlib import Path
+
+# The repository folder. Every state file below is resolved against it, never
+# against the current directory, so the app, the systemd timer and tools/
+# started from anywhere read the same settings (and the same database folder
+# override).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # ==================== UI Constants ====================
 
 # File browser and menu constants
-RECENT_DIRS_FILE = "recent_dirs.json"
+RECENT_DIRS_FILE = PROJECT_ROOT / "recent_dirs.json"
 MAX_RECENT_DIRS = 5
 
 # Discovery module settings (enabled state + fetch order), persisted as JSON.
 # Order here is only the seed used the first time the file is created — after
 # that, the JSON file is the source of truth and this is ignored.
-DISCOVERY_MODULES_CONFIG_FILE = "discovery_modules_config.json"
+DISCOVERY_MODULES_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config.json"
 
 # Same idea as DISCOVERY_MODULES_CONFIG_FILE, but for "Fill missing data ->
 # Years": a separate config because only some modules implement
 # get_release_year(), so the set of available modules (and a sensible order)
 # differs from the album fetchers.
-DISCOVERY_MODULES_YEAR_CONFIG_FILE = "discovery_modules_config_years.json"
+DISCOVERY_MODULES_YEAR_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_years.json"
 
 # Optional override for Settings.database_dir (the folder holding music.db /
 # tag.db), persisted as JSON. Read once at startup, so a change made through
 # the Settings menu only takes effect after the app is restarted.
-DATABASE_LOCATION_CONFIG_FILE = "database_location_config.json"
+DATABASE_LOCATION_CONFIG_FILE = PROJECT_ROOT / "database_location_config.json"
 
 # Per-module invocation/success counters for the Statistics menu, persisted
 # as JSON and keyed by module id (filename stem) for the same reason as
 # DISCOVERY_MODULES_CONFIG_FILE: stable across MODULE_NAME renames.
-DISCOVERY_STATS_FILE = "discovery_fetcher_stats.json"
+DISCOVERY_STATS_FILE = PROJECT_ROOT / "discovery_fetcher_stats.json"
 
 # Same as DISCOVERY_STATS_FILE, but counters for "Fill missing data -> Years"
 # lookups, kept separate so they don't conflate with the album fetchers'
 # invocation/success rates in the Statistics menu.
-DISCOVERY_STATS_YEAR_FILE = "discovery_fetcher_stats_years.json"
+DISCOVERY_STATS_YEAR_FILE = PROJECT_ROOT / "discovery_fetcher_stats_years.json"
 
 # Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
 # albums) processes at once, persisted as JSON. Keeps a single run from
 # churning through the whole database when only a quick batch is wanted.
-FETCH_DATA_CONFIG_FILE = "fetch_data_config.json"
+FETCH_DATA_CONFIG_FILE = PROJECT_ROOT / "fetch_data_config.json"
 DEFAULT_MAX_SONGS_PER_FETCH = 50
 
 # "Create playlist from folder": a file whose title matches a song exactly but
@@ -49,7 +56,7 @@ DEFAULT_MAX_SONGS_PER_FETCH = 50
 # 0.98) is matched without asking when the artist similarity reaches this;
 # below it, it's only suggested. Settings -> "Auto-accept similar artist
 # names" (persisted as JSON); 1.0 turns it off.
-FILE_MATCHING_CONFIG_FILE = "file_matching_config.json"
+FILE_MATCHING_CONFIG_FILE = PROJECT_ROOT / "file_matching_config.json"
 DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY = 0.9
 MIN_AUTO_ACCEPT_ARTIST_SIMILARITY = 0.8
 
@@ -85,9 +92,9 @@ PUBLIC_DB_RELEASE_NAME = "Public database"
 PUBLIC_DB_VERSION_FILE = "version.json"
 PUBLIC_DB_FORMAT = 1
 # The daily publish switch and the last publish's time and result
-PUBLIC_DB_STATE_FILE = "data/public_database.json"
+PUBLIC_DB_STATE_FILE = PROJECT_ROOT / "data/public_database.json"
 # The day main.py last ran its once-a-day tasks (utils/common/startup_settings.py)
-STARTUP_STATE_FILE = "data/startup_state.json"
+STARTUP_STATE_FILE = PROJECT_ROOT / "data/startup_state.json"
 # Where a fresh install without databases downloads the public catalog from
 # (utils/database/first_run.py) when GITHUB_DB_REPO isn't set: this project's
 # own release
@@ -288,7 +295,7 @@ FULL_ALBUM_TITLE_MARKERS = [
     "ganzes album",
 ]
 # Songs the owner said aren't full albums, never offered again by the review
-FULL_ALBUM_IGNORE_FILE = "data/full_album_ignore.json"
+FULL_ALBUM_IGNORE_FILE = PROJECT_ROOT / "data/full_album_ignore.json"
 
 # album_covers (migration 0008)
 ALBUM_COVER_SOURCE_FILE = "file"  # embedded in the user's mp3s (APIC)
@@ -381,7 +388,7 @@ GENRE_MAX_PER_SONG = 3
 GENRE_MIN_VOTE_SHARE = 0.3
 # Songs MusicBrainz had no genre for, skipped by later runs. Relative to the
 # project root; delete it to look them all up again.
-GENRE_LOOKUP_MISSES_FILE = "data/genre_lookup_misses.json"
+GENRE_LOOKUP_MISSES_FILE = PROJECT_ROOT / "data/genre_lookup_misses.json"
 # Where a looked-up genre came from (genres.GenreResult.level). Song and album
 # genres are saved at once; an artist's genre is listed for the owner first.
 GENRE_LEVEL_SONG = "song"
@@ -426,11 +433,11 @@ MUSICBRAINZ_API_MIN_INTERVAL = 1.1
 MUSICBRAINZ_SPELLCHECK_USE_FALLBACK = True
 # Disk-backed cache of check_spelling() results, path relative to the project
 # root. Delete this file to force fresh lookups of everything.
-SPELLCHECK_CACHE_FILE = "data/spellcheck_cache.json"
+SPELLCHECK_CACHE_FILE = PROJECT_ROOT / "data/spellcheck_cache.json"
 # Joined artist names ("Simon & Garfunkel") the user said are one artist, so
 # "Split joined artist names" stops proposing them. Relative to the project
 # root; delete it (or a line in it) to be asked again.
-ARTIST_SPLIT_IGNORE_FILE = "data/artist_split_ignore.json"
+ARTIST_SPLIT_IGNORE_FILE = PROJECT_ROOT / "data/artist_split_ignore.json"
 # Words joining two artists ("Ірина Білик і Скрябін", "Hasiok i Maciej
 # Maleńczuk"). So many band names use them ("Tymon i Trupy", "Of Monsters and
 # Men") that a split on one is proposed only when a part is already an artist.

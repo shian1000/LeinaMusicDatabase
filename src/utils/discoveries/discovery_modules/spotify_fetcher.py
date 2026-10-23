@@ -7,7 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from config.constants import SPELLING_CHECK_THRESHOLD
+from config.constants import PROJECT_ROOT, SPELLING_CHECK_THRESHOLD
 from utils.common.debug import flog, slog
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.text_utils import is_blacklisted_album, similarity
@@ -23,7 +23,7 @@ MODULE_NAME = "Spotify fetcher"
 
 # Last page that failed to load, overwritten each time - to see whether it was
 # a cookie wall, an empty search or markup that changed.
-DEBUG_SNAPSHOT_FILE = "debug_spotify.html"
+DEBUG_SNAPSHOT_FILE = PROJECT_ROOT / "debug_spotify.html"
 
 
 def _save_snapshot(driver) -> None:

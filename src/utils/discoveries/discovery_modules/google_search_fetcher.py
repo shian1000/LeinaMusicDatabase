@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from config.constants import PROJECT_ROOT
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.debug import flog, slog
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
@@ -85,7 +86,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
             EC.visibility_of_element_located((By.CSS_SELECTOR, "[data-attrid]"))
         )
     except Exception:
-        with open("debug.html", "w", encoding="utf-8") as f:
+        with open(PROJECT_ROOT / "debug.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
         flog("[Result] Page loaded but no Knowledge Panel detected.")
         return None

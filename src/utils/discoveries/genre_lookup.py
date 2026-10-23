@@ -40,7 +40,6 @@ from utils.common.normalizer import name_key, normalize
 from utils.database.genres import canonical_genre, genre_key, is_known_genre
 from utils.database.latin_names import artist_match_synonyms, song_titles
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass
@@ -211,7 +210,7 @@ def _pick_release_group(recordings: list, song) -> str | None:
 # ==================== songs MusicBrainz had nothing for ====================
 
 def _misses_path() -> Path:
-    return _PROJECT_ROOT / GENRE_LOOKUP_MISSES_FILE
+    return GENRE_LOOKUP_MISSES_FILE
 
 
 def load_misses() -> set:

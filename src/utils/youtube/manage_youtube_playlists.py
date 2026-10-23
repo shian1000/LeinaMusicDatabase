@@ -26,7 +26,7 @@ from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import flog
 from settings import Settings
-from config.constants import FULL_ALBUM_MIN_DURATION_S, YOUTUBE_REGION
+from config.constants import FULL_ALBUM_MIN_DURATION_S, PROJECT_ROOT, YOUTUBE_REGION
 from utils.database.song_kinds import strip_full_album_marker
 import json
 
@@ -37,8 +37,8 @@ from googleapiclient.errors import HttpError
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
-TOKEN_PATH = ".secrets/token.json"
-CLIENT_SECRET_PATH = ".secrets/client_secret.json"
+TOKEN_PATH = str(PROJECT_ROOT / ".secrets" / "token.json")
+CLIENT_SECRET_PATH = str(PROJECT_ROOT / ".secrets" / "client_secret.json")
 
 # Manual `Song.youtube_video_id` annotation meaning "a human has confirmed
 # this song has no video on YouTube at all" — distinct from the field being
@@ -59,7 +59,7 @@ class QuotaExceededError(Exception):
 # file is present, so a stale/invalid stored link or a failed DB write is
 # still traceable after the fact without the user needing to have debug mode
 # on ahead of time.
-_LOG_PATH = Path(__file__).resolve().parents[3] / "youtube_link_cache.log"
+_LOG_PATH = PROJECT_ROOT / "youtube_link_cache.log"
 _logger = logging.getLogger("youtube_link_cache")
 if not _logger.handlers:
     _handler = logging.FileHandler(_LOG_PATH, encoding="utf-8")

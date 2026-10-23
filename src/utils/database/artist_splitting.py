@@ -10,7 +10,6 @@ can't tell "Sw@da & Maxim" from "Simon & Garfunkel".
 import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from config.constants import (
     ADDITIONAL_ARTIST_ROLE_FEAT,
@@ -25,7 +24,7 @@ from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import add_additional_artist
 
-_IGNORE_PATH = Path(__file__).resolve().parents[3] / ARTIST_SPLIT_IGNORE_FILE
+_IGNORE_PATH = ARTIST_SPLIT_IGNORE_FILE
 
 # "A feat. B", "A ft. B", "A featuring B", "A (feat. B)" - everything after is a guest
 _FEAT = re.compile(r"\s*\(?\s*\b(?:feat\.?|ft\.?|featuring)\s+", re.IGNORECASE)

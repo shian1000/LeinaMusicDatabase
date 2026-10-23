@@ -18,7 +18,6 @@ may be a mix the owner keeps as a song).
 """
 import json
 import re
-from pathlib import Path
 
 from config.constants import (
     FULL_ALBUM_IGNORE_FILE,
@@ -32,7 +31,7 @@ from utils.common.normalizer import normalize
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
 
-_IGNORE_PATH = Path(__file__).resolve().parents[3] / FULL_ALBUM_IGNORE_FILE
+_IGNORE_PATH = FULL_ALBUM_IGNORE_FILE
 
 _NORMALIZED_MARKERS = sorted({normalize(m) for m in FULL_ALBUM_TITLE_MARKERS}, key=len, reverse=True)
 # Raw-title forms, for cutting a marker out: longest first, so "full album

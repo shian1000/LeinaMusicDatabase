@@ -15,15 +15,12 @@ import json
 import os
 import tempfile
 import threading
-from pathlib import Path
 from typing import Optional
 
 from utils.common.debug import slog
 from config.constants import SPELLCHECK_CACHE_FILE
 
-# src/utils/common/spellcheck_cache.py -> parents[3] is the project root.
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_CACHE_PATH = _PROJECT_ROOT / SPELLCHECK_CACHE_FILE
+_CACHE_PATH = SPELLCHECK_CACHE_FILE
 
 _AUTOSAVE_EVERY = 20
 

@@ -14,30 +14,9 @@ import traceback
 from datetime import datetime
 from types import TracebackType
 
-
-def _find_project_root() -> Path:
-    """
-    Find the project root directory by looking for marker files.
-    
-    Searches upward from the current file location for:
-    - main.py (Python project entry point)
-    - .git (Git repository)
-    - pyproject.toml (Python project config)
-    
-    Returns:
-        Path: Project root directory, or current file's parent if not found
-    """
-    p = Path(__file__).resolve().parent
-    for _ in range(6):
-        if (p / "main.py").exists() or (p / ".git").exists() or (p / "pyproject.toml").exists():
-            return p
-        if p.parent == p:
-            break
-        p = p.parent
-    return p
+from config.constants import PROJECT_ROOT
 
 
-PROJECT_ROOT: Path = _find_project_root()
 DEBUG_ENABLED: bool = (PROJECT_ROOT / ".debug").exists()
 
 VERBOSITY_LEVEL: int = 0

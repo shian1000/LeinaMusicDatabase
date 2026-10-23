@@ -96,7 +96,11 @@ non-trivial work in that area.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
   don't inline them. In particular the `"Singles"` album sentinel ("no real parent album" — the
   fetchers, the singles-marker fallback, Years' per-title lookup and duplicate resolution all
-  agree on it) is `SINGLES_ALBUM`; never write the literal.
+  agree on it) is `SINGLES_ALBUM`; never write the literal. `PROJECT_ROOT` (the repo folder) is
+  the one base for every state / settings / debug file (`*_FILE` here, `.debug`, `debug.log`,
+  `.env`, `.secrets/`): a new one is `PROJECT_ROOT / "name"`, never a bare relative path, which
+  would follow the current directory — run from elsewhere, the app silently ignored the database
+  folder override (`tests/test_state_paths.py`).
 - `src/utils/database/` — DB access, sessions, and the search/getter layer + song/artist
   **category** system. Non-obvious ordering and category gotchas (alphabetical-not-best-match
   results, `search_only_categories` is song-only, shared fallback filter):

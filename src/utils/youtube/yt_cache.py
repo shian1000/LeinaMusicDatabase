@@ -4,10 +4,10 @@ from datetime import datetime
 
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.latin_names import artist_match_synonyms
-from config.constants import SONG_KIND_FULL_ALBUM
+from config.constants import PROJECT_ROOT, SONG_KIND_FULL_ALBUM
 
 
-CACHE_FILE = Path("yt_playlist_cache.json")
+CACHE_FILE = PROJECT_ROOT / "yt_playlist_cache.json"
 
 
 def make_song_key(artist: str, title: str) -> str:

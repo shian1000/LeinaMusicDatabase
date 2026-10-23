@@ -16,15 +16,17 @@ venv/
 Thumbs.db
 .directory
 
-# Local runtime state / machine-specific config (not versioned)
-.debug
-recent_dirs.json
-discovery_modules_config.json
-discovery_modules_config_years.json
-discovery_fetcher_stats.json
-discovery_fetcher_stats_years.json
-database_location_config.json
-file_matching_config.json
+# Local runtime state / machine-specific config (not versioned) - always at the repo root
+# (config.constants.PROJECT_ROOT), never in the current directory
+/.debug
+/recent_dirs.json
+/discovery_modules_config.json
+/discovery_modules_config_years.json
+/discovery_fetcher_stats.json
+/discovery_fetcher_stats_years.json
+/database_location_config.json
+/file_matching_config.json
+/fetch_data_config.json
 /.agents/local.md
 # This machine's own ssh shortcuts (the committed one is MusicDatabase-Remote.sh, configured in .env)
 /MusicDatabase-Remote-LAN.sh
@@ -42,12 +44,12 @@ file_matching_config.json
 /backimport/
 
 # Disposable debug dumps
-debug.log
-debug.html
-youtube_link_cache.log
-yt_playlist_cache.json
-MusicDatabase - ToDo.txt
-debug_spotify.html
+/debug.log
+/debug.html
+/youtube_link_cache.log
+/yt_playlist_cache.json
+/MusicDatabase - ToDo.txt
+/debug_spotify.html
 
 # Local code review (owner only, Polish)
 /docs/code-review-2026-10.md

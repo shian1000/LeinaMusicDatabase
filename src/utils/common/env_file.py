@@ -8,9 +8,11 @@ from pathlib import Path
 
 from dotenv import dotenv_values, set_key, unset_key
 
+from config.constants import PROJECT_ROOT
+
 # Looked up when a function runs, never bound as a default argument, so the
 # tests' swap of ENV_FILE (tests/conftest.py) reaches every caller
-ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 @dataclass(frozen=True)
