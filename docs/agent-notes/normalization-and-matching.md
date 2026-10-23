@@ -308,7 +308,9 @@ and so like its title track: "Migration" the album and "Migration" the song.
 rule, a track's file would be matched to the album row (and the import would
 skip a genuinely new track as "already there"). So every matching entry point
 in `import_engine` (`find_existing_song()`, `find_song_loosely()`, every
-`LocalSongMatcher` path) first passes the candidates through
+`LocalSongMatcher` path, and `find_similar_song()` — else the import's
+end-of-batch "use the song already in the database?" offered a track the
+album of its name) first passes the candidates through
 `song_kinds.songs_for_entry(songs, title, duration_s)`:
 
 - an entry that doesn't look like an album (no `FULL_ALBUM_TITLE_MARKERS`

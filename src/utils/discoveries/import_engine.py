@@ -118,8 +118,11 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
     new_title = metadata["title"]
     slog(f"Couldn't find song {new_artist_name} - {new_title}, trying spellcheck")
 
-    # OPTIMIZATION STEP 1: Check local database for similar songs FIRST (instant)
-    existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
+    # OPTIMIZATION STEP 1: Check local database for similar songs FIRST (instant).
+    # Full albums only for an entry that looks like one, as in find_existing_song():
+    # a track "Migration" is never offered the full album "Migration".
+    existing_artists_songs = songs_for_entry(get_songs_from_db_session(artist_categories[2], artist_obj.id),
+                                             new_title, metadata.get("duration_s"))
 
     # Try to find similar songs using local similarity comparison (no API call).
     # Bracketed annotations like "(prod. X)" or "(feat. Y)" are stripped first
@@ -335,7 +338,7 @@ def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
     new_song_obj.title = metadata["title"]
     new_song_obj.album = metadata.get("album")
     try:
-        new_song_obj.year = int(metadata["year"])
+        new_song_obj.year = int(metadata.get("year"))
     except (ValueError, TypeError):
         new_song_obj.year = None
     new_song_obj.language = metadata.get("language")
