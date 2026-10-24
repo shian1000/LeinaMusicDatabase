@@ -355,9 +355,12 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   A request carrying a YouTube channel as the artist and the whole video title as the title
   ("familyboombox" / "Бумбокс - Твiй на 100%", Leina Radio's search results before
   [`youtube-search-requests-for-musicdatabaseapp.md`](../handoffs/youtube-search-requests-for-musicdatabaseapp.md))
-  gets a suggested split (`suggested_artist_title()`): the title's part before " - " is an
-  artist in music.db and the channel is that artist (name / synonym / Latin form) or unknown;
-  another known artist's channel is left as asked. The review offers it first, and the "already
+  gets a suggested split (`suggested_artist_title()`): the title's part before " - " (or,
+  without a dash, before ": " after at most `SONG_REQUEST_COLON_ARTIST_MAX_WORDS` words — a
+  label's channel: "Fueled By Ramen" / "Travie McCoy: Billionaire ft. Bruno Mars") is the
+  artist when the channel is one music.db doesn't know (that artist then may be new too) or is
+  that same artist (name / synonym / Latin form); another known artist's channel is left as
+  asked. The review offers it first, and the "already
   in the database" / "rejected before" checks use it too.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its

@@ -151,12 +151,41 @@ def test_a_channel_and_video_title_suggest_the_artist_from_the_title(env, channe
     assert case.suggested == expected
 
 
-def test_a_title_naming_no_known_artist_suggests_nothing(env):
+def test_a_known_channel_with_a_title_naming_no_known_artist_suggests_nothing(env):
     _request(env["inbox"], "2026-10-19_17-50-39_001.db", [{"title": "Nobody - Song", "artist": "familyboombox"}])
 
     _, [case] = _cases(env)
 
     assert case.suggested is None
+
+
+@pytest.mark.parametrize("channel, title, expected", [
+    # A label's channel, "<artist>: <title>", an artist the database doesn't know yet
+    ("Fueled By Ramen", "Travie McCoy: Billionaire ft. Bruno Mars", ("Travie McCoy", "Billionaire ft. Bruno Mars")),
+    ("Some Uploads", "Nobody - Song", ("Nobody", "Song")),
+    (None, "Nobody - Song", ("Nobody", "Song")),
+    ("Some Uploads", "BoomBox: Вахтёрам", ("Бумбокс", "Вахтёрам")),        # spelt as the database does
+    ("familyboombox", "Бумбокс: Твiй на 100%", ("Бумбокс", "Твiй на 100%")),
+    ("Okean Elzy", "Nobody: Song", None),                                 # a known artist's channel
+    ("Some Uploads", "Live at the Royal Albert Hall: Song", None),       # too long to be an artist
+    ("Some Uploads", "Song 12:30", None),                                 # no space after the colon
+    ("Some Uploads", "Song", None),
+])
+def test_an_unknown_channel_suggests_the_artist_from_the_title_even_a_new_one(env, channel, title, expected):
+    _request(env["inbox"], "2026-10-21_19-26-51_001.db", [{"title": title, "artist": channel}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested == expected
+
+
+def test_a_dash_wins_over_a_colon(env):
+    _request(env["inbox"], "2026-10-21_19-26-51_001.db",
+             [{"title": "Бумбокс - Live: Твiй на 100%", "artist": "Some Uploads"}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested == ("Бумбокс", "Live: Твiй на 100%")
 
 
 def test_the_suggested_split_finds_a_song_in_the_database(env):

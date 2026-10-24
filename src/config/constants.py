@@ -508,6 +508,12 @@ FILE_TITLE_PREFIX_MIN_LENGTH = 4
 # more and the user searches by title instead.
 FILE_TITLE_CANDIDATES_MAX = 5
 
+# A song request whose video title is "<artist>: <title>" ("Travie McCoy:
+# Billionaire ft. Bruno Mars" on the label's channel) is read that way only
+# when the part before ": " has at most this many words - longer, it's more
+# likely a title with a subtitle ("Star Wars: Episode IV ...").
+SONG_REQUEST_COLON_ARTIST_MAX_WORDS = 4
+
 # A file nothing else found a song for is offered up to this many of the
 # closest songs by score (LocalSongMatcher.match_score(): title, and the
 # artist when the file has one), if they score at least the "Closest songs:

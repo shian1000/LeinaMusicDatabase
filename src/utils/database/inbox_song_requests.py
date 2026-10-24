@@ -22,16 +22,20 @@ every file. Settled without asking (the automatic pass too):
 
 A request may carry a YouTube video's channel as the artist and the whole
 video title as the title ("familyboombox" / "Бумбокс - Твiй на 100%"; Leina
-Radio's YouTube search results did that). When the part of the title before
-" - " is an artist in the database and the request's artist is the same one
-(a synonym, as here) or none the database knows, the case suggests the split
-(`suggested`): the review offers it first, and the "already in the database"
-check uses it too.
+Radio's YouTube search results did that), or a label's channel ("Fueled By
+Ramen" / "Travie McCoy: Billionaire ft. Bruno Mars"). When the title is
+"<artist> - <title>" or "<artist>: <title>" and the request's artist is none
+the database knows (or none at all), the case suggests the split
+(`suggested`), the artist from the title known to the database or not; when
+the request's artist is a known one, only if the title names that same
+artist (a synonym, as with familyboombox). The review offers it first, and
+the "already in the database" check uses it too.
 """
 
 import re
 from dataclasses import dataclass
 
+from config.constants import SONG_REQUEST_COLON_ARTIST_MAX_WORDS
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
 from utils.database.datatables import RejectedSongRequest, Song
@@ -55,6 +59,8 @@ REJECT = "rejected"
 
 # What separates the artist from the title inside a video's title
 _TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
+# ... or, when there's no dash, a colon right after the artist
+_TITLE_ARTIST_COLON = re.compile(r":\s+")
 
 SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a file on the phone"}
 
@@ -136,21 +142,35 @@ def _rejected_rows(session) -> tuple[set, set, set]:
 
 
 def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tuple | None:
-    """(artist, title) when `title` is "<artist> - <title>" of an artist in
-    the database and `artist` is the same artist or one it doesn't know (a
-    YouTube channel): "familyboombox" (Бумбокс's synonym) / "Бумбокс - Твiй на
-    100%" -> ("Бумбокс", "Твiй на 100%"). None otherwise - a known artist's
-    channel uploading another artist's song is left as asked."""
-    parts = _TITLE_ARTIST_SEPARATOR.split(title or "", maxsplit=1)
-    if len(parts) < 2 or not parts[0].strip() or not parts[1].strip():
+    """(artist, title) when `title` is "<artist> - <title>" (or "<artist>:
+    <title>", the artist part short) and `artist` is one the database doesn't
+    know (a YouTube channel, a label) or the same artist as the title's:
+    "familyboombox" (Бумбокс's synonym) / "Бумбокс - Твiй на 100%" ->
+    ("Бумбокс", "Твiй на 100%"); "Fueled By Ramen" / "Travie McCoy:
+    Billionaire ft. Bruno Mars" -> ("Travie McCoy", "Billionaire ft. Bruno
+    Mars"). The title's artist is given as the database spells it when it
+    knows it. None otherwise - a known artist's channel uploading another
+    artist's song is left as asked."""
+    parts = _split_title(title or "")
+    if parts is None:
         return None
-    in_title = matcher.artist(parts[0].strip())
-    if in_title is None:
-        return None
+    in_title = matcher.artist(parts[0])
     asked = matcher.artist(artist) if artist else None
-    if asked is not None and asked.id != in_title.id:
+    if asked is not None and (in_title is None or asked.id != in_title.id):
         return None
-    return in_title.name, parts[1].strip()
+    return (in_title.name if in_title is not None else parts[0]), parts[1]
+
+
+def _split_title(title: str) -> tuple[str, str] | None:
+    """(artist part, title part) of a video title, by " - " first, else by
+    ": " after at most SONG_REQUEST_COLON_ARTIST_MAX_WORDS words."""
+    parts = _TITLE_ARTIST_SEPARATOR.split(title, maxsplit=1)
+    if len(parts) < 2:
+        parts = _TITLE_ARTIST_COLON.split(title, maxsplit=1)
+        if len(parts) < 2 or len(parts[0].split()) > SONG_REQUEST_COLON_ARTIST_MAX_WORDS:
+            return None
+    left, right = parts[0].strip(), parts[1].strip()
+    return (left, right) if left and right else None
 
 
 def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
