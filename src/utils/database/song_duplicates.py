@@ -75,6 +75,22 @@ def feat_credits(title: str) -> list[str]:
     return names
 
 
+# An unbracketed credit up to the next bracket: "(Remix)" after it stays
+_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)(?:feat\.?|ft\.?|featuring)\s+[^()\[\]]+", re.IGNORECASE)
+
+
+def split_feat_credits(title: str) -> tuple[str, list[str]]:
+    """(title without its featured-artist credits, the artists they name):
+    "Billionaire ft. Bruno Mars" -> ("Billionaire", ["Bruno Mars"]). A title
+    that is nothing but a credit, or names nobody, comes back unchanged."""
+    names = feat_credits(title)
+    if not names:
+        return title, []
+    bare = _BRACKET_RE.sub(lambda m: "" if _FEAT_WORD_RE.match(m.group(1).strip() + " ") else m.group(0), title)
+    bare = " ".join(_UNBRACKETED_FEAT_RE.sub(" ", bare).split())
+    return (bare, names) if bare else (title, [])
+
+
 def missing_feat_artists(group: list) -> list[str]:
     """The featured artists the other titles of a duplicate group credit and
     the kept song (`group[0]`) has neither in its title nor among its

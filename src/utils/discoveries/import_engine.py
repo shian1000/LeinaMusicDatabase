@@ -351,6 +351,13 @@ def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
     if title_has_full_album_marker(new_song_obj.title):
         set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM)
     add_db_entry(new_song_obj)
+    # A caller that split "Title ft. X" off its title (song requests) names X here
+    if metadata.get("feat_artists"):
+        from sqlalchemy.orm import object_session
+        from utils.database.song_duplicates import credit_feat_artists
+        session = object_session(new_song_obj)
+        credit_feat_artists(session, new_song_obj, metadata["feat_artists"])
+        session.commit()
     return new_song_obj
 
 def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:

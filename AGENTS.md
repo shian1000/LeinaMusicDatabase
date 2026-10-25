@@ -136,7 +136,10 @@ non-trivial work in that area.
   automatic pass), `inbox_found_links.py` for links the phone found for
   songs without one, and `inbox_song_requests.py` for songs the phone played that music.db doesn't
   have (`song_requests`): never added automatically - the owner adds them (through
-  `run_import_batch()`), skips or rejects them; a rejected one goes to music.db's
+  `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
+  `create_song_entry()` credits as feat - only requests do that so far: the mp3 / YouTube imports keep the
+  credit in the title, since `find_existing_song()` wouldn't then see "Song ft. X" as the stored "Song"
+  and would add it again), skips or rejects them; a rejected one goes to music.db's
   `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the

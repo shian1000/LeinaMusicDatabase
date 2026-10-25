@@ -48,6 +48,7 @@ from utils.database.inbox_requests import (
     parse_time,
     save_decision,
 )
+from utils.database.song_duplicates import split_feat_credits
 
 # Settled statuses of their own
 ALREADY_IN_DATABASE = "already in the database"
@@ -116,10 +117,15 @@ class SongRequestCase:
 
     def metadata(self, artist: str | None = None, title: str | None = None) -> dict:
         """An import_engine metadata dict (run_import_batch()); `artist` /
-        `title` as the owner corrected them, else the request's."""
+        `title` as the owner corrected them, else the request's. A
+        featured-artist credit leaves the title for `feat_artists`, which the
+        import credits on the new song ("Billionaire ft. Bruno Mars" ->
+        "Billionaire", Bruno Mars as feat)."""
+        title, feat_artists = split_feat_credits(title if title is not None else self.latest.title or "")
         return {
             "artist_name": artist if artist is not None else self.latest.artist,
-            "title": title if title is not None else self.latest.title,
+            "title": title or None,
+            "feat_artists": feat_artists,
             "album": self._first("album"),
             "year": self._first("year"),
             "language": "Unknown",

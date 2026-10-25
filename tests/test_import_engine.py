@@ -93,6 +93,18 @@ def test_a_new_artist_and_song_are_created(env):
     assert env["questions"] == []
 
 
+def test_feat_artists_are_credited_on_the_new_song(env):
+    session = env["session"]
+    _artist(session, "Bruno Mars", "Grenade")
+
+    [song] = ie.run_import_batch([_entry("Travie McCoy", "Billionaire", feat_artists=["Bruno Mars", "Someone New"])])
+
+    assert song.title == "Billionaire"
+    assert [(link.artist.name, link.role) for link in song.additional_artist_links] == [
+        ("Bruno Mars", "feat"), ("Someone New", "feat")]
+    assert session.query(Artist).filter(Artist.name == "Bruno Mars").count() == 1
+
+
 def test_a_year_that_isnt_a_number_is_left_empty(env):
     [song] = ie.run_import_batch([_entry("Rammstein", "Sonne", year="2001?")])
 

@@ -29,6 +29,7 @@ from utils.database.song_duplicates import (
     merge_songs,
     missing_feat_artists,
     spelling_key,
+    split_feat_credits,
 )
 
 rd = importlib.import_module("menu.main_menu.enter_database.manage_database.resolve_duplicates")
@@ -191,6 +192,20 @@ def test_feat_credits_and_the_ones_the_kept_song_lacks(session, monkeypatch):
         database_sessions.set_global_database_sessions(None)
     assert [a.name for a in additional_artists(apt_feat)] == ["Bruno Mars", "Someone New"]
     assert session.query(Artist).filter(Artist.name == "Bruno Mars").count() == 1
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Billionaire ft. Bruno Mars", ("Billionaire", ["Bruno Mars"])),
+    ("Savana (feat. Darko Rundek)", ("Savana", ["Darko Rundek"])),
+    ("Hollywood feat. Snoop Dogg & Jamie Principle (Visualiser)",
+     ("Hollywood (Visualiser)", ["Snoop Dogg", "Jamie Principle"])),
+    ("Song feat. Kaya Lane (Remix)", ("Song (Remix)", ["Kaya Lane"])),  # a bracket after the credit stays
+    ("Feat. Bruno Mars", ("Feat. Bruno Mars", [])),                     # nothing but a credit
+    ("Defeated", ("Defeated", [])),
+    ("Tamagotchi", ("Tamagotchi", [])),
+])
+def test_split_feat_credits(title, expected):
+    assert split_feat_credits(title) == expected
 
 
 # ---- the same new song twice in one import's review ------------------------------

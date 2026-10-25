@@ -179,6 +179,18 @@ def test_an_unknown_channel_suggests_the_artist_from_the_title_even_a_new_one(en
     assert case.suggested == expected
 
 
+def test_a_feat_credit_leaves_the_title_for_the_imports_feat_artists(env):
+    _request(env["inbox"], "2026-10-21_19-26-51_001.db",
+             [{"title": "Travie McCoy: Billionaire ft. Bruno Mars", "artist": "Fueled By Ramen"}])
+
+    _, [case] = _cases(env)
+
+    metadata = case.metadata(*case.suggested)
+    assert (metadata["artist_name"], metadata["title"]) == ("Travie McCoy", "Billionaire")
+    assert metadata["feat_artists"] == ["Bruno Mars"]
+    assert case.metadata("Elise Trouw", "Unseen")["feat_artists"] == []
+
+
 def test_a_dash_wins_over_a_colon(env):
     _request(env["inbox"], "2026-10-21_19-26-51_001.db",
              [{"title": "Бумбокс - Live: Твiй на 100%", "artist": "Some Uploads"}])
