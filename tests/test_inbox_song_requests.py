@@ -159,6 +159,22 @@ def test_a_known_channel_with_a_title_naming_no_known_artist_suggests_nothing(en
     assert case.suggested is None
 
 
+@pytest.mark.parametrize("channel, expected", [
+    ("familyboombox", ("Бумбокс", "Ангела (feat. Крихітка)")),  # the artist's synonym
+    ("Бумбокс", None),                                          # already its name
+    ("Okean Elzy", None),
+    ("Some Uploads", None),                                     # a channel the database doesn't know
+    (None, None),
+])
+def test_a_title_naming_no_artist_suggests_the_artist_a_synonym_stands_for(env, channel, expected):
+    _request(env["inbox"], "2026-10-19_18-12-20_035.db", [{"title": "Ангела (feat. Крихітка)", "artist": channel}])
+
+    _, [case] = _cases(env)
+
+    assert case.pending
+    assert case.suggested == expected
+
+
 @pytest.mark.parametrize("channel, title, expected", [
     # A label's channel, "<artist>: <title>", an artist the database doesn't know yet
     ("Fueled By Ramen", "Travie McCoy: Billionaire ft. Bruno Mars", ("Travie McCoy", "Billionaire ft. Bruno Mars")),

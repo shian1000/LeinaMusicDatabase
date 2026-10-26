@@ -28,8 +28,11 @@ Ramen" / "Travie McCoy: Billionaire ft. Bruno Mars"). When the title is
 the database knows (or none at all), the case suggests the split
 (`suggested`), the artist from the title known to the database or not; when
 the request's artist is a known one, only if the title names that same
-artist (a synonym, as with familyboombox). The review offers it first, and
-the "already in the database" check uses it too.
+artist (a synonym, as with familyboombox). A title naming no artist with a
+channel that is one of a known artist's other names ("familyboombox" /
+"Ангела (feat. Крихітка)") suggests that artist as the database spells it.
+The review offers it first, and the "already in the database" check uses it
+too.
 """
 
 import re
@@ -37,8 +40,9 @@ from dataclasses import dataclass
 
 from config.constants import SONG_REQUEST_COLON_ARTIST_MAX_WORDS
 from utils.common.debug import mlog
-from utils.common.normalizer import normalize
+from utils.common.normalizer import name_key, normalize
 from utils.database.datatables import RejectedSongRequest, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.inbox_requests import (
     DECIDED,
     OPEN,
@@ -155,16 +159,30 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     ("Бумбокс", "Твiй на 100%"); "Fueled By Ramen" / "Travie McCoy:
     Billionaire ft. Bruno Mars" -> ("Travie McCoy", "Billionaire ft. Bruno
     Mars"). The title's artist is given as the database spells it when it
-    knows it. None otherwise - a known artist's channel uploading another
-    artist's song is left as asked."""
+    knows it. A title with no artist in it keeps the title, with the artist
+    as the database spells it when `artist` is one of its other names
+    ("familyboombox" / "Ангела" -> ("Бумбокс", "Ангела")). None otherwise - a
+    known artist's channel uploading another artist's song is left as
+    asked."""
     parts = _split_title(title or "")
     if parts is None:
-        return None
+        known = _known_by_other_name(artist, matcher)
+        return (known.name, title) if known is not None and title else None
     in_title = matcher.artist(parts[0])
     asked = matcher.artist(artist) if artist else None
     if asked is not None and (in_title is None or asked.id != in_title.id):
         return None
     return (in_title.name if in_title is not None else parts[0]), parts[1]
+
+
+def _known_by_other_name(artist: str | None, matcher):
+    """The database artist `artist` is a synonym or the Latin form of - not
+    just its name spelt another way, and never a fuzzy guess - else None."""
+    known = matcher.artist(artist) if artist else None
+    if known is None or name_key(artist) == name_key(known.name):
+        return None
+    other_names = (artist_match_synonyms(known) or "").split(",")
+    return known if name_key(artist) in {name_key(n) for n in other_names} else None
 
 
 def _split_title(title: str) -> tuple[str, str] | None:
