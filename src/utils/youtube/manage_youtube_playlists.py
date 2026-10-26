@@ -1155,11 +1155,40 @@ def score_result(
     return relevance, artist_relevance, quality
 
 
+def _is_plain_official_audio(video_title: str) -> bool:
+    lowered = video_title.lower()
+    return _keyword_present("official audio", lowered) and not any(
+        _keyword_present(kw, lowered) for kw in LQ_KEYWORDS + STRONG_LQ_KEYWORDS
+    )
+
+
+def _official_audio_twin(ranked: list) -> int:
+    """Index in `ranked` (best first) of the candidate to pick: the winner,
+    unless it's a labelled video ("Official Video", "MV", ...) and the same
+    channel also uploaded an "Official Audio" of the song, as relevant and
+    not another version (live, acoustic, remix, ...) - the owner wants the
+    audio then (2026-10-26), however many more views the video has. Real
+    case: Larkin Poe - Bleach Blonde Bottle Blues, the official video (4.2M
+    views) beat the band's own official audio (113K) on popularity alone,
+    4.62 to 4.05. Only the same channel: a fan reupload calling itself
+    "Official Audio" proves nothing."""
+    (relevance, artist_relevance, _), _, video_title, _, channel = ranked[0]
+    channel = normalize(channel or "")
+    lowered = video_title.lower()
+    if not channel or not any(_keyword_present(kw, lowered) for kw in VIDEO_KEYWORDS):
+        return 0
+    for i, ((rel, artist_rel, _), _, other_title, _, other_channel) in enumerate(ranked[1:], 1):
+        if (rel >= relevance and artist_rel >= artist_relevance and normalize(other_channel or "") == channel
+                and _is_plain_official_audio(other_title)):
+            return i
+    return 0
+
+
 def _select_best_candidate(
-    candidates: list[tuple[tuple[float, float, float], str, str, bool]], title: str
+    candidates: list[tuple[tuple[float, float, float], str, str, bool, str]], title: str
 ) -> tuple[str | None, float, bool]:
     """Pick the winning (video_id, best_relevance, is_official) from a
-    (score, video_id, video_title, is_official) list, gated on both title
+    (score, video_id, video_title, is_official, channel) list, gated on both title
     relevance (_min_relevance_for) and MIN_ARTIST_RELEVANCE — see that
     constant's docstring for why the artist floor is needed on top of the
     (deliberately title-only) relevance gate. Shared by the yt-dlp and Data
@@ -1184,7 +1213,8 @@ def _select_best_candidate(
         return None, 0.0, False
 
     plausible.sort(key=lambda x: x[0], reverse=True)
-    (best_relevance, best_artist_relevance, best_quality), best_id, best_title, is_official = plausible[0]
+    plausible.insert(0, plausible.pop(_official_audio_twin(plausible)))
+    (best_relevance, best_artist_relevance, best_quality), best_id, best_title, is_official, _ = plausible[0]
     required = _min_relevance_for(title)
     if best_relevance < required:
         print(f"  ✖ No relevant match (closest: {best_title}, relevance={best_relevance:.2f}, needed {required:.2f})")
@@ -1313,6 +1343,7 @@ def _search_video_ytdlp_once(
                         video_id,
                         video_title,
                         _is_official_release(channel, track),
+                        channel,
                     )
                 )
         except json.JSONDecodeError:
@@ -1433,6 +1464,7 @@ def _search_video_api_once(
             item["id"]["videoId"],
             item["snippet"]["title"],
             _is_official_release(item["snippet"].get("channelTitle", ""), None),
+            item["snippet"].get("channelTitle", ""),
         )
         for item in items
     ]

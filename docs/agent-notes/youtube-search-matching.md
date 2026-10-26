@@ -749,6 +749,23 @@ remixes/dubs/demos exactly like `"official audio"` already did — verified none
 "official" somewhere) picked up the bonus, because each also matches an `LQ_KEYWORDS` term that
 suppresses the whole HQ bonus block.
 
+## The artist's own "Official Audio" beats their "Official Video" — whatever the views
+
+The owner's rule (2026-10-26): when a channel uploaded both a labelled video (any `VIDEO_KEYWORDS`
+hit) and an "Official Audio" of the song, the audio is the link. Scoring alone can't guarantee it:
+the audio is only `+1` ahead (`+2` vs `+2 - VIDEO_PENALTY`), and `_popularity_bonus()` hands a
+10x-more-watched video `+1` — `Larkin Poe - Bleach Blonde Bottle Blues`' official video (4.2M views)
+beat the band's official audio (113K) 4.62 to 4.05, and Leina Radio's suggestion (the audio) then
+disagreed with our search, so the inbox pass left the dead-link case to the owner. Raising the
+bonus wouldn't hold against a 1000x gap, so `_select_best_candidate()` applies it after the sort
+instead (`_official_audio_twin()`): the audio takes the winner's place only when it's from the
+**same channel** (a fan reupload calling itself "Official Audio" proves nothing — this is why the
+candidate tuples carry the channel), at least as relevant on title and artist, and not another
+version (no `LQ_KEYWORDS` / `STRONG_LQ_KEYWORDS` hit — the band's "(Acoustic)" upload doesn't
+count). An audio from another channel still competes on score alone (`Krzysztof Zalewski - Milosc
+Milosc`, a label's audio vs the artist's video, already won that way). Don't "simplify" this into
+the quality score.
+
 ## Typo/spelling-variant tolerance for titles: doubled letters, diacritics, punctuation
 
 Two related relevance-matching gaps, both stemming from the same root cause: the scaled threshold
@@ -1320,6 +1337,8 @@ simplified:
 - `Drenchill ft. Indiiana - Freed From Desire` → every real upload split or reworded the "ft."
   credit enough to lose artist_relevance to a "(Bass Boosted)" reupload that happened to spell the
   DB's combined field verbatim (see the "ft."/"feat." section above).
+- `Larkin Poe - Bleach Blonde Bottle Blues` → the band's official video out-viewed its official
+  audio from the same channel; the owner wants the audio (see the "Official Audio" section above).
 
 **Not covered by any of the above:** `Vinsent - Praciahvaju Żyć` — same shape as the Akute cases
 above (Latin DB title, Cyrillic-only real upload), not specifically re-tested since the mechanism

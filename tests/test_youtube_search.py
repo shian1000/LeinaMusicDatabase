@@ -1226,6 +1226,7 @@ DB_REFERENCE_REGRESSION_CASES = [
     ("Koala Voice - Vest", "Koala Voice", "Vest", "Vv6fECSGkKg"),
     ("Krzysztof Zalewski - Milosc Milosc", "Krzysztof Zalewski", "Milosc Milosc", "7i1ggMU2JSQ"),
     ("La Vida Bohème - Radio Capital", "La Vida Bohème", "Radio Capital", "F9gb9SsO_O8"),
+    ("Larkin Poe - Bleach Blonde Bottle Blues", "Larkin Poe", "Bleach Blonde Bottle Blues", "wui_CNVtI0E"),
     ("Ørganek - O, matko!", "Ørganek", "O, matko!", "zFK8GqOUcGw"),
     ("Drenchill ft. Indiiana - Freed From Desire", "Drenchill ft. Indiiana", "Freed From Desire", "6b6FBneAENQ"),
     ("Easy Life - Pockets", "Easy Life", "Pockets", "irruBdi_K3k"),
@@ -1572,6 +1573,21 @@ FRESH_SEARCH_REGRESSION_CASES = [
             {"id": "F9gb9SsO_O8", "title": "La Vida Boheme - Radio Capital (Official Music Video)", "channel": "Nacional Records", "view_count": 1935147},
         ],
         ("F9gb9SsO_O8",), {},
+    ),
+    # The band's own official video (37x the views) beat its official audio
+    # on popularity alone, 4.62 to 4.05; the owner wants the audio when the
+    # same channel has both (_official_audio_twin()).
+    (
+        "Larkin Poe - Bleach Blonde Bottle Blues", "Larkin Poe", "Bleach Blonde Bottle Blues",
+        [
+            {"id": "Wy0RGsd2-JA", "title": "Larkin Poe | Bleach Blonde Bottle Blues (Official Video)", "channel": "Larkin Poe", "view_count": 4177453},
+            {"id": "wui_CNVtI0E", "title": "Larkin Poe | Bleach Blonde Bottle Blues (Official Audio)", "channel": "Larkin Poe", "view_count": 112699},
+            {"id": "-XX-mgtQtV4", "title": "Larkin Poe @ Inas Nacht : Bleach Blonde Bottle Blues", "channel": "Jürgen Schilling", "view_count": 123478},
+            {"id": "cGIb43q10L0", "title": "Larkin Poe | Bleach Blonde Bottle Blues (Acoustic)", "channel": "Larkin Poe", "view_count": 72444},
+            {"id": "uyNCSvVE4kg", "title": "Larkin Poe — Bleach Blonde Bottle Blues", "channel": "Benjamin Israel", "view_count": 124271},
+            {"id": "c9akyuikjoA", "title": "Larkin Poe - Bleach Blonde Bottle Blues (Lyrics)", "channel": "Rocky Lyric", "view_count": 11502},
+        ],
+        ("wui_CNVtI0E",), {},
     ),
     (
         "Ørganek - O, matko!", "Ørganek", "O, matko!",
