@@ -50,7 +50,21 @@ AdditionalSongArtist  (table additional_song_artists, migration 0003)
 song_id       PK, FK -> Song.id
 artist_id     PK, FK -> Artist.id
 role          NOT NULL, 'main' | 'feat'
+
+YoutubeVideoDuration  (table youtube_video_durations, migration 0017)
+--------------------
+video_id      PK, a YouTube video id (joined on songs.youtube_video_id)
+duration_s    NOT NULL, > 0
+fetched_at    NOT NULL, default datetime('now')
 ```
+
+- `youtube_video_durations` — how long a YouTube video is, as the Data API said once (a video's
+  length never changes): `utils/database/video_durations.py`, filled by "Find full albums" for the
+  videos of songs not marked as any kind. Keyed by video, not song, so a changed link never shows
+  the old video's length, and merges / deletions of songs don't touch it (rows of videos no song
+  uses any more just stay). A live or upcoming stream (0) and a video YouTube doesn't list aren't
+  stored. Leina Radio reads it (playlist lengths); public on GitHub. App side:
+  [`handoffs/video-durations-for-musicdatabaseapp.md`](handoffs/video-durations-for-musicdatabaseapp.md).
 
 - `Artist.name` has **no uniqueness constraint** — the DB will happily hold two rows with the same
   name. Preventing accidental duplicates is an application-layer concern (fuzzy matching before
@@ -181,7 +195,8 @@ role          NOT NULL, 'main' | 'feat'
   albums" (`utils/database/full_album_candidates.py`, `utils/ui/full_album_review.py`) offers
   candidates in one ticked list: a title with `FULL_ALBUM_TITLE_MARKERS` ("(Full Album)", "cały
   album", pre-ticked), a library file or a YouTube video (Data API) at least
-  `FULL_ALBUM_MIN_DURATION_S` (20 min — also mixes, so not pre-ticked); it offers taking the marker
+  `FULL_ALBUM_MIN_DURATION_S` (20 min — also mixes, so not pre-ticked; video lengths are kept in
+  `youtube_video_durations`, below, so the API is asked only about new links); it offers taking the marker
   out of the titles, and remembers unticked songs in `data/full_album_ignore.json`. An imported
   entry whose title has a marker becomes a full album at once (`create_song_entry()`). Matching
   keeps tracks and albums apart (`song_kinds.songs_for_entry()`, see

@@ -56,6 +56,7 @@ MUSIC_SPEC = DatabaseSpec("music.db", {
     "bad_youtube_videos": TableSpec(("id", "video_id", "song_id", "reason", "marked_at")),
     "rejected_song_requests": TableSpec(("id", "artist", "title", "youtube_video_id", "spotify_track_id",
                                          "rejected_at")),
+    "youtube_video_durations": TableSpec(("video_id", "duration_s", "fetched_at")),
     "schema_version": TableSpec(("id", "filename", "applied_at")),
     "sqlite_sequence": TableSpec(("name", "seq")),
 })

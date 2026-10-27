@@ -186,6 +186,18 @@ class RejectedSongRequest(Base):
     rejected_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
 
 
+# --------------------
+# How long a YouTube video is (migration 0017), by video id - read by Leina
+# Radio too. utils/database/video_durations.py
+# --------------------
+class YoutubeVideoDuration(Base):
+    __tablename__ = "youtube_video_durations"
+
+    video_id = Column(String, primary_key=True)
+    duration_s = Column(Integer, CheckConstraint("duration_s > 0"), nullable=False)
+    fetched_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+
 song_categories = [
     "title",
     "artist name",

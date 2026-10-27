@@ -14,7 +14,7 @@ from utils.database.files_index import long_song_files
 from utils.database.full_album_candidates import FullAlbumCandidate, find_full_album_candidates, unmarked_video_ids
 from utils.database.song_artists import song_artist_label
 from utils.database.song_kinds import add_to_full_album_ignore_list, set_song_kind
-from utils.youtube.manage_youtube_playlists import video_durations_via_api
+from utils.database.video_durations import video_durations
 
 
 def _describe(candidate: FullAlbumCandidate) -> str:
@@ -28,11 +28,11 @@ def review_full_albums() -> int:
     music_session, _ = open_and_set_global_database_sessions()
     file_durations = long_song_files(FULL_ALBUM_MIN_DURATION_S)
     print("Asking YouTube how long the songs' videos are...")
-    video_durations = video_durations_via_api(unmarked_video_ids(music_session))
-    if video_durations is None:
+    video_durations_by_id = video_durations(music_session, unmarked_video_ids(music_session))
+    if video_durations_by_id is None:
         print("[yellow]YouTube's API isn't set up (YOUTUBE_API_KEY) or didn't answer - "
               "only titles and library files are checked.[/yellow]")
-    candidates = find_full_album_candidates(music_session, file_durations, video_durations)
+    candidates = find_full_album_candidates(music_session, file_durations, video_durations_by_id)
     if not candidates:
         print("No songs look like full albums.")
         return 0

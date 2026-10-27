@@ -94,7 +94,7 @@ def test_export_keeps_the_allow_list_and_empties_the_rest(sources, tmp_path):
         ("Re:Zero", None, "https://open.spotify.com/track/abc")]
     assert _rows(music, "SELECT path FROM album_covers") == [(None,)]
     assert {"songs", "artists", "albums", "additional_song_artists", "song_id_changes", "bad_youtube_videos",
-            "rejected_song_requests", "album_covers", "schema_version"} <= _tables(music)
+            "rejected_song_requests", "album_covers", "youtube_video_durations", "schema_version"} <= _tables(music)
     assert _rows(tag, "SELECT name, kind FROM tags") == [("Chill", "mood")]
     assert _rows(tag, "SELECT song_id, tag_id FROM song_tags") == [(1, 2)]
     assert sources["music"].read_bytes() == before  # the original is only read

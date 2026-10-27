@@ -1635,10 +1635,12 @@ def videos_exist_via_api(video_ids) -> dict | None:
 _ISO_DURATION = re.compile(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$")
 
 
-def video_durations_via_api(video_ids) -> dict | None:
+def video_durations_via_api(video_ids, on_found=None) -> dict | None:
     """{video id: length in seconds} from the YouTube Data API, batched (one
     quota unit per 50 videos); a video it doesn't list is left out. None
-    when the API can't be used."""
+    when the API can't be used. `on_found` gets each batch's lengths as they
+    come, so what came before an error isn't lost
+    (utils/database/video_durations.py stores them)."""
     ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
     if not ids:
         return {}
@@ -1650,11 +1652,15 @@ def video_durations_via_api(video_ids) -> dict | None:
         for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
             chunk = ids[start:start + _API_VIDEOS_PER_CALL]
             response = service.videos().list(part="contentDetails", id=",".join(chunk), maxResults=50).execute()
+            batch = {}
             for item in response.get("items", []):
                 match = _ISO_DURATION.match(item.get("contentDetails", {}).get("duration") or "")
                 if match:
                     days, hours, minutes, seconds = (int(g or 0) for g in match.groups())
-                    result[item["id"]] = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+                    batch[item["id"]] = ((days * 24 + hours) * 60 + minutes) * 60 + seconds
+            result.update(batch)
+            if on_found and batch:
+                on_found(batch)
     except Exception as exc:
         flog(f"[YouTube API] videos.list (durations) failed: {exc}")
         return None

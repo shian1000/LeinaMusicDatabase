@@ -486,6 +486,28 @@ def test_videos_exist_via_api_none_without_service_or_on_error(monkeypatch):
     assert m.videos_exist_via_api(["public00000"]) is None
 
 
+def test_video_durations_via_api_parses_and_hands_over_each_batch(monkeypatch):
+    calls = _fake_service(monkeypatch, {
+        "hour0000000": {"contentDetails": {"duration": "PT1H2M3S"}},
+        "live0000000": {"contentDetails": {"duration": "P0D"}},
+        "days0000000": {"contentDetails": {"duration": "P1DT1S"}},
+    })
+    batches = []
+
+    result = m.video_durations_via_api(["hour0000000", "live0000000", "days0000000", "gone0000000", "N/A", None],
+                                       on_found=batches.append)
+
+    assert result == {"hour0000000": 3723, "live0000000": 0, "days0000000": 86401}
+    assert calls == [["hour0000000", "live0000000", "days0000000", "gone0000000"]]
+    assert batches == [result]
+
+
+def test_video_durations_via_api_none_without_service_or_on_error(monkeypatch):
+    monkeypatch.setattr(m, "_read_only_youtube_service", lambda: None)
+    assert m.video_durations_via_api(["hour0000000"]) is None
+    assert m.video_durations_via_api(["N/A"]) == {}
+
+
 # ==================== YouTube login (YT-07) ====================
 
 class _Creds:

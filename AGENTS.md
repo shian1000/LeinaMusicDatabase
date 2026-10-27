@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,610 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,670 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -171,6 +171,9 @@ non-trivial work in that area.
   matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
   spelling music.db already uses); never assign `song.genre` raw text.
+  `video_durations.py` — `youtube_video_durations` (migration 0017), YouTube videos' lengths by id,
+  asked once (`video_durations_via_api()`, each batch stored as it comes); "Find full albums" reads
+  them, Leina Radio sums them for playlists. A live stream's 0 is never stored.
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -497,7 +500,10 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `rejected_song_requests` (migration 0015: songs the owner didn't want
-  added, by the artist / title / YouTube video / Spotify track the request named). Matching keeps a track apart from the full album of the same name
+  added, by the artist / title / YouTube video / Spotify track the request named), and
+  `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
+  `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks
+  the Data API only about videos not stored yet). Matching keeps a track apart from the full album of the same name
   (`song_kinds.songs_for_entry()`, entries carry `duration_s`); candidates are reviewed in Manage
   database → "Find full albums".
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
@@ -675,7 +681,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,610 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,670 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

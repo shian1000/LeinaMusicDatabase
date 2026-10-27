@@ -52,7 +52,7 @@ def unmarked_video_ids(session) -> list:
 def find_full_album_candidates(session, file_durations: dict, video_durations: dict | None) -> list:
     """Candidates, the ones whose title says so first. `file_durations` =
     files_index.long_song_files(); `video_durations` = {video id: seconds}
-    (video_durations_via_api()) or None when YouTube wasn't asked."""
+    (video_durations.video_durations()) or None when YouTube wasn't asked."""
     ignored = load_full_album_ignore_list()
     candidates = []
     for song in session.query(Song).filter(Song.kind.is_(None)).all():
