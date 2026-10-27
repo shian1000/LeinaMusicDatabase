@@ -6,7 +6,7 @@ import musicbrainzngs
 from utils.common.debug import flog, slog
 from utils.common.text_utils import is_blacklisted_album, title_resembles, similarity
 from utils.common.normalizer import normalize
-from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
+from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
 import re
 import requests
 from difflib import SequenceMatcher
@@ -60,11 +60,18 @@ def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, di
     (undated last). Compilations, live albums, remixes, blacklisted titles,
     another artist's release and another song's single never count.
     """
+    title, recording, _release = _pick_release_with_entry(recordings, artist)
+    return title, recording
+
+
+def _pick_release_with_entry(recordings, artist: str | None = None) -> tuple[str | None, dict | None, dict | None]:
+    """_pick_release() plus the picked release entry itself (its id and the
+    recording's place on it)."""
     for recording in recordings:
         for release in recording.get("release-list", []):
             if (_release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
                     and release.get("release-group", {}).get("primary-type", "") == "Album"):
-                return _release_title(release), recording
+                return _release_title(release), recording, release
 
     for recording in recordings:
         candidates = [release for release in recording.get("release-list", [])
@@ -76,8 +83,70 @@ def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, di
                                                len(FALLBACK_RELEASE_TYPE_RANK)),
                 release.get("date") or "9999",
             ))
-            return _release_title(best), recording
+            return _release_title(best), recording, best
+    return None, None, None
+
+
+def _as_int(value) -> int | None:
+    """MusicBrainz's numbers come as text; a vinyl side's "A1" is no number."""
+    text = str(value).strip() if value is not None else ""
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
+def _track_position(release) -> tuple[int | None, int | None]:
+    """(track number, disc number) of the searched recording on a release of
+    the search results, whose medium-list holds just that track. The disc is
+    None on a one-disc release (songs.disc_number: NULL = 1)."""
+    media = release.get("medium-list") or []
+    several_discs = (_as_int(release.get("medium-count")) or len(media)) > 1
+    for medium in media:
+        for track in medium.get("track-list", []):
+            return _as_int(track.get("number")), (_as_int(medium.get("position")) if several_discs else None)
     return None, None
+
+
+def _tracks_loader(release):
+    """A function fetching the release's whole tracklist (one more request),
+    for the manager's album cache - None for a release that isn't an album or
+    an EP, since a single's other tracks don't belong to the album we want."""
+    release_id = release.get("id")
+    if not release_id or release.get("release-group", {}).get("primary-type", "") not in ("Album", "EP"):
+        return None
+
+    def load() -> list[AlbumTrack]:
+        try:
+            with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
+                response = musicbrainzngs.get_release_by_id(release_id, includes=["recordings", "artist-credits"])
+        except musicbrainzngs.WebServiceError as e:
+            flog(f"[{MODULE_NAME}] couldn't load the tracklist of release {release_id}: {e}")
+            return []
+        full = response.get("release", {})
+        media = full.get("medium-list", [])
+        tracks = []
+        for medium in media:
+            disc = _as_int(medium.get("position")) if len(media) > 1 else None
+            for track in medium.get("track-list", []):
+                recording = track.get("recording", {})
+                title = track.get("title") or recording.get("title")
+                if not title:
+                    continue
+                tracks.append(AlbumTrack(
+                    title=title,
+                    track_number=_as_int(track.get("number")) or _as_int(track.get("position")),
+                    disc_number=disc,
+                    artist=recording.get("artist-credit-phrase") or full.get("artist-credit-phrase"),
+                ))
+        return tracks
+
+    return load
+
+
+def _album_result(title: str, recording, release, artist: str) -> DiscoveryResult:
+    matched_title, matched_artist = _recording_title_artist(recording, artist)
+    track_number, disc_number = _track_position(release)
+    return DiscoveryResult(album=title, matched_title=matched_title, matched_artist=matched_artist,
+                           track_number=track_number, disc_number=disc_number,
+                           load_tracks=_tracks_loader(release))
 
 
 def _release_title(release) -> str:
@@ -144,28 +213,26 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
             response = musicbrainzngs.search_recordings(query=query, limit=5)
         recordings = response.get("recording-list", [])
 
-        result, result_recording = _pick_release(recordings, artist)
+        result, result_recording, result_release = _pick_release_with_entry(recordings, artist)
         slog(result)
 
         if result and not is_blacklisted_album(result, artist):
             if not spell_check:
                 return get_album_name(artist, song, delay=delay, spell_check=True)
             time.sleep(delay)
-            matched_title, matched_artist = _recording_title_artist(result_recording, artist)
-            return DiscoveryResult(album=result, matched_title=matched_title, matched_artist=matched_artist)
+            return _album_result(result, result_recording, result_release, artist)
 
 
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
             response = musicbrainzngs.search_recordings(query=query, limit=25)
         recordings = response.get("recording-list", [])
 
-        final, final_recording = _pick_release(recordings, artist)
+        final, final_recording, final_release = _pick_release_with_entry(recordings, artist)
 
         time.sleep(delay)
         if not final:
             return None
-        matched_title, matched_artist = _recording_title_artist(final_recording, artist)
-        return DiscoveryResult(album=final, matched_title=matched_title, matched_artist=matched_artist)
+        return _album_result(final, final_recording, final_release, artist)
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for '{song}' by '{artist}': {e}")

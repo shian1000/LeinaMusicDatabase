@@ -229,3 +229,82 @@ def test_lucene_quote_is_shared_with_the_genre_lookup():
 
     assert lucene_quote('a "b" \\c') == '"a \\"b\\" \\\\c"'
     assert genre_lookup.lucene_quote is lucene_quote
+
+
+def _placed_release(title, primary_type, number, disc=1, medium_count=1, release_id="rel-1"):
+    """A search-result release as MusicBrainz sends it: the medium-list holds
+    only the searched track, with its number on that medium."""
+    release = _release(title, primary_type, "2021-07-15")
+    release.update({"id": release_id, "medium-count": medium_count,
+                    "medium-list": [{"position": str(disc), "track-list": [{"number": number}]}]})
+    return release
+
+
+def _mock_search(monkeypatch, recordings):
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings",
+                        lambda query, limit: {"recording-list": recordings})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: {"found": False})
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+
+
+def test_get_album_name_reports_the_track_number_of_the_picked_release(monkeypatch):
+    # Shaped like the real result for "Serial Experiments - Dust of Harmonies": track 7 of 26
+    _mock_search(monkeypatch, [_recording("Dust Of Harmonies (REMASTERED)", [
+        _placed_release("Lain: The Wired World (Remastered)", "Album", "7")])])
+
+    result = get_album_name("The Rare Occasions", "Dust of Harmonies")
+
+    assert result.album == "Lain: The Wired World (Remastered)"
+    assert (result.track_number, result.disc_number) == (7, None)  # one disc: NULL = 1
+
+
+def test_disc_number_only_on_a_release_of_several_discs_and_a_vinyl_side_is_no_number(monkeypatch):
+    _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Futureproof", "Album", "3", disc=2,
+                                                                     medium_count=2)])])
+    result = get_album_name("The Rare Occasions", "Notion")
+    assert (result.track_number, result.disc_number) == (3, 2)
+
+    _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Futureproof", "Album", "A1")])])
+    assert get_album_name("The Rare Occasions", "Notion").track_number is None
+
+
+def test_tracklist_loads_only_when_asked_and_only_for_an_album_or_ep(monkeypatch):
+    lookups = []
+
+    def get_release_by_id(release_id, includes):
+        lookups.append((release_id, includes))
+        return {"release": {"artist-credit-phrase": "The Rare Occasions", "medium-list": [
+            {"position": "1", "track-list": [
+                {"number": "1", "position": "1", "recording": {"title": "Notion"}},
+                {"number": "A2", "position": "2", "title": "Alright (Edit)",
+                 "recording": {"title": "Alright", "artist-credit-phrase": "The Rare Occasions & Guest"}},
+            ]},
+            {"position": "2", "track-list": [{"number": "1", "position": "1", "recording": {"title": "Kinda"}}]},
+        ]}}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "get_release_by_id", get_release_by_id)
+    _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Futureproof", "EP", "1",
+                                                                     release_id="ep-id")])])
+
+    result = get_album_name("The Rare Occasions", "Notion")
+    assert lookups == []  # the search alone costs no tracklist request
+
+    tracks = result.load_tracks()
+    assert lookups == [("ep-id", ["recordings", "artist-credits"])]
+    assert [(t.title, t.track_number, t.disc_number, t.artist) for t in tracks] == [
+        ("Notion", 1, 1, "The Rare Occasions"),
+        ("Alright (Edit)", 2, 1, "The Rare Occasions & Guest"),  # the track's own title, "A2" -> position
+        ("Kinda", 1, 2, "The Rare Occasions"),
+    ]
+
+    # A single's other tracks aren't the album we want
+    _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Notion", "Single", "1")])])
+    assert get_album_name("The Rare Occasions", "Notion").load_tracks is None
+
+
+def test_a_failed_tracklist_request_gives_no_tracks(monkeypatch):
+    def fail(release_id, includes):
+        raise music_brainz_fetcher.musicbrainzngs.NetworkError("down")
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "get_release_by_id", fail)
+    _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Futureproof", "Album", "1")])])
+
+    assert get_album_name("The Rare Occasions", "Notion").load_tracks() == []

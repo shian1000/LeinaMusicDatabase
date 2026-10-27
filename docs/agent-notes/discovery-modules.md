@@ -158,6 +158,9 @@ class DiscoveryResult:
     album: str
     matched_title: Optional[str] = None
     matched_artist: Optional[str] = None
+    track_number: Optional[int] = None    # the song's place on that album
+    disc_number: Optional[int] = None     # None also = a one-disc release
+    load_tracks: Optional[Callable[[], list[AlbumTrack]]] = None
 ```
 
 A fetcher's `get_album_name()` can return this instead of a bare `str`. `matched_title` /
@@ -181,6 +184,28 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
 
 Plain `str` returns still work (they just skip the similarity cross-check), so an un-upgraded
 module degrades gracefully rather than breaking.
+
+### Track positions and the per-run tracklist cache
+
+`discover_album()` returns an `AlbumMatch` (album + track/disc number); `discover_album_name()` is
+its text-only wrapper. Fill missing data → Albums writes the position into `songs.track_number` /
+`disc_number` only when the song has none, so a hand-set number is never overwritten. Only
+MusicBrainz reports a position so far. It comes free from the search hit (the release's
+`medium-list` holds just that track).
+
+`load_tracks` is lazy on purpose: a tracklist is one more request (`get_release_by_id`, ~1 s with
+the rate limit). `AlbumTrackCache` calls it only while another song of the same artist id still
+waits in the run. Before that, the user's log showed every song of one album being searched module
+by module, synonyms included. The following songs of that artist are then answered from the
+tracklist without calling any module. MusicBrainz offers a loader only for an Album/EP (a single's
+other tracks are B-sides, not the album). Rules that keep the cache from giving a wrong album:
+- **Equal `_track_key()` only, never similarity.** The key is the duplicate-song key plus remaster
+  annotations dropped, so "Song (Remix)" stays apart from "Song". Two titles can be close and still
+  name different songs on one album: "The Wired World" vs "Lain: The Wired World".
+- **The track's own credit must resemble the artist or a synonym.** A soundtrack's tracks by
+  others are left out.
+- **It lives for one run only and stores nothing.** Spotify / iTunes could fill `load_tracks` the
+  same way from their album pages; they don't yet. Tests: `tests/test_album_track_cache.py`.
 
 ## Release-year lookups ("Fill missing data -> Years") and `get_release_year()`
 

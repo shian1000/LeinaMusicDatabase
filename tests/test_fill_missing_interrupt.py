@@ -40,13 +40,13 @@ def test_albums_found_before_ctrl_c_are_saved(monkeypatch):
     monkeypatch.setattr(module, "load_discovery_modules", lambda: [])
     answers = iter(["Album One"])
 
-    def discover(song, modules):
+    def discover(song, modules, cache=None):
         try:
-            return next(answers)
+            return SimpleNamespace(album=next(answers), track_number=None, disc_number=None)
         except StopIteration:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(module, "discover_album_name", discover)
+    monkeypatch.setattr(module, "discover_album", discover)
 
     module.fill_missing_albums()
 

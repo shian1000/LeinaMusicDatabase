@@ -751,7 +751,8 @@ non-trivial work in that area.
   key keeps non-junk brackets (remixes and covers are songs of their own).
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
-  contract, why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
+  contract (with the track position and the lazy tracklist behind Albums' per-run
+  `AlbumTrackCache`, which writes `songs.track_number`), why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't

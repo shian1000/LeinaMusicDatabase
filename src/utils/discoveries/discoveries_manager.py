@@ -8,7 +8,7 @@ from utils.common.text_utils import (
     title_resembles,
     resembles_across_scripts,
 )
-from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
+from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
 from utils.discoveries.discovery_settings import (
     reconcile_discovery_config,
     reconcile_year_discovery_config,
@@ -34,6 +34,10 @@ from utils.database.artist_splitting import propose_artist_split
 from utils.common.script_utils import cyrillic_search_variant, has_non_latin
 from utils.common.romanize import suggest_latin
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Callable
+import re
 
 def split_synonyms(synonyms: str | None) -> list[str]:
     """The artists.synonyms column is a plain comma-separated list."""
@@ -257,6 +261,17 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
     return album
 
 
+@dataclass
+class AlbumMatch:
+    """An album found for a song, with the song's place on it when the
+    module knew it (None = unknown; disc None also means a one-disc album).
+    load_tracks: the module's tracklist loader, see DiscoveryResult."""
+    album: str
+    track_number: int | None = None
+    disc_number: int | None = None
+    load_tracks: Callable[[], list[AlbumTrack]] | None = None
+
+
 def _call_module(module, module_id: str, module_name: str, artist: str, title: str,
                  credited_artists: list[str] | None = None) -> str | None:
     """Run a module's get_album_name, isolated from crashes and bad output.
@@ -265,6 +280,14 @@ def _call_module(module, module_id: str, module_name: str, artist: str, title: s
     of the same module with untruncated text or an artist synonym -- each
     such retry is a real call to get_album_name().
     """
+    match = _call_module_match(module, module_id, module_name, artist, title, credited_artists)
+    return match.album if match else None
+
+
+def _call_module_match(module, module_id: str, module_name: str, artist: str, title: str,
+                       credited_artists: list[str] | None = None) -> AlbumMatch | None:
+    """_call_module() keeping what else the module reported (track position,
+    tracklist loader)."""
     record_invocation(module_id)
     try:
         result = module.get_album_name(artist, title)
@@ -275,9 +298,85 @@ def _call_module(module, module_id: str, module_name: str, artist: str, title: s
     if result is None:
         flog(f"[{module_name}] found no album for '{artist} - {title}'")
     album = _validate_result(result, artist, title, module_name, credited_artists)
-    if album:
-        record_success(module_id)
-    return album
+    if not album:
+        return None
+    record_success(module_id)
+    if not isinstance(result, DiscoveryResult):
+        return AlbumMatch(album)
+    return AlbumMatch(album, _positive_int(result.track_number), _positive_int(result.disc_number),
+                      result.load_tracks if callable(result.load_tracks) else None)
+
+
+def _positive_int(value) -> int | None:
+    """A module's track/disc number, if it's a believable one."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+# A remaster annotation doesn't make another song of a track: "Dust Of
+# Harmonies (REMASTERED)" on the album is the stored "Dust of Harmonies"
+_REMASTER_RE = re.compile(
+    r"\s*(?:[(\[][^)\]]*\bremaster(?:ed)?\b[^)\]]*[)\]]"
+    r"|-\s*(?:\d{4}\s+)?(?:digital(?:ly)?\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?\s*$)",
+    re.IGNORECASE,
+)
+
+
+def _track_key(title: str) -> str:
+    """Key matching a stored title with an album's track: the duplicate-song
+    key (feat. credits and junk brackets dropped, a remix or live bracket
+    kept) without remaster annotations. Equal keys only - a similar title
+    may be another song of the album."""
+    from utils.database.song_duplicates import duplicate_key
+    return duplicate_key(_REMASTER_RE.sub("", title or ""))
+
+
+class AlbumTrackCache:
+    """Albums found during one run of Fill missing data -> Albums, by their
+    tracks: once a song's album is found, the other songs of that artist
+    still waiting in the run are looked up in its tracklist first, instead
+    of asking every module again for each one.
+
+    A tracklist is loaded (a module's load_tracks(), one more request) only
+    while another song of the same artist still waits. Only the artist's own
+    tracks are taken - a soundtrack's tracks by other artists are left out -
+    and only on an exactly equal title key (_track_key()). Lives only as long
+    as the run; nothing is saved."""
+
+    def __init__(self, songs):
+        self._waiting: dict = defaultdict(set)
+        for song in songs:
+            self._waiting[song.artist_id].add(song.id)
+        self._tracks: dict = defaultdict(dict)
+
+    def lookup(self, song) -> AlbumMatch | None:
+        """The song's album from a tracklist already loaded. Also marks the
+        song as no longer waiting."""
+        self._waiting[song.artist_id].discard(song.id)
+        return self._tracks.get(song.artist_id, {}).get(_track_key(song.title))
+
+    def remember(self, song, match: AlbumMatch) -> None:
+        if not match.load_tracks or not self._waiting.get(song.artist_id):
+            return
+        try:
+            tracks = match.load_tracks() or []
+        except Exception as e:
+            flog(f"Loading the tracklist of '{match.album}' crashed: {e}")
+            return
+        names = [song.artist.name, *split_synonyms(artist_match_synonyms(song.artist))]
+        known = self._tracks[song.artist_id]
+        added = 0
+        for track in tracks:
+            if not isinstance(track, AlbumTrack) or not track.title:
+                continue
+            if track.artist and not any(_matched_artist_resembles(name, track.artist) for name in names):
+                continue
+            key = _track_key(track.title)
+            if key and key not in known:
+                known[key] = AlbumMatch(match.album, _positive_int(track.track_number),
+                                        _positive_int(track.disc_number))
+                added += 1
+        if added:
+            print(f"Remembered {added} tracks of {match.album} for the other songs of {song.artist.name}")
 
 
 def _multi_artist_query(song) -> tuple[list[str] | None, str | None]:
@@ -307,6 +406,20 @@ def _latin_search_title(song, title: str) -> str | None:
 
 
 def discover_album_name(song, modules):
+    """The album discover_album() finds, as text."""
+    match = discover_album(song, modules)
+    return match.album if match else None
+
+
+def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> AlbumMatch | None:
+    """The song's album and its place there: from the run's tracklists
+    (`cache`) when one already has it, else from the modules in order, then
+    the last-resort fallbacks (those never know a place)."""
+    if cache:
+        cached = cache.lookup(song)
+        if cached:
+            print(f"On the tracklist of {cached.album}, loaded for an earlier song")
+            return cached
     art_full, son_full, alb = song.artist.name, song.title, song.album
     credited, multi_label = _multi_artist_query(song)
     slog(f"{art_full} - {son_full} ({alb})")
@@ -340,58 +453,60 @@ def discover_album_name(song, modules):
     slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
-        album = _call_module(module, module_id, module_name, art_cln, son_cln, credited)
+        match = _call_module_match(module, module_id, module_name, art_cln, son_cln, credited)
 
         # truncate_at_word() strips trailing "feat. X" / "& X" credits, but it
         # can also cut into a legitimate title/artist (e.g. "Bang, Bang").
         # If the truncated search came up empty, retry with the untruncated
         # strings before giving up on this module.
-        if not album and truncated:
+        if not match and truncated:
             print(f"Looking in {module_name} using untruncated title/artist")
-            album = _call_module(module, module_id, module_name, art_cln_full, son_cln_full, credited)
+            match = _call_module_match(module, module_id, module_name, art_cln_full, son_cln_full, credited)
 
         # Both attempts above still strip parentheses from title/artist. If
         # that stripping actually removed something, retry once more with
         # the fully raw strings before giving up on this module.
-        if not album and raw_differs:
+        if not match and raw_differs:
             print(f"Looking in {module_name} using full title/artist including parentheses")
-            album = _call_module(module, module_id, module_name, art_full, son_full, credited)
+            match = _call_module_match(module, module_id, module_name, art_full, son_full, credited)
 
         #Repeat the searching with each of the artist's synonyms
-        for synonym in ([] if album else synonyms):
+        for synonym in ([] if match else synonyms):
             print(f"Looking for it in {module_name} using synonym {synonym}")
-            album = _call_module(module, module_id, module_name, synonym, son_cln, credited)
+            match = _call_module_match(module, module_id, module_name, synonym, son_cln, credited)
             # The truncated title alone, as in the first attempt, may be a stub
             # ("Bang, Bang" -> "Bang"); retry it whole with the synonym too
-            if not album and son_cln != son_cln_full:
-                album = _call_module(module, module_id, module_name, synonym, son_cln_full, credited)
-            if album:
+            if not match and son_cln != son_cln_full:
+                match = _call_module_match(module, module_id, module_name, synonym, son_cln_full, credited)
+            if match:
                 break
 
-        if not album and multi_label:
+        if not match and multi_label:
             print(f"Looking in {module_name} using all main artists")
-            album = _call_module(module, module_id, module_name, multi_label, son_cln, credited)
+            match = _call_module_match(module, module_id, module_name, multi_label, son_cln, credited)
 
-        if not album and alt_script_title:
+        if not match and alt_script_title:
             print(f"Looking in {module_name} using the title in its own script")
             for alt_artist in [art_cln, *synonyms]:
-                album = _call_module(module, module_id, module_name, alt_artist, alt_script_title, credited)
-                if album:
+                match = _call_module_match(module, module_id, module_name, alt_artist, alt_script_title, credited)
+                if match:
                     break
 
-        if not album and latin_title:
+        if not match and latin_title:
             print(f"Looking in {module_name} using the title in Latin letters")
             for alt_artist in [art_cln, *synonyms]:
-                album = _call_module(module, module_id, module_name, alt_artist, latin_title, credited)
-                if album:
+                match = _call_module_match(module, module_id, module_name, alt_artist, latin_title, credited)
+                if match:
                     break
 
-        if album:
-            return album
+        if match:
+            if cache:
+                cache.remember(song, match)
+            return match
 
     album = album_from_stored_youtube_link(song, credited)
     if album:
-        return album
+        return AlbumMatch(album)
 
     # Game/anime soundtracks are often stored with the album in the artist
     # field ("Tekken 5 OST") and no fetcher knows the individual track. Only a
@@ -399,14 +514,14 @@ def discover_album_name(song, modules):
     # recorded as any fetcher's success in the Statistics menu.
     if is_soundtrack_artist(art_full):
         print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {art_full}")
-        return art_full
+        return AlbumMatch(art_full)
 
     # A cover/unplugged version no fetcher knows is almost always a standalone
     # upload, not part of an album. Checked after the soundtrack fallback,
     # which names a more specific album. Same last-resort / no-stats rules as above.
     if has_singles_marker(art_full, son_full):
         print(f"No fetcher found an album; song looks like a cover/unplugged version, filing it under {SINGLES_ALBUM}")
-        return SINGLES_ALBUM
+        return AlbumMatch(SINGLES_ALBUM)
 
     slog("Gave up =)")
     return None

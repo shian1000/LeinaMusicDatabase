@@ -28,8 +28,8 @@ name_latin    (migration 0011)  year
                                  genre          (migration 0013) "indie pop, synth-pop"
                                  kind           (migration 0014) NULL = song, 'full_album'
                                  album_id       FK -> Album.id (NULL = see below)
-                                 track_number   NULL = unknown
-                                 disc_number    NULL = 1 / unknown
+                                 track_number   NULL = unknown (filled by Fill missing data
+                                 disc_number    NULL = 1 / unknown   -> Albums, MusicBrainz only)
 
 Album  (table albums, migration 0005)    AlbumCover  (table album_covers, migration 0008)
 -----                                    ----------
