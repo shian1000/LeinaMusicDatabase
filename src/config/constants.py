@@ -514,6 +514,15 @@ FILE_TITLE_CANDIDATES_MAX = 5
 # likely a title with a subtitle ("Star Wars: Episode IV ...").
 SONG_REQUEST_COLON_ARTIST_MAX_WORDS = 4
 
+# A song request whose video title has no separator at all ("Бумбокс і Тіна
+# Кароль Безодня" on a fan channel) is read as artists + title only when it
+# starts with artists the database knows by exactly that name (or the
+# channel's name holds them, for all but one of them): each artist at most
+# this many words, and one lone artist at least this many characters
+# (name_key()), since a short name ("Yes", "Air") starts many titles.
+SONG_REQUEST_TITLE_ARTIST_MAX_WORDS = 5
+SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS = 4
+
 # A file nothing else found a song for is offered up to this many of the
 # closest songs by score (LocalSongMatcher.match_score(): title, and the
 # artist when the file has one), if they score at least the "Closest songs:

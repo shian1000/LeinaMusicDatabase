@@ -360,7 +360,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   label's channel: "Fueled By Ramen" / "Travie McCoy: Billionaire ft. Bruno Mars") is the
   artist when the channel is one music.db doesn't know (that artist then may be new too) or is
   that same artist (name / synonym / Latin form); another known artist's channel is left as
-  asked. The review offers it first, and the "already
+  asked. A title with no separator at all ("фан Тіна кароль" / "Бумбокс і Тіна Кароль Безодня",
+  a fan channel) is split only when it starts with artists music.db knows by exactly that name
+  (name / synonym / Latin form, never a fuzzy guess), joined by "і" / "&" / "x" / "," / ...
+  and suggested joined by " & " for the import's split review ("Бумбокс & Тіна Кароль" /
+  "Безодня"); an artist music.db doesn't know counts only when the channel's name holds it, since
+  where an unknown name ends is otherwise a guess. One lone artist needs
+  `SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS` ("Air" starts too many titles), and a title left as
+  only a bracket is no split (Leina Radio's swapped "I Follow Rivers" / "Lykke Li (La Vie
+  d'Adèle)"). Checked against every real request in the inbox (2026-10-27): only correct new
+  suggestions. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
+  The review offers it first, and the "already
   in the database" / "rejected before" checks use it too.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its

@@ -31,6 +31,12 @@ the request's artist is a known one, only if the title names that same
 artist (a synonym, as with familyboombox). A title naming no artist with a
 channel that is one of a known artist's other names ("familyboombox" /
 "Ангела (feat. Крихітка)") suggests that artist as the database spells it.
+A title with no separator at all that starts with artists the database
+knows by exactly that name, joined by "і" / "&" / "x" / ... ("фан Тіна
+кароль" / "Бумбокс і Тіна Кароль Безодня" -> "Бумбокс & Тіна Кароль" /
+"Безодня") suggests that split too; an artist the database doesn't know
+counts only when the channel's name holds it (here "Тіна Кароль"), and at
+least one must be known - where an unknown name ends is a guess otherwise.
 The review offers it first, and the "already in the database" check uses it
 too.
 """
@@ -38,7 +44,12 @@ too.
 import re
 from dataclasses import dataclass
 
-from config.constants import SONG_REQUEST_COLON_ARTIST_MAX_WORDS
+from config.constants import (
+    ARTIST_JOINING_WORDS,
+    SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
+    SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
+    SONG_REQUEST_TITLE_ARTIST_MAX_WORDS,
+)
 from utils.common.debug import mlog
 from utils.common.normalizer import name_key, normalize
 from utils.database.datatables import RejectedSongRequest, Song
@@ -66,6 +77,10 @@ REJECT = "rejected"
 _TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
 # ... or, when there's no dash, a colon right after the artist
 _TITLE_ARTIST_COLON = re.compile(r":\s+")
+# ... or, with neither, the words of a title starting with artists ("," apart)
+_TITLE_WORD = re.compile(r"[^\s,]+|,")
+_BRACKETED = re.compile(r"\([^)]*\)?|\[[^\]]*\]?")
+_TITLE_ARTIST_JOINERS = {*ARTIST_JOINING_WORDS, "&", "x", ",", "+", "/", "vs", "vs."}
 
 SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a file on the phone"}
 
@@ -161,11 +176,15 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     Mars"). The title's artist is given as the database spells it when it
     knows it. A title with no artist in it keeps the title, with the artist
     as the database spells it when `artist` is one of its other names
-    ("familyboombox" / "Ангела" -> ("Бумбокс", "Ангела")). None otherwise - a
+    ("familyboombox" / "Ангела" -> ("Бумбокс", "Ангела")), unless it starts
+    with known artists (_artists_at_start()). None otherwise - a
     known artist's channel uploading another artist's song is left as
     asked."""
     parts = _split_title(title or "")
     if parts is None:
+        at_start = _artists_at_start(artist, title or "", matcher)
+        if at_start is not None:
+            return at_start
         known = _known_by_other_name(artist, matcher)
         return (known.name, title) if known is not None and title else None
     in_title = matcher.artist(parts[0])
@@ -183,6 +202,72 @@ def _known_by_other_name(artist: str | None, matcher):
         return None
     other_names = (artist_match_synonyms(known) or "").split(",")
     return known if name_key(artist) in {name_key(n) for n in other_names} else None
+
+
+def _artists_at_start(artist: str | None, title: str, matcher) -> tuple | None:
+    """("A & B", title) when a title with no separator starts with artists
+    joined by _TITLE_ARTIST_JOINERS, at least one known to the database by
+    exactly that name (the rest may be in the channel's name `artist`):
+    "фан Тіна кароль" / "Бумбокс і Тіна Кароль Безодня" -> ("Бумбокс & Тіна
+    Кароль", "Безодня"). None when a joiner is followed by no artist it can
+    tell ("Бумбокс і Тіна Кароль Безодня" with Тіна Кароль unknown to both),
+    for one short lone artist, for nothing but a bracket left as the title,
+    or when `artist` is another known artist."""
+    words = list(_TITLE_WORD.finditer(title))
+    names, known, i = [], [], 0
+    while True:
+        found = _artist_words(words, i, title, artist, matcher)
+        if found is None:
+            return None
+        i, name, db_artist = found
+        names.append(name)
+        if db_artist is not None:
+            known.append(db_artist)
+        if words[i].group().lower() not in _TITLE_ARTIST_JOINERS:
+            break
+        i += 1
+        if i >= len(words):
+            return None
+    if not known or (len(names) == 1 and len(name_key(names[0])) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS):
+        return None
+    asked = matcher.artist(artist) if artist else None
+    if asked is not None and asked.id not in {a.id for a in known}:
+        return None
+    rest = title[words[i].start():].strip()
+    # "Lykke Li (La Vie d'Adèle)" with the song's title as the artist: no title left
+    if not _BRACKETED.sub("", rest).strip():
+        return None
+    return " & ".join(names), rest
+
+
+def _artist_words(words: list, i: int, title: str, channel: str | None, matcher) -> tuple | None:
+    """(index after, name, database artist or None) of the longest run of
+    words from `i` that a database artist is named exactly, else that the
+    channel's name holds - always leaving a word for the title."""
+    spans = [title[words[i].start():words[j - 1].end()]
+             for j in range(min(len(words) - 1, i + SONG_REQUEST_TITLE_ARTIST_MAX_WORDS), i, -1)
+             if words[i].group().lower() not in _TITLE_ARTIST_JOINERS
+             and words[j - 1].group().lower() not in _TITLE_ARTIST_JOINERS]
+    for span in spans:
+        db_artist = _known_exactly(span, matcher)
+        if db_artist is not None:
+            return i + len(_TITLE_WORD.findall(span)), db_artist.name, db_artist
+    channel_words = f" {normalize(channel or '')} "
+    for span in spans:
+        if (len(name_key(span)) >= SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS
+                and f" {normalize(span)} " in channel_words):
+            return i + len(_TITLE_WORD.findall(span)), span, None
+    return None
+
+
+def _known_exactly(name: str, matcher):
+    """The database artist named `name` (or with it as a synonym / Latin
+    form), not a fuzzy guess nor a part of a joined name - else None."""
+    known = matcher.artist(name)
+    if known is None:
+        return None
+    names = [known.name, getattr(known, "name_latin", None), *(artist_match_synonyms(known) or "").split(",")]
+    return known if name_key(name) in {name_key(n) for n in names if n} else None
 
 
 def _split_title(title: str) -> tuple[str, str] | None:

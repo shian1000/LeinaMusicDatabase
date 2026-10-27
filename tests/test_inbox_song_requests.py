@@ -195,6 +195,35 @@ def test_an_unknown_channel_suggests_the_artist_from_the_title_even_a_new_one(en
     assert case.suggested == expected
 
 
+@pytest.mark.parametrize("channel, title, expected", [
+    # A fan channel naming the second artist, the database knowing the first
+    ("фан Тіна кароль", "Бумбокс і Тіна Кароль Безодня", ("Бумбокс & Тіна Кароль", "Безодня")),
+    ("Some Uploads", "Бумбокс і Okean Elzy Безодня", ("Бумбокс & Okean Elzy", "Безодня")),  # both known
+    ("Some Uploads", "BoomBox x Okean Elzy Безодня", ("Бумбокс & Okean Elzy", "Безодня")),  # a synonym
+    ("Some Uploads", "Бумбокс, Okean Elzy Безодня", ("Бумбокс & Okean Elzy", "Безодня")),
+    ("Some Uploads", "Бумбокс Безодня", ("Бумбокс", "Безодня")),
+    (None, "Бумбокс Безодня", ("Бумбокс", "Безодня")),
+    ("familyboombox", "Бумбокс Безодня", ("Бумбокс", "Безодня")),  # the artist's own channel
+    ("Some Uploads", "Бумбокс і Тіна Кароль Безодня", None),  # where "Тіна Кароль" ends is a guess
+    ("фан Тіна кароль", "Тіна Кароль Безодня", None),          # only the channel knows it
+    ("Okean Elzy", "Бумбокс Безодня", None),                   # another known artist's channel
+    ("Some Uploads", "Бумбокс", None),                         # nothing left for the title
+    ("Some Uploads", "Бумбокс і", None),
+    ("Some Uploads", "Air Безодня", None),                     # a short lone name starts many titles
+    ("Some Uploads", "Бумбоксы Безодня", None),                # not exactly the name
+    ("Some Uploads", "Безодня Бумбокс", None),
+    ("I Follow Rivers", "Бумбокс (La Vie d'Adèle)", None),     # only a bracket left for the title
+    ("Some Uploads", "Бумбокс Безодня (Official Video)", ("Бумбокс", "Безодня (Official Video)")),
+])
+def test_a_title_without_a_separator_starting_with_known_artists_suggests_them(env, channel, title, expected):
+    env["matcher"].artists.append(Artist(id=40, name="Air"))
+    _request(env["inbox"], "2026-10-19_18-21-45_037.db", [{"title": title, "artist": channel}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested == expected
+
+
 def test_a_feat_credit_leaves_the_title_for_the_imports_feat_artists(env):
     _request(env["inbox"], "2026-10-21_19-26-51_001.db",
              [{"title": "Travie McCoy: Billionaire ft. Bruno Mars", "artist": "Fueled By Ramen"}])
