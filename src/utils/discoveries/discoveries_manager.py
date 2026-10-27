@@ -27,7 +27,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from utils.common.debug import flog, slog
-from utils.common.normalizer import name_key, normalize
+from utils.common.normalizer import composed, name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.artist_splitting import propose_artist_split
@@ -288,6 +288,7 @@ def _call_module_match(module, module_id: str, module_name: str, artist: str, ti
                        credited_artists: list[str] | None = None) -> AlbumMatch | None:
     """_call_module() keeping what else the module reported (track position,
     tracklist loader)."""
+    artist, title = composed(artist), composed(title)
     record_invocation(module_id)
     try:
         result = module.get_album_name(artist, title)
@@ -597,6 +598,7 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
     Song rows being looked up (the single, or the album's songs), e.g. to
     reuse a stored youtube_video_id. Everything else keeps the plain
     (artist, query, is_single) contract."""
+    artist, query = composed(artist), composed(query)
     record_year_invocation(module_id)
     try:
         if songs and "songs" in inspect.signature(module.get_release_year).parameters:

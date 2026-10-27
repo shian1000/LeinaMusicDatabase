@@ -1,10 +1,21 @@
 import os
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker, validates
+from utils.common.normalizer import composed
 from utils.common.debug import slog
 import re
 
 Base = declarative_base()
+
+# Text columns stored only in Unicode NFC (normalizer.composed()): YouTube
+# titles and macOS file names bring decomposed letters, which look the same
+# but defeat external searches. The validators below compose every ORM write;
+# Clean names composes rows stored before (decomposed_names()).
+COMPOSED_FIELDS = {
+    "artists": ("name", "origin", "synonyms", "name_latin"),
+    "songs": ("title", "title_latin", "album", "genre"),
+    "albums": ("title", "title_latin"),
+}
 
 
 
@@ -25,6 +36,10 @@ class Artist(Base):
     additional_song_links = relationship(
         "AdditionalSongArtist", back_populates="artist", cascade="all, delete-orphan"
     )
+
+    @validates(*COMPOSED_FIELDS["artists"])
+    def _compose(self, _key, value):
+        return composed(value)
 
 
 # --------------------
@@ -62,6 +77,10 @@ class Song(Base):
     additional_artist_links = relationship(
         "AdditionalSongArtist", back_populates="song", cascade="all, delete-orphan"
     )
+
+    @validates(*COMPOSED_FIELDS["songs"])
+    def _compose(self, _key, value):
+        return composed(value)
 
 
 # --------------------
@@ -108,6 +127,10 @@ class Album(Base):
     artist = relationship("Artist", back_populates="albums")
     songs = relationship("Song", back_populates="album_entry")
     covers = relationship("AlbumCover", back_populates="album", cascade="all, delete-orphan")
+
+    @validates(*COMPOSED_FIELDS["albums"])
+    def _compose(self, _key, value):
+        return composed(value)
 
 
 class AlbumCover(Base):

@@ -238,8 +238,8 @@ All in Enter database -> Manage database:
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
     after their song.
   - Spell check existing data: artist and title spelling against MusicBrainz.
-  - Clean names: invisible characters, double spaces, broken encoding, look-alike letters, junk
-    like 'Official Video' in titles.
+  - Clean names: invisible characters, double spaces, broken encoding, accented letters stored in
+    two parts, look-alike letters, junk like 'Official Video' in titles.
 MusicDatabase backs the databases up once a day when it starts (unless switched off in Settings ->
 "Start-up tasks") and always before a database upgrade; Settings -> Server -> "Back up database
 now" takes a snapshot before something big.

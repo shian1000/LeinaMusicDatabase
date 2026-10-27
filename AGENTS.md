@@ -380,7 +380,10 @@ non-trivial work in that area.
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
-  write a second one. `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 ("Ma³pa"),
+  write a second one. `composed()` is the NFC form every stored name is kept in: the models'
+  `@validates` (`datatables.COMPOSED_FIELDS`) compose each ORM write, Clean names the older rows
+  (decomposed letters from YouTube titles / macOS file names defeat MusicBrainz's search;
+  `docs/data-model.md`). `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 ("Ma³pa"),
   only when a never-genuine character shows it. `strip_site_names()` drops download-site junk from mp3 file names and tags
   before they're read (domains in `SITE_NAME_TLDS`, the words in `src/config/file_name_junk.txt` —
   the owner's list, add entries there — and Y2Mate's id/bitrate/timestamp suffix). `normalize()` is `lru_cache`d (pure function of its arguments): the artist

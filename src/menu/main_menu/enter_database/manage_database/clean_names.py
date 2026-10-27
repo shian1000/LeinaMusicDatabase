@@ -4,12 +4,12 @@ import time
 import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.database.artist_reassignment import credit_unknown_artist_song
-from utils.database.database_management import edit_db_entry
+from utils.database.database_management import decomposed_names, edit_db_entry
 from utils.database.database_sessions import get_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
 from config.constants import TITLE_JUNK_SUFFIXES
-from utils.database.datatables import Artist, artist_categories
+from utils.database.datatables import Album, Artist, Song, artist_categories
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
 from utils.common.script_utils import fix_mixed_script_words
@@ -156,6 +156,31 @@ def remove_invisible_characters(songs, held=None):
         action_description="Removed invisible characters in",
         held=held,
     )
+
+def compose_decomposed_letters(held=None):
+    """Names stored with decomposed letters ("a" + a combining accent instead
+    of "á", from YouTube titles and macOS file names) composed, in every
+    column the models compose on write - albums' and artists' too, not just
+    the songs' title/artist/album. Looks the same, so nothing is asked. An
+    artist name onto another artist's goes to `held` (_hold_artist_rename())."""
+    session, _ = get_global_database_sessions()
+    changes = []
+    for row, field, _old, new in decomposed_names(session):
+        if isinstance(row, Artist) and field == "name" and _hold_artist_rename(held, row, new):
+            changes.append(f"artist '{new}' (held: another artist has that name)")
+            continue
+        setattr(row, field, new)
+        if isinstance(row, Song):
+            changes.append(f"{field} of {row.artist.name} - {row.title}")
+        elif isinstance(row, Album):
+            changes.append(f"album {field}: {row.title}")
+        else:
+            changes.append(f"artist {field}: {row.name}" if field == "name" else f"{field} of artist {row.name}")
+    if changes:
+        print(f"Composed accented letters in {len(changes)} name(s):")
+        for change in changes:
+            print(f"  \033[93m{change}\033[0m")
+
 
 def fix_lookalike_letters(songs, held=None):
     """Words mixing Latin and Cyrillic look-alike letters ("Вjörk",
@@ -321,6 +346,7 @@ def clean_names():
     unchecked = [song for song in songs if song.id not in checked_ids]
     held = {}
     convert_characters_encoding(songs, held)
+    compose_decomposed_letters(held)
     remove_invisible_characters(songs, held)
     strip_leading_spaces(songs, held)
     replace_double_spaces(songs, held)

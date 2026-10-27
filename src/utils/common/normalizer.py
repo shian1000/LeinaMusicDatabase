@@ -35,6 +35,14 @@ _ZERO_WIDTH_JOINER = "\u200d"
 _MARK_SYMBOLS = {ord(c): None for c in "\u2122\u00ae\u2120\u00a9\u2117"}
 
 
+def composed(s: Optional[str]) -> Optional[str]:
+    """`s` in Unicode NFC: "a" + a combining accent (U+0301) becomes the one
+    letter "á". Looks the same, but MusicBrainz's search found nothing for a
+    decomposed title ("Abrásame" by Бумбокс, from a YouTube video title).
+    music.db stores names only in this form (datatables' validators)."""
+    return unicodedata.normalize("NFC", s) if s else s
+
+
 def strip_format_characters(s: str, keep_joiner: bool = False) -> str:
     """Drop invisible Unicode format characters (category Cf): zero-width
     space, soft hyphen, joiners, direction marks."""

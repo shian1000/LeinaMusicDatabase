@@ -408,3 +408,12 @@ resolved by fuzzy string matching against `name`/`title`, not a stable external 
 MBID stored, for instance). All comparison goes through the single centralized normalizer before
 matching. See [`agent-notes/normalization-and-matching.md`](agent-notes/normalization-and-matching.md)
 for how strings are canonicalized and compared, and why short strings need a stricter threshold.
+
+Stored names are always Unicode NFC (`normalizer.composed()`): `@validates` on the models compose
+every ORM write of the columns in `datatables.COMPOSED_FIELDS` (artists' name / origin / synonyms /
+Latin form, songs' title / Latin form / album / genre, albums' title / Latin form). YouTube video
+titles and macOS file names bring decomposed letters ("a" + U+0301 for "á") that look the same but
+match nothing in MusicBrainz's search ("Abrásame" by Бумбокс had no album). Rows stored before the
+validators are composed by Manage database → Clean names (`database_management.decomposed_names()`,
+an artist name composed onto another artist's is held like any rename). Raw-SQL writes bypass the
+validators. `files.db` paths are never composed: they must match the files on disk.

@@ -1,9 +1,10 @@
 from utils.database.music_db_manager import get_music_session
-from utils.database.datatables import Song, Artist
+from utils.database.datatables import Album, COMPOSED_FIELDS, Song, Artist
 from sqlalchemy import func
 from utils.database.datatables import song_categories, search_only_categories, artist_categories
 import time
 from utils.common.debug import slog
+from utils.common.normalizer import composed
 from sqlalchemy import text
 from sqlalchemy.orm import object_session
 from utils.database.database_getter import get_global_database_sessions
@@ -26,6 +27,21 @@ EDITABLE_SONG_FIELDS = {
     song_categories[3]: "year",  # "year"
     song_categories[4]: "language",  # "language"
 }
+
+
+def decomposed_names(session) -> list[tuple[object, str, str, str]]:
+    """(row, attribute, stored value, composed value) for every name music.db
+    holds in decomposed form (COMPOSED_FIELDS): stored before the models
+    composed every write. Assigning the value again composes it."""
+    found = []
+    for model in (Artist, Song, Album):
+        fields = COMPOSED_FIELDS[model.__tablename__]
+        for row in session.query(model).order_by(model.id):
+            for field in fields:
+                value = getattr(row, field)
+                if value and composed(value) != value:
+                    found.append((row, field, value, composed(value)))
+    return found
 
 
 def edit_db_entry(db_object, category: str, new_value: str) -> bool:
