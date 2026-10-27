@@ -406,3 +406,21 @@ def test_a_rejected_song_is_published_for_leina_radio(env):
     assert (rejected.artist, rejected.title) == ("Vulfpeck", "Dean Town")
     assert env["imported"] == []
     assert _folder(env, pr.PROCESSED) == ["2026-10-14_09-00-00_001.db"]
+
+
+def test_a_generic_channel_offers_each_credited_artist_and_never_itself(env, monkeypatch, capsys):
+    monkeypatch.setattr(sr, "_description_credits", lambda case: ["Natalia Przybysz", "Fisz Emade Tworzywo"])
+    _request(env["inbox"], "2026-10-26_16-26-30_031.db", songs=[("Release", "Śniadanie")])
+    env["answers"].add(REVIEW_LABEL, "Add it as Fisz Emade Tworzywo")
+
+    review.resolve_new_requests()
+
+    out = capsys.readouterr().out
+    assert "Looks like:" in out and "credited in the YouTube video's description" in out
+    offered = env["answers"].selects[1][1]
+    assert offered[:2] == ["Add it as Natalia Przybysz - Śniadanie (feat. Fisz Emade Tworzywo)",
+                           "Add it as Fisz Emade Tworzywo - Śniadanie (feat. Natalia Przybysz)"]
+    assert not any("Release" in title for title in offered)
+    [entry] = env["imported"]
+    assert (entry["artist_name"], entry["title"], entry["feat_artists"]) == \
+        ("Fisz Emade Tworzywo", "Śniadanie", ["Natalia Przybysz"])

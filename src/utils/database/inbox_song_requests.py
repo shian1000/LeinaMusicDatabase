@@ -39,20 +39,36 @@ counts only when the channel's name holds it (here "Тіна Кароль"), and
 least one must be known - where an unknown name ends is a guess otherwise.
 The review offers it first, and the "already in the database" check uses it
 too.
+
+A YouTube request whose artist is a generic Topic channel ("Release" - YouTube
+files an auto-generated upload there when it can't attach it to an artist's
+channel) has the real artists only in the video's description, on a
+"<Title> · <Artist> · <Artist 2>" line (Leina Radio sends just the bare
+title). When nothing else settles such a case, the description is fetched
+(yt-dlp) and each credited artist is suggested as the main one, the others
+as featured in the title (`suggested`, then `also_suggested`): the one with
+most songs in the database first, since the description's order isn't the
+main artist first ("Śniadanie · Natalia Przybysz · Fisz Emade Tworzywo").
+Each is spelt as the database spells it, and a name it doesn't know that is
+known artists side by side is split into them ("Fisz Emade Tworzywo" ->
+"Fisz / Emade / Tworzywo Sztuczne"). The rejected-before and "already in the
+database" checks try every suggestion.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cache
 
 from config.constants import (
     ARTIST_JOINING_WORDS,
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
+    SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS,
     SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
     SONG_REQUEST_TITLE_ARTIST_MAX_WORDS,
 )
 from utils.common.debug import mlog
 from utils.common.normalizer import name_key, normalize
-from utils.database.datatables import RejectedSongRequest, Song
+from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.inbox_requests import (
     DECIDED,
@@ -68,6 +84,10 @@ from utils.database.song_duplicates import split_feat_credits
 # Settled statuses of their own
 ALREADY_IN_DATABASE = "already in the database"
 REJECTED_BEFORE = "rejected before"
+
+# Where a suggestion comes from (shown in the review)
+SUGGESTED_FROM_TITLE = "the title starts with the artist"
+SUGGESTED_FROM_DESCRIPTION = "credited in the YouTube video's description"
 
 # Answers
 ADD = "added"
@@ -96,7 +116,13 @@ class SongRequestCase:
     status: str = OPEN
     existing: Song | None = None  # the song it already is, for ALREADY_IN_DATABASE
     auto_note: str | None = None  # why the automatic pass left it to the owner
-    suggested: tuple | None = None  # (artist, title) read out of the title, see the module docstring
+    suggested: tuple | None = None  # (artist, title) read out of the title or the description, see the module docstring
+    also_suggested: list = field(default_factory=list)  # the description's other readings, (artist, title) each
+    suggested_from: str | None = None  # SUGGESTED_FROM_TITLE / SUGGESTED_FROM_DESCRIPTION
+
+    @property
+    def suggestions(self) -> list[tuple]:
+        return ([self.suggested] if self.suggested else []) + self.also_suggested
 
     @property
     def pending(self) -> bool:
@@ -282,16 +308,112 @@ def _split_title(title: str) -> tuple[str, str] | None:
     return (left, right) if left and right else None
 
 
+def fetch_video_description(video_id: str) -> str | None:
+    """The video's description (yt-dlp), None when it can't be had."""
+    from utils.youtube.import_from_playlist import _fetch_video_description
+    return _fetch_video_description(video_id)
+
+
+# video id -> topic_description_credits() of its description, for this run
+_credits_by_video: dict = {}
+
+
+def is_generic_channel_artist(artist: str | None) -> bool:
+    """Whether a request's artist is a generic Topic channel ("Release",
+    "Release - Topic"), not an artist."""
+    from utils.youtube.import_from_playlist import GENERIC_TOPIC_CHANNELS
+    base = re.sub(r"\s*-\s*topic$", "", artist or "", flags=re.IGNORECASE).strip().lower()
+    return base in GENERIC_TOPIC_CHANNELS
+
+
+def _description_credits(case: SongRequestCase) -> list[str] | None:
+    """The artists the description of the case's YouTube video credits, for
+    a request by a generic Topic channel - only when its credit line names
+    the requested title."""
+    if not is_generic_channel_artist(case.latest.artist):
+        return None
+    from utils.youtube.import_from_playlist import topic_description_credits
+    for video_id in case.youtube_video_ids:
+        if video_id not in _credits_by_video:
+            description = fetch_video_description(video_id)
+            _credits_by_video[video_id] = topic_description_credits(description) if description else None
+        credits = _credits_by_video[video_id]
+        if credits and normalize(credits[0]) == normalize(case.latest.title or ""):
+            return credits[1]
+    return None
+
+
+def description_suggestions(session, credits: list[str], title: str, matcher) -> list[tuple]:
+    """(artist, title) with each credited artist as the main one and the
+    others featured in the title, the one with most songs in the database
+    first (ties in the description's order). Names as the database spells
+    them (_database_spelling())."""
+    names = [_database_spelling(name, matcher) for name in credits]
+    counts = [_song_count(session, matcher.artist(name)) for name in names]
+    suggestions = []
+    for i in sorted(range(len(names)), key=lambda i: -counts[i]):
+        others = [name for j, name in enumerate(names) if j != i]
+        suggestions.append((names[i], f"{title} (feat. {', '.join(others)})" if others else title))
+    return suggestions
+
+
+def _database_spelling(name: str, matcher) -> str:
+    """`name` as the database knows it, else as the known artists it is
+    side by side ("Fisz Emade Tworzywo" -> "Fisz / Emade / Tworzywo
+    Sztuczne"), else as it is."""
+    known = _known_exactly(name, matcher)
+    if known is not None:
+        return known.name
+    parts = _known_side_by_side(name, matcher)
+    return " / ".join(a.name for a in parts) if parts else name
+
+
+def _known_side_by_side(name: str, matcher) -> tuple | None:
+    """The database artists (_known_exactly()) whose names, one after
+    another, are all of `name`'s words - as many as possible, so "Fisz Emade
+    Tworzywo" is Fisz, Emade and Tworzywo Sztuczne even though "Fisz Emade"
+    is an artist too. None when its words aren't all such names."""
+    words = name.split()
+    if not 2 <= len(words) <= SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS:
+        return None
+
+    @cache
+    def most_parts(i: int) -> tuple | None:
+        if i == len(words):
+            return ()
+        best = None
+        for j in range(i + 1, len(words) + 1):
+            if (i, j) == (0, len(words)):
+                continue
+            artist = _known_exactly(" ".join(words[i:j]), matcher)
+            rest = most_parts(j) if artist is not None else None
+            if rest is not None and (best is None or len(rest) + 1 > len(best)):
+                best = (artist, *rest)
+        return best
+
+    return most_parts(0)
+
+
+def _song_count(session, artist) -> int:
+    """How many songs credit `artist` (main or additional); 0 for None."""
+    if artist is None:
+        return 0
+    return (session.query(Song).filter(Song.artist_id == artist.id).count()
+            + session.query(AdditionalSongArtist).filter(AdditionalSongArtist.artist_id == artist.id).count())
+
+
 def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
     for video_id in case.youtube_video_ids:
         song = session.query(Song).filter(Song.youtube_video_id == video_id).first()
         if song is not None:
             return song
     metadata = case.metadata()
-    if case.suggested:
-        song = matcher.match(case.metadata(*case.suggested))
+    for suggestion in case.suggestions:
+        song = matcher.match(case.metadata(*suggestion))
         if song is not None:
             return song
+    if is_generic_channel_artist(metadata["artist_name"]):
+        return None
     if not metadata["artist_name"]:
         return None
     return matcher.match(metadata)
@@ -314,18 +436,36 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
     if matcher is None:
         from utils.discoveries.import_engine import LocalSongMatcher
         matcher = LocalSongMatcher(session)
-    rejected_keys, rejected_videos, rejected_tracks = _rejected_rows(session)
+    rejected = _rejected_rows(session)
     for key, case in cases.items():
         case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
-        if (key in rejected_keys or (case.suggested and song_key(*case.suggested) in rejected_keys)
-                or set(case.youtube_video_ids) & rejected_videos
-                or set(case.spotify_track_ids) & rejected_tracks):
-            case.status = REJECTED_BEFORE
+        case.suggested_from = SUGGESTED_FROM_TITLE if case.suggested else None
+        if _settle(session, key, case, rejected, matcher):
             continue
-        case.existing = _song_in_database(session, case, matcher)
-        if case.existing is not None:
-            case.status = ALREADY_IN_DATABASE
+        # Only now, the description fetch being slow
+        credits = _description_credits(case)
+        if credits:
+            case.suggested, *case.also_suggested = description_suggestions(
+                session, credits, case.latest.title, matcher)
+            case.suggested_from = SUGGESTED_FROM_DESCRIPTION
+            _settle(session, key, case, rejected, matcher)
     return list(cases.values())
+
+
+def _settle(session, key: str, case: SongRequestCase, rejected: tuple, matcher) -> bool:
+    """Settle the case if it was rejected before or is in the database
+    already (by any of its suggestions too); whether it was."""
+    rejected_keys, rejected_videos, rejected_tracks = rejected
+    if (key in rejected_keys or any(song_key(*s) in rejected_keys for s in case.suggestions)
+            or set(case.youtube_video_ids) & rejected_videos
+            or set(case.spotify_track_ids) & rejected_tracks):
+        case.status = REJECTED_BEFORE
+        return True
+    case.existing = _song_in_database(session, case, matcher)
+    if case.existing is not None:
+        case.status = ALREADY_IN_DATABASE
+        return True
+    return False
 
 
 def reject_song_request(session, case: SongRequestCase) -> None:

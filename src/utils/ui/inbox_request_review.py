@@ -45,7 +45,12 @@ from utils.database.inbox_field_corrections import (
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
-from utils.database.inbox_song_requests import collect_song_request_cases, mark_song_added, reject_song_request
+from utils.database.inbox_song_requests import (
+    collect_song_request_cases,
+    is_generic_channel_artist,
+    mark_song_added,
+    reject_song_request,
+)
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
 from utils.database.latin_names import LATIN_COLUMNS, name_of
@@ -547,8 +552,9 @@ def _show_song_request(case, position: str) -> None:
     album, year = case.metadata()["album"], case.metadata()["year"]
     if album or year:
         print(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")
-    if case.suggested:
-        print(f"    Looks like:   {_colored_song_label(*case.suggested)}  [dim](the title starts with the artist)[/dim]")
+    for i, suggestion in enumerate(case.suggestions):
+        label = "Looks like:" if i == 0 else "or:"
+        print(f"    {label:<14}{_colored_song_label(*suggestion)}  [dim]({escape(case.suggested_from or '')})[/dim]")
     for video_id in case.youtube_video_ids:
         print(f"    YouTube:      {_url(video_id)}")
     for track_id in case.spotify_track_ids:
@@ -563,11 +569,12 @@ def _ask_song_request(case):
     report = case.latest
     suggested = case.suggested
     choices = [
-        *([questionary.Choice([("", "Add it as "), *song_tokens(*suggested)], _ADD_SUGGESTED)]
-          if suggested else []),
+        *[questionary.Choice([("", "Add it as "), *song_tokens(*suggestion)], (_ADD_SUGGESTED, suggestion))
+          for suggestion in case.suggestions],
+        # A generic Topic channel ("Release") is never the artist
         *([questionary.Choice([("", "Add it as asked (" if suggested else "Add it to the database ("),
                                *song_tokens(report.artist, report.title), ("", ")")], _ADD)]
-          if report.artist else []),
+          if report.artist and not is_generic_channel_artist(report.artist) else []),
         questionary.Choice("Correct the artist / title, then add it", _CORRECT),
         questionary.Choice("Reject - Leina Radio won't ask for it again", _REJECT_SONG),
         questionary.Choice(_SKIP, _SKIP),
@@ -577,8 +584,8 @@ def _ask_song_request(case):
         answer = questionary.select("What should the database do?", choices=choices).ask()
         if answer is None:
             return _STOP
-        if answer == _ADD_SUGGESTED:
-            return _ADD, *suggested
+        if isinstance(answer, tuple) and answer[0] == _ADD_SUGGESTED:
+            return _ADD, *answer[1]
         if answer == _ADD:
             return _ADD, report.artist, report.title
         if answer != _CORRECT:

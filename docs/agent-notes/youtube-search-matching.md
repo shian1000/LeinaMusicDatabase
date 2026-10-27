@@ -70,7 +70,9 @@ Zulu - so the setting only matters for playlist pages.
    flat playlist fetch never has it), then `_parse_topic_description_artist()` reads the
    `"<Title> · <Artist> · <Artist 2>"` credit line (several artists joined with `", "` for the
    artist-split review), else the `"Main Artist:"` lines. Real cases: `"Mind Me"` -> Oordaya,
-   `"Slide"` -> Frankie Cosmos.
+   `"Slide"` -> Frankie Cosmos. The credit line itself is `topic_description_credits()`, shared
+   with Leina Radio's song requests (`inbox_song_requests.py`), which need the artists apart and
+   in order - so don't fold it back into the `", "`-joined string.
 2. Otherwise, try `split_artist_title()` (`normalizer.py` - the same "Artist - Title" splitter
    `extract_unknown_data()` uses for mp3 filenames, factored out so both callers share it) on the
    video title.

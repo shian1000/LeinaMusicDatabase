@@ -372,6 +372,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   suggestions. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
   The review offers it first, and the "already
   in the database" / "rejected before" checks use it too.
+  A YouTube request whose artist is a generic Topic channel (`GENERIC_TOPIC_CHANNELS`: "Release",
+  "Various Artists", with or without " - Topic"; Leina Radio sends just the bare title) is never
+  offered "as asked": when nothing else settles it, the video's description is fetched (yt-dlp,
+  once per run, so the `yt-dlp` of the venv must be on PATH - the app's launcher and the inbox
+  timer have it) and its "<Title> · <Artist> · <Artist 2>" line, if it names the requested title,
+  gives one suggestion per credited artist as the main one, the others as "(feat. ...)" in the
+  title. The one with most songs in music.db comes first: the description's order isn't main
+  artist first ("Śniadanie · Natalia Przybysz · Fisz Emade Tworzywo"). A credited name music.db
+  doesn't know that is known artists side by side is split into as many of them as possible
+  ("Fisz Emade Tworzywo" -> "Fisz / Emade / Tworzywo Sztuczne", though "Fisz Emade" is an artist
+  too), up to `SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS` words.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.

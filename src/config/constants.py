@@ -523,6 +523,11 @@ SONG_REQUEST_COLON_ARTIST_MAX_WORDS = 4
 SONG_REQUEST_TITLE_ARTIST_MAX_WORDS = 5
 SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS = 4
 
+# An artist a YouTube description credits that the database doesn't know is
+# tried as several known artists side by side ("Fisz Emade Tworzywo" ->
+# Fisz / Emade / Tworzywo Sztuczne) only up to this many words.
+SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS = 6
+
 # A file nothing else found a song for is offered up to this many of the
 # closest songs by score (LocalSongMatcher.match_score(): title, and the
 # artist when the file has one), if they score at least the "Closest songs:

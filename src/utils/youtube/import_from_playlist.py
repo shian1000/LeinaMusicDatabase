@@ -759,15 +759,26 @@ _TOPIC_CREDIT_SEPARATOR = " · "
 _MAIN_ARTIST_LINE_RE = re.compile(r"(?im)^\s*main artist\s*:\s*(.+?)\s*$")
 
 
+def topic_description_credits(description: str) -> tuple[str, list[str]] | None:
+    """(title, [artists]) from the first "<Title> · <Artist> · <Artist 2>"
+    line of an auto-generated Topic video description, the artists in the
+    description's order (not necessarily the main one first: "Śniadanie ·
+    Natalia Przybysz · Fisz Emade Tworzywo"). None without such a line."""
+    for line in (description or "").splitlines():
+        parts = [p.strip() for p in line.split(_TOPIC_CREDIT_SEPARATOR)]
+        if len(parts) >= 2 and all(parts):
+            return parts[0], parts[1:]
+    return None
+
+
 def _parse_topic_description_artist(description: str) -> str | None:
     """Pull the artist out of an auto-generated Topic video description -
     the artists after the title on the first "<Title> · <Artist>" line
     (several joined with ", ", left for the artist-split review to break
     up), else every "Main Artist:" line. None if neither is there."""
-    for line in (description or "").splitlines():
-        parts = [p.strip() for p in line.split(_TOPIC_CREDIT_SEPARATOR)]
-        if len(parts) >= 2 and all(parts):
-            return ", ".join(parts[1:])
+    credits = topic_description_credits(description)
+    if credits:
+        return ", ".join(credits[1])
     main_artists = [a for a in _MAIN_ARTIST_LINE_RE.findall(description or "") if a]
     return ", ".join(main_artists) or None
 
