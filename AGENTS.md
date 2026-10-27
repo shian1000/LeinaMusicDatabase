@@ -621,7 +621,10 @@ non-trivial work in that area.
   `print()` a plain colored line above the `questionary` call instead (see `seek_nonsense_names()`
   in `clean_names.py` for the pattern). A `questionary.Choice` title can be coloured,
   though, given as prompt_toolkit `(style, text)` tokens: `utils/ui/song_colors.py` builds artist
-  (cyan) / title (yellow) labels that way and turns them into ANSI only for `print()`.
+  (cyan) / title (yellow) labels that way, the featured artists a title credits in the artist
+  colour (`title_tokens()`, names from `song_duplicates.feat_credits()`, "(feat. " / ")" plain),
+  and turns them into ANSI (`as_ansi()`) or rich markup (`as_rich_markup()`) only for `print()` -
+  don't hand-write the colours in markup.
 - Every yes/no question goes through `utils/ui/prompts.ask_yes_no()` (a bare Enter means yes,
   everywhere — the owner's choice), never `questionary.confirm()` directly; a test checks that.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.

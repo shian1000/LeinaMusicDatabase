@@ -16,7 +16,7 @@ automatic pass changed."""
 
 import questionary
 from utils.ui.prompts import ask_yes_no
-from utils.ui.song_colors import song_tokens
+from utils.ui.song_colors import as_rich_markup, song_tokens
 from rich import print
 from rich.markup import escape
 
@@ -533,7 +533,7 @@ def _song_label(artist, title) -> str:
 def _colored_song_label(artist, title) -> str:
     """_song_label() as rich markup, the artist and the title in song_colors'
     colours - a name with " - " in it otherwise hides where one ends."""
-    return f"[bright_cyan]{escape(artist or '(no artist)')}[/bright_cyan] - [bright_yellow]{escape(title or '?')}[/bright_yellow]"
+    return as_rich_markup(song_tokens(artist or "(no artist)", title))
 
 
 def _show_song_request(case, position: str) -> None:
