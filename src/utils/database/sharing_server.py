@@ -181,6 +181,10 @@ INBOX_PREFIX = "/inbox/"
 INBOX_NEW = "new"
 INBOX_REVIEW = "review"
 INBOX_PROCESSED = "processed"
+# Where a request sent again counts as received already - by HTTP and in a
+# package (request_packages.py) alike. Not rejected/: a file rejected as
+# unreadable may come back fixed, and then it's a new request.
+INBOX_KEPT_FOLDERS = (INBOX_NEW, INBOX_REVIEW, INBOX_PROCESSED)
 DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024
 DEFAULT_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
 # A phone that stops sending mid-upload mustn't hold a server thread forever
@@ -259,6 +263,8 @@ LIBRARY_CHUNK_BYTES = 64 * 1024
 BYTE_RANGE_RE = re.compile(r"^\s*bytes\s*=\s*(?P<first>[0-9]*)\s*-\s*(?P<last>[0-9]*)\s*$", re.IGNORECASE)
 # A player that stops reading mustn't hold a server thread forever
 LIBRARY_SOCKET_TIMEOUT = 60
+# The same for a phone downloading music.db / tag.db / files.db
+SHARED_FILE_SOCKET_TIMEOUT = 60
 
 
 class LoginLimiter:
@@ -282,6 +288,7 @@ class LoginLimiter:
     def failed(self, keys) -> None:
         now = self._clock()
         with self._lock:
+            self._forget_old(now)
             for key in keys:
                 recent = [t for t in self._failures.get(key, []) if now - t < LOGIN_FAILURE_WINDOW_SECONDS]
                 recent.append(now)
@@ -294,6 +301,16 @@ class LoginLimiter:
         with self._lock:
             for key in keys:
                 self._failures.pop(key, None)
+
+    def _forget_old(self, now: float) -> None:
+        """Drop failures older than the window and lockouts that ran out - a
+        made-up name per try must not grow these dicts for as long as the
+        server runs."""
+        for key in [k for k, times in self._failures.items()
+                    if not any(now - t < LOGIN_FAILURE_WINDOW_SECONDS for t in times)]:
+            del self._failures[key]
+        for key in [k for k, until in self._locked_until.items() if until <= now]:
+            del self._locked_until[key]
 
 
 def _dir_size(path: str) -> int:
@@ -466,9 +483,15 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self.send_header("Content-Length", str(st.st_size))
                 self.send_header("Last-Modified", formatdate(st.st_mtime, usegmt=True))
                 self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                if send_body:
-                    shutil.copyfileobj(f, self.wfile)
+                self.connection.settimeout(SHARED_FILE_SOCKET_TIMEOUT)
+                try:
+                    self.end_headers()
+                    if send_body:
+                        shutil.copyfileobj(f, self.wfile)
+                except (ConnectionError, TimeoutError):
+                    # The phone lost the network mid-download; it asks again
+                    print(f"{name}: download cut off", flush=True)
+                    self.close_connection = True
 
         # ---- library files ----
 
@@ -1217,7 +1240,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 try:
                     os.makedirs(new_dir, exist_ok=True)
                     # Sent again (e.g. the answer to the first try got lost)
-                    for folder in (INBOX_NEW, INBOX_REVIEW, INBOX_PROCESSED):
+                    for folder in INBOX_KEPT_FOLDERS:
                         existing = os.path.join(inbox_dir, folder, name)
                         if os.path.exists(existing):
                             if _same_content(existing, data):

@@ -287,6 +287,26 @@ def test_song_ids_follow_merges_and_deletions(tmp_path):
     assert [t["title"] for t in tracks] == ["t1", "t2", "t3", "t5", "t99", "tNone"]
 
 
+def test_song_ids_resolve_from_a_folder_with_uri_characters(tmp_path):
+    # SRV-32: "file:{path}" unescaped took "?" / "#" / "%" in a folder name as URI syntax,
+    # the copy "couldn't be read" and no id was checked
+    from utils.database import global_mood_log
+    folder = tmp_path / "Share #1 ?100%"
+    folder.mkdir()
+    music = folder / "music.db"
+    _shared_music_db(music, [4], [(1, 2, 4)])
+    tracks = [{"song_id": 2, "title": "t"}]
+    assert ps.resolve_song_ids(tracks, music) == 1
+    assert tracks[0]["song_id"] == 4
+
+    tag = sqlite3.connect(folder / "tag.db")
+    tag.execute("CREATE TABLE tags (id INTEGER PRIMARY KEY, name TEXT, kind TEXT)")
+    tag.execute("INSERT INTO tags VALUES (1, 'Siłownia', 'mood')")
+    tag.commit()
+    tag.close()
+    assert global_mood_log.global_mood_name(folder / "tag.db", 1) == "Siłownia"
+
+
 @pytest.mark.parametrize("song_id, keep_deleted, expected", [
     (2, False, 4),        # 2 -> 3 -> 4
     (4, False, 4),        # not in the log

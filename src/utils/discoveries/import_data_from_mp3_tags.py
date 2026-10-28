@@ -98,7 +98,7 @@ def _build_metadata_list(folder_path: str) -> tuple:
     return metadata_list, pre_skipped
 
 
-def import_data_from_mp3_tags(folder_path: str, mode: str = "skip") -> list:
+def import_data_from_mp3_tags(folder_path: str) -> list:
     metadata_list, pre_skipped = _build_metadata_list(folder_path)
     if not metadata_list and not pre_skipped:
         return []

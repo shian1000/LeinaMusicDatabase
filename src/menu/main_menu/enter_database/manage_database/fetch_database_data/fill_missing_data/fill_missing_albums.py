@@ -1,8 +1,7 @@
-from utils.database.database_getter import get_songs_with_empty_category, extract_db_object_info
+from utils.database.database_getter import get_songs_with_empty_category
 from utils.database.database_management import edit_db_entry
-import questionary
 from utils.ui.prompts import ask_yes_no
-from utils.common.debug import slog, mlog
+from utils.common.debug import slog
 from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.selenium_sessions import open_global_driver, close_global_driver, ChromeDriverLaunchError
@@ -68,7 +67,7 @@ def fill_missing_albums():
                 slog(discovery_modules)
                 match = discover_album(song, discovery_modules, album_cache)
                 new_album = match.album if match else None
-                if new_album == None:
+                if new_album is None:
                     print(f"Couldn't find album for \033[93m{song.artist.name} - {song.title}\033[0m")
                 else:
                     if new_album == SINGLES_ALBUM:
@@ -84,14 +83,8 @@ def fill_missing_albums():
         print("\nStopped - the albums found so far are saved.")
         songs_objects = songs_objects[:len(songs_list)]
     finally:
-        #Make it adjustable in settings
         close_global_driver()
 
-    if not len(songs_objects) == len(songs_list):
-        print(f"albums_search_results and matched_objects items quantity mismatch! song_objects = {songs_objects}, songs_list = {songs_list}! Aborting!")
-        return
-    
-    slog("Seems songs_objcets and songs_list do match. Continuing")
     for i, song in enumerate(songs_list):
         art, son, new_album = song
         if new_album is not None:

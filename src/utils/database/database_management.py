@@ -1,7 +1,6 @@
 from utils.database.datatables import Album, COMPOSED_FIELDS, Song, Artist
 from sqlalchemy import func
-from utils.database.datatables import song_categories, search_only_categories, artist_categories
-import time
+from utils.database.datatables import song_categories, artist_categories
 from utils.common.debug import slog
 from utils.common.normalizer import composed
 from sqlalchemy import text
@@ -11,7 +10,6 @@ from utils.database.database_sessions import (
     open_and_set_global_database_sessions,
     require_global_database_sessions,
 )
-from utils.database.tags_management import remove_tag_from_song
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
 from rich import print
@@ -202,8 +200,7 @@ def divide_artist(db_object):
 def add_db_entry(db_object):
     """Add a new Artist or Song entry to the music database.
 
-    Accepts either an ORM-like object (instance of `Artist` or `Song`) or a
-    dict-like object with the required fields.
+    Accepts an `Artist` or `Song` instance; anything else raises ValueError.
 
     Behavior:
     - If `db_object` is an `Artist` instance: add it to the music session and
@@ -248,51 +245,6 @@ def add_db_entry(db_object):
         music_session.refresh(db_object)
         print(f"Added Song '{db_object.title}' with id {db_object.id}")
         return db_object
-
-    # Allow dict-like creation for convenience
-    if isinstance(db_object, dict):
-        obj_type = db_object.get("_type")
-        if obj_type == "artist":
-            name = db_object.get("name")
-            if not name:
-                raise ValueError("Artist dict must contain 'name'")
-            new_artist = Artist(name=name, origin=db_object.get("origin"), synonyms=db_object.get("synonyms"))
-            music_session.add(new_artist)
-            music_session.commit()
-            music_session.refresh(new_artist)
-            print(f"Added artist [green]'{new_artist.name}'[/green] with id [green]{new_artist.id}[/green]")
-            return new_artist
-
-        if obj_type == "song":
-            title = db_object.get("title")
-            artist_id = db_object.get("artist_id")
-            artist_name = db_object.get("artist_name")
-            if not title:
-                raise ValueError("Song dict must contain 'title'")
-            if not artist_id and not artist_name:
-                raise ValueError("Song dict must contain either 'artist_id' or 'artist_name'")
-
-            if not artist_id and artist_name:
-                existing = music_session.query(Artist).filter(func.lower(Artist.name) == artist_name.lower()).first()
-                if existing:
-                    artist_id = existing.id
-                else:
-                    new_artist = Artist(name=artist_name)
-                    music_session.add(new_artist)
-                    music_session.flush()
-                    artist_id = new_artist.id
-
-            new_song = Song(
-                title=title,
-                album=db_object.get("album"),
-                year=db_object.get("year"),
-                language=db_object.get("language"),
-                artist_id=artist_id,
-            )
-            music_session.add(new_song)
-            music_session.refresh(new_song)
-            print(f"Added song [green]'{new_song.title}'[/green] with id [green]{new_song.id}[/green]")
-            return new_song
 
     raise ValueError(f"Unsupported db_object type: {type(db_object)}")
 

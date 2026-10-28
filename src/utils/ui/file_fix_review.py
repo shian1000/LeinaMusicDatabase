@@ -4,7 +4,6 @@ their song (utils/discoveries/file_fixes.py), and confirm once for all."""
 
 from pathlib import Path
 
-import questionary
 from utils.ui.prompts import ask_yes_no
 
 from settings import settings

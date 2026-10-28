@@ -216,6 +216,7 @@ def test_using_a_video_changes_the_link_and_finishes_the_file(env):
     assert env["songs"][0].youtube_video_id == "new0"
     assert [r.name for r in moved] == ["2026-10-12_23-44-05_001.db"] and left == []
     assert (env["inbox"] / "processed" / "2026-10-12_23-44-05_001.db").exists()
+    assert moved[0].path == env["inbox"] / "processed" / "2026-10-12_23-44-05_001.db"  # DB-32
     assert pr.count_new_requests() == 0
     decision = json.loads((env["inbox"] / "decisions.json").read_text())["4601:dead0"]
     assert decision["decision"] == pr.USE_VIDEO and decision["video_id"] == "new0"
@@ -450,3 +451,20 @@ def test_an_id_that_isnt_a_number_makes_the_file_unreadable(env, untyped_ids):
     [request] = pr.read_new_requests()
 
     assert request.error == "dead_youtube_links.song_id 'Chromatic' isn't a whole number"
+
+
+def test_the_inbox_doesnt_load_the_youtube_module_for_the_no_video_value():
+    # YT-23: NO_VIDEO_SENTINEL is in config/constants.py - reading the inbox mustn't pull in
+    # google-api, OAuth and the link-cache log at import
+    import subprocess
+    tests = Path(__file__).resolve().parent
+    # conftest first: the same isolation from the real .env, databases and logs as here
+    code = (f"import sys; sys.path.insert(0, {str(tests)!r}); import conftest; "
+            "import utils.database.inbox_requests, utils.database.inbox_found_links, utils.ui.display_utils; "
+            "print('utils.youtube.manage_youtube_playlists' in sys.modules); conftest.pytest_unconfigure(None)")
+    out = subprocess.run([sys.executable, "-c", code], cwd=tests.parent / "src", capture_output=True, text=True,
+                         check=True)
+    assert out.stdout.strip() == "False"
+    from config.constants import NO_VIDEO_SENTINEL
+    from utils.youtube import manage_youtube_playlists
+    assert manage_youtube_playlists.NO_VIDEO_SENTINEL == NO_VIDEO_SENTINEL == "N/A"

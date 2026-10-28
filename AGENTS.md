@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,700 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,890 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -423,7 +423,8 @@ non-trivial work in that area.
   `music_brainz_fetcher.py` still goes through the raw `musicbrainzngs` library instead — see
   `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
-  `data/spellcheck_cache.json`. `docs/agent-notes/import-pipeline.md`.
+  `data/spellcheck_cache.json`, saved every 20 answers and when the process exits (`atexit`), so a
+  test that fills it must leave `_CACHE_PATH` where `conftest.py` put it. `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console
   output is gated by a `.debug` file (`verbosity = N`) at the repo root, and so is what reaches
   `debug.log` (gitignored): without `.debug`, only `slog(..., priority=3)` gets there. Exception:
@@ -461,13 +462,13 @@ non-trivial work in that area.
   (`song_actions/__init__.py` ↔ `main_menu/enter_database/fetch_songs/__init__.py`) — doesn't
   affect `main.py` itself (its own import order avoids it); a test or script importing
   `menu.song_actions` must import `menu.main_menu` first. Not yet fixed; not a reason to avoid
-  importing `menu.song_actions` normally through `main.py`'s own path. Separately,
-  `manage_database/resolve_duplicates.py` (the submodule) is shadowed by
-  `manage_database/__init__.py`'s own `resolve_duplicates()` *function* of the same name — a plain
-  `from ...manage_database import resolve_duplicates` binds the function, not the submodule; tests
-  that need the submodule (e.g. to monkeypatch its `get_music_session`) must
-  `importlib.import_module("menu.main_menu.enter_database.manage_database.resolve_duplicates")`
-  instead (see `tests/test_resolve_duplicates.py`).
+  importing `menu.song_actions` normally through `main.py`'s own path. Separately, several menu
+  submodules are shadowed by a *function* of the same name that their package's `__init__.py`
+  imports: `manage_database/resolve_duplicates.py`, `manage_database/clean_names.py`,
+  `fill_missing_data/fill_missing_years.py`. A plain `from ...manage_database import clean_names`
+  binds the function, not the submodule; tests that need the submodule (to monkeypatch something
+  in it) must `importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")`
+  instead (see `tests/test_resolve_duplicates.py`, `tests/test_review_screens.py`).
 - `src/menu/main_menu/enter_database/manage_database/clean_names.py` (Manage database → "Clean names") — per-field song
   cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
   per-field loop. `seek_nonsense_names()` first auto-strips a known trailing junk annotation off the
@@ -664,7 +665,7 @@ non-trivial work in that area.
   for any new pre-import question — and `review_artist_splits()`
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
-  `needs_review`, e.g. YouTube upload dates; tick the ones to change), and
+  `needs_review`, e.g. YouTube upload dates; all ticked, the ticked ones saved), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
@@ -693,15 +694,18 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,700 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,890 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
-  with "unable to open database file". It also sends `debug.log` and `youtube_link_cache.log` to that
-  temp folder. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  with "unable to open database file". It also sends `debug.log`, `youtube_link_cache.log` and the
+  spell-check cache (written at exit) to that temp folder. Give it temp-file databases; never undo the isolation. A function taking the `.env`
   path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
   default bound at import would keep pointing at the real `.env`.
+- The Selenium fetchers are tested through `tests/fake_browser.FakeBrowser` (pages as HTML by URL,
+  a wait succeeds when its CSS selector matches, no Chrome and no timeouts) — use it for a new
+  scraping test instead of mocking the driver by hand (`tests/test_scraping_fetchers.py`).
 - Don't claim a check passed unless you ran it in this workspace.
 - Ask before creating or changing regression tests unless the task explicitly requires it.
 - If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.

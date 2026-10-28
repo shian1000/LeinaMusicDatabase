@@ -166,44 +166,6 @@ def open_file_browser_terminal(current_path: Optional[str] = None) -> Optional[U
 
 
 
-def open_file_browser_window() -> Optional[str]:
-    """
-    Interactive file browser using GUI dialog.
-    
-    Uses tkinter to display a file selection dialog. Returns the selected
-    file path or None if an error occurs or user cancels.
-    
-    Returns:
-        Optional[str]: Path to selected file, or None if error/cancelled
-    """
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except Exception as e:
-        slog(f"File browser import error: {e}")
-        return None
-
-    try:
-        root: tk.Tk = tk.Tk()
-        root.withdraw()
-        try:
-            root.attributes("-topmost", True)
-        except Exception:
-            pass
-
-        path: str = filedialog.askopenfilename()
-        root.destroy()
-        
-        if path:
-            slog(f"File browser selected: {path}")
-        
-        return path or None
-
-    except Exception as e:
-        slog(f"File browser error: {e}")
-        return None
-
-
 def pick_from_db_objects(
     entries_objects: list[Union[Song, Artist]],
     question: str = DEFAULT_MENU_PICK_QUESTION,
@@ -342,7 +304,7 @@ def search_and_pick_db_object(
     return pick_from_db_objects(entries_objects, question=pick_question, back_label=back_label)
 
 
-def ask_for_entires_list(
+def ask_for_entries_list(
     mode: str = "Song",
     question: str = "What query do you wish to search for: ",
     allow_no_results: bool = False,
@@ -372,7 +334,7 @@ def ask_for_entires_list(
         artists_objects = get_artists_from_db_session(
             artist_categories[0],
             query,
-            aggresive_search=True
+            aggressive_search=True
         )
     else:
         slog("Search for songs is not yet implemented")

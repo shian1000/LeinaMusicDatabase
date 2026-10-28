@@ -1,5 +1,4 @@
 import re
-import unicodedata
 from utils.common.debug import slog
 from difflib import SequenceMatcher
 from settings import settings
@@ -94,21 +93,6 @@ def truncate_at_word(text: str) -> str:
     truncated = text[:match.start()].rstrip(" -–—") if match else ""
     return truncated if truncated.strip() else text.rstrip()
 
-
-def normalize_japanese_title(text: str) -> str:
-    if not text:
-        return text.rstrip()
-
-    text = re.sub(r'[・･•·\-+]', ' ', text)
-    slog(text)
-
-    text = re.sub(r'[\.\。…]+$', '', text)
-
-    text = unicodedata.normalize('NFKC', text)
-
-    text = re.sub(r'\s+', ' ', text).strip()
-
-    return text
 
 def make_fuzzy(text: str) -> str:
     """Split on spaces AND Japanese middle dot, append ~ to each token."""
@@ -378,16 +362,6 @@ def scaled_similarity_threshold(a: str, b: str, base_threshold: float) -> float:
     if shortest <= 8:
         return max(base_threshold, 0.85)
     return base_threshold
-
-def are_song_entries_similar(
-    db_object,
-    title_query: str,
-    artist_query: str,
-    threshold: float = 0.7
-) -> bool:
-    title_score = similarity(title_query, db_object.title)
-    artist_score = similarity(artist_query, db_object.artist.name)
-    return title_score >= threshold and artist_score >= threshold
 
 def are_artists_entries_similar(
     db_object,

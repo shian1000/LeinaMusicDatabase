@@ -1171,6 +1171,7 @@ def test_fix_names_and_tags_plans_then_applies(tmp_path, music_session, monkeypa
 
 
 def test_fix_names_and_tags_menu_asks_once(tmp_path, music_session, monkeypatch, capsys):
+    import questionary
     from utils.ui import file_fix_review as ffr
 
     _add_liquid_tension(music_session)
@@ -1182,7 +1183,7 @@ def test_fix_names_and_tags_menu_asks_once(tmp_path, music_session, monkeypatch,
     monkeypatch.setattr(ffr, "open_file_browser_terminal", lambda start: folder)
     monkeypatch.setattr(ffr, "open_and_set_global_database_sessions", lambda: (music_session, None))
     asked = []
-    monkeypatch.setattr(ffr.questionary, "confirm", lambda message, **k: asked.append(message) or _Answer(False))
+    monkeypatch.setattr(questionary, "confirm", lambda message, **k: asked.append(message) or _Answer(False))
 
     ffr.fix_file_names_and_tags()
     assert asked == ["Fix the names and tags of these mp3 files?"]

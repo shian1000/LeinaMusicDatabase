@@ -40,6 +40,9 @@ def _load_config(config_file: str, default_order) -> dict:
     except (json.JSONDecodeError, OSError) as e:
         slog(f"Failed to read discovery modules config '{config_file}', using defaults: {e}")
         return _default_config(default_order)
+    if not isinstance(data, dict):
+        slog(f"Discovery modules config '{config_file}' isn't a JSON object, using defaults")
+        return _default_config(default_order)
 
     data.setdefault("order", [])
     data.setdefault("enabled", {})

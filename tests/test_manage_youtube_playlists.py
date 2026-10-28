@@ -652,3 +652,30 @@ def test_no_browser_login_over_ssh_without_a_display(login, monkeypatch):
     with pytest.raises(m.YouTubeLoginError, match="over ssh"):
         m.get_youtube_service()
     assert login["flows"] == 0
+
+
+@pytest.mark.parametrize("content, expected", [
+    (json.dumps({"error": {"errors": [{"reason": "quotaExceeded"}]}}).encode(), True),
+    # the reason not first in the list, a body that isn't the usual JSON
+    (json.dumps({"error": {"errors": [{"reason": "rateLimitExceeded"}, {"reason": "quotaExceeded"}]}}).encode(),
+     True),
+    (b"<html>quotaExceeded</html>", True),
+    (json.dumps({"error": {"errors": [{"reason": "forbidden"}]}}).encode(), False),
+    (b"", False),
+])
+def test_one_rule_says_the_api_quota_is_used_up(content, expected):
+    # YT-24: searching and adding to a playlist told a used-up quota apart each in its own way
+    error = HttpError(SimpleNamespace(status=403, reason="error"), content)
+    assert m.is_quota_exceeded(error) is expected
+
+
+def test_two_songs_with_one_artist_and_title_both_reach_the_playlist(monkeypatch):
+    # YT-18: keyed "artist|||title", the second song overwrote the first and only one was added
+    added, committed = _patch_playlist_plumbing(monkeypatch)
+    monkeypatch.setattr(m, "is_video_id_valid", lambda video_id, timeout=20: True)
+    first, second = _fake_song("Hey", "Teksański", youtube_video_id="studio"), \
+        _fake_song("Hey", "Teksański", youtube_video_id="unplugged")
+    first.id, second.id = 1, 2
+
+    m.create_yt_playlist([first, second], "Hey")
+    assert added == ["studio", "unplugged"]

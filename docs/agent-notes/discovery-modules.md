@@ -258,7 +258,7 @@ its album success rate in the Statistics menu.
 **`fill_missing_years.py` batch-writes a year to every song sharing an album — unlike
 `fill_missing_albums.py`'s one-write-per-song.** It only looks at songs that already have an
 `album` filled in (a real album, or the `"Singles"` sentinel, `constants.SINGLES_ALBUM` — see below), groups them by
-`(artist.name, album)`, and calls `discover_release_year()` once per group; every song in that
+`(artist.name, album)`, and calls `discover_release_year_result()` once per group; every song in that
 group gets `edit_db_entry(song, "year", str(year))`. This is a real asymmetry from the album flow
 worth remembering if you're porting logic between the two: album lookups are inherently per-song
 (each song can have a different album), but a release year is a property of the album, not the
@@ -343,11 +343,10 @@ normal DB → YouTube `search_video_ytdlp()` matching (yt-dlp, no Selenium, no A
 the date with `get_video_release_year()`, which prefers yt-dlp's `release_date`/`release_year`
 (YouTube Music's "Released on") over `upload_date`. An upload date is often not the release date (a
 live session, a reupload), so it returns `YearDiscoveryResult(needs_review=True, source_url=...)`.
-`discover_release_year_result()` passes that flag through (`discover_release_year()` is the same
-call reduced to just the int). `fill_missing_years.py` doesn't write flagged years straight away:
-`_review_unsure_years()` lists them all at the end in one checkbox prompt, and the user ticks the
-ones to change. Unticked years are written. A ticked one asks for a year, and an empty answer
-leaves the song without one. Albums are looked up too (one track's video date says little about
+`discover_release_year_result()` passes that flag through. `fill_missing_years.py` doesn't write flagged years straight away:
+`_review_unsure_years()` lists them all at the end in one checkbox prompt, all ticked, and like
+every other checkbox review the ticked years are written. An unticked one asks for the right year
+(1900 to next year), and an empty answer leaves the song without one. Albums are looked up too (one track's video date says little about
 the album, but the year goes through that same review anyway, so a wrong guess costs one tick). It's last in `DEFAULT_DISCOVERY_MODULE_YEAR_ORDER`, and an existing config
 gets it appended at the end by `_reconcile_config()`. It reuses a stored `Song.youtube_video_id`
 first: `_call_year_module()` passes the songs being looked up (the single, or the album's songs
@@ -360,7 +359,7 @@ resolves falls back to a search (for an album: "artist + album name"), and a sin
 ## Multi-artist songs (`additional_song_artists`)
 
 Fetchers still get one artist string; nothing in a module changed. `discover_album_name()` (and
-`discover_release_year()` for a single, via its `song=` kwarg) query the **primary artist first** —
+`discover_release_year_result()` for a single, via its `song=` kwarg) query the **primary artist first** —
 one clean name finds a collab on most services better than a joined string — and only as a last
 per-module retry the main-artist label "A x B" (feats excluded). Album lookups in Years stay keyed
 on the primary artist alone: a guest on one track isn't the album's artist.

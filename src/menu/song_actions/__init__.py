@@ -6,10 +6,10 @@ from utils.common.debug import slog
 from menu.song_actions.copy_songs_from_storage import copy_songs_from_storage
 from menu.song_actions.edit_songs import edit_songs_menu
 from utils.database.database_getter import extract_db_object_info
-from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu
-from utils.database.datatables import artist_categories, song_categories
+from utils.database.datatables import song_categories
 from utils.database.tags_management import remove_tag_from_song
-from utils.youtube.manage_youtube_playlists import YouTubeLoginError, create_yt_playlist, extract_video_id, NO_VIDEO_SENTINEL
+from config.constants import NO_VIDEO_SENTINEL
+from utils.youtube.manage_youtube_playlists import YouTubeLoginError, create_yt_playlist, extract_video_id
 from utils.ui.display_utils import display_songs, display_song_links
 from utils.ui.artist_change import change_songs_artist, swap_titles_and_artist_names
 from utils.database.tags_management import add_tag_to_song
@@ -27,7 +27,7 @@ def remove_check_protection(songs_objects):
 def make_yt_playlist_menu(songs_objects):
     print("About to create a playlist with these songs:")
     display_songs(songs_objects)
-    playlist_name = input("Enter playlsit name:")
+    playlist_name = input("Enter playlist name: ")
     try:
         create_yt_playlist(songs_objects, playlist_name)
     except HttpError as exc:

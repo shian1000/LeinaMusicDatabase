@@ -88,3 +88,18 @@ def test_resuming_takes_the_songs_picked_now(monkeypatch, tmp_path):
     assert (new, dropped) == (1, 1)
     assert sorted(c.load_cache("Rock")["songs"]) == sorted(
         c.make_song_key(*s) for s in [("Queen", "Bicycle"), ("Muse", "Uprising"), ("ABBA", "SOS")])
+
+
+def test_a_playlist_cached_under_titles_resumes_without_adding_songs_twice(monkeypatch, tmp_path):
+    # YT-18: entries are keyed by song id now; one started before keeps its "added" marks
+    monkeypatch.setattr(c, "CACHE_FILE", tmp_path / "yt_playlist_cache.json")
+    old = c.init_cache("PL1", "Rock", [_fake_song("Queen", "Bicycle"), _fake_song("Muse", "Uprising")])
+    old["songs"][c.make_song_key("Queen", "Bicycle")]["added"] = True
+    c.save_cache(old)
+    bicycle, uprising = _fake_song("Queen", "Bicycle"), _fake_song("Muse", "Uprising")
+    bicycle.id, uprising.id = 7, 8
+
+    cache = c.load_cache("Rock")
+    assert c.update_cache_songs(cache, [bicycle, uprising]) == (0, 0)
+    assert set(cache["songs"]) == {"7", "8"}
+    assert cache["songs"]["7"]["added"] is True and cache["songs"]["8"]["added"] is False

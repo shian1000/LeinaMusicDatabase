@@ -86,7 +86,7 @@ from utils.database.song_artists import song_artist_credits, song_main_artist_la
 from utils.database.song_references import load_changes
 from utils.database.playlist_sync import follow_song_id_changes
 from utils.database.song_kinds import is_full_album
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
+from config.constants import NO_VIDEO_SENTINEL
 
 INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
 INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
@@ -943,7 +943,7 @@ def finish_request_files(requests: list[RequestFile], cases: list,
                             for report in request.dead_links + request.field_corrections
                             + request.found_links + request.song_requests))
         if done:
-            _move(request.path, PROCESSED)
+            request.path = _move(request.path, PROCESSED)
             moved.append(request)
         else:
             if left_to:

@@ -358,3 +358,17 @@ def test_a_failed_tracklist_request_gives_no_tracks(monkeypatch):
     _mock_search(monkeypatch, [_recording("Notion", [_placed_release("Futureproof", "Album", "1")])])
 
     assert get_album_name("The Rare Occasions", "Notion").load_tracks() == []
+
+
+def test_a_singles_year_isnt_taken_from_someone_elses_release(monkeypatch):
+    # DSC-46: the single's year had only the type filter; get_album_name() also refuses an edition
+    # credited to another artist (Dido's "No Angel" with LeAnn Rimes songs appended)
+    leann = [{"artist": {"id": "leann", "name": "LeAnn Rimes"}}]
+    dido = [{"artist": {"id": "dido", "name": "Dido"}}]
+    other = {**_release("No Angel", "Album", "1999-06-01"), "artist-credit": dido}
+    own = {**_release("Can't Fight the Moonlight", "Single", "2000-10-24"), "artist-credit": leann}
+    recording = {"title": "Can't Fight the Moonlight", "artist-credit": leann, "release-list": [other, own]}
+    _mock_search(monkeypatch, [recording])
+
+    result = music_brainz_fetcher.get_release_year("LeAnn Rimes", "Can't Fight the Moonlight", is_single=True)
+    assert result.year == 2000

@@ -1,16 +1,10 @@
-import questionary
 from utils.ui.prompts import ask_yes_no
-import time
-from utils.database.database_getter import get_artists_from_db_session, extract_db_object_info
-from utils.common.debug import slog, mlog
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import artist_primary_songs, merge_artists_in_db, divide_artist
-from utils.database.datatables import artist_categories, song_categories
-from rich import print
+from utils.database.datatables import song_categories
 from questionary import Style
-from utils.ui.menu_utils import pick_from_db_objects, ask_for_entires_list
+from utils.ui.menu_utils import pick_from_db_objects, ask_for_entries_list
 from utils.database.database_getter import get_songs_from_db_session
-from utils.database.tags_management import has_tag_on_song
 
 
 def merge_artists_menu(artist_objects = None):
@@ -20,7 +14,7 @@ def merge_artists_menu(artist_objects = None):
     q1 = ("Select the artist you want to merge to (stays in db)")
 
     if not artist_objects:
-        artist_objects = ask_for_entires_list(mode = "Artist", allow_one_result=False)
+        artist_objects = ask_for_entries_list(mode = "Artist", allow_one_result=False)
         if not artist_objects:
             return
         
@@ -63,7 +57,7 @@ def merge_artists_menu(artist_objects = None):
 def divide_artists_menu():
     q0 = ("Select the artist you want to divide")
 
-    artist_objects = ask_for_entires_list(mode = "Artist")
+    artist_objects = ask_for_entries_list(mode = "Artist")
     if not artist_objects:
         return
     

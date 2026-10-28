@@ -3,6 +3,7 @@ file is resolved against the repository folder, never the current directory,
 so the app, the systemd timer and tools/ started from elsewhere read the same
 files - the database folder override above all (COM-06)."""
 import importlib
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -55,3 +56,52 @@ def test_other_project_files_ignore_the_current_directory(tmp_path, monkeypatch)
     assert Path(playlists.TOKEN_PATH) == root / ".secrets" / "token.json"
     assert Path(playlists.CLIENT_SECRET_PATH) == root / ".secrets" / "client_secret.json"
     assert Path(spotify_fetcher.DEBUG_SNAPSHOT_FILE) == root / "debug_spotify.html"
+
+
+def _real_database_location():
+    """A private copy of database_location: conftest replaces
+    load_database_dir_override() in the shared one for every test."""
+    spec = importlib.util.spec_from_file_location(
+        "_database_location_copy", constants.PROJECT_ROOT / "src/utils/database/database_location.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("text", ["[1, 2]", "42", '"/media/x"'])
+def test_database_location_override_that_isnt_an_object_is_ignored(text, tmp_path, monkeypatch):
+    location = _real_database_location()
+    config = tmp_path / "database_location_config.json"
+    config.write_text(text)
+    monkeypatch.setattr(location, "_config_path", lambda: config)
+    assert location.load_database_dir_override() is None
+
+
+def test_database_location_override_is_saved_whole(tmp_path, monkeypatch):
+    location = _real_database_location()
+    config = tmp_path / "new" / "database_location_config.json"
+    monkeypatch.setattr(location, "_config_path", lambda: config)
+    location.save_database_dir_override("/media/drive/db")
+    assert location.load_database_dir_override() == "/media/drive/db"
+    assert [p.name for p in config.parent.iterdir()] == [config.name]
+    location.save_database_dir_override(None)
+    assert location.load_database_dir_override() is None
+
+
+@pytest.mark.parametrize("text", ['[100]', '{"max_songs_per_fetch": "100"}', '{"max_songs_per_fetch": 0}',
+                                  '{"max_songs_per_fetch": -5}', '{"max_songs_per_fetch": true}', '{}'])
+def test_max_songs_per_fetch_that_isnt_a_positive_number_is_the_default(text, tmp_path, monkeypatch):
+    # DB-39: a list gave AttributeError, "100" / 0 / -5 went straight into the Fill missing data loop
+    from utils.database import fetch_data_settings
+    config = tmp_path / "fetch_data_config.json"
+    config.write_text(text)
+    monkeypatch.setattr(fetch_data_settings, "_config_path", lambda: config)
+    assert fetch_data_settings.load_max_songs_per_fetch() == constants.DEFAULT_MAX_SONGS_PER_FETCH
+
+
+def test_max_songs_per_fetch_is_read_back(tmp_path, monkeypatch):
+    from utils.database import fetch_data_settings
+    config = tmp_path / "fetch_data_config.json"
+    monkeypatch.setattr(fetch_data_settings, "_config_path", lambda: config)
+    fetch_data_settings.save_max_songs_per_fetch(79)
+    assert fetch_data_settings.load_max_songs_per_fetch() == 79

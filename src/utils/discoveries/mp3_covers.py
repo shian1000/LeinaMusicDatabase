@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from mutagen import MutagenError
 from mutagen.id3 import ID3, ID3NoHeaderError
 from PIL import Image, UnidentifiedImageError
 
@@ -38,7 +39,7 @@ from config.constants import (
     ALBUM_COVER_STATUS_FOUND,
     ID3_PICTURE_TYPE_FRONT_COVER,
 )
-from utils.common.debug import flog, slog
+from utils.common.debug import flog
 from utils.database.albums import cover_filename, covers_dir
 from utils.database.datatables import Album, AlbumCover
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
@@ -73,6 +74,7 @@ class CoverImportReport:
     unmatched: list = field(default_factory=list)   # file names with no song in the DB
     no_album: int = 0                               # matched a song that has no album row
     albums_written: int = 0
+    failed: list = field(default_factory=list)      # album titles whose cover couldn't be written
     # (Album, CoverChoice) for albums whose tracks carry different pictures
     disagreements: list = field(default_factory=list)
 
@@ -177,7 +179,7 @@ def collect_covers(session, files: list[Path], report: CoverImportReport, progre
             data = read_picture(file)
         except Exception as exc:
             report.unreadable += 1
-            slog(f"[COVERS] can't read tags of {file}: {exc}")
+            flog(f"Cover import: can't read the tags of {file}: {type(exc).__name__}: {exc}")
             continue
         if not data:
             report.no_image += 1
@@ -191,7 +193,7 @@ def collect_covers(session, files: list[Path], report: CoverImportReport, progre
             dhash = difference_hash(image)
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             report.unreadable += 1
-            slog(f"[COVERS] bad embedded image in {file}: {exc}")
+            flog(f"Cover import: bad embedded image in {file}: {exc}")
             continue
 
         try:
@@ -225,10 +227,19 @@ def import_covers_from_mp3(session, folder: Path, directory: Path | None = None,
     for album_id, covers in by_album.items():
         album = session.get(Album, album_id)
         choice = choose_cover(covers)
-        data = read_picture(choice.winner.file)
-        if not data:
+        try:
+            data = read_picture(choice.winner.file)
+            if not data:
+                continue
+            save_file_cover(session, album, data, directory)
+        except (MutagenError, OSError, ValueError) as exc:
+            # One bad picture (or the file changed since the scan) mustn't stop the
+            # albums after it; the ones before are committed already
+            session.rollback()
+            report.failed.append(album.title)
+            flog(f"Cover import: {album.title} (album {album_id}) from {choice.winner.file} failed: "
+                 f"{type(exc).__name__}: {exc}")
             continue
-        save_file_cover(session, album, data, directory)
         session.commit()
         report.albums_written += 1
         if len(choice.pictures) > 1:

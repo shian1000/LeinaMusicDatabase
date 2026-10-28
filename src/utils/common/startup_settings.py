@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from config.constants import STARTUP_STATE_FILE
+from utils.common.debug import flog
 from utils.common.env_file import read_env_value, save_env_value
 
 OFF = "off"
@@ -35,9 +36,10 @@ class StartupSwitch:
 BACKUP = StartupSwitch(
     "STARTUP_BACKUP", "Daily backup",
     "The first start of a day copies music.db, tag.db, files.db and the users' databases into "
-    "src/database/archive/. Turned off, nothing is backed up except right before a database upgrade - "
-    "a mistake, a bad import or a broken disk can't be undone from a recent copy; every start then "
-    "warns once the newest backup is more than 7 days old.",
+    "archive/ in the database folder (Settings -> Database location). Turned off, nothing is backed "
+    "up except right before a database upgrade - a mistake, a bad import or a broken disk can't be "
+    "undone from a recent copy; every start then warns once the newest backup is more than "
+    f"{BACKUP_WARNING_AGE.days} days old.",
 )
 MOOD_CHANGES = StartupSwitch(
     "STARTUP_MOOD_CHANGES", "Global mood changes from Leina Radio",
@@ -125,8 +127,10 @@ def mark_daily_tasks_run(today: str | None = None, state_file: Path | str = STAR
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_text(json.dumps(state, indent=2))
         tmp.replace(path)
-    except OSError:
-        pass  # at worst the daily tasks run again at the next start
+    except OSError as exc:
+        # At worst the daily tasks run again at the next start - but say why, or
+        # a folder that's never writable runs them at every start unexplained
+        flog(f"Saving the startup state to {path} failed: {exc}")
 
 
 def backup_warning(newest: datetime | None, now: datetime | None = None) -> str | None:

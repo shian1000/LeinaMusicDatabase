@@ -10,7 +10,6 @@ from utils.common.debug import flog, slog
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 import re
 import time
-from utils.database.database_getter import get_songs_from_db_session
 
 # -- Internal helpers ----------------------------------------------------------
 

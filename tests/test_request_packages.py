@@ -103,6 +103,17 @@ def test_a_package_imported_twice_skips_what_is_there(inbox, tmp_path):
     assert not (inbox / "new" / NAME).exists()
 
 
+def test_a_file_rejected_as_unreadable_can_come_back_in_a_package(inbox, tmp_path):
+    # SRV-35: the server took such a file again, a package skipped it as "already there"
+    (inbox / "rejected").mkdir()
+    (inbox / "rejected" / NAME).write_bytes(b"half a file")
+
+    result = rp.import_package(_zip(tmp_path, [(NAME, SQLITE)]))
+
+    assert result.added == [NAME] and result.already_there == []
+    assert (inbox / "new" / NAME).read_bytes() == SQLITE
+
+
 def _symlink(name):
     info = zipfile.ZipInfo(name)
     info.external_attr = (stat.S_IFLNK | 0o777) << 16

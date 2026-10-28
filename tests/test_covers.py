@@ -74,6 +74,16 @@ def test_blob_is_stored_once_under_its_hash(user_folder):
     assert [p.name for p in (user_folder / "covers").iterdir() if p.name.startswith(".")] == []
 
 
+def test_blob_lookup_takes_only_a_hash(user_folder):
+    # DB-37: a value that isn't a hash never becomes a path, a stray file isn't a cover
+    covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    for value in ("../" + sha(PNG), sha(PNG) + "\n", sha(PNG).upper(), "", None):
+        assert covers.blob_path(user_folder, value) is None
+    assert covers.archive_blob(user_folder, "../covers/" + sha(PNG)) is None
+    with pytest.raises(covers.UnsupportedImageError):
+        covers.content_type_of(user_folder / "covers" / "notes.txt")
+
+
 @pytest.mark.parametrize("data, content_type, error", [
     (PNG, "image/png", covers.HashMismatchError),         # sent under another picture's hash
     (PNG, "image/gif", covers.UnsupportedImageError),

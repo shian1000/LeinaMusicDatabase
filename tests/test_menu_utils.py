@@ -83,5 +83,5 @@ def test_an_artist_search_that_stops_says_why(monkeypatch, capsys, found, allow_
     """UI-20: these went only to the debug log; without DEBUG the menu just came back."""
     monkeypatch.setattr("builtins.input", lambda prompt="": "abba")
     monkeypatch.setattr(menu_utils, "get_artists_from_db_session", lambda *a, **k: found)
-    assert menu_utils.ask_for_entires_list(mode="Artist", allow_one_result=allow_one) is None
+    assert menu_utils.ask_for_entries_list(mode="Artist", allow_one_result=allow_one) is None
     assert message in capsys.readouterr().out

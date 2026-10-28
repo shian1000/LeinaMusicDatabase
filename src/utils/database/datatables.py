@@ -1,9 +1,6 @@
-import os
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker, validates
+from sqlalchemy import Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
+from sqlalchemy.orm import declarative_base, relationship, validates
 from utils.common.normalizer import composed
-from utils.common.debug import slog
-import re
 
 Base = declarative_base()
 

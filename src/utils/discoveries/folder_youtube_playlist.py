@@ -55,7 +55,8 @@ def _artists_resemble(a: str | None, b: str | None) -> bool:
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
         return False
-    if name_key(a) == name_key(b) or na in nb or nb in na:  # "A" vs "A feat. B"
+    # "A" vs "A feat. B" - as whole words, so "Ka" isn't found in "Kayah"
+    if name_key(a) == name_key(b) or f" {na} " in f" {nb} " or f" {nb} " in f" {na} ":
         return True
     return similarity(na, nb) >= scaled_similarity_threshold(na, nb, SPELLING_CHECK_THRESHOLD)
 

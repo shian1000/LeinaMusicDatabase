@@ -1,6 +1,5 @@
 from utils.database.database_getter import get_songs_from_db_session
 from utils.common.text_utils import is_blacklisted_album
-import time
 import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.database.artist_reassignment import credit_unknown_artist_song
@@ -9,7 +8,7 @@ from utils.database.database_sessions import require_global_database_sessions, s
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
 from config.constants import TITLE_JUNK_SUFFIXES
-from utils.database.datatables import Album, Artist, Song, artist_categories
+from utils.database.datatables import Album, Artist, Song
 import re
 from utils.common.normalizer import strip_brackets, strip_format_characters
 from utils.common.script_utils import fix_mixed_script_words
@@ -293,14 +292,16 @@ def seek_nonsense_names(songs):
             continue
 
         if field == "album":
-            new_name = input("Enter new album name: ")
-            edit_db_entry(song, "album", new_name)
+            # Empty skips, as everywhere else; clearing the album takes a "-"
+            new_name = input("Enter new album name (nothing = keep it, '-' = no album): ").strip()
+            if new_name == "":
+                print(f"Kept '{old_value}'")
+            else:
+                edit_db_entry(song, "album", "" if new_name == "-" else new_name)
         else:
             new_name = input("Enter new title: ")
             if new_name == "":
                 new_name = strip_brackets(old_value)
-                print(new_name)
-            print(new_name)
             if new_name:
                 edit_db_entry(song, "title", new_name)
             else:

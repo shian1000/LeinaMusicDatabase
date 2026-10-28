@@ -324,8 +324,8 @@ def test_single_release_year_uses_credits_and_label_fallback(no_discovery_stats)
         return 2020 if artist == "Sw@da x Maxim" else None
 
     modules = [("fake", "Fake", SimpleNamespace(get_release_year=fake_get_release_year))]
-    year = dm.discover_release_year("Sw@da", "Bahato", True, modules, song=_transient_collab())
-    assert year == 2020
+    result = dm.discover_release_year_result("Sw@da", "Bahato", True, modules, song=_transient_collab())
+    assert result.year == 2020
     assert queries[0] == "Sw@da"
 
 

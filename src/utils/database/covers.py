@@ -66,15 +66,23 @@ class CoverMissingError(CoverError):
 
 
 def is_sha256(value) -> bool:
-    return isinstance(value, str) and SHA256_RE.match(value) is not None
+    return isinstance(value, str) and SHA256_RE.fullmatch(value) is not None
 
 
 def content_type_of(path: Path) -> str:
-    return next(t for t, (ext, _) in IMAGE_TYPES.items() if ext == path.suffix)
+    """The content type of a stored blob; UnsupportedImageError for any other
+    extension (a stray file in covers/)."""
+    content_type = next((t for t, (ext, _) in IMAGE_TYPES.items() if ext == path.suffix), None)
+    if content_type is None:
+        raise UnsupportedImageError(f"{path.name}: not a stored cover")
+    return content_type
 
 
 def blob_path(user_folder, sha: str) -> Path | None:
-    """The stored blob of this hash, or None."""
+    """The stored blob of this hash, or None - also for anything that isn't a
+    hash, so a value from a request never becomes a path outside covers/."""
+    if not is_sha256(sha):
+        return None
     for ext, _ in IMAGE_TYPES.values():
         path = Path(user_folder) / COVERS_SUBDIR / f"{sha}{ext}"
         if path.is_file():

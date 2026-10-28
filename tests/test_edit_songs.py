@@ -120,7 +120,7 @@ def _divide_menu():
 
 def test_divide_artists_back_does_nothing(song, monkeypatch):
     menu = _divide_menu()
-    monkeypatch.setattr(menu, "ask_for_entires_list", lambda mode: [song.artist])
+    monkeypatch.setattr(menu, "ask_for_entries_list", lambda mode: [song.artist])
     monkeypatch.setattr(menu, "pick_from_db_objects", lambda objects, question: None)
     monkeypatch.setattr(menu, "divide_artist", lambda artist: pytest.fail("divided"))
 
@@ -133,7 +133,7 @@ def test_divide_artists_lists_the_artists_songs(session, song, monkeypatch, caps
     session.commit()
     monkeypatch.setattr(dm, "get_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(dm, "require_global_database_sessions", lambda: (session, None))
-    monkeypatch.setattr(menu, "ask_for_entires_list", lambda mode: [song.artist])
+    monkeypatch.setattr(menu, "ask_for_entries_list", lambda mode: [song.artist])
     monkeypatch.setattr(menu, "pick_from_db_objects", lambda objects, question: objects[0])
     monkeypatch.setattr(menu, "ask_yes_no", lambda q: True)
     monkeypatch.setattr(menu, "submit_global_database_session", session.commit)

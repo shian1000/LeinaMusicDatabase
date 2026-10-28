@@ -52,7 +52,7 @@ from utils.database.inbox_requests import (
     superseded_by_hand,
     unmark_bad_video,
 )
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
+from config.constants import NO_VIDEO_SENTINEL
 
 # Settled statuses of their own
 ONLY_BAD_VIDEOS = "only videos found bad before"

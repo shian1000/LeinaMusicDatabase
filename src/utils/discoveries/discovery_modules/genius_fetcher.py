@@ -4,13 +4,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
-import re
+from urllib.parse import quote
 from utils.common.debug import flog, slog
 from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
-from difflib import SequenceMatcher
 
-MODULE_NAME = "Genius lyrics fetcher"
+MODULE_NAME = "Genius fetcher"
 
 def _url_slug(url: str) -> str:
     """"metronomy-love-letters-lyrics" -> "metronomy love letters lyrics" """
@@ -45,8 +44,9 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     driver = get_global_driver()
     
     # Search via Genius search page
-    query = f"{artist} {title}".replace(" ", "%20")
-    url = (f"https://genius.com/search?q={query}")
+    # Every character escaped: an "&" or "#" in a title would end the query
+    query = quote(f"{artist} {title}", safe="")
+    url = f"https://genius.com/search?q={query}"
     slog(url, priority=1)
     driver.get(url)
     slog(query, priority=1)

@@ -30,7 +30,7 @@ _COMPILATION = "One album: a compilation (various artists)"
 _SOUNDTRACK = "One album: a soundtrack (various artists)"
 _PER_ARTIST = "Separate albums, one per artist"
 _BY_HAND = "Split into albums by hand"
-_DELETE = "Delete album entry for both artists"
+_DELETE = "Clear the album title from these songs"
 _SKIP = "Skip for now"
 _STOP = "Stop here (the rest stays for next time)"
 

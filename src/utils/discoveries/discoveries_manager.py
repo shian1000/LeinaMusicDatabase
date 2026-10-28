@@ -149,7 +149,7 @@ def _year_capable_module_files() -> dict:
 def load_year_discovery_modules():
     """Import and return the *enabled* year-capable discovery modules, in
     the user's configured order (see discovery_settings.py), ready to be
-    passed to discover_release_year()."""
+    passed to discover_release_year_result()."""
     module_files = _year_capable_module_files()
     config = reconcile_year_discovery_config(module_files.keys())
 
@@ -615,13 +615,6 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
     if result:
         record_year_success(module_id)
     return result
-
-
-def discover_release_year(artist: str, query: str, is_single: bool, modules, artist_synonyms: str | None = None,
-                          song=None) -> int | None:
-    """discover_release_year_result(), reduced to just the year."""
-    result = discover_release_year_result(artist, query, is_single, modules, artist_synonyms, song)
-    return result.year if result else None
 
 
 def discover_release_year_result(artist: str, query: str, is_single: bool, modules,

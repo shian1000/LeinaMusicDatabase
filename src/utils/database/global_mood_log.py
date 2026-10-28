@@ -142,7 +142,8 @@ def global_mood_name(tag_db_path, mood_id: int) -> str | None:
     or a copy from before tags.kind. Raises sqlite3.Error when the copy can't
     be read (missing, locked, damaged): the server answers 503 then, not "no
     such mood", or the phone would drop a mood that still exists."""
-    conn = sqlite3.connect(f"file:{tag_db_path}?mode=ro", uri=True, timeout=15)
+    # as_uri() escapes "?", "#" and "%" in the folder names
+    conn = sqlite3.connect(f"{Path(tag_db_path).absolute().as_uri()}?mode=ro", uri=True, timeout=15)
     try:
         if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(tags)")}:
             return None

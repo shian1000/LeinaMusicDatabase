@@ -34,3 +34,28 @@ def test_an_empty_artist_finds_nothing_instead_of_an_index_error(tmp_path):
 
     assert fm.find_in_index(rows, "", "Song") is None
     assert fm.find_in_index(rows, None, "Song") is None
+
+
+def test_an_index_on_a_share_is_read_from_a_private_copy_removed_afterwards(tmp_path, monkeypatch):
+    # COM-39: every run left the index at the shared /tmp/.mp3_index.sqlite3
+    from types import SimpleNamespace
+    import tempfile
+    source = tmp_path / "share" / ".mp3_index.sqlite3"
+    source.parent.mkdir()
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE files (path TEXT, artist TEXT, title TEXT)")
+        db.execute("INSERT INTO files VALUES ('/music/a.mp3', 'Hey', 'Teksański')")
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    read_from, copied = [], []
+    real_read = fm._read_index
+    monkeypatch.setattr(fm, "_read_index", lambda path: read_from.append(path) or real_read(path))
+    monkeypatch.setattr(fm, "copy_file_to_destination", lambda path, dest: copied.append(path))
+
+    remote = SimpleNamespace(read_bytes=source.read_bytes)  # an UPath to smb://, as far as this goes
+    fm.copy_songs_using_index([("Hey", "Teksański")], remote, tmp_path / "out")
+
+    assert copied == ["/music/a.mp3"]
+    assert temp_root in read_from[0].parents
+    assert list(temp_root.iterdir()) == []

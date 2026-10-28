@@ -40,7 +40,7 @@ from config.constants import (
     USERNAME_PATTERN,
 )
 from settings import Settings, drive_unavailable_message, sharing_dir_available
-from utils.database.account_auth import PERMISSIONS, password_matches, revoke_all_tokens
+from utils.database.account_auth import PERMISSIONS, check_login, revoke_all_tokens
 from utils.database.account_auth import user_permissions as _user_permissions
 
 USERS_DIR = Path(str(Settings.users_dir)) if Settings.users_dir else None
@@ -125,15 +125,13 @@ def hash_password(password: str) -> str:
 
 
 def verify_user(username: str, password: str) -> bool:
-    """True when the user exists and the password is theirs."""
+    """True when the user exists and the password is theirs. An unreadable
+    account.json is a wrong password, the same as for the server's login."""
     try:
-        account_file = user_dir(username) / USER_ACCOUNT_FILENAME
+        folder = user_dir(username)
     except InvalidUserError:
         return False
-    if not account_file.exists():
-        return False
-    account = json.loads(account_file.read_text())
-    return password_matches(password, account.get("password", ""))
+    return check_login(folder.parent, folder.name, password) is not None
 
 
 # --------------------

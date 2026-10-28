@@ -11,13 +11,14 @@ Delete the cache file (``data/spellcheck_cache.json`` by default) to force fresh
 lookups of everything.
 """
 
+import atexit
 import json
 import os
 import tempfile
 import threading
 from typing import Optional
 
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from config.constants import SPELLCHECK_CACHE_FILE
 
 _CACHE_PATH = SPELLCHECK_CACHE_FILE
@@ -75,11 +76,20 @@ def save() -> None:
         try:
             _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(_CACHE_PATH.parent), suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(_cache, f, ensure_ascii=False)
-            os.replace(tmp, _CACHE_PATH)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(_cache, f, ensure_ascii=False)
+                os.replace(tmp, _CACHE_PATH)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
             _dirty = False
             _pending = 0
             slog(f"[SPELLCACHE] Saved {len(_cache)} entries to {_CACHE_PATH}", priority=1)
         except OSError as e:
-            slog(f"[SPELLCACHE] Failed to save cache: {e}", priority=1)
+            flog(f"[SPELLCACHE] Saving {_CACHE_PATH} failed: {e}")
+
+
+# Only the import pipeline saves on its own; Check spelling and the fetchers
+# would otherwise lose up to _AUTOSAVE_EVERY - 1 answers when the app exits
+atexit.register(save)

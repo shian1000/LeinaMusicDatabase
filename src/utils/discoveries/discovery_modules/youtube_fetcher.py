@@ -2,16 +2,17 @@ import time
 from urllib.parse import quote
 
 from bs4 import BeautifulSoup
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from config.constants import SPELLING_CHECK_THRESHOLD
+from config.constants import NO_VIDEO_SENTINEL, SPELLING_CHECK_THRESHOLD
 from utils.common.debug import flog, slog
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, get_video_release_year, search_video_ytdlp
+from utils.youtube.manage_youtube_playlists import get_video_release_year, search_video_ytdlp
 
 # Scrapes the public music.youtube.com web player instead of calling the
 # official YouTube Data API, so no app registration / API key is needed.
@@ -41,9 +42,13 @@ def _reject_consent_if_present(driver) -> None:
         flog("[YouTube] Couldn't find/click the consent 'Reject all' button")
         return
 
-    WebDriverWait(driver, 8).until(
-        lambda d: _CONSENT_URL_MARKER not in d.current_url
-    )
+    try:
+        WebDriverWait(driver, 8).until(
+            lambda d: _CONSENT_URL_MARKER not in d.current_url
+        )
+    except TimeoutException:
+        # get_album_name() loads the search page again either way
+        flog("[YouTube] Still on the consent page 8 s after 'Reject all'")
 
 
 def _find_matching_song(soup: BeautifulSoup, artist: str, title: str):

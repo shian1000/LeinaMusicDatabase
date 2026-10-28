@@ -55,3 +55,21 @@ def test_failed_install_leaves_requirements_alone(monkeypatch, tmp_path):
 
     with pytest.raises(u.subprocess.CalledProcessError):
         u.install_ytdlp("2026.8.19")
+
+
+def test_a_stalled_pip_is_stopped_and_the_app_goes_on(monkeypatch, capsys):
+    # YT-19: pip without a timeout could keep the app from opening (the offer comes at startup)
+    from utils.ui import ytdlp_update_prompt as prompt
+    seen = {}
+
+    def pip_hangs(*a, timeout=None, **k):
+        seen["timeout"] = timeout
+        raise u.subprocess.TimeoutExpired("pip", timeout)
+    monkeypatch.setattr(u.subprocess, "run", pip_hangs)
+    monkeypatch.setattr(u, "repin_requirements", lambda: pytest.fail("re-pinned after a failed install"))
+    monkeypatch.setattr(prompt, "available_update", lambda: ("2026.7.4", "2026.8.19"))
+    monkeypatch.setattr(prompt, "ask_yes_no", lambda q: True)
+
+    prompt.offer_ytdlp_update()
+    assert seen["timeout"] == u.YTDLP_INSTALL_TIMEOUT
+    assert "took too long" in capsys.readouterr().out

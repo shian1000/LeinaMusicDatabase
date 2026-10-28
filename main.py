@@ -28,6 +28,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-
-#TODO On importing songs, note which artists are new

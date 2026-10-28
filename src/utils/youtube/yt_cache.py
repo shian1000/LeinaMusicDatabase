@@ -14,6 +14,25 @@ def make_song_key(artist: str, title: str) -> str:
     return f"{artist}|||{title}"
 
 
+def song_key(song) -> str:
+    """A song's entry in a playlist's cache: its id, so two songs of one
+    artist with the same title (a duplicate, another version) are two
+    entries - keyed "artist|||title" they overwrote each other and only one
+    reached the playlist. A song without an id falls back to that key."""
+    song_id = getattr(song, "id", None)
+    return str(song_id) if song_id is not None else make_song_key(song.artist.name, song.title)
+
+
+def _adopt_title_keys(cache: dict, songs) -> None:
+    """Rename entries a cache from before song_key() holds under
+    "artist|||title" to the song's id, so a playlist started then resumes
+    without adding its songs twice."""
+    for song in songs:
+        old, new = make_song_key(song.artist.name, song.title), song_key(song)
+        if old != new and old in cache["songs"] and new not in cache["songs"]:
+            cache["songs"][new] = cache["songs"].pop(old)
+
+
 def _read_all() -> dict:
     """Every unfinished playlist on disk, by name. The file used to hold a
     single playlist's cache at its top level (and "null" after a failed
@@ -63,9 +82,8 @@ def init_cache(playlist_id: str, playlist_name: str, songs):
     }
 
     for song in songs:
-        # Keyed on the primary artist alone - create_yt_playlist() maps keys
-        # back to Song rows the same way
-        cache["songs"][make_song_key(song.artist.name, song.title)] = _song_entry(song)
+        # create_yt_playlist() maps keys back to Song rows the same way
+        cache["songs"][song_key(song)] = _song_entry(song)
 
     save_cache(cache)
     return cache
@@ -75,7 +93,8 @@ def update_cache_songs(cache: dict, songs) -> tuple[int, int]:
     """Resuming with the songs picked now: a song not in the cache yet is
     added, one never added to the playlist that isn't among them is dropped
     (added ones stay, as a record). Returns (new, dropped) and saves."""
-    wanted = {make_song_key(song.artist.name, song.title): song for song in songs}
+    _adopt_title_keys(cache, songs)
+    wanted = {song_key(song): song for song in songs}
     dropped = [key for key, entry in cache["songs"].items() if key not in wanted and not entry["added"]]
     for key in dropped:
         del cache["songs"][key]

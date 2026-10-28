@@ -34,6 +34,11 @@ import logging  # noqa: E402
 from utils.common import debug  # noqa: E402
 
 debug.DEBUG_LOG_FILE = _ISOLATED_DIR / "debug.log"
+
+# check_spelling() answers: saved every 20 and when the process exits
+from utils.common import spellcheck_cache  # noqa: E402
+
+spellcheck_cache._CACHE_PATH = _ISOLATED_DIR / "spellcheck_cache.json"
 _link_log = logging.getLogger("youtube_link_cache")
 _link_log.addHandler(logging.FileHandler(_ISOLATED_DIR / "youtube_link_cache.log", encoding="utf-8"))
 _link_log.setLevel(logging.INFO)

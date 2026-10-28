@@ -141,3 +141,32 @@ def test_import_writes_one_cover_per_album_and_reruns_update(tmp_path, session, 
     mc.import_covers_from_mp3(session, music, covers)
     assert session.query(AlbumCover).count() == 1
     assert sorted(p.name for p in covers.iterdir()) == [f"{album_id}.jpg"]
+
+
+def test_one_bad_picture_doesnt_stop_the_albums_after_it(tmp_path, session, monkeypatch):
+    # DSC-23: an image Pillow couldn't re-encode stopped the import half-way
+    artist = Artist(name="Hey")
+    session.add(artist)
+    session.add_all([Song(title="A", artist=artist, album="Bad"), Song(title="B", artist=artist, album="Good")])
+    session.commit()
+    music = tmp_path / "music"
+    music.mkdir()
+    _mp3(music / "A.mp3", (3, _image(500, 500, seed=1)))
+    _mp3(music / "B.mp3", (3, _image(500, 500, seed=2)))
+    monkeypatch.setattr(mc, "read_file_metadata", lambda f: {"artist_name": "Hey", "title": f.stem})
+    monkeypatch.setattr(mc.LocalSongMatcher, "match", _match_by_title(session))
+    real_encode = mc.encode_cover
+    calls = []
+
+    def encode_failing_first(data):
+        calls.append(data)
+        if len(calls) == 1:
+            raise OSError("image file is truncated")
+        return real_encode(data)
+
+    monkeypatch.setattr(mc, "encode_cover", encode_failing_first)
+    report = mc.import_covers_from_mp3(session, music, tmp_path / "covers")
+
+    assert report.failed == ["Bad"]
+    assert report.albums_written == 1
+    assert [row.album.title for row in session.query(AlbumCover)] == ["Good"]

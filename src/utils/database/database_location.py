@@ -28,6 +28,9 @@ def load_database_dir_override() -> Optional[str]:
     except (json.JSONDecodeError, OSError) as e:
         slog(f"Failed to read database location config, ignoring override: {e}")
         return None
+    if not isinstance(data, dict):
+        slog(f"Database location config isn't a JSON object, ignoring override: {data!r}")
+        return None
     return data.get("database_dir") or None
 
 
@@ -38,4 +41,8 @@ def save_database_dir_override(path_str: Optional[str]) -> None:
         if path.exists():
             path.unlink()
         return
-    path.write_text(json.dumps({"database_dir": path_str}, indent=2))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Read at every start: a write cut short must not leave half a file
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"database_dir": path_str}, indent=2))
+    tmp.replace(path)

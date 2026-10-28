@@ -195,6 +195,16 @@ def test_a_day_marked_by_the_backup_isnt_run_again_with_it_off(tmp_path):
     assert switches.first_start_today(None, state) is False
 
 
+def test_a_startup_state_it_cant_save_is_logged(tmp_path, monkeypatch):
+    # COM-25: swallowed silently, the daily tasks ran at every start with nothing saying why
+    logged = []
+    monkeypatch.setattr(switches, "flog", logged.append)
+    blocker = tmp_path / "data"
+    blocker.write_text("a file where the folder should be")
+    switches.mark_daily_tasks_run("2026-10-28", blocker / "startup_state.json")
+    assert len(logged) == 1 and "startup_state.json" in logged[0]
+
+
 # ==================== the .env round trip ====================
 
 def test_switches_are_on_by_default_and_off_is_written_to_env(tmp_path):
@@ -249,3 +259,20 @@ def test_the_settings_screen_saves_the_ticks_and_the_github_switch(monkeypatch, 
     assert "Changed: Daily backup, Daily publish to GitHub." in out
     assert "The daily backup is off" in out
 
+
+
+def test_env_example_copied_as_it_is_sets_no_folder():
+    # COM-26: "/path/to/Music/Library/" copied unchanged gave messages about a folder that isn't
+    # there instead of a clean "not set"
+    from dotenv import dotenv_values
+    from config.constants import PROJECT_ROOT
+    example = dotenv_values(PROJECT_ROOT / ".env.example")
+    for key in ("MUSIC_LIBRARY_DIR", "SHARING_DIR", "SHARING_DRIVE_MOUNT"):
+        assert example[key] == "", key
+
+
+def test_backup_switch_text_follows_the_database_folder_and_the_warning_age():
+    # COM-42: it named src/database/archive/ (the folder can be moved) and wrote out "7 days"
+    text = switches.BACKUP.explanation
+    assert "src/database" not in text
+    assert f"more than {switches.BACKUP_WARNING_AGE.days} days old" in text

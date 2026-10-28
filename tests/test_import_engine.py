@@ -319,3 +319,30 @@ def test_the_full_album_entry_finds_the_full_album(env):
     full = session.query(Song).filter_by(kind=SONG_KIND_FULL_ALBUM).one()
     track = session.query(Song).filter(Song.kind.is_(None)).one()
     assert (full.youtube_video_id, track.youtube_video_id) == ("album", None)
+
+
+# ==================== Etap 18 ====================
+
+def test_a_corrected_title_must_be_the_song_not_part_of_its_title(env):
+    # DSC-40: MusicBrainz corrected "Lowe" to "Low", and "low" in "lowlands" offered Lowlands as the song
+    session = env["session"]
+    _artist(session, "Cracker", "Lowlands")
+    env["spelling"][("Cracker", "Lowe")] = {"found": True, "corrected_artist": "Cracker", "corrected_title": "Low"}
+
+    [song] = ie.run_import_batch([_entry("Cracker", "Lowe")])
+
+    assert song.title == "Lowe"
+    assert env["questions"] == []
+
+
+def test_the_summary_counts_filled_in_links_and_names_an_artist_once(env, capsys):
+    # DSC-42: "updated 0" whatever happened, two lines for one existing artist
+    session = env["session"]
+    _artist(session, "Hey", "Teksański", "Cisza")
+
+    ie.run_import_batch([_entry("Hey", "Teksański", youtube_video_id="vid1"), _entry("Hey", "Cisza")])
+
+    out = capsys.readouterr().out
+    assert "Done! Added 0, updated 1 (a YouTube link filled in)." in out
+    assert "Skipped 2 songs:" in out
+    assert out.count("Found existing artist") == 1

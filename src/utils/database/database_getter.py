@@ -1,12 +1,8 @@
-from utils.database.music_db_manager import get_music_session
-from utils.database.datatables import Song, Artist
-from utils.database.tag_db_manager import get_tag_session, Tag, SongTag
-from sqlalchemy import func, inspect, or_, select
+from utils.database.tag_db_manager import Tag, SongTag
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
-import os
 from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist, Album
-import time
-from utils.common.debug import mlog, slog
+from utils.common.debug import slog
 from utils.common.text_utils import is_soundtrack_artist, normalize_text
 from utils.common.normalizer import normalize
 from collections import Counter
@@ -457,7 +453,7 @@ def get_artists_from_db_session(
     category: str = None,
     query: str = None,
     artist_id: int = None,
-    aggresive_search: bool = False
+    aggressive_search: bool = False
 ) -> list[Artist]:
 
     slog(category)
@@ -500,7 +496,7 @@ def get_artists_from_db_session(
             artist_categories[1]: lambda artist: normalize_text(artist.origin),
         }
 
-        if aggresive_search or not query_has_any_standard_latin_characters:
+        if aggressive_search or not query_has_any_standard_latin_characters:
             # Python-side normalized filtering — handles Polish and other non-ASCII characters
             slog("Falling back to Python-side normalized filtering")
             get_field = CATEGORY_NORMALIZED_FIELDS[category]

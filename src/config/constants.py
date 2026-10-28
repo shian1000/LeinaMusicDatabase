@@ -129,9 +129,22 @@ BAD_VIDEO_REASONS = {
     BAD_VIDEO_NO_VIDEO_FOR_SONG: 'the owner chose "N/A" (no video) for this song',
 }
 
+# `Song.youtube_video_id` value meaning "confirmed: this song has no video on
+# YouTube at all" — distinct from the field being empty/unset (never checked)
+# and from a real video_id (found, possibly stale), as opposed to the
+# "excluded from search results" escape hatch (see
+# docs/agent-notes/youtube-search-matching.md), where a real video_id does
+# exist and is stored instead. Set by hand (the song's YouTube link) and by
+# the inbox's NO_VIDEO decision (inbox_requests / inbox_found_links). Respected by create_yt_playlist()
+# (leaves the song out, never overwrites it), youtube_fetcher, the yt-dlp
+# lookups in manage_youtube_playlists.py, and Leina Radio, which doesn't search for such a song.
+NO_VIDEO_SENTINEL = "N/A"
+
 # Daily "is yt-dlp current?" check (utils/youtube/ytdlp_update.py)
 YTDLP_PYPI_URL = "https://pypi.org/pypi/yt-dlp/json"
 YTDLP_UPDATE_CHECK_TIMEOUT = 10
+# pip installing it, offered at startup: a stalled download mustn't keep the app from opening
+YTDLP_INSTALL_TIMEOUT = 300
 # Country (ISO 3166-1 alpha-2) the database's YouTube links have to play in -
 # a video region-blocked here counts as not playing (videos_exist_via_api())
 YOUTUBE_REGION = "PL"
@@ -206,24 +219,18 @@ FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"
 FILE_BROWSER_BACK_OPTION = "<= [Go Back]"
 
 # Menu labels and defaults
-DEFAULT_MENU_EXIT_LABEL = "Back"
 DEFAULT_MENU_PICK_QUESTION = "Pick one"
 DEFAULT_MENU_BACK_LABEL = "Back"
 DEFAULT_FILE_BROWSER_QUESTION = "Pick a destination."
 FILE_BROWSER_EXIT_OPTION = "Exit file manager"
 
 # Similarity thresholds
-FILE_SIMILARITY_THRESHOLD = 90  # Percentage (0-100)
+FILE_SIMILARITY_THRESHOLD = 90  # Percentage (0-100): rapidfuzz, file_management.fuzzy_match()
 SPELLING_CHECK_THRESHOLD = 0.7  # Decimal (0-1)
-SIMILARITY_THRESHOLD = 0.77 # Used when resolving duplicates
 # Two artist rows offered for merging as one spelt differently ("Man I Trust" /
 # "Men I Trust" 0.91) - stricter than the lookup threshold, since a merge
 # moves every song: "Persona 5 OST" / "Persona 5 Strikers OST" is 0.74
 SAME_ARTIST_SIMILARITY_THRESHOLD = 0.85
-
-# Search constants
-DEFAULT_SEARCH_MODE = "Song"
-DEFAULT_SEARCH_QUESTION = "What query do you wish to search for: "
 
 # ==================== Database Constants ====================
 
@@ -427,37 +434,7 @@ ARTIST_SPLIT_IGNORE_FILE = PROJECT_ROOT / "data/artist_split_ignore.json"
 # Men") that a split on one is proposed only when a part is already an artist.
 ARTIST_JOINING_WORDS = ("and", "und", "et", "i", "y", "і", "и", "та")
 
-# ==================== System Constants ====================
-
-# Operating system commands
-CLEAR_SCREEN_UNIX = "clear"
-CLEAR_SCREEN_WINDOWS = "cls"
-
-# Text processing
-TEXT_NORMALIZATION_REPLACEMENTS = {
-    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
-    "ó": "o", "ś": "s", "ź": "z", "ż": "z",
-    "à": "a", "â": "a", "ä": "a", "é": "e", "è": "e",
-    "ê": "e", "ë": "e", "î": "i", "ï": "i", "ô": "o",
-    "ö": "o", "û": "u", "ü": "u", "ç": "c",
-}
-
-SPELLCHECK_MARKER = "[exact]"
-SPELLCHECK_SUBSTRING_MARKER = "[substring]"
-
-# ==================== String Patterns ====================
-
-# File naming
-TEXT_SEPARATOR = "_"
-
-# SMB Protocol
-SMB_PROTOCOL_PREFIX = "smb://"
-
 # ==================== Default Values ====================
-
-# Default query modes
-QUERY_MODE_ARTIST = "Artist"
-QUERY_MODE_SONG = "Song"
 
 # Default dialog choices
 DIALOG_NO_RESULT = -1

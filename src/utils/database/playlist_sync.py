@@ -303,7 +303,9 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
     checked against, for playlists.song_ids_checked_to - 0 when the copy
     can't be read, so the app replays the whole log for this playlist."""
     try:
-        conn = sqlite3.connect(f"file:{music_db_path}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_SECONDS)
+        # as_uri() escapes "?", "#" and "%" in the folder names
+        conn = sqlite3.connect(f"{Path(music_db_path).absolute().as_uri()}?mode=ro", uri=True,
+                               timeout=BUSY_TIMEOUT_SECONDS)
     except sqlite3.Error:
         return 0
     try:

@@ -102,7 +102,7 @@ def find_similar_artist(metadata: dict) -> list:
 
     return similar_artists
 
-def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
+def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
     """
     Check if a similar song already exists for the artist and return it.
 
@@ -162,9 +162,11 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song:
     slog(similarity_percent)
 
     if(similarity_percent > SPELLING_CHECK_THRESHOLD):
-        # Search DB again with corrected spelling
+        # Search DB again with corrected spelling - the same title, not one
+        # merely containing it (a corrected "Low" isn't "Lowlands")
+        corrected_core = _title_core(corrected_spelling)
         for ex_son in existing_artists_songs:
-            if normalize(corrected_spelling) in normalize(ex_son.title):
+            if corrected_core and _title_core(ex_son.title) == corrected_core:
                 slog(f"      [SPELLCHECK MATCH] Similar song found, deferring decision to caller", priority=1)
                 return ex_son
 
@@ -325,7 +327,6 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
         add_db_entry(new_artist_obj)
     else:
         new_artist_obj = existing_artist
-        print(f"Found existing artist ({new_artist_obj.name})")
 
     # Cache the result for future lookups in this import batch
     artist_cache[normalized_name] = new_artist_obj
@@ -360,6 +361,11 @@ def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
         session.commit()
     return new_song_obj
 
+# Songs whose missing YouTube link the running import filled in - the
+# summary's "updated" (reset by run_import_batch())
+_LINKED_IN_BATCH: list = []
+
+
 def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
     """If this metadata entry came with a YouTube video id (i.e. it's from a
     playlist import) and the matched existing song doesn't have one stored
@@ -370,6 +376,7 @@ def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
     video_id = metadata.get("youtube_video_id")
     if video_id and not existing_song.youtube_video_id:
         existing_song.youtube_video_id = video_id
+        _LINKED_IN_BATCH.append(existing_song)
         print(f"Linked existing song [blue]{existing_song.title}[/blue] to YouTube video [green]{video_id}[/green]")
 
 def find_existing_song(title: str, artist_songs: list, duration_s: int | None = None) -> Song | None:
@@ -856,18 +863,17 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     MBStats.reset()
 
     added_count = 0
-    skipped_count = len(skipped_songs)
+    _LINKED_IN_BATCH.clear()
 
     entry_timings = {}
 
     def process_entry(metadata: dict, idx: int, total: int) -> None:
-        nonlocal added_count, skipped_count
+        nonlocal added_count
         entry_start = time.time()
         label = _entry_label(metadata)
         mlog(f"\n[{idx}/{total}] Processing: {label}")
 
         if not metadata.get("artist_name") or not metadata.get("title"):
-            skipped_count += 1
             skipped_songs.append(label)
             reason_for_skipping.append("Missing artist or title")
             return
@@ -898,7 +904,6 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             added_count += 1
             added_songs.append(new_song_obj)
         else:
-            skipped_count += 1
             skipped_songs.append(label)
             reason_for_skipping.append("Song already exists")
 
@@ -914,7 +919,6 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     if late_entries:
         extra_metadata_list, extra_skipped = late_entries()
         for label, reason in extra_skipped or []:
-            skipped_count += 1
             skipped_songs.append(label)
             reason_for_skipping.append(reason)
         for idx, metadata in enumerate(extra_metadata_list or [], 1):
@@ -970,7 +974,6 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             added_count = added_count + 1
             added_songs.append(deferred_song_obj)
         else:
-            skipped_count = skipped_count + 1
             skipped_songs.append(_entry_label(deferred_metadata))
             reason_for_skipping.append("Song already exists")
 
@@ -986,7 +989,6 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
         added_count += len(new_songs)
         added_songs += new_songs
         for label, reason in skipped:
-            skipped_count += 1
             skipped_songs.append(label)
             reason_for_skipping.append(reason)
 
@@ -1034,7 +1036,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
 
     print("="*70)
 
-    print(f"Skipped {skipped_count} songs:")
+    print(f"Skipped {len(skipped_songs)} songs:")
     for s_s, reason in zip(skipped_songs, reason_for_skipping):
         print(f"{s_s} (reason - {reason})")
     print()
@@ -1042,6 +1044,6 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     print()
     print()
 
-    print(f"\nDone! Added {added_count}, updated 0.")
+    print(f"\nDone! Added {added_count}, updated {len(_LINKED_IN_BATCH)} (a YouTube link filled in).")
     sorted_songs = sorted(added_songs, key=lambda song: (song.artist.name, song.title))
     return sorted_songs

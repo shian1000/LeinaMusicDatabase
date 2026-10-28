@@ -995,7 +995,7 @@ right answer. Every reuse, validation failure, search miss, and DB save in this 
 gates `debug.log`) — check it first if a playlist run picks an unexpected video or a stored link
 stops working.
 
-A separate annotation — `manage_youtube_playlists.NO_VIDEO_SENTINEL` (the literal
+A separate annotation — `config/constants.NO_VIDEO_SENTINEL` (the literal
 string `"N/A"`) — can also be written to `Song.youtube_video_id` to record "checked, this song has
 no video on YouTube in any form" (as opposed to the above, where a real video exists but is
 unreachable by search). It's written by a menu action (`report_no_yt_video()` in
@@ -1113,8 +1113,9 @@ Same non-decomposing-letter shape already documented above for Belarusian "і" (
 — Polish "ł" (U+0142) is a genuinely separate base letter in Unicode, not a base letter plus a
 combining mark, so NFKD folding leaves it untouched. Unlike the Belarusian case, though, there's no
 cross-script ambiguity here: an ASCII-typed DB title dropping "ł" always means plain "l" was
-intended, so a direct substitution table (`_NON_DECOMPOSING_LETTER_FOLDS`, applied inside
-`_fold_diacritics()` after the NFKD pass) closes this gap safely, the same "only ever adds a way to
+intended, so a direct substitution table (`NON_DECOMPOSING_LETTER_FOLDS`, applied inside
+`_fold_diacritics()` after the NFKD pass, and by `import_from_playlist._fold_char()` too, so the
+title clean-up's `strip_artist_from_title()` folds "Łona" the same way) closes this gap safely, the same "only ever adds a way to
 match" guarantee the rest of this diacritic-tolerance machinery already relies on.
 
 Real case: `Krzysztof Zalewski - Milosc Milosc` (DB, ASCII) vs the real `"Miłość Miłość"` — NFKD
@@ -1218,8 +1219,10 @@ with `artist` = the main-artist label "A x B" (feats left out of the query). The
 
 Songs without credits (including old collabs still stored as one joined `Artist` row) take the
 unchanged path, regex split included — the regression suites run entirely on that path.
-The cache key stays `make_song_key(primary name, title)`, since `create_yt_playlist()` maps keys
-back to `Song` rows by the primary name.
+The playlist cache is keyed by `yt_cache.song_key()` - the song's id - so two songs with one
+artist and title (a duplicate, another version) are two entries and both reach the playlist;
+`create_yt_playlist()` maps keys back to `Song` rows the same way. A cache from before that
+(keyed `make_song_key(primary name, title)`) has its entries renamed when the playlist is resumed.
 
 ## Known regressions this logic exists to prevent
 

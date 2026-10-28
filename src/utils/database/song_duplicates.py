@@ -17,11 +17,10 @@ from collections import defaultdict
 from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, DUPLICATE_TITLE_EXTRA_JUNK, DUPLICATE_VERSION_WORDS, TITLE_JUNK_SUFFIXES
 from utils.common.normalizer import normalize
 from utils.common.text_utils import strip_trailing_feat, strip_trailing_junk_suffix
-from utils.database.datatables import Song
+from utils.database.datatables import Artist, Song
 from utils.database.genres import keep_genre_on_merge
 from utils.database.latin_names import keep_latin_on_merge
 from utils.database.artist_splitting import propose_artist_split
-from utils.database.datatables import Artist
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists, song_all_artists
 from utils.database.song_references import record_song_merge
 

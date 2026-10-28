@@ -38,7 +38,6 @@ from utils.database.song_references import apply_song_id_changes
 from utils.database.users import (
     InvalidUserError,
     UsersUnavailableError,
-    list_usernames,
     set_permissions,
     user_permissions,
     users_available,
@@ -46,28 +45,16 @@ from utils.database.users import (
 )
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import execute_menu_item, search_and_pick_db_object
+from utils.ui.user_picker import pick_user, show_error
 
-RED = "\033[91m"
-RESET = "\033[0m"
 _BACK = "Back"
 _CREATE = "Create a global mood"
 # How many of the phones' changes "Changes from the phones" lists
 _HISTORY_SHOWN = 100
 
 
-def _error(message) -> None:
-    print(f"{RED}{message}{RESET}")
-
-
-def _pick_user(question: str) -> str | None:
-    if not users_available():
-        _error(f"The users folder isn't available: {users_unavailable_message()}")
-        return None
-    names = list_usernames()
-    if not names:
-        print('No users yet - create one with "Create a new user".')
-        return None
-    return questionary.select(question, choices=names + [_BACK]).ask()
+_error = show_error
+_pick_user = pick_user  # utils/ui/user_picker.py, the same as in Users
 
 
 def _songs(music_session, song_ids) -> list:

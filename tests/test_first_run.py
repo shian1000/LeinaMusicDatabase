@@ -181,6 +181,21 @@ def test_a_bad_version_json_is_refused(db_dir, release, document, message):
         first_run.download_public_catalog(base_url=release["url"])
 
 
+def test_a_failed_write_is_a_download_error(db_dir, release, monkeypatch):
+    """A full disk or an unwritable folder: still the one error the caller
+    expects (the setup offers an empty start then), nothing left behind."""
+    real_open = open
+
+    def full_disk(path, mode="r", *a, **k):
+        if "w" in mode and str(path).endswith(first_run._PARTIAL_SUFFIX):
+            raise OSError(28, "No space left on device")
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.open", full_disk)
+    with pytest.raises(first_run.CatalogDownloadError, match="No space left"):
+        first_run.download_public_catalog(base_url=release["url"])
+    assert list(db_dir.iterdir()) == []
+
 def test_a_missing_release_says_so(db_dir, release):
     with pytest.raises(first_run.CatalogDownloadError, match="HTTP 404"):
         first_run.download_public_catalog(base_url=release["url"] + "/no-such-release")

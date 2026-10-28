@@ -112,3 +112,29 @@ def test_find_matching_song_matches_collab_stored_as_one_joined_artist():
     match = module._find_matching_song(soup, "Sw@da x Maxim x Niczos", "Bahato")
 
     assert match == ("Bahato", "Sw@da", "Bahato")
+
+
+def test_consent_page_that_doesnt_go_away_is_logged_not_raised(monkeypatch):
+    # DSC-19 / YT-15: the wait after "Reject all" timed out into the manager as a crashed module
+    from types import SimpleNamespace
+    from selenium.common.exceptions import TimeoutException
+    from utils.discoveries.discovery_modules import youtube_fetcher as yf
+
+    clicked, logged = [], []
+
+    class FakeWait:
+        def __init__(self, driver, timeout):
+            pass
+
+        def until(self, condition):
+            if callable(condition) and getattr(condition, "__name__", "") == "<lambda>":
+                raise TimeoutException("still there")
+            return SimpleNamespace(click=lambda: clicked.append(True))
+
+    monkeypatch.setattr(yf, "WebDriverWait", FakeWait)
+    monkeypatch.setattr(yf, "flog", logged.append)
+    driver = SimpleNamespace(current_url="https://consent.youtube.com/m?continue=x")
+
+    yf._reject_consent_if_present(driver)
+    assert clicked == [True]
+    assert logged and "consent" in logged[0]

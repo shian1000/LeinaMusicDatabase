@@ -21,7 +21,10 @@ _SPECIAL_REPLACEMENTS = {
     "\u0111": "d",
 }
 
-APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵"
+# Every apostrophe-like character, for normalize() (dropped, or a space) and
+# normalize_apostrophes() (one canonical "'") alike
+APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵＇"
+_APOSTROPHE_RE = re.compile(f"[{re.escape(APOSTROPHES)}]")
 
 ACCEPTED_WORDS = {"of", "the", "in", "for", "to", "on", "as", "a", "and", "remix", "by"}
 
@@ -118,9 +121,9 @@ def _normalize(
 
     # Apostrophes and similar characters
     if strip_apostrophe:
-        s = re.sub(r"[''`\u00b4\u02bc\u02bb\uff07\u2018\u2019\u201a\u201b\u2032\u2035]", "", s)
+        s = _APOSTROPHE_RE.sub("", s)
     else:
-        s = re.sub(r"[''`\u00b4\u02bc\u02bb\uff07\u2018\u2019\u201a\u201b\u2032\u2035]", " ", s)
+        s = _APOSTROPHE_RE.sub(" ", s)
 
     # Replace some punctuation with space and optionally remove other punctuation
     if remove_punctuation:
@@ -290,14 +293,13 @@ def extract_unknown_data(filepath: Path):
     return split_artist_title(strip_site_names(filepath.stem))
 
 def strip_brackets(title: str):
-    print("Stripping title")
-    
+    """The title before its first " (" or " [", or None when it has none
+    (or nothing comes before it)."""
     # Find the earliest occurrence of either bracket type
     round_pos = title.find(" (")
     square_pos = title.find(" [")
     
     if round_pos == -1 and square_pos == -1:
-        print("Can't strip brackets")
         return None
     
     # Pick the earliest bracket that exists
@@ -309,20 +311,12 @@ def strip_brackets(title: str):
         split_str = " (" if round_pos <= square_pos else " ["
     
     new_title, _ = title.split(split_str, maxsplit=1)
-    print(title)
-    print(new_title)
-    
-    if new_title:
-        print("returning new title")
-        return new_title
-    else:
-        print("returning none")
-        return None
+    return new_title or None
 
     
 def normalize_apostrophes(text: str) -> str:
     """Replace all apostrophe-like characters with a single canonical one."""
-    return re.sub(f"[{re.escape(APOSTROPHES)}]", "'", text)
+    return _APOSTROPHE_RE.sub("'", text)
 
 def _words_match(old_word: str, new_word: str) -> bool:
     """A word pair is acceptable if identical, or if the new word is an

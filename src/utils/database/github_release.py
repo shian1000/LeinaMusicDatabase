@@ -49,22 +49,27 @@ class GithubReleaseClient:
             raise GithubError(_explain(response.status_code, self.repo, _message(response)))
         return response
 
-    def _release(self, data: dict) -> Release:
-        return Release(id=data["id"], upload_url=data["upload_url"].split("{", 1)[0],
-                       html_url=data.get("html_url", ""),
-                       assets={a["name"]: a for a in data.get("assets", [])})
+    def _release(self, response) -> Release:
+        data = _json(response)
+        try:
+            return Release(id=data["id"], upload_url=data["upload_url"].split("{", 1)[0],
+                           html_url=data.get("html_url", ""),
+                           assets={a["name"]: a for a in data.get("assets", [])})
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise GithubError(f"GitHub answered with a release it doesn't describe ({type(exc).__name__}: {exc})") \
+                from None
 
     def get_release(self, tag: str) -> Release | None:
         response = self._request("GET", f"{self.api_url}/repos/{self.repo}/releases/tags/{tag}", expected=(200, 404))
         if response.status_code == 404:
             return None
-        return self._release(response.json())
+        return self._release(response)
 
     def create_release(self, tag: str, name: str, body: str) -> Release:
         response = self._request("POST", f"{self.api_url}/repos/{self.repo}/releases", expected=(201,), json={
             "tag_name": tag, "name": name, "body": body, "make_latest": "false",
         })
-        return self._release(response.json())
+        return self._release(response)
 
     def download_asset(self, asset: dict) -> bytes:
         response = self._request("GET", f"{self.api_url}/repos/{self.repo}/releases/assets/{asset['id']}",
@@ -77,7 +82,7 @@ class GithubReleaseClient:
                                      params={"name": name}, data=f,
                                      headers={"Content-Type": content_type,
                                               "Content-Length": str(path.stat().st_size)})
-        asset = response.json()
+        asset = _asset(response)
         release.assets[asset["name"]] = asset
         return asset
 
@@ -85,7 +90,7 @@ class GithubReleaseClient:
         response = self._request("PATCH", f"{self.api_url}/repos/{self.repo}/releases/assets/{asset['id']}",
                                  json={"name": name})
         release.assets.pop(asset["name"], None)
-        renamed = response.json()
+        renamed = _asset(response)
         release.assets[renamed["name"]] = renamed
         return renamed
 
@@ -96,6 +101,21 @@ class GithubReleaseClient:
         self._request("DELETE", f"{self.api_url}/repos/{self.repo}/releases/assets/{asset['id']}",
                       expected=(204, 404))
         release.assets.pop(name, None)
+
+
+def _json(response):
+    """The answer's JSON; GithubError when it isn't JSON (a proxy's error page)."""
+    try:
+        return response.json()
+    except ValueError:
+        raise GithubError(f"GitHub's answer isn't JSON (HTTP {response.status_code})") from None
+
+
+def _asset(response) -> dict:
+    asset = _json(response)
+    if not isinstance(asset, dict) or "name" not in asset:
+        raise GithubError("GitHub answered with an asset it doesn't describe")
+    return asset
 
 
 def _message(response) -> str:

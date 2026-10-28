@@ -98,6 +98,14 @@ def test_passwords_are_salted_hashes(users_env):
     assert users.hash_password("x") != users.hash_password("x")
 
 
+@pytest.mark.parametrize("content", ["{not json", "[]", '{"password": 5}'])
+def test_an_unreadable_account_is_a_wrong_password(users_env, content):
+    # SRV-28: the menu's login answers like the server's, instead of crashing on account.json
+    users.create_user("ania", "secret1")
+    (users_env / "ania" / "account.json").write_text(content)
+    assert not users.verify_user("ania", "secret1")
+
+
 def test_backup_includes_user_dbs(users_env):
     users.create_user("ania", "secret1")
     created = backup.backup_databases(reason="test")

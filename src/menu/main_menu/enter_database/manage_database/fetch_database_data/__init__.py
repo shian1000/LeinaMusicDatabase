@@ -6,7 +6,6 @@ from utils.youtube.import_from_playlist import import_data_from_youtube_playlist
 from utils.ui.menu_utils import open_file_browser_terminal
 from menu.song_actions.edit_songs import edit_songs_menu
 from settings import settings
-from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.display_utils import display_songs
 import questionary
 from utils.ui.prompts import ask_yes_no
@@ -74,6 +73,9 @@ def import_covers():
         print('  (Songs on album titles several artists share get covers once '
               '"Resolve albums with several artists" has settled them.)')
     print(f"Covers written for {report.albums_written} album(s), into {covers_dir()}")
+    if report.failed:
+        print(f"\033[91m{len(report.failed)} album(s) failed (details in debug.log): "
+              f"{', '.join(report.failed[:10])}\033[0m")
     if report.disagreements:
         print(f"\n{len(report.disagreements)} album(s) have different pictures on different tracks - "
               "the one most tracks carry was used:")

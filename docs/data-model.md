@@ -127,7 +127,7 @@ fetched_at    NOT NULL, default datetime('now')
     share a name) is **not** decided automatically. Those songs keep `album_id` NULL until the user
     settles them in Manage database → "Resolve albums with several artists"
     (`utils/ui/album_resolution_review.py`), which is also offered at the end of an import that
-    creates such a case. Its "Delete album entry for both artists" choice (`clear_album_text()`)
+    creates such a case. Its "Clear the album title from these songs" choice (`clear_album_text()`)
     is the one that erases data: it sets `songs.album` to NULL for every song of that title, which
     the phone sees too; any album row it empties is kept. Before those choices it offers to fix
     what often only makes a title *look* shared (`utils/database/artist_identity.py`): one artist
@@ -215,7 +215,7 @@ fetched_at    NOT NULL, default datetime('now')
   gone stale (deleted/private) rather than trusting it blindly — and if that fallback search also
   comes up empty, the dead link is cleared from the DB (`save_video_id_to_song(song, None)`) rather
   than left to fail validation again on every future run. Can also be set to the literal string
-  `"N/A"` (`manage_youtube_playlists.NO_VIDEO_SENTINEL`) — a record that no video for this
+  `"N/A"` (`config/constants.NO_VIDEO_SENTINEL`) — a record that no video for this
   song exists on YouTube at all (as opposed to existing but excluded from search).
   `create_yt_playlist()` leaves such a song out without searching (never overwriting it), and so
   does Years' `youtube_fetcher.get_release_year()`. Set via the

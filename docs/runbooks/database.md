@@ -221,7 +221,7 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
 
 - The server stores it in `Inbox/new/`, written as a dot-named `.part` file and `os.replace()`d
   in. It never overwrites and never serves inbox files back (a GET is a 404). Answers: 201 stored,
-  200 the same file is already in `new/` or `processed/` (a resend), 409 another file under that
+  200 the same file is already in `new/`, `review/` or `processed/` (a resend), 409 another file under that
   name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
   (1 MiB), 507 inbox full, 503 data drive not mounted (nothing is created then).
 - **Inbox limit:** while the files in `new/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
@@ -693,7 +693,8 @@ package", `utils/ui/request_package_import.py`). A `.zip` of the phone's outbox 
   read in total — sizes counted while reading, not taken from the zip. A folder, `..`, an absolute
   path, a symlink, an encrypted entry or a name twice refuses the whole package. The inbox limit
   applies as for the server.
-- A name already in `new/`, `review/`, `processed/` or `rejected/` is skipped and named.
+- A name already in `new/`, `review/` or `processed/` is skipped and named (`sharing_server.INBOX_KEPT_FOLDERS`,
+  the server's own list). A file rejected as unreadable may come back fixed: its name in `rejected/` doesn't stop it.
 - Files go to `Inbox/new/` (dot-named `.part`, then renamed) and are recorded first in
   `Inbox/packages.json` (name → typed sender name, package, time). Such a file's user part is a
   name typed on the phone, not a login: `RequestFile.sender` is None for it, so it never gets an

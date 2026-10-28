@@ -600,6 +600,22 @@ def test_failures_spread_out_dont_lock_out(login_server):
         now[0] += sharing_server.LOGIN_FAILURE_WINDOW_SECONDS / (sharing_server.LOGIN_MAX_FAILURES - 1)
 
 
+def test_login_limiter_forgets_old_failures_and_finished_lockouts():
+    # SRV-25: a made-up name per try mustn't grow the limiter's memory for as long as the server runs
+    now = [0.0]
+    limiter = sharing_server.LoginLimiter(lambda: now[0])
+    for i in range(sharing_server.LOGIN_MAX_FAILURES):
+        limiter.failed([("addr", "10.0.0.9"), ("user", "locked")])
+    for i in range(1000):
+        limiter.failed([("user", f"made-up-{i}")])
+    assert limiter.retry_after([("user", "locked")]) > 0
+
+    now[0] += sharing_server.LOGIN_FAILURE_WINDOW_SECONDS + sharing_server.LOGIN_LOCKOUT_SECONDS
+    limiter.failed([("user", "next")])
+    assert limiter._failures.keys() == {("user", "next")}
+    assert limiter._locked_until == {}
+
+
 def test_logout_revokes_the_token(login_server, tmp_path):
     start, _, inbox = login_server
     base = start()
@@ -1978,6 +1994,27 @@ def test_library_client_hanging_up_mid_body_leaves_the_server_serving(library_se
     assert _get(f"{base}/library/1")[2] == AUDIO
     assert "Traceback" not in capsys.readouterr().err
 
+
+def test_phone_hanging_up_mid_database_download_leaves_the_server_serving(serve, share_dir, capsys):
+    # SRV-26: like a library file - a cut-off download is logged in one line, not a traceback
+    import socket
+    from urllib.parse import urlsplit
+    big = share_dir / "music.db"
+    big.write_bytes(big.read_bytes() + bytes(16 * 1024 * 1024))
+    base = serve(share_dir, "/")
+    url = urlsplit(base)
+
+    for _ in range(3):
+        sock = socket.create_connection((url.hostname, url.port))
+        sock.sendall(b"GET /music.db HTTP/1.0\r\n\r\n")
+        sock.recv(64)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+        sock.close()
+
+    assert _request(f"{base}/tag.db")[0] == 200
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err + captured.out
+    assert "music.db: download cut off" in captured.out
 
 def test_service_unit_quotes_paths_with_spaces(monkeypatch):
     # SRV-12: systemd splits ExecStart= at spaces - a drive called "My Drive" gave the server

@@ -3,9 +3,9 @@ backup). Logic: utils/youtube/ytdlp_update.py."""
 
 import subprocess
 
-import questionary
 from utils.ui.prompts import ask_yes_no
 
+from config.constants import YTDLP_INSTALL_TIMEOUT
 from utils.common.debug import slog
 from utils.youtube.ytdlp_update import available_update, install_ytdlp
 
@@ -24,6 +24,10 @@ def offer_ytdlp_update() -> None:
     except subprocess.CalledProcessError as exc:
         slog(f"yt-dlp update failed: {exc.stderr}", priority=3)
         print(f"Updating yt-dlp failed - see debug.log. Still on {installed}.")
+        return
+    except subprocess.TimeoutExpired:
+        slog(f"yt-dlp update: pip didn't finish in {YTDLP_INSTALL_TIMEOUT} s", priority=3)
+        print(f"Updating yt-dlp took too long and was stopped. Still on {installed}; it's offered again tomorrow.")
         return
     except OSError as exc:
         print(f"Updating yt-dlp failed ({exc}). Still on {installed}.")

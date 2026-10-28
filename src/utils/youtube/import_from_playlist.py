@@ -15,7 +15,9 @@ from utils.youtube.manage_youtube_playlists import (
     _run_ytdlp_search,
     _is_official_release,
     _log_ytdlp_errors,
+    NON_DECOMPOSING_LETTER_FOLDS,
     run_ytdlp,
+    video_durations_via_api,
 )
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
@@ -318,11 +320,13 @@ def _fold_char(ch: str) -> str:
     back to the original character when decomposition doesn't yield exactly
     one base character - keeps a 1:1 length correspondence with the input,
     which strip_artist_from_title() relies on to map a match back to
-    original-string positions.
+    original-string positions. "ł" / "ø", which have no decomposition, are
+    folded with the same table as the search's _fold_diacritics(), so "Łona"
+    is "Lona" here too.
     """
     decomposed = unicodedata.normalize("NFKD", ch)
     base = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return base if len(base) == 1 else ch
+    return (base if len(base) == 1 else ch).translate(NON_DECOMPOSING_LETTER_FOLDS)
 
 
 def strip_artist_from_title(title: str, artist: str) -> str:
@@ -493,6 +497,14 @@ def _fetch_playlist_items_api(playlist_id: str) -> list:
         if not page_token:
             break
 
+    # playlistItems carries no length (yt-dlp's items do): asked for in batches,
+    # one quota unit per 50 videos, so a full album is still told from a track
+    durations = video_durations_via_api([item["video_id"] for item in items]) if items else {}
+    if durations is None:
+        flog(f"[YouTube API] no video lengths for playlist {playlist_id} - full albums go by title only")
+        durations = {}
+    for item in items:
+        item["duration"] = durations.get(item["video_id"])
     return items
 
 
@@ -1060,10 +1072,6 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
         print("No videos found in this playlist.")
         return []
 
-    # DEBUG: only process the first video of the playlist, ignore the rest.
-    # Remove this line to go back to importing the whole playlist.
-    # items = items[:94]
-
     metadata_list = [playlist_item_metadata(item) for item in items]
 
     _resolve_artist_synonyms(metadata_list)
@@ -1082,6 +1090,8 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
         filled_in, missing_skipped = _review_missing_artists(missing_artist)
         _resolve_artist_synonyms(filled_in)
         swapped, swap_skipped = _review_artist_title_swaps(flagged)
+        # A swapped title, or an artist typed by hand, can be a synonym too
+        _resolve_artist_synonyms(swapped)
         return filled_in + swapped, missing_skipped + swap_skipped
 
     return run_import_batch(rest, late_entries=review_held_back_entries)

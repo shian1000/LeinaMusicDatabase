@@ -8,18 +8,15 @@ from utils.common.text_utils import is_blacklisted_album, title_resembles, simil
 from utils.common.normalizer import normalize
 from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
 import re
-import requests
-from difflib import SequenceMatcher
 from utils.common.text_utils import check_spelling
-from config.constants import MUSICBRAINZ_API_USER_AGENT, MUSICBRAINZ_VARIOUS_ARTISTS_ID
+from config.constants import MUSICBRAINZ_VARIOUS_ARTISTS_ID
 from utils.common.musicbrainz_client import lucene_quote
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
 musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian1000/LeinaMusicDatabase")
 
-HEADERS = {"User-Agent": MUSICBRAINZ_API_USER_AGENT}
-MODULE_NAME = "Musicbrainz fetcher"
+MODULE_NAME = "MusicBrainz fetcher"
 
 # musicbrainzngs issues its HTTP requests via urllib with no per-call timeout,
 # so a stalled connection (server accepts then never answers) blocks forever
@@ -182,9 +179,13 @@ def _is_other_songs_single(release, recording) -> bool:
     return not title_resembles(recording.get("title", ""), _release_title(release))
 
 
+# Release kinds that are never a song's own album or release
+_SKIPPED_SECONDARY_TYPES = ("Compilation", "Live", "Remix", "DJ-mix")
+
+
 def _release_is_eligible(release, artist: str | None = None) -> bool:
     secondary_types = release.get("release-group", {}).get("secondary-type-list", [])
-    if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
+    if any(t in _SKIPPED_SECONDARY_TYPES for t in secondary_types):
         return False
     return not is_blacklisted_album(_release_title(release), artist)
 
@@ -315,10 +316,9 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
             for recording in recordings:
                 for release in recording.get("release-list", []):
                     release_group = release.get("release-group", {})
-                    secondary_types = release_group.get("secondary-type-list", [])
-                    if any(t in ("Compilation", "Live", "Remix", "DJ-mix") for t in secondary_types):
-                        continue
-                    if is_blacklisted_album(release.get("title", "")):
+                    # The same releases as for the album (get_album_name()): not a
+                    # compilation or live one, not someone else's
+                    if not _release_is_eligible(release, artist) or _is_other_artists_release(release, recording):
                         continue
                     year = _extract_year(release.get("date") or release_group.get("first-release-date"))
                     if year:

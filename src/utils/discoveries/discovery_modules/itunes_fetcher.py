@@ -7,7 +7,7 @@ from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import SPELLING_CHECK_THRESHOLD, SINGLES_ALBUM
 
-MODULE_NAME = "Itunes Fetches"
+MODULE_NAME = "iTunes fetcher"
 
 # Apple Music appends this to the product title of releases that only ever
 # came out as a single (no parent album) -- e.g. "Say So (feat. Nicki

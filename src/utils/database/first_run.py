@@ -160,7 +160,11 @@ def download_public_catalog(directory: Path | None = None, base_url: str | None 
     directory = directory or database_dir()
     session = session or requests.Session()
     try:
-        return _download_catalog(directory, session, info or fetch_catalog_info(base_url, session))
+        try:
+            return _download_catalog(directory, session, info or fetch_catalog_info(base_url, session))
+        except (OSError, sqlite3.Error) as exc:
+            # A full disk, a folder it can't write to, a file SQLite can't open
+            raise CatalogDownloadError(f"{type(exc).__name__}: {exc}") from exc
     except CatalogDownloadError as exc:
         flog(f"Public catalog download failed: {exc}")
         raise

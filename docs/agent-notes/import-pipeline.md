@@ -111,7 +111,7 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
    `requests.get` would defeat the global rate limit.
 
    **Known exception:** `music_brainz_fetcher.py`'s `get_album_name()` (the
-   "Musicbrainz fetcher" discovery module, used by manual album lookup — not the
+   "MusicBrainz fetcher" discovery module, used by manual album lookup — not the
    import batch path above) never migrated to `mb_get()`. It calls
    `musicbrainzngs.search_recordings()` directly, which issues its own HTTP
    requests via `urllib` with **no per-call timeout** and no shared rate limiter.

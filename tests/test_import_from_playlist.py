@@ -378,6 +378,30 @@ def test_held_back_entries_are_only_asked_about_after_the_main_batch(monkeypatch
     assert [md["title"] for md, _ in events[2][1]] == ["Genesis"]
 
 
+def test_a_swapped_entry_gets_the_artists_real_name_for_a_synonym(monkeypatch):
+    # YT-22: synonyms were resolved for artists typed in, not for a swap - "akuteofficial" became an artist
+    items = [{"channel": "X", "title": "Jakiś utwór - akuteofficial", "video_id": "1"}]
+    monkeypatch.setattr(m, "get_playlist_items", lambda _: items)
+    monkeypatch.setattr(m, "get_artists_from_db_session", lambda: [_fake_artist("Akute", synonyms="akuteofficial")])
+    monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: None)
+    monkeypatch.setattr(m, "_review_missing_artists", lambda entries: ([], []))
+
+    def swap_all(flagged):
+        for metadata, _ in flagged:
+            metadata["artist_name"], metadata["title"] = metadata["title"], metadata["artist_name"]
+        return [metadata for metadata, _ in flagged], []
+    monkeypatch.setattr(m, "_review_artist_title_swaps", swap_all)
+    monkeypatch.setattr(m, "_find_possible_artist_title_swaps", lambda rest: [(md, None) for md in rest])
+    late = []
+
+    def fake_run_import_batch(metadata_list, late_entries=None):
+        late.extend(late_entries()[0])
+        return []
+    monkeypatch.setattr(m, "run_import_batch", fake_run_import_batch)
+
+    m.import_data_from_youtube_playlist("playlist")
+    assert [(md["artist_name"], md["title"]) for md in late] == [("Akute", "Jakiś utwór")]
+
 def test_unbracketed_trailing_junk_phrase_is_stripped():
     metadata = _build("“Golden” Official Lyric Video | KPop Demon Hunters | Sony Animation", channel="Sony Pictures Animation")
     assert metadata["title"] == "Golden"
@@ -501,3 +525,11 @@ def test_official_match_survives_an_unavailable_hit_in_the_search(monkeypatch):
 
     result.stdout = ""
     assert m._find_official_match_via_search("Eartha Kitt - Santa Baby (1953)") is None
+
+
+def test_artist_in_the_title_is_found_across_letters_without_a_decomposition():
+    # YT-32: "ł" / "ø" have no NFKD decomposition - the search folded them, the title clean-up didn't
+    from utils.youtube.import_from_playlist import strip_artist_from_title
+    assert strip_artist_from_title('Łona "Rozmowy" (Official Video)', "Lona") == "Rozmowy (Official Video)"
+    assert strip_artist_from_title("Ørganek - Głupi ja", "Organek") == "Głupi ja"
+    assert strip_artist_from_title("Ołów", "Olowek") == "Ołów"  # whole words only, still

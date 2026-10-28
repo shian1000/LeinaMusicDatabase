@@ -8,7 +8,8 @@ YouTube doesn't list (gone, private) has none, so neither is stored and both
 are asked about again next time.
 """
 from utils.database.datatables import YoutubeVideoDuration
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, video_durations_via_api
+from config.constants import NO_VIDEO_SENTINEL
+from utils.youtube.manage_youtube_playlists import video_durations_via_api
 
 _IN_CHUNK = 500  # SQLite's bound-parameter limit
 

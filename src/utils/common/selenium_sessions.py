@@ -109,10 +109,9 @@ def _build_driver(headless: bool = True) -> webdriver.Chrome:
         driver = webdriver.Chrome(options=options)
     except WebDriverException as exc:
         raise ChromeDriverLaunchError(
-            "Nie udało się uruchomić przeglądarki Chrome/Chromium do wyszukiwania "
-            "(Selenium). Sprawdź, czy Chrome/Chromium jest zainstalowany i czy nie "
-            "jest to wersja snap (znany konflikt: 'DevToolsActivePort file doesn't "
-            f"exist'). Szczegóły: {exc}"
+            "Couldn't start Chrome/Chromium for the lookups (Selenium). Check that "
+            "Chrome or Chromium is installed and isn't the snap version (a known "
+            f"clash: 'DevToolsActivePort file doesn't exist'). Details: {exc}"
         ) from exc
 
     driver.execute_script(

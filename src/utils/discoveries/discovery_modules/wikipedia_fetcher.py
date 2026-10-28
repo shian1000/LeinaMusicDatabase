@@ -6,8 +6,7 @@ import time
 from bs4 import BeautifulSoup, GuessedAtParserWarning
 
 from utils.common.debug import flog, slog
-from utils.common.text_utils import is_blacklisted_album
-from utils.common.file_management import save_string_to_file
+from utils.common.text_utils import is_blacklisted_album, title_resembles
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import MUSICBRAINZ_API_USER_AGENT, SINGLES_ALBUM
 
@@ -45,8 +44,8 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     """Search Wikipedia for a song and return the album name, or None.
 
     matched_title / matched_artist stay None: the page is found by the query
-    itself (a song page only when its title contains the queried title, else
-    an artist/album page), so there's no independent match to report."""
+    itself (a song page only when its title resembles the queried title,
+    else an artist/album page), so there's no independent match to report."""
     page = _fetch_wikipedia_page(artist, title)
     if not page:
         return None
@@ -55,7 +54,9 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     if not soup:
         return None
 
-    if title.lower() in page.title.lower():
+    # The song's own page ("Low (Cracker song)"), not an artist or album page
+    # that merely contains a short title ("Low" in "Lower Than Atlantis")
+    if title_resembles(title, page.title):
         album = _extract_from_infobox(soup, title)
     else:
         album = _extract_from_track_listing(soup, page.title, title, artist)

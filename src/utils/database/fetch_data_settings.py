@@ -25,7 +25,13 @@ def load_max_songs_per_fetch() -> int:
         slog(f"Failed to read fetch data config, using default: {e}")
         return DEFAULT_MAX_SONGS_PER_FETCH
 
-    return data.get("max_songs_per_fetch", DEFAULT_MAX_SONGS_PER_FETCH)
+    value = data.get("max_songs_per_fetch") if isinstance(data, dict) else None
+    # bool is an int too; "100", 0 or -5 would reach the fetch loop as they are
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        if value is not None or not isinstance(data, dict):
+            slog(f"Fetch data config holds {data!r}, using the default")
+        return DEFAULT_MAX_SONGS_PER_FETCH
+    return value
 
 
 def save_max_songs_per_fetch(value: int) -> None:

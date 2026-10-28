@@ -18,7 +18,7 @@ from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
-from utils.youtube.yt_cache import make_song_key, save_cache
+from utils.youtube.yt_cache import save_cache, song_key
 from utils.youtube.yt_cache import load_cache, init_cache, clear_cache, update_cache_songs
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
 from utils.common.normalizer import APOSTROPHES, normalize
@@ -26,13 +26,9 @@ from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import flog
 from settings import Settings
-from config.constants import FULL_ALBUM_MIN_DURATION_S, PROJECT_ROOT, YOUTUBE_REGION
+from config.constants import FULL_ALBUM_MIN_DURATION_S, NO_VIDEO_SENTINEL, PROJECT_ROOT, YOUTUBE_REGION
 from utils.database.song_kinds import strip_full_album_marker
 import json
-
-
-import json
-from googleapiclient.errors import HttpError
 
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
@@ -40,16 +36,7 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_PATH = str(PROJECT_ROOT / ".secrets" / "token.json")
 CLIENT_SECRET_PATH = str(PROJECT_ROOT / ".secrets" / "client_secret.json")
 
-# `Song.youtube_video_id` value meaning "confirmed: this song has no video on
-# YouTube at all" — distinct from the field being empty/unset (never checked)
-# and from a real video_id (found, possibly stale), as opposed to the
-# "excluded from search results" escape hatch (see
-# docs/agent-notes/youtube-search-matching.md), where a real video_id does
-# exist and is stored instead. Set by hand (the song's YouTube link) and by
-# the inbox's NO_VIDEO decision (inbox_requests / inbox_found_links). Respected by create_yt_playlist()
-# (leaves the song out, never overwrites it), youtube_fetcher, the yt-dlp
-# lookups below, and Leina Radio, which doesn't search for such a song.
-NO_VIDEO_SENTINEL = "N/A"
+# NO_VIDEO_SENTINEL ("N/A", confirmed: no video at all) lives in config/constants.py
 
 
 class QuotaExceededError(Exception):
@@ -543,7 +530,7 @@ def _collapse_repeated_letters(text: str) -> str:
 # why NFKD alone can't fold these) but have one unambiguous plain-Latin
 # equivalent worth substituting directly. "ø" too: "Ørganek" is the stylized
 # name of Organek, whose uploads all spell it with a plain "O".
-_NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O"})
+NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O"})
 
 
 def _drop_punctuation(text: str) -> str:
@@ -594,7 +581,7 @@ def _fold_diacritics(text: str) -> str:
     """
     decomposed = unicodedata.normalize("NFKD", text)
     folded = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return folded.translate(_NON_DECOMPOSING_LETTER_FOLDS)
+    return folded.translate(NON_DECOMPOSING_LETTER_FOLDS)
 
 
 def _text_containment(expected: str, candidate: str) -> float:
@@ -1417,7 +1404,7 @@ def _search_video_api_once(
         ).execute()
 
     except HttpError as e:
-        if e.resp.status == 403 and b"quotaExceeded" in e.content:
+        if is_quota_exceeded(e):
             print("🛑 YouTube API quota exceeded. Stopping.")
             raise QuotaExceededError() from e
         raise
@@ -1778,12 +1765,15 @@ def save_video_id_to_song(song, video_id: str | None) -> None:
 # ---------------------------------------------------------
 
 def is_quota_exceeded(error: HttpError) -> bool:
+    """The one test for "the daily API quota is used up", for searching and
+    for adding to playlists alike: any of the error's reasons, or - when the
+    body isn't the usual JSON - the word anywhere in it."""
+    content = error.content or b""
     try:
-        error_details = json.loads(error.content.decode("utf-8"))
-        reason = error_details["error"]["errors"][0]["reason"]
-        return reason == "quotaExceeded"
-    except Exception:
-        return False
+        reasons = [e.get("reason") for e in json.loads(content.decode("utf-8"))["error"]["errors"]]
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return b"quotaExceeded" in content
+    return "quotaExceeded" in reasons
 
 def add_video_to_playlist(youtube, playlist_id: str, video_id: str) -> bool:
     """Add a video to playlist with retry logic for API conflicts."""
@@ -1896,7 +1886,7 @@ def create_yt_playlist(song_list, playlist_name: str):
         # Maps a cache key back to the actual Song DB object, so a
         # freshly-found video can be written back to Song.youtube_video_id
         # (see save_video_id_to_song()) once search_video() finds it.
-        songs_by_key = {make_song_key(song.artist.name, song.title): song for song in song_list}
+        songs_by_key = {song_key(song): song for song in song_list}
 
         # -------------------
         # Add videos to playlist

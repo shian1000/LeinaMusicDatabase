@@ -4,7 +4,7 @@ This module provides functions to display database objects (Songs, Artists)
 in formatted tables using the rich library.
 """
 
-from typing import Optional, List, Tuple, Any, Dict
+from typing import Optional, List, Tuple, Dict
 from rich.console import Console
 from rich.table import Table
 from utils.database.datatables import Song, Artist
@@ -52,7 +52,7 @@ def display_songs(songs: Optional[List[Song]]) -> None:
     
     console: Console = Console()
 
-    table: Table = _create_table("Music Library", [
+    table: Table = _create_table("Songs", [
         ("Artist", "cyan", None),
         ("Title", "magenta", None),
         ("Album", "green", None),
@@ -87,16 +87,16 @@ def display_song_links(songs: Optional[List[Song]]) -> None:
         return
 
     from utils.database.files_index import song_file_paths
-    from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL
+    from config.constants import NO_VIDEO_SENTINEL
 
     console: Console = Console()
 
-    table: Table = _create_table("Music Library", [
+    table: Table = _create_table("Song links", [
         ("Artist", "cyan", None),
         ("Title", "magenta", None),
         ("Album", "green", None),
         ("Year", None, "right"),
-        ("DB path", None, None),
+        ("Library file", None, None),
         ("YouTube", None, None),
         ("Music video", None, None),
         ("Spotify", None, None),
@@ -147,7 +147,7 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     
     console: Console = Console()
 
-    table: Table = _create_table("Music Library", [
+    table: Table = _create_table("Artists", [
         ("Name", "cyan", None),
         ("Songs", None, None),
         ("Origin", None, None),
@@ -174,16 +174,16 @@ def display_songs_with_tags(songs: List[Song]) -> None:
     sessions stay open - other screens still hold their objects."""
     tags_by_song = tag_names_by_song(song.id for song in songs)
     table = _create_table("Songs & Tags", [
-        ("Title", "cyan", None),
-        ("Artist", "magenta", None),
+        ("Artist", "cyan", None),
+        ("Title", "magenta", None),
         ("Album", "green", None),
         ("Year", None, "right"),
         ("Tags", "yellow", None),
     ])
     for song in songs:
         table.add_row(
-            song.title,
             song_artist_label(song),
+            song.title,
             song.album or "—",
             str(song.year) if song.year else "—",
             ", ".join(tags_by_song.get(song.id, [])) or "—",

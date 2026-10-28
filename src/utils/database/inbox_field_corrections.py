@@ -99,7 +99,8 @@ from utils.database.latin_names import LATIN_COLUMNS, latin_of
 from utils.database.song_artists import count_artist_songs, song_all_artists
 from utils.database.song_kinds import set_song_kind
 from utils.database.song_references import load_changes
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
+from config.constants import NO_VIDEO_SENTINEL
+from utils.youtube.manage_youtube_playlists import extract_video_id
 
 TABLES = {"songs": Song, "artists": Artist, "albums": Album}
 

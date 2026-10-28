@@ -34,7 +34,7 @@ from config.constants import (
 )
 from utils.common.debug import mlog
 from utils.database import inbox_requests
-from utils.database.sharing_server import REQUEST_NAME_RE, SQLITE_HEADER
+from utils.database.sharing_server import INBOX_KEPT_FOLDERS, REQUEST_NAME_RE, SQLITE_HEADER
 
 
 class PackageError(Exception):
@@ -107,8 +107,7 @@ def _check_entry(info: zipfile.ZipInfo, seen: set) -> None:
 
 
 def _in_inbox(name: str) -> bool:
-    folders = (inbox_requests.NEW, inbox_requests.REVIEW, inbox_requests.PROCESSED, inbox_requests.REJECTED)
-    return any((inbox_requests.INBOX_DIR / folder / name).exists() for folder in folders)
+    return any((inbox_requests.INBOX_DIR / folder / name).exists() for folder in INBOX_KEPT_FOLDERS)
 
 
 def _waiting_bytes() -> int:

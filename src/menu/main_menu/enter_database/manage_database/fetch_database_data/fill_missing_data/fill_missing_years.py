@@ -1,6 +1,7 @@
 import re
 import random
 from collections import defaultdict
+from datetime import date
 import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
@@ -136,14 +137,16 @@ def fill_missing_years():
             for label, songs in no_year_entries:
                 print(label + _sample_titles(label, songs))
                 copy_to_clipboard(label)
-                year_input = input("New year (put nothing to cancel): ")
+                year_input = input("New year (put nothing to cancel): ").strip()
+                year = _typed_year(year_input)
                 if year_input == "":
                     print(f"Skipped {label}")
-                elif not year_input.isdigit():
-                    print(f"'{year_input}' is not a valid year, skipped {label}")
+                elif year is None:
+                    print(f"'{year_input}' is not a year between {_FIRST_YEAR} and {date.today().year + 1}, "
+                          f"skipped {label}")
                 else:
                     for song in songs:
-                        edit_db_entry(song, "year", year_input)
+                        edit_db_entry(song, "year", str(year))
                         touched_songs.append(song)
 
     _finish(touched_songs)
@@ -211,11 +214,23 @@ def _collect(label, result, songs, results, review_results) -> None:
         results.append((label, result.year, songs))
 
 
+# A year typed by hand: no recording is older, and nothing is out yet after next year
+_FIRST_YEAR = 1900
+
+
+def _typed_year(text: str) -> int | None:
+    """`text` as a year from _FIRST_YEAR to next year, else None ("0", "20245")."""
+    if not text.isdigit():
+        return None
+    year = int(text)
+    return year if _FIRST_YEAR <= year <= date.today().year + 1 else None
+
+
 def _review_unsure_years(review_results) -> list:
     """List every year a module flagged needs_review (a YouTube upload date
-    is often not the release date) and let the user tick the ones to change.
-    Unticked ones are written; ticked ones ask for a new year. Returns the
-    songs that got a year."""
+    is often not the release date), all ticked: like every other checkbox
+    review, the ticked ones are saved. Unticked ones ask for the right year
+    (empty = leave the song without one). Returns the songs that got a year."""
     if not review_results:
         return []
 
@@ -224,11 +239,12 @@ def _review_unsure_years(review_results) -> list:
     print(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date")
     print("=" * 70)
     choices = [
-        questionary.Choice(title=f"{label}: {year}" + (f"  ({url})" if url else ""), value=i)
+        questionary.Choice(title=f"{label}: {year}" + (f"  ({url})" if url else ""), value=i, checked=True)
         for i, (label, year, _, url) in enumerate(review_results)
     ]
     selected = questionary.checkbox(
-        "Select the years you want to change (space toggles, enter confirms):", choices=choices
+        "Save the ticked years; untick a wrong one to type it (space toggles, enter confirms):",
+        choices=choices,
     ).ask()
     if selected is None:
         print("Aborted, none of these years saved.")
@@ -236,17 +252,18 @@ def _review_unsure_years(review_results) -> list:
 
     touched = []
     for i, (label, year, songs, _) in enumerate(review_results):
-        if i in selected:
+        if i not in selected:
             print(f"{label} (found {year})")
             copy_to_clipboard(label)
-            year_input = input("New year (put nothing to leave it empty): ")
+            year_input = input("Right year (put nothing to leave it empty): ").strip()
             if year_input == "":
                 print(f"Skipped {label}")
                 continue
-            if not year_input.isdigit():
-                print(f"'{year_input}' is not a valid year, skipped {label}")
+            year = _typed_year(year_input)
+            if year is None:
+                print(f"'{year_input}' is not a year between {_FIRST_YEAR} and {date.today().year + 1}, "
+                      f"skipped {label}")
                 continue
-            year = year_input
         for song in songs:
             edit_db_entry(song, "year", str(year))
             touched.append(song)

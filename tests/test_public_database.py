@@ -225,6 +225,7 @@ class FakeGithub:
         self.log = []  # (method, what)
         self.auth = []
         self.fail_status = None
+        self.garbage = False  # answer 200 with an HTML page (a captive portal, a proxy)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -261,6 +262,8 @@ class FakeGithub:
                 body = self._body()
                 if fake.fail_status:
                     return self._send(fake.fail_status, {"message": "nope"})
+                if fake.garbage:
+                    return self._send(200, raw=b"<html>Sign in to the network</html>")
                 parts = path.path.strip("/").split("/")
                 if method == "GET" and parts[:5] == ["repos", "o", "r", "releases", "tags"]:
                     rid = next((i for i, r in fake.releases.items() if r["tag"] == parts[5]), None)
@@ -390,6 +393,23 @@ def test_no_network_is_a_failure_not_a_crash(sources, tmp_path, monkeypatch):
     client = GithubReleaseClient("o/r", TOKEN, api_url="http://127.0.0.1:9")
     result = pd.publish(client=client, sources=sources)
     assert result.status == pd.FAILED and "can't reach GitHub" in result.message
+
+
+def test_an_answer_that_isnt_json_is_a_failure_not_a_crash(github, sources):
+    github.garbage = True
+    result = pd.publish(client=_client(github), sources=sources)
+    assert result.status == pd.FAILED and "isn't JSON" in result.message
+
+
+def test_a_database_it_cant_open_is_a_failure_not_a_crash(github, sources):
+    """SQLite can't open music.db (no read permission) - a result, not an exception."""
+    sources["music"].chmod(0)
+    try:
+        result = pd.publish(client=_client(github), sources=sources)
+    finally:
+        sources["music"].chmod(0o644)
+    assert result.status == pd.FAILED and "nothing was published" in result.message
+    assert github.log == []
 
 
 def test_not_set_up_is_skipped_naming_the_keys(tmp_path, monkeypatch):

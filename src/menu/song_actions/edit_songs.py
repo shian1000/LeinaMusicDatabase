@@ -27,7 +27,6 @@ from utils.ui.genre_review import set_genre_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
 from utils.database.song_kinds import kind_label
 from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
-import time
 
 HAS_SONGS_HINT = ("Credit its songs to another artist first (Song actions -> Change artist), "
                   "or merge it into another artist (Manage database -> Merge artists).")

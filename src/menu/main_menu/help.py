@@ -171,15 +171,15 @@ TOPIC_ACTIONS = {"Background services (Linux)": {"Show the full unit files": sho
 
 TOPICS = {
     "What MusicDatabase is for": """
-MusicDatabase is a tool for maanging music database. It stores artists, songs, albums, years,
-genres, moods (tags), YouTube and Spotify links, and where each song's file is in your music
-library. It fills in what's missing from MusicBrainz, Wikipedia, iTunes, Genius, Spotify and
+MusicDatabase is a tool for managing a music database. It stores artists, songs, albums,
+years, genres, moods (tags), YouTube and Spotify links, and where each song's file is in your
+music library. It fills in what's missing from MusicBrainz, Wikipedia, iTunes, Genius, Spotify and
 YouTube, and helps keep it clean.
 
 Leina Radio is a music player for Android which uses this database. The app works on music.db,
 tag.db and files.db which it can take from the server or from the GitHub repository. It can also
-play music stored on the server. The app can also send requests for database corretion or report new
-findings - you can accept these here. MusicDatabase's values always win; Leina Radio only fills
+play music stored on the server. The app can also send requests for database correction or report
+new findings - you can accept these here. MusicDatabase's values always win; Leina Radio only fills
 gaps for itself.
 """,
     "Day to day: the main menus": """
@@ -188,10 +188,10 @@ Enter database - the catalog itself:
     change artist, make a YouTube playlist, remove...).
   - Download YT song: save a YouTube video's audio into the import/ folder.
   - Manage database: adding songs in bulk, filling in data, requests from Leina Radio, clean-ups.
-  - Show whole database: everything in one table.
+  - Show whole database: artists, songs, or songs with their tags.
 Users - the accounts Leina Radio logs in with: create, rename, passwords, permissions, their
-  playlists, and the moods (global ones and each user's own). Currently you can only create accounts
-  using LeinaMusicDatabase's terminal.
+  playlists, and the moods (global ones and each user's own). Accounts are created only here,
+  in MusicDatabase.
 Statistics - how often each lookup module (albums, years) found something.
 Settings - lookup modules and their order, matching thresholds, the start-up tasks, and Server:
   the database folder, backups, this PC's folders and network, indexing the music library, sharing

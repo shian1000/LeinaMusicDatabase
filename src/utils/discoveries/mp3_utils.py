@@ -1,13 +1,10 @@
 """Utilities for extracting and normalizing metadata from MP3 files."""
 
 from pathlib import Path
-from typing import Optional
 
-import unicodedata
 from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 
-from utils.common.normalizer import normalize
 from utils.common.debug import slog
 
 from utils.common.normalizer import normalize, extract_unknown_data
@@ -57,17 +54,6 @@ def extract_mp3_metadata(file: Path) -> dict:
         "origin": origin,
     }
 
-
-def normalize_title(title: Optional[str]) -> str:
-    """Normalize a title from MP3 tags.
-
-    Uses NFC normalization then the project's `normalize` rules. Returns an empty
-    string for None inputs.
-    """
-    if not title:
-        return ""
-    title = unicodedata.normalize("NFC", title)
-    return normalize(title)
 
 def extract_metadata_with_fallback(file: Path) -> dict:
     """Extract MP3 metadata with fallback to filename parsing.

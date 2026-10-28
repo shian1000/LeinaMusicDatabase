@@ -7,5 +7,4 @@ Y2Mate.is
 y2mate
 ytmp3.cc
 mp3juices.cc
-savefrom.net
 dscom.it

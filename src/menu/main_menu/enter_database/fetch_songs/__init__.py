@@ -16,11 +16,11 @@ def fetch_artists():
     if category in (None, exit_label[0]):  # None: Esc / Ctrl+C
         return
 
-    querry = input("What are you looking for: ")
-    if querry == "":
+    query = input("What are you looking for: ")
+    if query == "":
         return
 
-    artist_objects = get_artists_from_db_session(category, querry)
+    artist_objects = get_artists_from_db_session(category, query)
 
     slog(artist_objects)
 
@@ -41,13 +41,13 @@ def fetch_songs():
         return
 
     if category == search_only_categories[1]:
-        querry = input("What are you looking for (nothing = all full albums): ")
+        query = input("What are you looking for (nothing = all full albums): ")
     else:
-        querry = input("What are you looking for: ")
-        if querry == "":
+        query = input("What are you looking for: ")
+        if query == "":
             return
 
-    songs_objects = get_songs_from_db_session(category, querry)
+    songs_objects = get_songs_from_db_session(category, query)
     if not songs_objects:
         print("Nothing found.")
 

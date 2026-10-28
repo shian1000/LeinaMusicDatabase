@@ -52,32 +52,15 @@ from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_so
 from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.menu_utils import clear_screen, execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
+from utils.ui.user_picker import pick_user, show_error, usernames_or_explain
 from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
 
-RED = "\033[91m"
-RESET = "\033[0m"
 
 
-def _error(message) -> None:
-    print(f"{RED}{message}{RESET}")
-
-
-def _users_or_explain() -> list[str] | None:
-    if not users_available():
-        _error(f"The users folder isn't available: {users_unavailable_message()}")
-        return None
-    names = list_usernames()
-    if not names:
-        print('No users yet - create one with "Create a new user".')
-        return None
-    return names
-
-
-def _pick_user(question: str) -> str | None:
-    names = _users_or_explain()
-    if not names:
-        return None
-    return questionary.select(question, choices=names).ask()
+# One version for this menu and Users -> Moods (utils/ui/user_picker.py)
+_error = show_error
+_users_or_explain = usernames_or_explain
+_pick_user = pick_user
 
 
 def _ask_new_password(question: str = "New password:") -> str | None:
@@ -642,7 +625,7 @@ def enter_user_database() -> None:
     if password is None or not verify_user(username, password):
         _error("Wrong username or password.")
         return
-    username = username.strip().lower()
+    username = normalize_username(username)  # the same rule as creating the user
 
     # Catch up on songs merged or deleted while this user's DB was out of reach
     try:

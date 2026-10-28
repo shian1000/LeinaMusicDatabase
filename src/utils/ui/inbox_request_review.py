@@ -81,7 +81,8 @@ from utils.database.inbox_requests import (
     reject_request_file,
     review_request_paths,
 )
-from utils.youtube.manage_youtube_playlists import NO_VIDEO_SENTINEL, extract_video_id
+from config.constants import NO_VIDEO_SENTINEL
+from utils.youtube.manage_youtube_playlists import extract_video_id
 
 _PASTE = "Paste another link"
 _NO_VIDEO = f'No YouTube video for this song ("{NO_VIDEO_SENTINEL}")'

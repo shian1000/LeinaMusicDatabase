@@ -22,6 +22,7 @@ sharing server (app ADR 0014, handoff musicdatabase-public-database.md).
 """
 
 import json
+import sqlite3
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -178,6 +179,11 @@ def publish(force: bool = False, client=None, sources=None, now=None) -> Publish
         except ExportError as exc:
             flog(f"Public database not published - the export failed its check: {exc}")
             return _record(PublishResult(FAILED, f"the export failed its check, nothing was published: {exc}"))
+        except (OSError, sqlite3.Error) as exc:
+            # A database it can't open, a full disk
+            flog(f"Public database not published - the export failed: {type(exc).__name__}: {exc}")
+            return _record(PublishResult(FAILED, f"the export failed, nothing was published: "
+                                                 f"{type(exc).__name__}: {exc}"))
         try:
             release = client.get_release(PUBLIC_DB_RELEASE_TAG)
             if release is None:
@@ -193,6 +199,9 @@ def publish(force: bool = False, client=None, sources=None, now=None) -> Publish
         except GithubError as exc:
             flog(f"Public database not published: {exc}")
             return _record(PublishResult(FAILED, str(exc)))
+        except OSError as exc:
+            flog(f"Public database not published: {type(exc).__name__}: {exc}")
+            return _record(PublishResult(FAILED, f"{type(exc).__name__}: {exc}"))
     sizes = ", ".join(f"{f.name} {f.size / 1024:.0f} KiB" for f in export.files)
     mlog(f"Public database published to {release.html_url}: {sizes}")
     return _record(PublishResult(PUBLISHED, f"published {sizes}", release.html_url))

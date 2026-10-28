@@ -6,7 +6,9 @@ whether PyPI has a newer one and offers to install it
 
 Installed as `yt-dlp[default]` - yt-dlp-ejs (YouTube's JS challenge
 scripts) and friends come with it; `deno`, the JS runtime they run on, is a
-separate pinned package in the same venv. After an update every line of
+separate pinned package in the same venv. requirements.txt pins the plain
+`yt-dlp` and each of those extras on its own line, so a fresh install from
+it gets them too. After an update every line of
 requirements.txt is re-pinned to what's now installed, so the file keeps
 matching the venv."""
 
@@ -20,7 +22,7 @@ from pathlib import Path
 import requests
 from packaging.version import InvalidVersion, Version
 
-from config.constants import YTDLP_PYPI_URL, YTDLP_UPDATE_CHECK_TIMEOUT
+from config.constants import YTDLP_INSTALL_TIMEOUT, YTDLP_PYPI_URL, YTDLP_UPDATE_CHECK_TIMEOUT
 from utils.common.debug import slog
 
 REQUIREMENTS_FILE = Path(__file__).resolve().parents[3] / "requirements.txt"
@@ -81,11 +83,12 @@ def repin_requirements(path: Path = REQUIREMENTS_FILE) -> list[str]:
 
 def install_ytdlp(version: str) -> list[str]:
     """pip-install yt-dlp[default]==version into this venv, then re-pin
-    requirements.txt. Raises subprocess.CalledProcessError if pip fails
+    requirements.txt. Raises subprocess.CalledProcessError if pip fails and
+    subprocess.TimeoutExpired if it takes over YTDLP_INSTALL_TIMEOUT
     (requirements.txt is left alone then)."""
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "--quiet", f"yt-dlp[default]=={version}"],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, timeout=YTDLP_INSTALL_TIMEOUT,
     )
     # So this process sees the versions pip just installed
     importlib.invalidate_caches()
