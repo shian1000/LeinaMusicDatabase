@@ -95,7 +95,8 @@ def divide_artists_menu():
 
     confirmation = ask_yes_no("Proceed with dividing this artist so each song gets its own new artist record?")
     if confirmation:
-        divide_artist(obj)        
+        divide_artist(obj)
+        submit_global_database_session()
     else:
         print("Aborted by user.")
         return

@@ -5,9 +5,10 @@ import re
 import time
 from bs4 import BeautifulSoup, GuessedAtParserWarning
 
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from utils.common.text_utils import is_blacklisted_album
 from utils.common.file_management import save_string_to_file
+from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import MUSICBRAINZ_API_USER_AGENT, SINGLES_ALBUM
 
 # The wikipedia package parses HTML internally without picking a parser,
@@ -40,8 +41,12 @@ GENERIC_HEADINGS = {
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_album_name(artist: str, title: str) -> str | None:
-    """Search Wikipedia for a song and return the album name, or None."""
+def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
+    """Search Wikipedia for a song and return the album name, or None.
+
+    matched_title / matched_artist stay None: the page is found by the query
+    itself (a song page only when its title contains the queried title, else
+    an artist/album page), so there's no independent match to report."""
     page = _fetch_wikipedia_page(artist, title)
     if not page:
         return None
@@ -56,10 +61,11 @@ def get_album_name(artist: str, title: str) -> str | None:
         album = _extract_from_track_listing(soup, page.title, title, artist)
 
     if not album:
+        flog(f"[Wikipedia] No album for the song on '{page.title}'")
         return None
 
     album = clean_album_title(album, artist)
-    return None if is_blacklisted_album(album, artist) else album
+    return None if is_blacklisted_album(album, artist) else DiscoveryResult(album=album)
 
 
 # ---------------------------------------------------------------------------
@@ -70,16 +76,18 @@ def _fetch_wikipedia_page(artist: str, title: str):
     """Search Wikipedia and return the first matching page, or None."""
     results = _search_with_retry(f"{artist} {title}")
     if not results:
+        flog("[Wikipedia] No search results")
         return None
 
     slog(results)
 
     try:
         page = wikipedia.page(results[0], auto_suggest=False)
-    except (wikipedia.DisambiguationError, wikipedia.PageError):
+    except (wikipedia.DisambiguationError, wikipedia.PageError) as exc:
+        flog(f"[Wikipedia] No page for '{results[0]}': {type(exc).__name__}")
         return None
     except requests.exceptions.RequestException as exc:
-        slog(f"Wikipedia page request failed: {exc}")
+        flog(f"[Wikipedia] Page request failed: {exc}")
         return None
 
     slog(f"Page title: {page.title}")
@@ -105,7 +113,7 @@ def _fetch_soup(url: str) -> BeautifulSoup | None:
         slog(response)
         return BeautifulSoup(response.text, "html.parser")
     except requests.exceptions.RequestException as exc:
-        slog(f"Wikipedia page fetch failed: {exc}")
+        flog(f"[Wikipedia] Page fetch failed: {exc}")
         return None
 
 

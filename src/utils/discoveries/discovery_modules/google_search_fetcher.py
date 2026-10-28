@@ -68,7 +68,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     its attrid handling revisited if this doesn't pan out)."""
     driver = get_global_driver()
     if driver is None:
-        print("[Error] No driver open. Call open_global_driver() first.")
+        flog("[Google] No driver open. Call open_global_driver() first.")
         return None
 
     url = f"https://www.google.com/search?q={quote_plus(f'{artist} - {query}')}&hl=en"
@@ -78,7 +78,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     time.sleep(4)
 
     if "/sorry/" in driver.current_url:
-        flog("[Result] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
+        flog("[Google] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
         return None
 
     try:
@@ -88,7 +88,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     except Exception:
         with open(PROJECT_ROOT / "debug.html", "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        flog("[Result] Page loaded but no Knowledge Panel detected.")
+        flog("[Google] Page loaded but no Knowledge Panel detected.")
         return None
 
     soup = BeautifulSoup(driver.page_source, "html.parser")
@@ -108,7 +108,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
                 info[friendly_name] = value
 
     if not info:
-        print("[Result] No Knowledge Panel found for this query.")
+        flog(f"[Google] No music Knowledge Panel for '{artist} - {query}'")
         return None
 
     info["_query"] = {"artist": artist, "query": query}

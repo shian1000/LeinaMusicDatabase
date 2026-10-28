@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 from utils.common.selenium_sessions import get_global_driver
 import time
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from urllib.parse import quote
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
@@ -114,7 +114,7 @@ def _find_song_link(soup, song: str) -> str | None:
     return None
 
 
-def get_album_name(artist: str, song: str) -> str | None:
+def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
     query = quote(f"{artist} {song}")
     url = f"https://music.apple.com/us/search?term={query}"
 
@@ -123,7 +123,7 @@ def get_album_name(artist: str, song: str) -> str | None:
     #Open itunes and look for the song:
     driver = get_global_driver()
     if driver is None:
-        slog("[iTunes] No driver open. Call open_global_driver() first.")
+        flog("[iTunes] No driver open. Call open_global_driver() first.")
         return None
     driver.get(url)
     time.sleep(2)
@@ -133,6 +133,7 @@ def get_album_name(artist: str, song: str) -> str | None:
     #Open the link of the song:
     song_link = _find_song_link(soup, song)
     if not song_link:
+        flog("[iTunes] No matching song in search results")
         return None
 
     slog(f"Found song link: {song_link}", priority=1)
@@ -142,6 +143,7 @@ def get_album_name(artist: str, song: str) -> str | None:
     song_soup = BeautifulSoup(driver.page_source, "html.parser")
     extracted = extract_from_itunes_soup(song_soup, artist, song)
     if not extracted:
+        flog("[iTunes] No album on the song page")
         return None
 
     album_name, matched_title, matched_artist = extracted

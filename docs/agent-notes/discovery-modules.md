@@ -404,9 +404,10 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
   row if the track page's markup doesn't have them.
 - `youtube_fetcher.py` — reports the title/artist scraped straight from the matched row in the
   filtered "Songs" search results (no separate track page to visit; see below).
-- `wikipedia_fetcher.py` was **not** upgraded — it already requires the query title to appear in
-  the page/container text before accepting a result, so the marginal benefit was low, and its
-  extraction logic wasn't touched.
+- `wikipedia_fetcher.py` returns a `DiscoveryResult` with only `album` set — no matched title or
+  artist. It already requires the query title to appear in the page title (song page) or the
+  tracklist text (artist/album page) before accepting a result, so the page title would only echo
+  the query and give the manager no independent check.
 
 ## MusicBrainz: which release becomes the album, and what it can't find
 

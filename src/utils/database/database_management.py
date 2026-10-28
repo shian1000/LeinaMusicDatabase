@@ -181,8 +181,8 @@ def artist_primary_songs(artist: Artist) -> list[Song]:
 
 def divide_artist(db_object):
     """Split an artist so each song (except the first) becomes assigned to a newly created
-    artist record with the same name (the menu shows the songs and asks first).
-    Commits the changes to the global music session.
+    artist record with the same name, in the global music session. Asks nothing (the menu
+    shows the songs and asks first); the caller commits.
     """
     music_session, _ = require_global_database_sessions()
     songs = artist_primary_songs(db_object)
@@ -195,7 +195,6 @@ def divide_artist(db_object):
         s.artist_id = new_artist.id
         print(f"Reassigned song [{s.id}] '{s.title}' to new artist id {new_artist.id}.")
 
-    music_session.commit()
     print(f"Division complete: created {len(songs)-1} new artist(s) and reassigned {len(songs)-1} song(s).")
 
     

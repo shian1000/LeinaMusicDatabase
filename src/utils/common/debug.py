@@ -19,6 +19,9 @@ from config.constants import PROJECT_ROOT
 
 DEBUG_ENABLED: bool = (PROJECT_ROOT / ".debug").exists()
 
+# slog()/mlog() pass a message on when priority >= 3 - VERBOSITY_LEVEL: with
+# verbosity 0 (no .debug, or one without a "verbosity = N" line) only
+# priority 3 gets through, with verbosity 3 everything does
 VERBOSITY_LEVEL: int = 0
 if DEBUG_ENABLED:
     import re
@@ -84,12 +87,17 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     Log a variable's value with type and source location information.
     
     Smart logging function that automatically extracts the variable name
-    from the calling code and includes file/line information. Works only
-    if DEBUG_ENABLED or DEBUG_TO_FILE_ENABLED is True.
+    from the calling code and includes file/line information. A message
+    that passes the verbosity check goes to debug.log, and to the console
+    too when a .debug file exists.
     
     Args:
         var: Variable to log (can be any type)
         name: Optional custom name for the variable (auto-detected if None)
+        priority: 0-3, higher = shown sooner. Logged only when
+            priority >= 3 - VERBOSITY_LEVEL: 3 always, 0 (the default)
+            only with "verbosity = 3" in .debug - so by default nothing,
+            not even to debug.log. Use flog() for a lookup that came up empty.
     
     Example:
         >>> x = 42
@@ -149,10 +157,13 @@ def mlog(message: str, priority: int = 0) -> None:
     """
     Log a simple message string.
     
-    Logs a plain text message to console. Works only if DEBUG_ENABLED is True.
+    Logs a plain text message to the console only (never to debug.log), and
+    only when a .debug file exists.
     
     Args:
         message: Message text to log
+        priority: same scale as slog(): logged only when
+            priority >= 3 - VERBOSITY_LEVEL (3 always, 0 only at verbosity 3)
     
     Example:
         >>> mlog("Application started")  # Logs if debug enabled

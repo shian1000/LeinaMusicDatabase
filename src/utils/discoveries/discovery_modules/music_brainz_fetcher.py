@@ -238,7 +238,7 @@ def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = Fal
         return result
 
     except musicbrainzngs.WebServiceError as e:
-        print(f"MusicBrainz error for '{song}' by '{artist}': {e}")
+        flog(f"[MusicBrainz] error for the album of '{artist} - {song}': {e}")
         return None
 
 
@@ -364,6 +364,5 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
         return _release_year_from_artist_recordings(artist, query, delay)
 
     except musicbrainzngs.WebServiceError as e:
-        print(f"MusicBrainz error for release year of '{query}' by '{artist}': {e}")
         flog(f"[MusicBrainz] error for release year of '{artist} - {query}': {e}")
         return None

@@ -53,3 +53,19 @@ def test_wikipedia_requests_carry_the_projects_user_agent(monkeypatch):
     assert module._fetch_soup("https://en.wikipedia.org/wiki/X") is None
     assert sent["User-Agent"] == MUSICBRAINZ_API_USER_AGENT
     assert module.wikipedia.wikipedia.USER_AGENT == MUSICBRAINZ_API_USER_AGENT
+
+
+def test_get_album_name_returns_a_discovery_result(monkeypatch):
+    # DSC-11: the same result shape as the other modules, not a bare str
+    from types import SimpleNamespace
+    from utils.discoveries.discovery_result import DiscoveryResult
+
+    module = load_wikipedia_fetcher_module()
+    page = SimpleNamespace(title="Sadness Is a Blessing", url="https://en.wikipedia.org/wiki/x")
+    monkeypatch.setattr(module, "_fetch_wikipedia_page", lambda artist, title: page)
+    monkeypatch.setattr(module, "_fetch_soup", lambda url: object())
+    monkeypatch.setattr(module, "_extract_from_infobox", lambda soup, title: "So Sad So Sexy (Lykke Li album)")
+
+    result = module.get_album_name("Lykke Li", "Sadness Is a Blessing")
+
+    assert result == DiscoveryResult(album="So Sad So Sexy")

@@ -356,88 +356,45 @@ def discovery_modules_menu():
     execute_menu_item("Discovery modules", action_map, exit_label="Back")
 
 
+NO_YEAR_MODULES_MESSAGE = "No discovery modules implement release-year lookups yet."
+
+
 def toggle_discovery_modules():
     """Tick/untick which discovery modules are used when searching for songs."""
-    modules = load_all_discovery_modules_metadata()  # [(id, display_name), ...] in configured order
-    config = load_discovery_config()
-
-    choices = [
-        questionary.Choice(
-            title=display_name,
-            value=module_id,
-            checked=config["enabled"].get(module_id, True),
-        )
-        for module_id, display_name in modules
-    ]
-
-    selected_ids = questionary.checkbox(
-        "Select modules to enable (space to toggle, enter to confirm)",
-        choices=choices,
-    ).ask()
-
-    if selected_ids is None:  # cancelled (e.g. Ctrl+C)
-        return
-
-    config["enabled"] = {module_id: module_id in selected_ids for module_id, _ in modules}
-    save_discovery_config(config)
-    print("Discovery module settings saved.")
+    _toggle_modules(load_all_discovery_modules_metadata, load_discovery_config, save_discovery_config,
+                    question_suffix="", saved_message="Discovery module settings saved.")
 
 
 def reorder_discovery_modules():
     """Rearrange the priority order discovery modules are tried in."""
-    modules = load_all_discovery_modules_metadata()
-    config = load_discovery_config()
-    order = [module_id for module_id, _ in modules]
-    names = dict(modules)
-
-    while True:
-        clear_screen()
-        print("Set modules order (top = tried first)\n")
-        for i, module_id in enumerate(order, start=1):
-            marker = "" if config["enabled"].get(module_id, True) else " (disabled)"
-            print(f"{i}. {names[module_id]}{marker}")
-        print()
-
-        pick_choices = [questionary.Choice(title=names[m], value=m) for m in order]
-        pick_choices.append(questionary.Choice(title="Done", value="__done__"))
-
-        selected_id = questionary.select(
-            "Pick a module to move",
-            choices=pick_choices,
-        ).ask()
-
-        if selected_id is None or selected_id == "__done__":
-            break
-
-        direction = questionary.select(
-            f"Move '{names[selected_id]}' where?",
-            choices=["Move up", "Move down", "Move to top", "Move to bottom", "Cancel"],
-        ).ask()
-
-        idx = order.index(selected_id)
-        if direction == "Move up" and idx > 0:
-            order[idx - 1], order[idx] = order[idx], order[idx - 1]
-        elif direction == "Move down" and idx < len(order) - 1:
-            order[idx + 1], order[idx] = order[idx], order[idx + 1]
-        elif direction == "Move to top":
-            order.insert(0, order.pop(idx))
-        elif direction == "Move to bottom":
-            order.append(order.pop(idx))
-        # "Cancel" or a dismissed prompt: no change
-
-    config["order"] = order
-    save_discovery_config(config)
-    print("Module order saved.")
+    _reorder_modules(load_all_discovery_modules_metadata, load_discovery_config, save_discovery_config,
+                     header="Set modules order", saved_message="Module order saved.")
 
 
 def toggle_year_discovery_modules():
     """Tick/untick which discovery modules are used when searching for a
     release year (only modules that implement get_release_year())."""
-    modules = load_all_year_discovery_modules_metadata()
-    config = load_year_discovery_config()
+    _toggle_modules(load_all_year_discovery_modules_metadata, load_year_discovery_config,
+                    save_year_discovery_config, question_suffix=" for Years",
+                    saved_message="Year discovery module settings saved.",
+                    empty_message=NO_YEAR_MODULES_MESSAGE)
 
-    if not modules:
-        print("No discovery modules implement release-year lookups yet.")
+
+def reorder_year_discovery_modules():
+    """Rearrange the priority order release-year discovery modules are tried in."""
+    _reorder_modules(load_all_year_discovery_modules_metadata, load_year_discovery_config,
+                     save_year_discovery_config, header="Set modules order for Years",
+                     saved_message="Year module order saved.", empty_message=NO_YEAR_MODULES_MESSAGE)
+
+
+def _toggle_modules(load_modules, load_config, save_config, *, question_suffix, saved_message,
+                    empty_message=None):
+    """The checkbox list behind both "Enable/disable modules" entries (albums, years)."""
+    modules = load_modules()  # [(id, display_name), ...] in configured order
+    config = load_config()
+
+    if not modules and empty_message:
+        print(empty_message)
         return
 
     choices = [
@@ -450,7 +407,7 @@ def toggle_year_discovery_modules():
     ]
 
     selected_ids = questionary.checkbox(
-        "Select modules to enable for Years (space to toggle, enter to confirm)",
+        f"Select modules to enable{question_suffix} (space to toggle, enter to confirm)",
         choices=choices,
     ).ask()
 
@@ -458,17 +415,18 @@ def toggle_year_discovery_modules():
         return
 
     config["enabled"] = {module_id: module_id in selected_ids for module_id, _ in modules}
-    save_year_discovery_config(config)
-    print("Year discovery module settings saved.")
+    save_config(config)
+    print(saved_message)
 
 
-def reorder_year_discovery_modules():
-    """Rearrange the priority order release-year discovery modules are tried in."""
-    modules = load_all_year_discovery_modules_metadata()
-    config = load_year_discovery_config()
+def _reorder_modules(load_modules, load_config, save_config, *, header, saved_message,
+                     empty_message=None):
+    """The move-up/down loop behind both "Set modules order" entries (albums, years)."""
+    modules = load_modules()
+    config = load_config()
 
-    if not modules:
-        print("No discovery modules implement release-year lookups yet.")
+    if not modules and empty_message:
+        print(empty_message)
         return
 
     order = [module_id for module_id, _ in modules]
@@ -476,7 +434,7 @@ def reorder_year_discovery_modules():
 
     while True:
         clear_screen()
-        print("Set modules order for Years (top = tried first)\n")
+        print(f"{header} (top = tried first)\n")
         for i, module_id in enumerate(order, start=1):
             marker = "" if config["enabled"].get(module_id, True) else " (disabled)"
             print(f"{i}. {names[module_id]}{marker}")
@@ -510,8 +468,8 @@ def reorder_year_discovery_modules():
         # "Cancel" or a dismissed prompt: no change
 
     config["order"] = order
-    save_year_discovery_config(config)
-    print("Year module order saved.")
+    save_config(config)
+    print(saved_message)
 
 
 def database_location_menu():

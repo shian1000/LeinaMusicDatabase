@@ -5,7 +5,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 import re
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
 from difflib import SequenceMatcher
@@ -40,7 +40,7 @@ def title_matches_url(title: str, url: str, artist: str, threshold: float = 0.6)
     slog(ratio, priority=1)
     return ratio >= threshold
 
-def get_album_name(artist: str, title: str) -> str | None:
+def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     slog("Genius", priority=1)
     driver = get_global_driver()
     
@@ -70,7 +70,7 @@ def get_album_name(artist: str, title: str) -> str | None:
                 break
 
         if not song_url:
-            slog("No matching Genius result found")
+            flog("[Genius] No matching song in search results")
             return None
 
         slog(song_url)
@@ -85,7 +85,7 @@ def get_album_name(artist: str, title: str) -> str | None:
         )
         album_text = next((tag.text.strip() for tag in album_tags if tag.text.strip()), "")
         if not album_text:
-            slog("No visible album link on the Genius song page")
+            flog("[Genius] No visible album link on the song page")
             return None
 
         album_found = remove_brackets(album_text)
@@ -96,5 +96,5 @@ def get_album_name(artist: str, title: str) -> str | None:
             return DiscoveryResult(album=album_found, matched_title=matched_title)
     
     except Exception as e:
-        slog(f"Failed: {e}")
+        flog(f"[Genius] Lookup failed: {e}")
         return None

@@ -227,22 +227,6 @@ DEFAULT_SEARCH_QUESTION = "What query do you wish to search for: "
 
 # ==================== Database Constants ====================
 
-# Search categories
-SONG_CATEGORY_TITLE = "title"
-SONG_CATEGORY_ARTIST = "artist name"
-SONG_CATEGORY_ALBUM = "album"
-SONG_CATEGORY_YEAR = "year"
-SONG_CATEGORY_LANGUAGE = "language"
-SONG_CATEGORY_ORIGIN = "artist origin"
-SONG_CATEGORY_TAG = "tag"
-SONG_CATEGORY_ARTIST_ID = "artist id"
-
-ARTIST_CATEGORY_NAME = "artist name"
-ARTIST_CATEGORY_ORIGIN = "artist origin"
-ARTIST_CATEGORY_ID = "artist id"
-
-SEARCH_CATEGORY_NAME = "name"
-
 # additional_song_artists.role - the song's own songs.artist_id is always the
 # primary artist; extra rows are either co-headliners ("A x B") or guests
 # ("A feat. B").
