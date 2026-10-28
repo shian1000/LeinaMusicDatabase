@@ -6,6 +6,7 @@ actions; renaming an artist row is Artist actions → Edit only.
 """
 
 import questionary
+from utils.common.output import review_header
 from utils.ui.prompts import ask_yes_no
 
 from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, ADDITIONAL_ARTIST_ROLE_MAIN
@@ -261,9 +262,7 @@ def review_held_artist_renames(held: dict[int, tuple[Artist, str]]) -> None:
     into it, rename anyway or cancel (rename_artist())."""
     if not held:
         return
-    print("\n" + "=" * 70)
-    print(f"REVIEW: {len(held)} artist rename(s) onto a name another artist already has")
-    print("=" * 70)
+    review_header(f"REVIEW: {len(held)} artist rename(s) onto a name another artist already has")
     for artist, new_name in held.values():
         print(f'"{artist.name}"  ->  "{new_name}"')
         if not rename_artist(artist, new_name):

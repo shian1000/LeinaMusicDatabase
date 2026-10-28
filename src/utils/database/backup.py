@@ -20,7 +20,7 @@ from pathlib import Path
 
 from config.constants import FILES_DB_FILENAME
 from settings import Settings
-from utils.common.debug import mlog, slog
+from utils.common.debug import flog, mlog
 from utils.database.users import user_db_files
 
 ARCHIVE_DIR = Path(str(Settings.database_dir)) / "archive"
@@ -144,5 +144,5 @@ def backup_if_needed_today(reason: str = "daily-startup") -> list[Path]:
     try:
         return backup_databases(reason=reason)
     except Exception as exc:
-        slog(f"Daily database backup failed: {exc}", priority=3)
+        flog(f"Daily database backup failed: {exc}")
         raise BackupFailedError(str(exc) or type(exc).__name__) from exc

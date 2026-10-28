@@ -3,7 +3,7 @@ import questionary
 from utils.common.file_management import (LIBRARY_INDEX_NAME, MissingSmbLoginError, copy_songs_using_index,
                                           library_index_path)
 from utils.ui.menu_utils import open_file_browser_terminal, save_recent_dirs, load_recent_dirs
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 from settings import settings
 
 
@@ -22,7 +22,7 @@ def copy_songs_from_storage(songs):
         index_exists = index_file.exists()
     except Exception as e:
         # Log detailed debug info and show a friendly warning to the user. Don't crash the app.
-        slog(e, "copy_songs_from_storage - index existence check failed")
+        flog(f"Copy songs from storage: checking {index_file} failed: {type(e).__name__}: {e}")
         print("Warning: Could not reach the storage to check for an index file. The operation will be aborted.")
         return "Back"
 
@@ -63,7 +63,7 @@ def copy_songs_from_storage(songs):
     try:
         copy_songs_using_index(songs, index_file, paste_destination)
     except Exception as e:
-        slog(e, "copy_songs_from_storage - copy operation failed")
+        flog(f"Copy songs from storage: copying to {paste_destination} failed: {type(e).__name__}: {e}")
         print("Warning: Copy operation failed due to storage/network error. Returning to menu.")
         return "Back"
 

@@ -17,8 +17,6 @@ automatic pass changed."""
 import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.ui.song_colors import as_rich_markup, song_tokens
-from rich import print
-from rich.markup import escape
 
 from config.constants import INBOX_CHECK_MAX_AGE_HOURS, SONG_KIND_FULL_ALBUM
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
@@ -83,6 +81,7 @@ from utils.database.inbox_requests import (
 )
 from config.constants import NO_VIDEO_SENTINEL
 from utils.youtube.manage_youtube_playlists import extract_video_id
+from utils.common.output import escape, show
 
 _PASTE = "Paste another link"
 _NO_VIDEO = f'No YouTube video for this song ("{NO_VIDEO_SENTINEL}")'
@@ -108,42 +107,42 @@ def _not_playing_note(value: bool | None) -> str:
 
 def _show_bad(case) -> None:
     for r in case.bad_replacements:
-        print(f"    [dim]Found bad:    {_url(r.video_id)}  {escape(case.bad[r.video_id])}[/dim]")
+        show(f"    [dim]Found bad:    {_url(r.video_id)}  {escape(case.bad[r.video_id])}[/dim]")
 
 
 def _show_ours(case) -> None:
     if case.our_video_id:
         same = " [green](same as Leina Radio's)[/green]" if any(
             r.video_id == case.our_video_id for r in case.replacements) else ""
-        print(f"    Our search:   {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
+        show(f"    Our search:   {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
     else:
-        print("    Our search:   [dim]found nothing[/dim]")
+        show("    Our search:   [dim]found nothing[/dim]")
 
 
 def _show_case(case, position: str) -> None:
     song = case.song
-    print(f"\n{position} [yellow]{escape(song.artist.name)} - {escape(song.title)}[/yellow]  (song #{song.id})")
+    show(f"\n{position} [yellow]{escape(song.artist.name)} - {escape(song.title)}[/yellow]  (song #{song.id})")
     if case.title_differs:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
-        print(f"    [red]The request showed it as[/red] {escape(shown)}")
+        show(f"    [red]The request showed it as[/red] {escape(shown)}")
     current = song.youtube_video_id or "none (cleared)"
     dead = "[red]gone (YouTube API)[/red]" if case.dead_still_plays is False else "[dim]reported dead[/dim]"
-    print(f"    Dead link:    {_url(case.dead_video_id)}  {dead}"
+    show(f"    Dead link:    {_url(case.dead_video_id)}  {dead}"
           + ("" if song.youtube_video_id == case.dead_video_id else f"  [dim](now in database: {current})[/dim]"))
     for r in case.replacements:
         about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
-        print(f"    Suggested:    {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
+        show(f"    Suggested:    {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
               + (f"  {about}" if about else ""))
     _show_bad(case)
     _show_ours(case)
     files = escape(describe_files({r.file_name for r in case.reports}))
-    print(f"    [dim]Reported in {files}[/dim]")
+    show(f"    [dim]Reported in {files}[/dim]")
     _show_auto_note(case)
 
 
 def _show_auto_note(case) -> None:
     if case.auto_note:
-        print(f"    [cyan]Left for you by the automatic check: {escape(case.auto_note)}[/cyan]")
+        show(f"    [cyan]Left for you by the automatic check: {escape(case.auto_note)}[/cyan]")
 
 
 def _video_choices(case, label: str) -> list:
@@ -190,7 +189,7 @@ def _ask(case, choices: list):
         video_id = extract_video_id(url)
         if video_id:
             return USE_VIDEO, video_id
-        print(f"'{escape(url)}' isn't a YouTube video link.")
+        show(f"'{escape(url)}' isn't a YouTube video link.")
 
 
 def _check(cases: list, what: str) -> None:
@@ -199,20 +198,20 @@ def _check(cases: list, what: str) -> None:
     unchecked = [c for c in cases if not c.checked_at]
     if not unchecked:
         return
-    print(f"\nLooking for videos for {len(unchecked)} {what}...")
+    show(f"\nLooking for videos for {len(unchecked)} {what}...")
     stats = check_link_cases(
         unchecked,
-        on_case=lambda i, case: print(f"  [{i}/{len(unchecked)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
+        on_case=lambda i, case: show(f"  [{i}/{len(unchecked)}] {escape(case.song.artist.name)} - {escape(case.song.title)}"),
     )
     _print_check_stats(stats)
 
 
 def _print_check_stats(stats: dict) -> None:
     if not stats["api"]:
-        print("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
+        show("[yellow]YouTube Data API not available (no YOUTUBE_API_KEY in .env and no valid login) - "
               "checked with yt-dlp only.[/yellow]")
     if stats.get("blocked"):
-        print(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
+        show(f"[yellow]YouTube blocked {stats['blocked']} yt-dlp check(s) (rate limiting / \"confirm you're not a bot\")"
               f"{' - the API still lists those videos, so they count as playing' if stats['api'] else ''}.[/yellow]")
 
 
@@ -220,20 +219,20 @@ def _print_check_stats(stats: dict) -> None:
 
 def _show_found(case, position: str) -> None:
     song = case.song
-    print(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
+    show(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
     if case.title_differs:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
-        print(f"    [red]The request showed it as[/red] {escape(shown)}")
-    print("    Now:          [dim]no YouTube link[/dim]")
+        show(f"    [red]The request showed it as[/red] {escape(shown)}")
+    show("    Now:          [dim]no YouTube link[/dim]")
     for i, r in enumerate(case.replacements):
         about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
         latest = "  [dim](its latest pick)[/dim]" if i == 0 and len(case.replacements) > 1 else ""
-        print(f"    Leina Radio:  {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
+        show(f"    Leina Radio:  {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
               + (f"  {about}" if about else "") + latest)
     _show_bad(case)
     _show_ours(case)
     files = escape(describe_files({r.file_name for r in case.reports}))
-    print(f"    [dim]Found in {files}[/dim]")
+    show(f"    [dim]Found in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -251,15 +250,15 @@ def _review_found_links(session, requests) -> tuple[list, bool]:
     settled = [c for c in cases if c.status != OPEN]
     open_cases = [c for c in cases if c.status == OPEN]
     if settled:
-        print(f"\n{len(settled)} link(s) found by Leina Radio need no answer:")
+        show(f"\n{len(settled)} link(s) found by Leina Radio need no answer:")
         for case in settled:
             report = case.reports[0]
-            print(f"    {escape(report.artist)} - {escape(report.title)} "
+            show(f"    {escape(report.artist)} - {escape(report.title)} "
                   f"({', '.join(r.video_id for r in case.all_replacements())}): {case.status}")
     if not open_cases:
         return cases, False
     _check(open_cases, "song(s) Leina Radio found a link for")
-    print(f"\n{len(open_cases)} link(s) Leina Radio found for songs without one:")
+    show(f"\n{len(open_cases)} link(s) Leina Radio found for songs without one:")
     for i, case in enumerate(open_cases, 1):
         _show_found(case, f"[{i}/{len(open_cases)}]")
         answer = _ask(case, _found_choices(case))
@@ -311,44 +310,44 @@ def _show_correction(session, case, position: str) -> None:
     report = case.latest
     song = case.song
     if song is not None:
-        print(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
+        show(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
     else:
-        print(f"\n{position} [yellow]{escape(report.artist)} - {escape(report.title)}[/yellow]  [red](that song is gone)[/red]")
+        show(f"\n{position} [yellow]{escape(report.artist)} - {escape(report.title)}[/yellow]  [red](that song is gone)[/red]")
     if case.title_differs:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
-        print(f"    [red]The request showed it as[/red] {escape(shown)}")
-    print(f"    Field:           {case.label}  [dim]({_row_label(session, case)})[/dim]")
+        show(f"    [red]The request showed it as[/red] {escape(shown)}")
+    show(f"    Field:           {case.label}  [dim]({_row_label(session, case)})[/dim]")
     if case.row is not None and case.column_name == LATIN_COLUMNS[type(case.row)][1]:
         name = name_of(case.row)
         suggestion = suggest_latin(name, getattr(case.row, "language", None))
         hint = f"  [dim](suggested: {escape(suggestion)})[/dim]" if suggestion else ""
-        print(f"    Written as:      {escape(name)}{hint}")
+        show(f"    Written as:      {escape(name)}{hint}")
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
-        print(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
+        show(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
     had, now = ((_artist_ref(session, report.old_value), _artist_ref(session, case.current)) if case.is_artist
                 else (_field_value(case, report.old_value), _field_value(case, case.current)))
-    print(f"    Leina Radio had: {had}")
+    show(f"    Leina Radio had: {had}")
     changed = "  [yellow](changed since Leina Radio's copy)[/yellow]" if case.changed_since else ""
-    print(f"    Now:             {now}{changed}")
+    show(f"    Now:             {now}{changed}")
     error = f"  [red]can't be stored: {escape(case.error)}[/red]" if case.error else ""
     shown = case.new_value if case.is_video and not case.error else report.new_value
     plays = f"  {_plays(case.plays.get(case.video_id))}" if case.video_id and case.checked_at else ""
-    print(f"    Correction:      {_field_value(case, shown)}{plays}{error}")
+    show(f"    Correction:      {_field_value(case, shown)}{plays}{error}")
     if case.bad:
-        print(f"    [yellow]That video was found bad before: {escape(case.bad)}[/yellow]")
+        show(f"    [yellow]That video was found bad before: {escape(case.bad)}[/yellow]")
     if case.earlier_values:
-        print(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
+        show(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
     if case.is_artist:
-        print("    [dim]Only this song moves to that artist - its current artist is not renamed.[/dim]")
+        show("    [dim]Only this song moves to that artist - its current artist is not renamed.[/dim]")
     elif rename_looks_like_other_artist(case, case.new_value) and credit_target_song(case) is not None:
-        print("    [yellow]The new name doesn't look like a spelling fix - maybe only this song is by another "
+        show("    [yellow]The new name doesn't look like a spelling fix - maybe only this song is by another "
               "artist.[/yellow]")
     if case.is_video:
-        print("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
+        show("    [dim]Leina Radio already uses this link; keeping the current value leaves it on that link "
               "until the database's value changes.[/dim]")
     files = escape(describe_files({r.file_name for r in case.reports}))
-    print(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {files}[/dim]")
+    show(f"    [dim]Corrected {escape(report.corrected_at or '?')}, in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -425,7 +424,7 @@ def _plain(value) -> str:
 def _ask_correction(session, case):
     """(decision, value), _SKIP or _STOP."""
     for note in _value_notes(session, case, case.new_value):
-        print(f"    {note}")
+        show(f"    {note}")
     while True:
         answer = questionary.select("What should the database do?", choices=_correction_choices(session, case)).ask()
         if answer is None:
@@ -451,11 +450,11 @@ def _ask_correction(session, case):
             continue
         value, error = coerce_field_value(case.table_name, case.column_name, typed)
         if error:
-            print(f"[red]{escape(error)}[/red]")
+            show(f"[red]{escape(error)}[/red]")
             continue
         notes = _value_notes(session, case, value)
         for note in notes:
-            print(f"    {note}")
+            show(f"    {note}")
         if notes and not ask_yes_no(f"Save {_plain(value)} anyway?"):
             continue
         return EDIT, value
@@ -473,7 +472,7 @@ def _credit_to_artist(session, case, decision, value) -> None:
         if keep_old_as is False:
             return
     apply_field_correction(session, case, decision, value, keep_old_as=keep_old_as)
-    print(f"Now: {escape(song_artist_label(song))} - {escape(song.title)}")
+    show(f"Now: {escape(song_artist_label(song))} - {escape(song.title)}")
     if is_unused(session, old):
         offer_removing_emptied(session, [old], song.artist)
 
@@ -485,22 +484,22 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
     unsupported = [c for c in cases if c.status == FIELD_UNSUPPORTED]
     open_cases = [c for c in cases if c.status == FIELD_OPEN]
     if settled:
-        print(f"\n{len(settled)} field correction(s) need no answer:")
+        show(f"\n{len(settled)} field correction(s) need no answer:")
         for case in settled:
             report = case.latest
-            print(f"    {escape(report.artist)} - {escape(report.title)}, {case.label} -> "
+            show(f"    {escape(report.artist)} - {escape(report.title)}, {case.label} -> "
                   f"{_value(report.new_value)}: {case.status}")
     if unsupported:
         names = sorted({f"{c.table_name}.{c.column_name}" for c in unsupported})
-        print(f"[yellow]{len(unsupported)} correction(s) of {', '.join(names)}, which this version can't correct - "
+        show(f"[yellow]{len(unsupported)} correction(s) of {', '.join(names)}, which this version can't correct - "
               f"their files stay in the inbox.[/yellow]")
     if open_cases:
         load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
         unchecked = [c for c in open_cases if c.video_id and not c.checked_at]
         if unchecked:
-            print(f"\nChecking {len(unchecked)} YouTube link(s) set in Leina Radio...")
+            show(f"\nChecking {len(unchecked)} YouTube link(s) set in Leina Radio...")
             _print_check_stats(check_correction_videos(unchecked))
-        print(f"\n{len(open_cases)} field correction(s) to look at:")
+        show(f"\n{len(open_cases)} field correction(s) to look at:")
     for i, case in enumerate(open_cases, 1):
         _show_correction(session, case, f"[{i}/{len(open_cases)}]")
         answer = _ask_correction(session, case)
@@ -544,24 +543,24 @@ def _colored_song_label(artist, title) -> str:
 
 def _show_song_request(case, position: str) -> None:
     report = case.latest
-    print(f"\n{position} {_colored_song_label(report.artist, report.title)}")
+    show(f"\n{position} {_colored_song_label(report.artist, report.title)}")
     other = sorted({(r.artist, r.title) for r in case.reports} - {(report.artist, report.title)},
                    key=lambda pair: _song_label(*pair))
     if other:
-        print(f"    Also asked for as {', '.join(_colored_song_label(*pair) for pair in other)}")
-    print(f"    From:         {escape(', '.join(case.sources))}")
+        show(f"    Also asked for as {', '.join(_colored_song_label(*pair) for pair in other)}")
+    show(f"    From:         {escape(', '.join(case.sources))}")
     album, year = case.metadata()["album"], case.metadata()["year"]
     if album or year:
-        print(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")
+        show(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")
     for i, suggestion in enumerate(case.suggestions):
         label = "Looks like:" if i == 0 else "or:"
-        print(f"    {label:<14}{_colored_song_label(*suggestion)}  [dim]({escape(case.suggested_from or '')})[/dim]")
+        show(f"    {label:<14}{_colored_song_label(*suggestion)}  [dim]({escape(case.suggested_from or '')})[/dim]")
     for video_id in case.youtube_video_ids:
-        print(f"    YouTube:      {_url(video_id)}")
+        show(f"    YouTube:      {_url(video_id)}")
     for track_id in case.spotify_track_ids:
-        print(f"    Spotify:      https://open.spotify.com/track/{track_id}")
+        show(f"    Spotify:      https://open.spotify.com/track/{track_id}")
     files = escape(describe_files({r.file_name for r in case.reports}))
-    print(f"    [dim]Asked {escape(report.requested_at or '?')}, in {files}[/dim]")
+    show(f"    [dim]Asked {escape(report.requested_at or '?')}, in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -596,7 +595,7 @@ def _ask_song_request(case):
         title = (questionary.text("Title:", default=default_title or "").ask() or "").strip()
         if artist and title:
             return _ADD, artist, title
-        print("[red]Both the artist and the title are needed.[/red]")
+        show("[red]Both the artist and the title are needed.[/red]")
 
 
 def _add_requested_songs(approved: list) -> None:
@@ -606,7 +605,7 @@ def _add_requested_songs(approved: list) -> None:
         return
     from utils.discoveries.import_engine import run_import_batch
 
-    print(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
+    show(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
     run_import_batch([case.metadata(artist, title) for case, artist, title in approved])
     submit_global_database_session()
     for case, artist, title in approved:
@@ -619,14 +618,14 @@ def _review_song_requests(session, requests) -> tuple[list, bool]:
     settled = [c for c in cases if not c.pending]
     open_cases = [c for c in cases if c.pending]
     if settled:
-        print(f"\n{len(settled)} song(s) Leina Radio asked for need no answer:")
+        show(f"\n{len(settled)} song(s) Leina Radio asked for need no answer:")
         for case in settled:
             report = case.latest
             also = (f" (#{case.existing.id} {escape(song_artist_label(case.existing))} - {escape(case.existing.title)})"
                     if case.existing is not None else "")
-            print(f"    {escape(_song_label(report.artist, report.title))}: {case.status}{also}")
+            show(f"    {escape(_song_label(report.artist, report.title))}: {case.status}{also}")
     if open_cases:
-        print(f"\n{len(open_cases)} song(s) Leina Radio played that aren't in the database:")
+        show(f"\n{len(open_cases)} song(s) Leina Radio played that aren't in the database:")
     approved = []
     stopped = False
     for i, case in enumerate(open_cases, 1):
@@ -651,40 +650,40 @@ def _review_song_requests(session, requests) -> tuple[list, bool]:
 def show_auto_changes(entries: list[dict]) -> None:
     for entry in entries:
         when = (entry.get("at") or "?")[:16].replace("T", " ")
-        print(f"  [dim]{escape(when)}[/dim]  {escape(entry.get('text', '?'))}")
+        show(f"  [dim]{escape(when)}[/dim]  {escape(entry.get('text', '?'))}")
 
 
 def _auto_pass(session) -> None:
     """The automatic pass over new/, shown as it goes."""
     requests = read_new_requests()
-    print(f"Checking {len(requests)} new request file(s) automatically first...")
+    show(f"Checking {len(requests)} new request file(s) automatically first...")
     result = auto_resolve(
         session, requests, shown=True,
-        on_case=lambda i, n, case: print(f"  [{i}/{n}] {escape(case.song.artist.name)} - {escape(case.song.title)}"))
+        on_case=lambda i, n, case: show(f"  [{i}/{n}] {escape(case.song.artist.name)} - {escape(case.song.title)}"))
     for request in result.rejected:
-        print(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - "
+        show(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - "
               f"moved to {INBOX_DIR / 'rejected'}")
     if result.check_stats:
         _print_check_stats(result.check_stats)
     if result.changes:
-        print(f"\n[green]Changed automatically ({len(result.changes)}):[/green]")
+        show(f"\n[green]Changed automatically ({len(result.changes)}):[/green]")
         show_auto_changes(result.changes)
-    print(f"{len(result.moved)} file(s) done, {len(result.left)} left for you to review.")
+    show(f"{len(result.moved)} file(s) done, {len(result.left)} left for you to review.")
 
 
 def resolve_new_requests() -> None:
     if not inbox_available():
-        print(f"The inbox isn't available: {inbox_unavailable_message()}")
+        show(f"The inbox isn't available: {inbox_unavailable_message()}")
         return
     new_count, review_count = len(new_request_paths()), len(review_request_paths())
     history = auto_report()
-    print(f"New request files (not checked yet): {new_count}")
-    print(f"Waiting for your review (checked automatically): {review_count}")
+    show(f"New request files (not checked yet): {new_count}")
+    show(f"Waiting for your review (checked automatically): {review_count}")
     review_label = "Review the requests"
     history_label = f"Show what the automatic check changed ({len(history)})"
     choices = ([review_label] if new_count or review_count else []) + ([history_label] if history else [])
     if not choices:
-        print("No new requests in the inbox.")
+        show("No new requests in the inbox.")
         return
     answer = questionary.select("What now?", choices=choices + ["Back"]).ask()
     if answer == history_label:
@@ -700,18 +699,18 @@ def resolve_new_requests() -> None:
     requests = read_review_requests()
     if not requests:
         return
-    print(f"\n{len(requests)} request file(s) to review.")
+    show(f"\n{len(requests)} request file(s) to review.")
 
     for request in [r for r in requests if r.error]:
         target = reject_request_file(request)
-        print(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - moved to {target.parent}")
+        show(f"[red]{escape(request.name)}[/red] isn't a readable request ({escape(request.error)}) - moved to {target.parent}")
     requests = [r for r in requests if not r.error]
     for request in requests:
         if not request.supported:
-            print(f"[yellow]{escape(request.name)}[/yellow] is request format {request.format}; this version reads "
+            show(f"[yellow]{escape(request.name)}[/yellow] is request format {request.format}; this version reads "
                   f"format 1 - left in the inbox for a newer version.")
         elif request.unknown_tables:
-            print(f"[yellow]{escape(request.name)}[/yellow] also has {', '.join(request.unknown_tables)}, which this "
+            show(f"[yellow]{escape(request.name)}[/yellow] also has {', '.join(request.unknown_tables)}, which this "
                   f"version can't handle yet - the file stays in the inbox.")
 
     cases = collect_dead_link_cases(session, requests)
@@ -719,10 +718,10 @@ def resolve_new_requests() -> None:
     open_cases = [c for c in cases if c.status == OPEN]
     stopped = False
     if settled:
-        print(f"\n{len(settled)} dead link report(s) need no answer:")
+        show(f"\n{len(settled)} dead link report(s) need no answer:")
         for case in settled:
             report = case.reports[0]
-            print(f"    {escape(report.artist)} - {escape(report.title)} ({case.dead_video_id}): {case.status}")
+            show(f"    {escape(report.artist)} - {escape(report.title)} ({case.dead_video_id}): {case.status}")
 
     if open_cases:
         _check(open_cases, "dead link report(s)")
@@ -755,6 +754,6 @@ def resolve_new_requests() -> None:
 
     moved, left = finish_request_files(requests, cases)
     if moved:
-        print(f"\n{len(moved)} request file(s) done - moved to {INBOX_DIR / 'processed'}.")
+        show(f"\n{len(moved)} request file(s) done - moved to {INBOX_DIR / 'processed'}.")
     if left:
-        print(f"{len(left)} request file(s) stay in the inbox for next time.")
+        show(f"{len(left)} request file(s) stay in the inbox for next time.")

@@ -10,13 +10,14 @@ from utils.common.env_file import read_env_value, save_env_value
 from utils.database import public_database
 from utils.database.moods import apply_global_mood_changes_quietly
 from utils.ui.prompts import ask_yes_no
+from utils.common.output import GREEN, RED, RESET, YELLOW, error, warn
 
-_COLORS = {public_database.PUBLISHED: "92", public_database.UNCHANGED: "92",
-           public_database.SKIPPED: "93", public_database.FAILED: "91"}
+_COLORS = {public_database.PUBLISHED: GREEN, public_database.UNCHANGED: GREEN,
+           public_database.SKIPPED: YELLOW, public_database.FAILED: RED}
 
 
 def _print_result(result) -> None:
-    print(f"\033[{_COLORS.get(result.status, '0')}m{result.status.capitalize()}: {result.message}\033[0m")
+    print(f"{_COLORS.get(result.status, '')}{result.status.capitalize()}: {result.message}{RESET}")
     if result.url:
         print(f"Release: {result.url}")
 
@@ -62,7 +63,7 @@ def public_database_menu():
 def publish_now() -> None:
     missing = public_database.missing_setup()
     if missing:
-        print(f"\033[93mNot set up yet: {' and '.join(missing)} missing.\033[0m")
+        warn(f"Not set up yet: {' and '.join(missing)} missing.")
         print_setup_steps()
         return
     applied = apply_global_mood_changes_quietly()
@@ -85,7 +86,7 @@ def _set_repository() -> None:
         return
     value = typed.strip().strip("/")
     if value and value.count("/") != 1:
-        print("\033[91mExpected owner/repo.\033[0m")
+        error("Expected owner/repo.")
         return
     save_env_value("GITHUB_DB_REPO", value)
     Settings.github_db_repo = value

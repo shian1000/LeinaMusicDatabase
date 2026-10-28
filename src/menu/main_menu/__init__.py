@@ -4,7 +4,6 @@ from menu.main_menu.users import users_menu
 from menu.main_menu.statistics import show_discovery_stats
 from menu.main_menu.settings import settings_menu
 from menu.main_menu.help import help_menu
-from utils.common.debug import slog
 
 def main_menu():
     action_map = {
@@ -15,6 +14,5 @@ def main_menu():
         "Help": help_menu,
     }
 
-    slog(action_map)
 
     execute_menu_item("Main Menu", action_map, exit_label="Exit")

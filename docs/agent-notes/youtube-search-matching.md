@@ -991,8 +991,9 @@ whenever a song's correct video is confirmed unreachable by automated search (ag
 the one confirmed trigger so far, but the mechanism doesn't assume that's the only possible cause)
 rather than trying to tune scoring around a candidate pool that structurally can never contain the
 right answer. Every reuse, validation failure, search miss, and DB save in this flow is logged to
-`youtube_link_cache.log` (repo root, gitignored, always-on regardless of the `.debug` flag that
-gates `debug.log`) — check it first if a playlist run picks an unexpected video or a stored link
+`youtube_link_cache.log` (repo root, gitignored, always on regardless of the `.debug` flag,
+rotated at 2 MB; a yt-dlp check that failed or timed out goes to `debug.log` through `flog()`
+instead) — check it first if a playlist run picks an unexpected video or a stored link
 stops working.
 
 A separate annotation — `config/constants.NO_VIDEO_SENTINEL` (the literal

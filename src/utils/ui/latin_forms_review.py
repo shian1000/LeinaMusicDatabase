@@ -7,8 +7,6 @@ or type."""
 
 import questionary
 from utils.ui.prompts import ask_yes_no
-from rich import print
-from rich.markup import escape
 
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.latin_names import (
@@ -22,6 +20,7 @@ from utils.database.latin_names import (
     set_latin_form,
     suggest_latin_for,
 )
+from utils.common.output import escape, review_header, show
 
 _KIND_LABELS = {ARTIST: "Artists", ALBUM: "Albums", SONG: "Songs"}
 
@@ -47,10 +46,7 @@ def _accept_suggestions(candidates: list[LatinCandidate]) -> set:
     offered = [i for i, c in enumerate(candidates) if c.suggestion]
     if not offered:
         return set()
-    print("\n" + "=" * 70)
-    print(f"{len(offered)} name(s) have a suggested Latin form. Tick the ones to save")
-    print("(space toggles, a toggles all, i inverts, enter confirms). The rest can be typed next.")
-    print("=" * 70)
+    review_header(f"{len(offered)} name(s) have a suggested Latin form. Tick the ones to save", "(space toggles, a toggles all, i inverts, enter confirms). The rest can be typed next.")
     choices = [questionary.Choice(title=_describe(candidates[i]), value=i) for i in offered]
     selected = questionary.checkbox("Save these Latin forms:", choices=choices).ask()
     if not selected:
@@ -58,17 +54,17 @@ def _accept_suggestions(candidates: list[LatinCandidate]) -> set:
     for i in selected:
         set_latin_form(candidates[i].row, candidates[i].suggestion)
     submit_global_database_session()
-    print(f"Saved {len(selected)} Latin form(s).")
+    show(f"Saved {len(selected)} Latin form(s).")
     return set(selected)
 
 
 def _type_the_rest(candidates: list[LatinCandidate]) -> int:
     """One by one, each saved as soon as it's typed. Returns how many."""
-    print("Type each Latin form (the suggestion, if any, is filled in). "
+    show("Type each Latin form (the suggestion, if any, is filled in). "
           "Leave it empty to skip that one, Ctrl+C to stop.")
     saved = 0
     for position, candidate in enumerate(candidates, 1):
-        print(f"\n[{position}/{len(candidates)}] [yellow]{escape(candidate.name)}[/yellow]  "
+        show(f"\n[{position}/{len(candidates)}] [yellow]{escape(candidate.name)}[/yellow]  "
               f"[dim]({candidate.kind}, {escape(candidate.context)})[/dim]")
         typed = questionary.text("Latin form:", default=candidate.suggestion or "").ask()
         if typed is None:
@@ -85,11 +81,11 @@ def fill_latin_forms() -> None:
     session, _ = open_and_set_global_database_sessions()
     kinds = _pick_kinds(session)
     if kinds is None:
-        print("Nothing picked.")
+        show("Nothing picked.")
         return
     candidates = missing_latin_forms(session, kinds) if kinds else []
     if not candidates:
-        print("Every name in another alphabet already has a Latin form.")
+        show("Every name in another alphabet already has a Latin form.")
         return
 
     accepted = _accept_suggestions(candidates)
@@ -100,7 +96,7 @@ def fill_latin_forms() -> None:
     if not ask_yes_no(f"Go through the other {len(rest)} one by one ({without} without a suggestion)?"):
         return
     saved = _type_the_rest(rest)
-    print(f"Saved {saved} Latin form(s).")
+    show(f"Saved {saved} Latin form(s).")
 
 
 def edit_latin_form(obj) -> None:
@@ -110,8 +106,8 @@ def edit_latin_form(obj) -> None:
     start = current or suggest_latin_for(obj) or ""
     typed = questionary.text(f'Latin form of "{name}" (empty = none):', default=start).ask()
     if typed is None:
-        print("Aborted")
+        show("Aborted")
         return
     old = set_latin_form(obj, typed)
     submit_global_database_session()
-    print(f'Latin form of "{escape(name)}": {escape(old or "---")} --> {escape(latin_of(obj) or "---")}')
+    show(f'Latin form of "{escape(name)}": {escape(old or "---")} --> {escape(latin_of(obj) or "---")}')

@@ -11,7 +11,7 @@ import json
 from typing import Optional
 from upath import UPath
 from config.constants import DATABASE_LOCATION_CONFIG_FILE
-from utils.common.debug import slog
+from utils.common.debug import flog
 
 
 def _config_path() -> UPath:
@@ -26,10 +26,10 @@ def load_database_dir_override() -> Optional[str]:
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError) as e:
-        slog(f"Failed to read database location config, ignoring override: {e}")
+        flog(f"Failed to read database location config, ignoring override: {e}")
         return None
     if not isinstance(data, dict):
-        slog(f"Database location config isn't a JSON object, ignoring override: {data!r}")
+        flog(f"Database location config isn't a JSON object, ignoring override: {data!r}")
         return None
     return data.get("database_dir") or None
 

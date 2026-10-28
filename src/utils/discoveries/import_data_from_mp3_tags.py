@@ -6,7 +6,6 @@ from utils.common.debug import mlog
 from utils.common.normalizer import fix_cp1250_mojibake, is_site_name, strip_site_names
 from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
 from utils.discoveries.import_engine import run_import_batch
-from rich import print
 
 
 def _clean_fields(metadata: dict) -> dict:

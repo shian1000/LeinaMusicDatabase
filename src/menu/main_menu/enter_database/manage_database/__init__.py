@@ -1,3 +1,4 @@
+from utils.common.output import GREEN, RED, RESET, review_header
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
@@ -24,9 +25,6 @@ from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_a
 from utils.database.tags_management import add_tag_to_song, has_tag_on_song
 from config.constants import SPELLING_CHECK_THRESHOLD
 
-RED = "\033[91m"
-GREEN = "\033[92m"
-RESET = "\033[0m"
 
 AUTO_CONFIRM_RULES = [
     rule_apostrophe_and_common_word_diff,
@@ -136,7 +134,6 @@ def check_spelling_menu():
         # Handle Title Correction
         if new_title != song.title:
             print(f"{RED}{song.title}{RESET} -> {GREEN}{new_title}{RESET}")
-            print(f"song_id = {song.id}")
             if should_auto_confirm(song.title, new_title):
                 print("Auto-confirmed")
                 song.title = new_title
@@ -155,9 +152,7 @@ def check_spelling_menu():
     # corrections that were queued along the way and ask about each one in a
     # single batch, instead of interrupting the menu every time one came up.
     if pending_artist_corrections or pending_title_corrections:
-        print("\n" + "="*70)
-        print(f"REVIEW: {len(pending_artist_corrections)} artist name(s) and {len(pending_title_corrections)} song title(s) need review")
-        print("="*70)
+        review_header(f"REVIEW: {len(pending_artist_corrections)} artist name(s) and {len(pending_title_corrections)} song title(s) need review")
 
         for correction in pending_artist_corrections.values():
             print(f"{RED}{correction['old_name']}{RESET} -> {GREEN}{correction['new_name']}{RESET}")
@@ -170,7 +165,6 @@ def check_spelling_menu():
         for correction in pending_title_corrections:
             song = correction["song"]
             print(f"{RED}{correction['old_title']}{RESET} -> {GREEN}{correction['new_title']}{RESET}")
-            print(f"song_id = {song.id}")
             if ask_yes_no("Do you wish to correct this song title?"):
                 print("Confirmed")
                 song.title = correction["new_title"]
@@ -197,6 +191,5 @@ def manage_database():
         "Clean names": clean_names
     }
 
-    slog(action_map)
 
     execute_menu_item("Manage database", action_map)

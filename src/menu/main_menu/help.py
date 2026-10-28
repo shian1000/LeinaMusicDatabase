@@ -7,8 +7,8 @@ import textwrap
 import questionary
 
 from utils.ui.menu_utils import clear_screen, execute_menu_item
+from utils.common.output import BOLD, RESET
 
-BOLD, RESET = "\033[1m", "\033[0m"
 
 # What each library the program imports itself is for - the same text is in
 # README.md -> Libraries (a test checks). Packages only these need aren't listed.

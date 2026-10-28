@@ -9,8 +9,6 @@ from collections import defaultdict
 
 import questionary
 from utils.ui.prompts import ask_yes_no
-from rich import print
-from rich.markup import escape
 
 from config.constants import ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK
 from utils.database.albums import (
@@ -23,6 +21,7 @@ from utils.database.albums import (
 from utils.database.artist_identity import find_same_artist_pairs, find_swapped_songs, fix_swapped_song
 from utils.database.database_management import merge_artists_in_db
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
+from utils.common.output import escape, review_header, show
 
 _MERGE = "Merge artists that are one artist spelt differently"
 _SWAP = "Fix songs with artist and title swapped"
@@ -48,10 +47,10 @@ def _song_label(song) -> str:
 
 def _show_group(group: AlbumTitleGroup, position: str) -> None:
     artists = len(group.artist_ids)
-    print(f"\n{position} Album [yellow]{escape(group.title)}[/yellow] - "
+    show(f"\n{position} Album [yellow]{escape(group.title)}[/yellow] - "
           f"{len(group.songs)} song(s) by {artists} artists:")
     for song in group.songs:
-        print(f"    {escape(_song_label(song))}")
+        show(f"    {escape(_song_label(song))}")
 
 
 def _split_by_hand(session, group: AlbumTitleGroup) -> None:
@@ -75,7 +74,7 @@ def _split_by_hand(session, group: AlbumTitleGroup) -> None:
         else:
             album = assign_songs_to_album(session, songs, group.title, artists[choice])
         submit_global_database_session()
-        print(f"{len(songs)} song(s) -> album #{album.id}")
+        show(f"{len(songs)} song(s) -> album #{album.id}")
         remaining = [s for s in remaining if s not in songs]
 
 
@@ -83,19 +82,19 @@ def _resolve_group(session, group: AlbumTitleGroup, choice: str) -> None:
     if choice in (_COMPILATION, _SOUNDTRACK):
         album_type = ALBUM_TYPE_COMPILATION if choice == _COMPILATION else ALBUM_TYPE_SOUNDTRACK
         album = assign_songs_to_album(session, group.songs, group.title, None, album_type)
-        print(f"All {len(group.songs)} song(s) -> album #{album.id}")
+        show(f"All {len(group.songs)} song(s) -> album #{album.id}")
     elif choice == _PER_ARTIST:
         by_artist = defaultdict(list)
         for song in group.songs:
             by_artist[song.artist].append(song)
         for artist, songs in by_artist.items():
             album = assign_songs_to_album(session, songs, group.title, artist)
-            print(f"{escape(artist.name)}: {len(songs)} song(s) -> album #{album.id}")
+            show(f"{escape(artist.name)}: {len(songs)} song(s) -> album #{album.id}")
     elif choice == _BY_HAND:
         _split_by_hand(session, group)
     elif choice == _DELETE:
         clear_album_text(group.songs)
-        print(f"Album name cleared from {len(group.songs)} song(s)")
+        show(f"Album name cleared from {len(group.songs)} song(s)")
 
 
 def _merge_same_artists(session, pairs, declined: set) -> bool:
@@ -107,7 +106,7 @@ def _merge_same_artists(session, pairs, declined: set) -> bool:
     for a_id, b_id, a, b in [(a.id, b.id, a, b) for a, b in pairs]:
         if a_id in gone or b_id in gone:
             continue
-        print(f"[yellow]{escape(a.name)}[/yellow] ({len(a.songs)} song(s)) and "
+        show(f"[yellow]{escape(a.name)}[/yellow] ({len(a.songs)} song(s)) and "
               f"[yellow]{escape(b.name)}[/yellow] ({len(b.songs)} song(s)) look like one artist.")
         keep_a, keep_b, different = f"Keep \"{a.name}\"", f"Keep \"{b.name}\"", "Different artists"
         choice = questionary.select(
@@ -145,7 +144,7 @@ def _fix_swaps(session, swaps, declined_swaps: set) -> bool:
         song, artist = labels[label]
         old = fix_swapped_song(session, song, artist)
         note = f" (artist \"{old.name}\" had no other song, removed)" if old else ""
-        print(f"Now: {escape(artist.name)} - {escape(song.title)}{escape(note)}")
+        show(f"Now: {escape(artist.name)} - {escape(song.title)}{escape(note)}")
     submit_global_database_session()
     return True
 
@@ -166,16 +165,14 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
     linked = link_unassigned_songs(music_session, report_linked=True)
     submit_global_database_session()
     if linked and songs is None:
-        print(f"Linked {linked} song(s) whose album title only one artist uses now.")
+        show(f"Linked {linked} song(s) whose album title only one artist uses now.")
     groups = find_unresolved_album_groups(music_session, songs)
     if not groups:
         if songs is None:
-            print("No album titles shared by several artists left to resolve.")
+            show("No album titles shared by several artists left to resolve.")
         return 0
 
-    print("\n" + "=" * 70)
-    print(f"REVIEW: {len(groups)} album title(s) are used by several artists")
-    print("=" * 70)
+    review_header(f"REVIEW: {len(groups)} album title(s) are used by several artists")
     resolved = 0
     done = set()       # titles settled or skipped
     declined = set()   # artist pairs the user said are different artists
@@ -191,9 +188,9 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
         swaps = [(song, artist) for song, artist in find_swapped_songs(group.songs)
                  if song.id not in declined_swaps]
         for a, b in pairs:
-            print(f"  [cyan]Same artist?[/cyan] {escape(a.name)} / {escape(b.name)}")
+            show(f"  [cyan]Same artist?[/cyan] {escape(a.name)} / {escape(b.name)}")
         for song, artist in swaps:
-            print(f"  [cyan]Swapped?[/cyan] {escape(song.artist.name)} - {escape(song.title)}")
+            show(f"  [cyan]Swapped?[/cyan] {escape(song.artist.name)} - {escape(song.title)}")
         choice = questionary.select(
             "What is this album?",
             choices=([_MERGE] if pairs else []) + ([_SWAP] if swaps else [])
@@ -211,7 +208,7 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
                 relinked = link_unassigned_songs(music_session, report_linked=True)
                 submit_global_database_session()
                 if relinked:
-                    print(f"Linked {relinked} song(s) whose album title only one artist uses now.")
+                    show(f"Linked {relinked} song(s) whose album title only one artist uses now.")
             continue  # the same title again if it's still shared, with what's left
         done.add(group.key)
         if choice == _SKIP:
@@ -221,7 +218,7 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
         resolved += 1
 
     left = len(find_unresolved_album_groups(music_session, songs))
-    print(f"\nSettled {resolved} album title(s); {left} left for later.")
+    show(f"\nSettled {resolved} album title(s); {left} left for later.")
     return resolved
 
 
@@ -234,8 +231,8 @@ def offer_album_resolution(songs: list) -> int:
     music_session, _ = open_and_set_global_database_sessions()
     if not find_unresolved_album_groups(music_session, pending):
         return 0
-    print(f"\n{len(pending)} imported song(s) have an album title other artists also use.")
+    show(f"\n{len(pending)} imported song(s) have an album title other artists also use.")
     if not ask_yes_no("Resolve those albums now?"):
-        print('Left for later: Manage database -> "Resolve albums with several artists".')
+        show('Left for later: Manage database -> "Resolve albums with several artists".')
         return 0
     return review_multi_artist_albums(pending)

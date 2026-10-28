@@ -1,5 +1,4 @@
 from utils.ui.menu_utils import execute_menu_item
-from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
 from utils.youtube.import_from_playlist import import_data_from_youtube_playlist
@@ -12,10 +11,10 @@ from utils.ui.prompts import ask_yes_no
 from utils.database.database_sessions import submit_global_database_session, open_and_set_global_database_sessions
 from utils.discoveries.mp3_covers import import_covers_from_mp3
 from utils.database.albums import covers_dir
+from utils.common.output import RED, RESET
 
 def _review_imported_songs(imported_songs):
     if imported_songs:
-        print("displaying")
         display_songs(imported_songs)
         edit_songs_menu(imported_songs)
         decision = ask_yes_no("Do you want to do something with these songs?")
@@ -74,8 +73,8 @@ def import_covers():
               '"Resolve albums with several artists" has settled them.)')
     print(f"Covers written for {report.albums_written} album(s), into {covers_dir()}")
     if report.failed:
-        print(f"\033[91m{len(report.failed)} album(s) failed (details in debug.log): "
-              f"{', '.join(report.failed[:10])}\033[0m")
+        print(f"{RED}{len(report.failed)} album(s) failed (details in debug.log): "
+              f"{', '.join(report.failed[:10])}{RESET}")
     if report.disagreements:
         print(f"\n{len(report.disagreements)} album(s) have different pictures on different tracks - "
               "the one most tracks carry was used:")
@@ -94,6 +93,5 @@ def fetch_database_data():
         "Import data from YouTube playlist": import_youtube_playlist,
     }
 
-    slog(action_map)
 
     execute_menu_item("Fetch database data", action_map, exit_label="Back")

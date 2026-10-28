@@ -33,6 +33,14 @@ if DEBUG_ENABLED:
 DEBUG_TO_FILE_ENABLED: bool = True
 DEBUG_LOG_FILE: Path = PROJECT_ROOT / "debug.log"
 
+# debug.log (and youtube_link_cache.log, through logging's
+# RotatingFileHandler) is rotated at this size: debug.log -> debug.log.1 ...
+# up to LOG_BACKUP_COUNT old files, the oldest dropped
+LOG_MAX_BYTES: int = 2 * 1024 * 1024
+LOG_BACKUP_COUNT: int = 3
+
+_write_failure_reported: bool = False
+
 
 def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Optional[TracebackType]) -> None:
     """
@@ -65,21 +73,45 @@ def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, e
 sys.excepthook = _handle_exception
 
 
+def _rotate_log(path: Path, incoming: int) -> None:
+    """Shift path -> path.1 -> ... -> path.LOG_BACKUP_COUNT when `incoming`
+    more bytes would take path over LOG_MAX_BYTES, dropping the oldest (like
+    logging's RotatingFileHandler). Done here rather than with a logging
+    handler so that a test or the sandbox can point DEBUG_LOG_FILE elsewhere
+    at any time."""
+    try:
+        size = path.stat().st_size
+    except FileNotFoundError:
+        return
+    if size == 0 or size + incoming <= LOG_MAX_BYTES:
+        return
+    for n in range(LOG_BACKUP_COUNT - 1, 0, -1):
+        older = path.with_name(f"{path.name}.{n}")
+        if older.exists():
+            older.replace(path.with_name(f"{path.name}.{n + 1}"))
+    path.replace(path.with_name(f"{path.name}.1"))
+
+
 def _write_to_log(message: str) -> None:
     """
-    Write a debug message to the log file.
-    
-    Safely appends message to debug log file. Silently fails if file
-    cannot be written.
-    
+    Append a message to the debug log file, rotating it first when it's full.
+
+    A failed write (full disk, read-only folder) doesn't stop the app; it's
+    reported once on stderr, so a missing log doesn't go unnoticed.
+
     Args:
         message: Message text to log
     """
+    global _write_failure_reported
     try:
+        line = message + "\n"
+        _rotate_log(DEBUG_LOG_FILE, len(line.encode("utf-8")))
         with DEBUG_LOG_FILE.open("a", encoding="utf-8") as f:
-            f.write(message + "\n")
-    except Exception:
-        pass
+            f.write(line)
+    except OSError as exc:
+        if not _write_failure_reported:
+            _write_failure_reported = True
+            print(f"Can't write {DEBUG_LOG_FILE}: {exc}", file=sys.stderr)
 
 
 def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None:
@@ -110,12 +142,10 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     if not priority >= threshold:
         return
 
-    
-
     file_info: str = "unknown:0"
 
+    frame = inspect.currentframe()
     try:
-        frame = inspect.currentframe()
         if frame is not None:
             caller = frame.f_back
             if caller is not None:
@@ -132,14 +162,12 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
                         call_node = tree.body
                         if isinstance(call_node, ast.Call) and call_node.args:
                             name = ast.unparse(call_node.args[0])
-                    except Exception:
+                    except (SyntaxError, ValueError):
+                        # a call spread over several lines - no name, "<unknown>"
                         pass
     finally:
         # explicit deletion to remove cyclic references
-        try:
-            del frame
-        except Exception:
-            pass
+        del frame
 
     if name is None:
         name = "<unknown>"
@@ -179,12 +207,16 @@ def mlog(message: str, priority: int = 0) -> None:
 
 
 def flog(message: str) -> None:
-    """Log why a lookup (fetcher, YouTube search, scrape) came up empty.
+    """Log something that has to be diagnosable after the fact: why a lookup
+    (fetcher, YouTube search, scrape) came up empty, or why an operation
+    failed where the user may not see it (a backup, sharing, a migration, a
+    caught exception the app carries on after).
 
     Unlike slog()/mlog() this ignores verbosity: it's always appended to
     debug.log with a timestamp (and printed only when a .debug file exists),
     so an intermittent failure - a page that didn't load in time, a yt-dlp
-    error - can still be diagnosed after the fact."""
+    error - can still be diagnosed later. slog() is for looking at values
+    while debugging, mlog() for progress notes; neither is for the user."""
     line = f"***Lookup*** [{datetime.now():%Y-%m-%d %H:%M:%S}] {message}"
     if DEBUG_ENABLED:
         print(line)

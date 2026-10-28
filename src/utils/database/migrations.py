@@ -34,7 +34,7 @@ import sqlite3
 from pathlib import Path
 
 from settings import Settings
-from utils.common.debug import mlog, slog
+from utils.common.debug import flog, mlog
 from utils.database.backup import DB_FILES as BACKED_UP_DB_FILES, backup_databases
 from utils.database.users import user_db_files
 
@@ -137,7 +137,7 @@ def _apply_pending(conn: sqlite3.Connection, files: list[Path], label: str, back
             executed.append(f.name)
             mlog(f"{label}: applied migration {f.name}")
         except Exception as exc:
-            slog(f"{label}: migration {f.name} FAILED, stopping here: {exc}")
+            flog(f"{label}: migration {f.name} FAILED, stopping here: {exc}")
             raise
     return executed
 

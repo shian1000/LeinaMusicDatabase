@@ -7,7 +7,7 @@ from datetime import datetime
 
 import questionary
 from utils.ui.prompts import ask_yes_no
-from rich.console import Console
+from utils.common.output import console
 from rich.table import Table
 
 from config.constants import PERMISSION_LABELS
@@ -311,7 +311,7 @@ def show_phone_changes() -> None:
         table.add_row(_when(r.get("received_at")), _when(r.get("applied_at")), str(r.get("user")),
                       str(r.get("action")), mood_text, song_text,
                       _RESULT_LABELS.get(r.get("result"), str(r.get("result"))))
-    Console().print(table)
+    console.print(table)
     print(f"Full log: {global_mood_log.HISTORY_FILENAME} in {settings.global_mood_changes_dir}")
 
 

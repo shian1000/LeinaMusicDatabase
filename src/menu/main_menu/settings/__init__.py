@@ -4,6 +4,7 @@ from datetime import datetime
 
 import questionary
 from utils.ui.prompts import ask_yes_no
+from utils.common.debug import flog
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
 from utils.discoveries.discoveries_manager import (
@@ -54,6 +55,7 @@ from utils.discoveries.file_matching_settings import (
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
+from utils.common.output import BOLD, RED, RESET, YELLOW, error, warn
 
 
 def settings_menu():
@@ -80,8 +82,8 @@ def startup_tasks_menu():
 
     print("What MusicDatabase does when it starts - all on by default, a change counts from the next start:\n")
     for switch in startup_settings.SWITCHES:
-        print(f"\033[1m{switch.label}\033[0m - {switch.explanation}")
-    print("\033[1mDaily publish to GitHub\033[0m - once a day, when the catalog changed: the public copy "
+        print(f"{BOLD}{switch.label}{RESET} - {switch.explanation}")
+    print(f"{BOLD}Daily publish to GitHub{RESET} - once a day, when the catalog changed: the public copy "
           "Leina Radio downloads without the server (Settings -> Server -> Public database on GitHub).")
     print(f"\nAlways done, not switchable: {startup_settings.ALWAYS}.\n")
     choices = [questionary.Choice(title=switch.label, value=switch.key, checked=startup_settings.enabled(switch))
@@ -102,7 +104,7 @@ def startup_tasks_menu():
         return
     print(f"Changed: {', '.join(changed)}.")
     if not startup_settings.enabled(startup_settings.BACKUP):
-        print(f"\033[93mThe daily backup is off: {startup_settings.BACKUP.explanation}\033[0m")
+        warn(f"The daily backup is off: {startup_settings.BACKUP.explanation}")
 
 
 def server_menu():
@@ -134,11 +136,11 @@ def set_max_songs_per_fetch():
     try:
         value = int(typed)
     except ValueError:
-        print(f"\033[91m'{typed}' is not a valid number.\033[0m")
+        error(f"'{typed}' is not a valid number.")
         return
 
     if value <= 0:
-        print("\033[91mMust be a positive number.\033[0m")
+        error("Must be a positive number.")
         return
 
     save_max_songs_per_fetch(value)
@@ -163,7 +165,7 @@ def set_auto_accept_artist_similarity():
         value = float(typed.replace(",", "."))
         save_auto_accept_artist_similarity(value)
     except ValueError:
-        print(f"\033[91m'{typed}' is not a number between {MIN_AUTO_ACCEPT_ARTIST_SIMILARITY} and 1.\033[0m")
+        error(f"'{typed}' is not a number between {MIN_AUTO_ACCEPT_ARTIST_SIMILARITY} and 1.")
         return
     print(f"Auto-accept similar artist names from: {value}")
 
@@ -185,7 +187,7 @@ def set_best_guess_min_score():
         value = float(typed.replace(",", "."))
         save_best_guess_min_score(value)
     except ValueError:
-        print(f"\033[91m'{typed}' is not a number between {lowest} and {highest}.\033[0m")
+        error(f"'{typed}' is not a number between {lowest} and {highest}.")
         return
     print(f"Closest songs offered from score: {value}")
 
@@ -207,7 +209,7 @@ def set_closest_auto_accept_score():
         value = float(typed.replace(",", "."))
         save_closest_auto_accept_score(value)
     except ValueError:
-        print(f"\033[91m'{typed}' is not a number between {lowest} and {highest}.\033[0m")
+        error(f"'{typed}' is not a number between {lowest} and {highest}.")
         return
     print(f"Closest songs auto-accepted from score: {value}")
 
@@ -245,7 +247,7 @@ def index_music_library():
     try:
         report = scan_library(music_session, progress=lambda done, total: print(f"  {done}/{total} files read"))
     except LibraryUnavailableError as exc:
-        print(f"\033[91mNot indexed: {exc}\033[0m")
+        error(f"Not indexed: {exc}")
         return
     print(f"\n{report.files} audio file(s) in the library: {report.added} new, "
           f"{report.changed} changed, {report.removed} removed since the last scan.")
@@ -268,10 +270,11 @@ def submit_database_for_sharing():
     try:
         published = share_databases()
     except SharingUnavailableError as exc:
-        print(f"\033[91mNot shared: {exc}\033[0m")
+        error(f"Not shared: {exc}")
         return
     except Exception as exc:
-        print(f"\033[91mSharing failed: {exc}\033[0m")
+        flog(f"Sharing from Settings failed: {type(exc).__name__}: {exc}")
+        error(f"Sharing failed: {exc}")
         return
     if not published:
         print("No database files found to share.")
@@ -299,21 +302,21 @@ def setup_database_sharing():
     # below read .env - they must agree (else e.g. a server with no address)
     changed = restart_needed()
     if changed:
-        print(f"\033[93mChanged in .env since MusicDatabase started: {', '.join(changed)}. The service is "
-              "written from the settings read at start-up, so MusicDatabase needs a restart first.\033[0m")
+        print(f"{YELLOW}Changed in .env since MusicDatabase started: {', '.join(changed)}. The service is "
+              f"written from the settings read at start-up, so MusicDatabase needs a restart first.{RESET}")
         if ask_yes_no("Restart MusicDatabase now and continue with the setup's checks?"):
             restart_to_continue()
         return
     if settings.sharing_dir is None:
-        print(f"\033[91mCan't set up sharing: {drive_unavailable_message(None)}\033[0m")
+        error(f"Can't set up sharing: {drive_unavailable_message(None)}")
         return
     if not sharing_dir_available(settings.sharing_drive_mount, settings.sharing_dir):
         # The server waits for it (answers 503 meanwhile), so this is no reason to stop
-        print(f"\033[93m{drive_unavailable_message(settings.sharing_drive_mount, settings.sharing_dir)}\033[0m")
+        warn(f"{drive_unavailable_message(settings.sharing_drive_mount, settings.sharing_dir)}")
     plan = listening_plan()
     if not plan:
-        print("\033[91mWith the current settings the server has no address to listen on - set the LAN interface "
-              "or an address to listen on (Settings -> Server -> Folders and network).\033[0m")
+        print(f"{RED}With the current settings the server has no address to listen on - set the LAN interface "
+              f"or an address to listen on (Settings -> Server -> Folders and network).{RESET}")
         return
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
     print(f"from {settings.sharing_dir}, port {SHARING_HTTP_PORT}, on:")
@@ -326,13 +329,13 @@ def setup_database_sharing():
     try:
         steps = install_sharing_service()
     except (NoListenAddressError, SharingUnavailableError) as exc:
-        print(f"\033[91mNot installed: {exc}\033[0m")
+        error(f"Not installed: {exc}")
         return
     except subprocess.CalledProcessError as exc:
-        print(f"\033[91mSetup failed: {' '.join(exc.cmd)}\n{exc.stderr.strip()}\033[0m")
+        error(f"Setup failed: {' '.join(exc.cmd)}\n{exc.stderr.strip()}")
         return
     except OSError as exc:
-        print(f"\033[91mSetup failed: {exc}\033[0m")
+        error(f"Setup failed: {exc}")
         return
     for step in steps:
         print(f"  {step}")
@@ -533,7 +536,7 @@ def _change_machine_key(key) -> None:
     value = value.strip()
     warning = value_warning(key.name, value)
     if warning:
-        print(f"\033[93m{warning}\033[0m")
+        warn(f"{warning}")
         if not ask_yes_no("Save it anyway?"):
             print("Cancelled.")
             return

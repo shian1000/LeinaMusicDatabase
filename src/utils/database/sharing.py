@@ -38,7 +38,7 @@ from config.constants import (
     SHARING_STARTUP_DELAY,
 )
 from settings import VPN_OFF, VPN_TAILSCALE, Settings, drive_unavailable_message, sharing_dir_available
-from utils.common.debug import mlog, slog
+from utils.common.debug import flog, mlog
 from utils.database.backup import DB_FILES
 from utils.database.files_index import local_library_path
 
@@ -127,9 +127,9 @@ def share_databases_quietly() -> list[Path]:
     try:
         return share_databases()
     except SharingUnavailableError as exc:
-        slog(f"Database sharing skipped: {exc}", priority=3)
+        flog(f"Database sharing skipped: {exc}")
     except Exception as exc:
-        slog(f"Database sharing failed (non-fatal): {exc}", priority=3)
+        flog(f"Database sharing failed (non-fatal): {exc}")
     return []
 
 

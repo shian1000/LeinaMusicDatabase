@@ -12,6 +12,7 @@ from utils.database.first_run import (
     fetch_catalog_info,
     missing_databases,
 )
+from utils.common.output import error
 
 DOWNLOAD = "download"
 EMPTY = "empty"
@@ -59,7 +60,7 @@ def _download() -> bool:
               f"(published {info.published_at or 'at an unknown time'})...")
         written = download_public_catalog(info=info)
     except CatalogDownloadError as exc:
-        print(f"\033[91mThe download failed: {exc}\033[0m")
+        error(f"The download failed: {exc}")
         print("Nothing was saved. Try again, start empty, or quit and try later.\n")
         return False
     for path in written:

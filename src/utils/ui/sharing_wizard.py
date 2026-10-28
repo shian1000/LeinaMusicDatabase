@@ -25,11 +25,11 @@ from utils.common import sharing_setup as setup
 from utils.common.env_file import read_env_value, save_env_value
 from utils.ui.menu_utils import open_file_browser_terminal
 from utils.ui.prompts import ask_yes_no
+from utils.common.output import BOLD, GREEN, RED, RESET, YELLOW
 
 CONTINUE_SETUP_FLAG = "--continue-sharing-setup"
 MAIN_SCRIPT = Path(__file__).resolve().parents[3] / "main.py"
 
-YELLOW, RED, GREEN, BOLD, RESET = "\033[93m", "\033[91m", "\033[92m", "\033[1m", "\033[0m"
 
 _KEEP, _SUGGESTED, _TYPE, _BROWSE, _CLEAR, _STOP = (
     "__keep__", "__suggested__", "__type__", "__browse__", "__clear__", "__stop__")

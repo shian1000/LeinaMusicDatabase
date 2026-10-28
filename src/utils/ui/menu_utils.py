@@ -26,6 +26,7 @@ from config.constants import (
     DIALOG_NO_RESULT,
     FILE_BROWSER_EXIT_OPTION
 )
+from utils.common.output import error
 
 def load_recent_dirs() -> list[str]:
     """
@@ -104,7 +105,7 @@ def execute_menu_item(
                 action_name: Optional[str] = action()
             except DatabaseCommitError as exc:
                 # Rolled back already: the menu goes on with the saved state
-                print(f"\033[91m{exc}\033[0m")
+                error(f"{exc}")
                 action_name = None
             if action_name == exit_label or one_time:
                 running = False

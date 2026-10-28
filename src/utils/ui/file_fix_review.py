@@ -14,12 +14,11 @@ from utils.discoveries.file_matching_settings import (
     load_auto_accept_artist_similarity,
     load_closest_auto_accept_score,
 )
+from utils.ui.file_batch import apply_to_files, report_failures
 from utils.ui.menu_utils import open_file_browser_terminal
 from utils.ui.song_colors import colored_song
+from utils.common.output import DIM, RESET
 
-RED = "\033[91m"
-DIM = "\033[90m"
-RESET = "\033[0m"
 
 
 def _in_library(folder: Path) -> bool:
@@ -67,12 +66,6 @@ def fix_file_names_and_tags() -> None:
         print("Nothing changed.")
         return
 
-    failed = []
-    for fix in plan.fixes:
-        try:
-            apply_file_fix(fix)
-        except Exception as exc:
-            failed.append((fix.file, exc))
+    _, failed = apply_to_files(plan.fixes, apply_file_fix, lambda fix: fix.file)
     print(f"Fixed {len(plan.fixes) - len(failed)} file(s).")
-    for file, exc in failed:
-        print(f"{RED}  Couldn't fix {file}: {exc}{RESET}")
+    report_failures(failed)

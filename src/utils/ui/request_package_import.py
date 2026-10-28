@@ -9,6 +9,7 @@ import questionary
 from utils.database.request_packages import PackageError, import_package
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.prompts import ask_yes_no
+from utils.common.output import error, warn
 
 _TYPE_PATH = "Type a path"
 _RECENT_LIMIT = 10
@@ -40,18 +41,15 @@ def import_request_package() -> None:
     if path is None:
         return
     if not path.is_file():
-        print(f"\033[91m{path} isn't a file.\033[0m")
+        error(f"{path} isn't a file.")
         return
     try:
         result = import_package(path)
-    except PackageError as exc:
-        print(f"\033[91mPackage not imported: {exc}\033[0m")
-        return
-    except OSError as exc:
-        print(f"\033[91mPackage not imported: {exc}\033[0m")
+    except (PackageError, OSError) as exc:
+        error(f"Package not imported: {exc}")
         return
     print(f"Added {len(result.added)} request file(s) to the inbox.")
     for name in result.already_there:
-        print(f"\033[93m{name} is in the inbox already (imported before?) - skipped.\033[0m")
+        warn(f"{name} is in the inbox already (imported before?) - skipped.")
     if result.added and ask_yes_no("Resolve the new requests now?"):
         resolve_new_requests()

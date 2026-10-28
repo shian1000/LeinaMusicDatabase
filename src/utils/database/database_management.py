@@ -12,7 +12,6 @@ from utils.database.database_sessions import (
 )
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
-from rich import print
 
 
 # What edit_db_entry() can change: category -> attribute. The rest of

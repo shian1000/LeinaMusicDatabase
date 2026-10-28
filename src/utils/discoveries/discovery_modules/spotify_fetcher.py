@@ -30,8 +30,8 @@ def _save_snapshot(driver) -> None:
     try:
         with open(DEBUG_SNAPSHOT_FILE, "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-    except Exception:
-        pass
+    except Exception as e:
+        flog(f"[Spotify] couldn't save the page to {DEBUG_SNAPSHOT_FILE.name}: {type(e).__name__}: {e}")
 
 
 def _search_url(text: str, kind: str) -> str:
@@ -94,7 +94,7 @@ def _extract_album_from_track_page(soup: BeautifulSoup):
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     driver = get_global_driver()
     if driver is None:
-        slog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No driver open. Call open_global_driver() first.")
         return None
 
     search_url = _search_url(f"{artist} {title}", "tracks")
@@ -217,7 +217,7 @@ def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryR
     off the album page."""
     driver = get_global_driver()
     if driver is None:
-        slog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No driver open. Call open_global_driver() first.")
         return None
 
     kind, row_selector = ("tracks", '[data-testid="tracklist-row"]') if is_single else ("albums", '[data-encore-id="card"]')
@@ -268,7 +268,7 @@ def get_release_year_from_url(url: str) -> YearDiscoveryResult | None:
         return None
     driver = get_global_driver()
     if driver is None:
-        slog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No driver open. Call open_global_driver() first.")
         return None
     page_testid = "album-page" if "/album/" in url else "track-page"
     page = _load(driver, url, f'[data-testid="{page_testid}"]')

@@ -31,7 +31,6 @@ def merge_artists_menu(artist_objects = None):
 
         songs_names.append(this_artist_songs)
 
-    print(songs_names)
 
 
 
@@ -95,5 +94,4 @@ def divide_artists_menu():
         print("Aborted by user.")
         return
 
-    print(q0)
     print()

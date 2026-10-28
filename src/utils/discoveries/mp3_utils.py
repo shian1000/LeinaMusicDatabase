@@ -5,7 +5,7 @@ from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 
-from utils.common.debug import slog
+from utils.common.debug import flog, slog
 
 from utils.common.normalizer import normalize, extract_unknown_data
 
@@ -14,7 +14,8 @@ def audio_duration(file: Path) -> int | None:
     """Length in whole seconds, or None when mutagen can't read it."""
     try:
         return round(MP3(file).info.length)
-    except Exception:
+    except Exception as e:
+        flog(f"Can't read the length of {file}: {type(e).__name__}: {e}")
         return None
 
 

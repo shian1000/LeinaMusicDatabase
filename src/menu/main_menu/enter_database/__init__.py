@@ -3,7 +3,6 @@ from pathlib import Path
 import questionary
 
 from utils.ui.menu_utils import execute_menu_item
-from utils.common.debug import slog
 from menu.main_menu.enter_database.fetch_songs import fetch_songs, fetch_artists
 from menu.main_menu.enter_database.manage_database import manage_database
 from menu.main_menu.enter_database.show_whole_database import show_whole_database
@@ -29,7 +28,6 @@ def enter_database():
         "Show whole database": show_whole_database
     }
 
-    slog(action_map)
 
     execute_menu_item("Database", action_map, exit_label="Exit database")
     close_global_database_sessions(commit=True)

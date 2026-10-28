@@ -4,8 +4,8 @@ startup_settings.py, all on by default); the rest always runs - see that
 module for which and why."""
 from utils.common import startup_settings as switches
 from utils.common.debug import slog
+from utils.common.output import RESET, YELLOW
 
-YELLOW, RESET = "\033[93m", "\033[0m"
 
 
 def _daily() -> bool:

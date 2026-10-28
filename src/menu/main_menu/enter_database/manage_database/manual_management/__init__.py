@@ -1,5 +1,4 @@
 from utils.ui.menu_utils import execute_menu_item
-from utils.common.debug import slog
 from menu.song_actions.edit_songs import edit_entry_menu, remove_song_menu, add_songs_menu
 
 def manual_management():
@@ -11,6 +10,5 @@ def manual_management():
         "Remove song": lambda: remove_song_menu("Song")
     }
 
-    slog(action_map)
 
     execute_menu_item("Manual management", action_map, exit_label="Back")

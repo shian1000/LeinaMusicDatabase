@@ -1,5 +1,6 @@
 import importlib.util
 import logging
+import logging.handlers
 import math
 import os
 import re
@@ -24,7 +25,7 @@ from utils.common.text_utils import remove_brackets, similarity, scaled_similari
 from utils.common.normalizer import APOSTROPHES, normalize
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
-from utils.common.debug import flog
+from utils.common.debug import LOG_BACKUP_COUNT, LOG_MAX_BYTES, flog
 from settings import Settings
 from config.constants import FULL_ALBUM_MIN_DURATION_S, NO_VIDEO_SENTINEL, PROJECT_ROOT, YOUTUBE_REGION
 from utils.database.song_kinds import strip_full_album_marker
@@ -47,11 +48,12 @@ class QuotaExceededError(Exception):
 # app-wide debug.log (utils.common.debug), which is silent unless a `.debug`
 # file is present, so a stale/invalid stored link or a failed DB write is
 # still traceable after the fact without the user needing to have debug mode
-# on ahead of time.
+# on ahead of time. Rotated like debug.log (2 MB, 3 old files).
 _LOG_PATH = PROJECT_ROOT / "youtube_link_cache.log"
 _logger = logging.getLogger("youtube_link_cache")
 if not _logger.handlers:
-    _handler = logging.FileHandler(_LOG_PATH, encoding="utf-8")
+    _handler = logging.handlers.RotatingFileHandler(
+        _LOG_PATH, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT, encoding="utf-8")
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     _logger.addHandler(_handler)
     _logger.setLevel(logging.INFO)
@@ -1206,13 +1208,20 @@ def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
         return None
 
 
+def ytdlp_errors(result) -> str:
+    """yt-dlp's ERROR lines from a finished run, joined for one log line;
+    "" when it printed none."""
+    return " | ".join(line for line in (getattr(result, "stderr", None) or "").splitlines()
+                      if line.startswith("ERROR"))
+
+
 def _log_ytdlp_errors(query: str, result) -> None:
     """Keep yt-dlp's ERROR lines (an unavailable hit, a throttled request) in
     debug.log even when the search still returned something - otherwise a
     flaky search leaves no trace of why it failed."""
-    errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
+    errors = ytdlp_errors(result)
     if errors or not result.stdout.strip():
-        flog(f"[yt-dlp] search '{query}' exit={result.returncode}: " + (" | ".join(errors) or "no output, no error"))
+        flog(f"[yt-dlp] search '{query}' exit={result.returncode}: " + (errors or "no output, no error"))
 
 
 def _search_video_ytdlp_once(
@@ -1508,7 +1517,7 @@ def video_playability(video_id: str | None, timeout: int = 20) -> bool | None:
             timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        _logger.warning(f"Could not check video_id={video_id} ({e})")
+        flog(f"[yt-dlp] couldn't check video {video_id}: {e}")
         return None
 
     if result.returncode == 0:
@@ -1671,8 +1680,7 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
         flog(f"[yt-dlp] unavailable: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
-        errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
-        flog(f"[yt-dlp] no date for video {video_id}: {' | '.join(errors) or 'no output'}")
+        flog(f"[yt-dlp] no date for video {video_id}: {ytdlp_errors(result) or 'no output'}")
         return None
 
     for value in result.stdout.strip().splitlines()[-1].split("|"):
@@ -1705,8 +1713,7 @@ def get_video_album(video_id: str | None, timeout: int = 30) -> tuple[str, str, 
         flog(f"[yt-dlp] unavailable: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
-        errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
-        flog(f"[yt-dlp] no album for video {video_id}: {' | '.join(errors) or 'no output'}")
+        flog(f"[yt-dlp] no album for video {video_id}: {ytdlp_errors(result) or 'no output'}")
         return None
 
     fields = result.stdout.strip().splitlines()[-1].split("\t")

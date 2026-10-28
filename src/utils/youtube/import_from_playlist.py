@@ -5,7 +5,7 @@ import unicodedata
 
 import questionary
 from googleapiclient.errors import HttpError
-from rich import print
+from utils.common.output import review_header, show, styled
 
 from utils.youtube.manage_youtube_playlists import (
     YouTubeLoginError,
@@ -15,6 +15,7 @@ from utils.youtube.manage_youtube_playlists import (
     _run_ytdlp_search,
     _is_official_release,
     _log_ytdlp_errors,
+    ytdlp_errors,
     NON_DECOMPOSING_LETTER_FOLDS,
     run_ytdlp,
     video_durations_via_api,
@@ -442,6 +443,8 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
         return None
 
     if not result.stdout.strip():
+        flog(f"[yt-dlp] playlist {playlist_id} gave no videos (private?) exit={result.returncode}: "
+             f"{ytdlp_errors(result) or 'no error'}")
         return None
 
     items = []
@@ -641,13 +644,17 @@ def _fetch_video_description(video_id: str, timeout: int = 30) -> str | None:
             text=True,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        flog(f"[yt-dlp] no description for video {video_id}: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
+        flog(f"[yt-dlp] no description for video {video_id} exit={result.returncode}: "
+             f"{ytdlp_errors(result) or 'no output'}")
         return None
     try:
         info = json.loads(result.stdout.strip().splitlines()[0])
-    except (json.JSONDecodeError, IndexError):
+    except (json.JSONDecodeError, IndexError) as e:
+        flog(f"[yt-dlp] unreadable description data for video {video_id}: {e}")
         return None
     return info.get("description")
 
@@ -735,18 +742,18 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
     title = item.get("title") or ""
     found = _find_official_match_via_search(title)
     if found:
-        print(f"[green]{item.get('channel')}[/green] special case: matched official release [blue]{found[0]} - {found[1]}[/blue] for \"[yellow]{title}[/yellow]\"")
+        show(f"{styled(item.get('channel'), 'green')} special case: matched official release {styled(f'{found[0]} - {found[1]}', 'blue')} for \"{styled(title, 'yellow')}\"")
         return found
 
     found = _parse_quoted_title_by_artist(title)
     if found:
-        print(f"[green]{item.get('channel')}[/green] special case: parsed [blue]{found[0]} - {found[1]}[/blue] from title \"[yellow]{title}[/yellow]\"")
+        show(f"{styled(item.get('channel'), 'green')} special case: parsed {styled(f'{found[0]} - {found[1]}', 'blue')} from title \"{styled(title, 'yellow')}\"")
         return found
 
     description = _fetch_video_description(item.get("video_id"))
     found = _parse_music_description_line(description) if description else None
     if found:
-        print(f"[green]{item.get('channel')}[/green] special case: parsed [blue]{found[0]} - {found[1]}[/blue] from description for \"[yellow]{title}[/yellow]\"")
+        show(f"{styled(item.get('channel'), 'green')} special case: parsed {styled(f'{found[0]} - {found[1]}', 'blue')} from description for \"{styled(title, 'yellow')}\"")
     return found
 
 
@@ -805,7 +812,7 @@ def resolve_generic_topic_artist(item: dict) -> str | None:
     description = _fetch_video_description(item.get("video_id"))
     artist = _parse_topic_description_artist(description) if description else None
     if artist:
-        print(f"[green]{item.get('channel')}[/green] is not an artist: found [blue]{artist}[/blue] in the description of \"[yellow]{item.get('title')}[/yellow]\"")
+        show(f"{styled(item.get('channel'), 'green')} is not an artist: found {styled(artist, 'blue')} in the description of \"{styled(item.get('title'), 'yellow')}\"")
     return artist
 
 
@@ -947,9 +954,7 @@ def _review_artist_title_swaps(flagged: list) -> tuple:
     remaining = []
     pre_skipped = []
 
-    print("\n" + "="*70)
-    print(f"REVIEW: {len(flagged)} song(s) may have their artist and title swapped")
-    print("="*70)
+    review_header(f"REVIEW: {len(flagged)} song(s) may have their artist and title swapped")
     for metadata, matched_artist in flagged:
         # The parsed (cleaned) "artist - title" is what was actually compared
         # against the database, so it's shown as the main label; the raw
@@ -957,7 +962,7 @@ def _review_artist_title_swaps(flagged: list) -> tuple:
         # purely as context for which video this came from.
         label = f"{metadata['artist_name']} - {metadata['title']}"
         raw_label = metadata.get("_label") or label
-        print(f"[green]{label}[/green] (raw: \"[yellow]{raw_label}[/yellow]\") - the title looks like it could be an artist: [blue]{matched_artist.name}[/blue] is already in the database")
+        show(f"{styled(label, 'green')} (raw: \"{styled(raw_label, 'yellow')}\") - the title looks like it could be an artist: {styled(matched_artist.name, 'blue')} is already in the database")
         choice = questionary.select(
             "What do you want to do with this song?",
             choices=[_SWAP_CHOICE_ADD, _SWAP_CHOICE_SWAP, _SWAP_CHOICE_MANUAL, _SWAP_CHOICE_SKIP],
@@ -1015,7 +1020,7 @@ def _resolve_artist_synonyms(metadata_list: list) -> None:
             continue
         canonical_name = synonym_to_canonical.get(artist_name.strip().lower())
         if canonical_name and canonical_name != artist_name:
-            print(f"Artist synonym match: [yellow]{artist_name}[/yellow] is known as [blue]{canonical_name}[/blue]")
+            show(f"Artist synonym match: {styled(artist_name, 'yellow')} is known as {styled(canonical_name, 'blue')}")
             metadata["artist_name"] = canonical_name
 
 
@@ -1035,14 +1040,12 @@ def _review_missing_artists(metadata_list: list) -> tuple:
     remaining = [m for m in metadata_list if id(m) not in missing_ids]
     pre_skipped = []
 
-    print("\n" + "="*70)
-    print(f"REVIEW: {len(missing)} song(s) have no artist - enter it manually")
-    print("="*70)
+    review_header(f"REVIEW: {len(missing)} song(s) have no artist - enter it manually")
     for metadata in missing:
         label = metadata.get("_label") or metadata.get("title") or ""
         video_id = metadata.get("youtube_video_id")
         link = f" https://youtu.be/{video_id}" if video_id else ""
-        print(f"Title: [green]{metadata.get('title')}[/green] (raw: \"[yellow]{label}[/yellow]\"){link}")
+        show(f"Title: {styled(metadata.get('title'), 'green')} (raw: \"{styled(label, 'yellow')}\"){link}")
         artist = (questionary.text("Artist (leave empty to skip this song):").ask() or "").strip()
         if artist:
             metadata["artist_name"] = artist

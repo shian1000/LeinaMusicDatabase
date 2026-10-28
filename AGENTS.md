@@ -425,14 +425,19 @@ non-trivial work in that area.
 - `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
   `data/spellcheck_cache.json`, saved every 20 answers and when the process exits (`atexit`), so a
   test that fills it must leave `_CACHE_PATH` where `conftest.py` put it. `docs/agent-notes/import-pipeline.md`.
-- `src/utils/common/debug.py` — use `slog(var)` / `mlog(message)`, not bare `print()`. Console
-  output is gated by a `.debug` file (`verbosity = N`) at the repo root, and so is what reaches
-  `debug.log` (gitignored): without `.debug`, only `slog(..., priority=3)` gets there. Exception:
-  `flog(message)` - *why a lookup came up empty* (a fetcher returning nothing, a result the manager
-  discarded, a yt-dlp ERROR line, a Spotify page that didn't load, which is then saved to
-  `debug_spotify.html`) - is always appended with a timestamp, so an intermittent failure can be
-  diagnosed afterwards. Grep `debug.log` for `***Lookup***`. Use `flog()` for new failure paths
-  in fetchers/searches, not `slog()`.
+- `src/utils/common/debug.py` — diagnostics, never messages for the user (those go through
+  `utils/common/output.py`, see Coding conventions → "Output"). `slog(var)` / `mlog(message)` are
+  for debugging: console output is gated by a `.debug` file (`verbosity = N`) at the repo root,
+  and so is what reaches `debug.log` (gitignored): without `.debug`, only `slog(..., priority=3)`
+  gets there. `flog(message)` is for anything that must be diagnosable afterwards - *why a lookup
+  came up empty* (a fetcher returning nothing, a result the manager discarded, a yt-dlp ERROR
+  line, a Spotify page that didn't load, which is then saved to `debug_spotify.html`) and *why an
+  operation failed where the user may not see it* (backup, sharing, a migration, a caught
+  `except Exception` the app carries on after) - always appended with a timestamp. Grep
+  `debug.log` for `***Lookup***`. Use `flog()` for new failure paths, not `slog()`, and never a
+  bare `except Exception: pass`. `debug.log` is rotated at 2 MB (`debug.log.1` … `.3`), and so is
+  `youtube_link_cache.log`, which keeps only the reuse / validate / persist flow of stored video
+  links (`_logger` in `manage_youtube_playlists.py`); a failed yt-dlp check goes to `flog()`.
 - `src/utils/youtube/` — YouTube playlist/download helpers, `score_result()` match ranking
   (DB → YouTube), and `import_from_playlist.py` (YouTube → DB, "Import data from YouTube
   playlist"). `docs/agent-notes/youtube-search-matching.md`. Whether a video plays:
@@ -522,7 +527,7 @@ non-trivial work in that area.
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).
 - One implementation per cross-cutting concern: normalize/compare → `normalizer.py`; MusicBrainz
   HTTP → `musicbrainz_client.mb_get()`; headless browser → `selenium_sessions`; diagnostics →
-  `debug.py`. Don't add a parallel local version of any of these.
+  `debug.py`; messages for the user → `output.py`. Don't add a parallel local version of any of these.
 - Constants and config load from `constants.py` / `settings.py`; don't scatter literals.
 - SQL goes through SQLAlchemy and stays parameterized — never build a query by string-concatenating
   user input.
@@ -655,6 +660,16 @@ non-trivial work in that area.
   colour (`title_tokens()`, names from `song_duplicates.feat_credits()`, "(feat. " / ")" plain),
   and turns them into ANSI (`as_ansi()`) or rich markup (`as_rich_markup()`) only for `print()` -
   don't hand-write the colours in markup.
+- Output: a message for the user goes through `utils/common/output.py` - `say()` (plain, taken
+  literally), `ok()` / `warn()` / `error()` (green / yellow / red), `show()` for a line of rich
+  markup with every name in it escaped (`styled(text, style)` or `escape()`; an unescaped
+  "Song [Live]" loses its "[Live]"), `review_header(title, *notes)` for the banner above a batch
+  review, `console` for a rich table. A plain `print()` is fine too, and for a coloured line right
+  above a `questionary` prompt use the ANSI constants there (`RED`, `YELLOW`, `RESET`, …) - never
+  hand-written `\033[...` codes and never `from rich import print` (tests check both). The module
+  is in `utils/common` because the import and the data layer still print progress (ADR-0001).
+  Several files changed in one go: `utils/ui/file_batch.apply_to_files()` (one bad file doesn't
+  stop the rest; each failure in `debug.log`).
 - Every yes/no question goes through `utils/ui/prompts.ask_yes_no()` (a bare Enter means yes,
   everywhere — the owner's choice), never `questionary.confirm()` directly; a test checks that.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.

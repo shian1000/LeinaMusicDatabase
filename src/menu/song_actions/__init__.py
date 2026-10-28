@@ -198,7 +198,6 @@ def song_actions(songs_objects):
         "Remove from the database": lambda: remove_songs_from_database(songs_objects)
     }
 
-    slog(action_map)
 
     execute_menu_item("What do you want to do with these songs?", action_map, exit_label="Nothing", one_time=True,
                       clear=False)

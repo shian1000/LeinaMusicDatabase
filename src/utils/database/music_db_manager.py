@@ -7,7 +7,6 @@ from settings import Settings
 from utils.database.datatables import Base, Song, Artist  # Song, Artist: imported from here by resolve_duplicates
 from utils.database.albums import register_album_sync
 from utils.database.song_references import register_song_reference_sync
-from utils.common.debug import slog, mlog
 
 # --------------------
 # Engine & Session
@@ -16,16 +15,12 @@ from utils.common.debug import slog, mlog
 BASE_DIR = Settings.database_dir
 DB_PATH = BASE_DIR / "music.db"
 
-slog(BASE_DIR)
-
 ENGINE = create_engine(f"sqlite:///{DB_PATH}")
 SessionLocal = sessionmaker(bind=ENGINE)
 # songs.album_id follows songs.album on every flush - see utils/database/albums.py
 register_album_sync(SessionLocal)
 # Deleted song ids are logged for tag.db / users' DBs and never reused - see utils/database/song_references.py
 register_song_reference_sync(SessionLocal)
-mlog("Music DB Manager")
-slog(SessionLocal)
 
 
 # --------------------

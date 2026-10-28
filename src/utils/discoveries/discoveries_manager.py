@@ -26,7 +26,7 @@ import inspect
 import importlib.util
 import sys
 from pathlib import Path
-from utils.common.debug import flog, slog
+from utils.common.debug import flog, mlog, slog
 from utils.common.normalizer import composed, name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms
@@ -451,7 +451,6 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     alt_script_title = cyrillic_search_variant(son_cln, [art_full, alb or "", *synonyms])
     latin_title = _latin_search_title(song, son_cln)
 
-    slog("About to lunch modules' loop")
     for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
         match = _call_module_match(module, module_id, module_name, art_cln, son_cln, credited)
@@ -461,19 +460,19 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
         # If the truncated search came up empty, retry with the untruncated
         # strings before giving up on this module.
         if not match and truncated:
-            print(f"Looking in {module_name} using untruncated title/artist")
+            mlog(f"Looking in {module_name} using untruncated title/artist")
             match = _call_module_match(module, module_id, module_name, art_cln_full, son_cln_full, credited)
 
         # Both attempts above still strip parentheses from title/artist. If
         # that stripping actually removed something, retry once more with
         # the fully raw strings before giving up on this module.
         if not match and raw_differs:
-            print(f"Looking in {module_name} using full title/artist including parentheses")
+            mlog(f"Looking in {module_name} using full title/artist including parentheses")
             match = _call_module_match(module, module_id, module_name, art_full, son_full, credited)
 
         #Repeat the searching with each of the artist's synonyms
         for synonym in ([] if match else synonyms):
-            print(f"Looking for it in {module_name} using synonym {synonym}")
+            mlog(f"Looking for it in {module_name} using synonym {synonym}")
             match = _call_module_match(module, module_id, module_name, synonym, son_cln, credited)
             # The truncated title alone, as in the first attempt, may be a stub
             # ("Bang, Bang" -> "Bang"); retry it whole with the synonym too
@@ -483,18 +482,18 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
                 break
 
         if not match and multi_label:
-            print(f"Looking in {module_name} using all main artists")
+            mlog(f"Looking in {module_name} using all main artists")
             match = _call_module_match(module, module_id, module_name, multi_label, son_cln, credited)
 
         if not match and alt_script_title:
-            print(f"Looking in {module_name} using the title in its own script")
+            mlog(f"Looking in {module_name} using the title in its own script")
             for alt_artist in [art_cln, *synonyms]:
                 match = _call_module_match(module, module_id, module_name, alt_artist, alt_script_title, credited)
                 if match:
                     break
 
         if not match and latin_title:
-            print(f"Looking in {module_name} using the title in Latin letters")
+            mlog(f"Looking in {module_name} using the title in Latin letters")
             for alt_artist in [art_cln, *synonyms]:
                 match = _call_module_match(module, module_id, module_name, alt_artist, latin_title, credited)
                 if match:
@@ -524,7 +523,7 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
         print(f"No fetcher found an album; song looks like a cover/unplugged version, filing it under {SINGLES_ALBUM}")
         return AlbumMatch(SINGLES_ALBUM)
 
-    slog("Gave up =)")
+    flog(f"No module found an album for '{art_full} - {son_full}'")
     return None
 
 
@@ -656,17 +655,17 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
         result = _call_year_module(module, module_id, module_name, art_cln, qry_cln, is_single, credited, songs)
 
         if not result and truncated:
-            print(f"Looking for release year in {module_name} using untruncated artist/query")
+            mlog(f"Looking for release year in {module_name} using untruncated artist/query")
             result = _call_year_module(module, module_id, module_name, art_cln_full, qry_cln_full, is_single, credited, songs)
 
         if not result and raw_differs:
-            print(f"Looking for release year in {module_name} using full artist/query including parentheses")
+            mlog(f"Looking for release year in {module_name} using full artist/query including parentheses")
             result = _call_year_module(module, module_id, module_name, art_full, qry_full, is_single, credited, songs)
 
         # Each synonym on its own - the column is a comma-separated list, and
         # sending it whole ("Taras Chubai, Тарас Чубай") matches nothing
         for synonym in ([] if result else synonyms):
-            print(f"Looking for release year in {module_name} using synonym {synonym}")
+            mlog(f"Looking for release year in {module_name} using synonym {synonym}")
             result = _call_year_module(module, module_id, module_name, synonym, qry_cln, is_single, credited, songs)
             # The truncated query is only a stub for a title with a comma
             # ("Там, де ти є" -> "Там"); retry it whole with the synonym too
@@ -677,13 +676,13 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
                 break
 
         if not result and multi_label:
-            print(f"Looking for release year in {module_name} using all main artists")
+            mlog(f"Looking for release year in {module_name} using all main artists")
             result = _call_year_module(module, module_id, module_name, multi_label, qry_cln, is_single, credited, songs)
 
         # A Latin-transliterated query the sources only know in its own script
         # ("Neformat" -> "Неформат"), see script_utils.cyrillic_search_variant()
         if not result and alt_script_query:
-            print(f"Looking for release year in {module_name} using the query in its own script")
+            mlog(f"Looking for release year in {module_name} using the query in its own script")
             for alt_artist in [art_cln, *synonyms]:
                 result = _call_year_module(module, module_id, module_name, alt_artist, alt_script_query, is_single,
                                            credited, songs)
@@ -692,7 +691,7 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
 
         if result:
             return result
-    slog("Gave up looking for a release year =)")
+    flog(f"No module found a release year for '{artist} - {query}'")
     return None
 
 

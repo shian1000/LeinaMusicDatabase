@@ -4,8 +4,6 @@ which ones to apply, then optionally remember the rest as single artists."""
 
 import questionary
 from utils.ui.prompts import ask_yes_no
-from rich import print
-from rich.markup import escape
 
 from utils.database.artist_splitting import (
     SplitCandidate,
@@ -15,6 +13,7 @@ from utils.database.artist_splitting import (
 )
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.datatables import Artist
+from utils.common.output import escape, review_header, show
 
 
 def _describe(candidate: SplitCandidate) -> str:
@@ -37,13 +36,10 @@ def review_artist_splits(artists: list[Artist] | None = None) -> int:
     candidates = find_split_candidates(music_session, artists)
     if not candidates:
         if artists is None:
-            print("No joined artist names to split.")
+            show("No joined artist names to split.")
         return 0
 
-    print("\n" + "=" * 70)
-    print(f"REVIEW: {len(candidates)} artist name(s) look like several artists")
-    print("Pre-selected: a feat./x credit, or every part already exists as an artist.")
-    print("=" * 70)
+    review_header(f"REVIEW: {len(candidates)} artist name(s) look like several artists", "Pre-selected: a feat./x credit, or every part already exists as an artist.")
     choices = [
         questionary.Choice(title=_describe(c), value=i, checked=c.preselected)
         for i, c in enumerate(candidates)
@@ -52,20 +48,20 @@ def review_artist_splits(artists: list[Artist] | None = None) -> int:
         "Select the names to split (space toggles, enter confirms):", choices=choices
     ).ask()
     if selected is None:
-        print("Aborted, nothing split.")
+        show("Aborted, nothing split.")
         return 0
 
     created = {}
     for i in selected:
         candidate = candidates[i]
         parts = apply_artist_split(music_session, candidate, created)
-        print(f"Split [green]{escape(candidate.proposal.original)}[/green] into {escape(', '.join(a.name for a in parts))}")
+        show(f"Split [green]{escape(candidate.proposal.original)}[/green] into {escape(', '.join(a.name for a in parts))}")
     submit_global_database_session()
 
     skipped = [candidates[i].proposal.original for i in range(len(candidates)) if i not in set(selected)]
     if skipped and ask_yes_no(f"Remember the {len(skipped)} unselected name(s) as single artists, so they aren't proposed again?"):
         add_to_split_ignore_list(skipped)
-        print(f"Remembered {len(skipped)} name(s).")
+        show(f"Remembered {len(skipped)} name(s).")
 
-    print(f"Split {len(selected)} artist name(s).")
+    show(f"Split {len(selected)} artist name(s).")
     return len(selected)

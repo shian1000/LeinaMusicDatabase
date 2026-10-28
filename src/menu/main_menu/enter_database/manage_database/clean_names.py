@@ -1,3 +1,4 @@
+from utils.common.output import RESET, YELLOW, review_header
 from utils.database.database_getter import get_songs_from_db_session
 from utils.common.text_utils import is_blacklisted_album
 import questionary
@@ -116,7 +117,7 @@ def _apply_field_cleanup(songs, needs_transform, transform, action_description, 
                 changed_fields.append(f"{field_name}: '{new_value}'")
 
         if changed_fields:
-            print(f"{action_description} \033[93m{', '.join(changed_fields)}\033[0m for \033[93m{song.artist.name} - {song.title}\033[0m")
+            print(f"{action_description} {YELLOW}{', '.join(changed_fields)}{RESET} for {YELLOW}{song.artist.name} - {song.title}{RESET}")
 
 def convert_characters_encoding(songs, held=None):
     _apply_field_cleanup(
@@ -178,7 +179,7 @@ def compose_decomposed_letters(held=None):
     if changes:
         print(f"Composed accented letters in {len(changes)} name(s):")
         for change in changes:
-            print(f"  \033[93m{change}\033[0m")
+            print(f"  {YELLOW}{change}{RESET}")
 
 
 def fix_lookalike_letters(songs, held=None):
@@ -200,9 +201,7 @@ def fix_lookalike_letters(songs, held=None):
         return
 
     entries = list(proposals.items())
-    print("\n" + "=" * 70)
-    print(f"REVIEW: {len(entries)} name(s) mix Latin and Cyrillic look-alike letters")
-    print("=" * 70)
+    review_header(f"REVIEW: {len(entries)} name(s) mix Latin and Cyrillic look-alike letters")
     choices = []
     for i, ((field_name, _), (old, new, owners)) in enumerate(entries):
         where = f"{owners[0].artist.name} - {owners[0].title}" if field_name == "title" else f"{len(owners)} song(s)"
@@ -245,7 +244,7 @@ def seek_nonsense_names(songs):
             if stripped_title and stripped_title != song.title:
                 old_title = song.title
                 edit_db_entry(song, "title", stripped_title)
-                auto_fixed_titles.append(f"'{old_title}' -> \033[93m'{stripped_title}'\033[0m")
+                auto_fixed_titles.append(f"'{old_title}' -> {YELLOW}'{stripped_title}'{RESET}")
 
         if is_blacklisted_album(song.title):
             pending_corrections.append({
@@ -256,18 +255,13 @@ def seek_nonsense_names(songs):
         add_tag_to_song(song, "album_checked")
 
     if auto_fixed_titles:
-        print("\n" + "="*70)
-        print(f"Auto-stripped junk suffixes from {len(auto_fixed_titles)} title(s):")
-        for change in auto_fixed_titles:
-            print(f"  {change}")
-        print("="*70)
+        review_header(f"Auto-stripped junk suffixes from {len(auto_fixed_titles)} title(s):",
+                      *(f"  {change}" for change in auto_fixed_titles))
 
     if not pending_corrections:
         return
 
-    print("\n" + "="*70)
-    print(f"REVIEW: {len(pending_corrections)} field(s) look like junk and need your review")
-    print("="*70)
+    review_header(f"REVIEW: {len(pending_corrections)} field(s) look like junk and need your review")
     for correction in pending_corrections:
         song = correction["song"]
         field = correction["field"]
@@ -282,9 +276,9 @@ def seek_nonsense_names(songs):
         # color-highlighted context are printed as a plain line above the
         # prompt instead of being folded into questionary's own message.
         if field == "album":
-            context = f"{song.artist.name} - {song.title} (album: \033[93m{song.album}\033[0m)"
+            context = f"{song.artist.name} - {song.title} (album: {YELLOW}{song.album}{RESET})"
         else:
-            context = f"{song.artist.name} - \033[93m{song.title}\033[0m"
+            context = f"{song.artist.name} - {YELLOW}{song.title}{RESET}"
         print(f"\n[{field.upper()}] {context}")
 
         confirmation = ask_yes_no(f"'{old_value}' looks like junk. Do you wish to edit it?")
@@ -317,14 +311,10 @@ def resolve_unknown_artist(songs):
         old_label = f"{song.artist.name} - {song.title}"
         artist = credit_unknown_artist_song(session, song)
         if artist is not None:
-            changes.append(f"song_id {song.id}: '{old_label}' -> \033[93m'{artist.name}' - '{song.title}'\033[0m")
+            changes.append(f"song_id {song.id}: '{old_label}' -> {YELLOW}'{artist.name}' - '{song.title}'{RESET}")
 
     if changes:
-        print("\n" + "="*70)
-        print(f"Credited {len(changes)} song(s) of an unknown artist:")
-        for change in changes:
-            print(f"  {change}")
-        print("="*70)
+        review_header(f"Credited {len(changes)} song(s) of an unknown artist:", *(f"  {change}" for change in changes))
 
 
 def _load_songs():

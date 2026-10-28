@@ -5,11 +5,11 @@ in formatted tables using the rich library.
 """
 
 from typing import Optional, List, Tuple, Dict
-from rich.console import Console
+from utils.common.output import console
 from rich.table import Table
 from utils.database.datatables import Song, Artist
 from sqlalchemy.orm import Session
-from utils.common.debug import slog
+from utils.common.debug import flog
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
 from utils.database.tags_management import tag_names_by_song
@@ -50,7 +50,6 @@ def display_songs(songs: Optional[List[Song]]) -> None:
     if not songs:
         return
     
-    console: Console = Console()
 
     table: Table = _create_table("Songs", [
         ("Artist", "cyan", None),
@@ -89,7 +88,6 @@ def display_song_links(songs: Optional[List[Song]]) -> None:
     from utils.database.files_index import song_file_paths
     from config.constants import NO_VIDEO_SENTINEL
 
-    console: Console = Console()
 
     table: Table = _create_table("Song links", [
         ("Artist", "cyan", None),
@@ -108,7 +106,7 @@ def display_song_links(songs: Optional[List[Song]]) -> None:
     try:
         paths = song_file_paths([song.id for song in songs])
     except Exception as exc:
-        slog(f"Couldn't read files.db: {exc}")
+        flog(f"Couldn't read files.db: {type(exc).__name__}: {exc}")
         paths = {}
 
     for song in songs:
@@ -145,7 +143,6 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     if not artists:
         return
     
-    console: Console = Console()
 
     table: Table = _create_table("Artists", [
         ("Name", "cyan", None),
@@ -188,4 +185,4 @@ def display_songs_with_tags(songs: List[Song]) -> None:
             str(song.year) if song.year else "—",
             ", ".join(tags_by_song.get(song.id, [])) or "—",
         )
-    Console().print(table)
+    console.print(table)

@@ -45,8 +45,10 @@ Thumbs.db
 
 # Disposable debug dumps
 /debug.log
+/debug.log.*
 /debug.html
 /youtube_link_cache.log
+/youtube_link_cache.log.*
 /yt_playlist_cache.json
 /MusicDatabase - ToDo.txt
 /debug_spotify.html

@@ -26,7 +26,7 @@ from utils.common.normalizer import name_key
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import offer_album_resolution
-from rich import print
+from utils.common.output import REVIEW_WIDTH, review_header, show, styled
 import questionary
 from utils.ui.prompts import ask_yes_no
 from sqlalchemy import func
@@ -303,13 +303,13 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
     existing_artist, had_local_candidates = _match_artist_locally(new_artist_name)
 
     if existing_artist:
-        print(f"Found existing artist match for [blue]{existing_artist.name}[/blue]")
+        show(f"Found existing artist match for {styled(existing_artist.name, 'blue')}")
     elif not had_local_candidates:
         # No local candidates at all - try spell check
         similar_artists = find_similar_artist(metadata)
 
         if similar_artists:
-            print(f"Found similar artist [blue]{similar_artists[0].name}[/blue] but you were trying to add [green]{new_artist_name}[/green] - review deferred until the import finishes")
+            show(f"Found similar artist {styled(similar_artists[0].name, 'blue')} but you were trying to add {styled(new_artist_name, 'green')} - review deferred until the import finishes")
             slog(f"    [DEFERRED] Similar artist conflict queued for later resolution", priority=1)
             pending_conflicts.append({
                 "metadata": metadata,
@@ -378,7 +378,7 @@ def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
     if video_id and not existing_song.youtube_video_id:
         existing_song.youtube_video_id = video_id
         _LINKED_IN_BATCH.append(existing_song)
-        print(f"Linked existing song [blue]{existing_song.title}[/blue] to YouTube video [green]{video_id}[/green]")
+        show(f"Linked existing song {styled(existing_song.title, 'blue')} to YouTube video {styled(video_id, 'green')}")
 
 def find_existing_song(title: str, artist_songs: list, duration_s: int | None = None) -> Song | None:
     """The song among one artist's `artist_songs` that `title` already is:
@@ -766,7 +766,7 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list) ->
     similar_song = find_similar_song(metadata, artist_obj)
 
     if similar_song:
-        print(f"Found similar song [blue]{similar_song.title}[/blue] by [cyan]{similar_song.artist.name}[/cyan] but you were trying to add [green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan] - review deferred until the import finishes")
+        show(f"Found similar song {styled(similar_song.title, 'blue')} by {styled(similar_song.artist.name, 'cyan')} but you were trying to add {styled(metadata['title'], 'green')} by {styled(artist_obj.name, 'cyan')} - review deferred until the import finishes")
         slog(f"    [DEFERRED] Similar song conflict queued for later resolution", priority=1)
         pending_conflicts.append({
             "metadata": metadata,
@@ -797,13 +797,13 @@ def _settle_song_conflicts(pending_conflicts: list, session) -> tuple[list, list
         added_now = find_existing_song(metadata["title"], [s for s in added if s.artist_id == artist_obj.id],
                                        metadata.get("duration_s"))
         if added_now is not None:
-            print(f"[green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan] was added a moment ago "
+            show(f"{styled(metadata['title'], 'green')} by {styled(artist_obj.name, 'cyan')} was added a moment ago "
                   "from this import - not added twice")
             skipped.append((_entry_label(metadata), "Added already in this import"))
             _backfill_youtube_link(metadata, added_now)
             session.commit()
             continue
-        print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan]")
+        show(f"Found similar song {styled(existing_song.title, 'blue')} by {styled(existing_song.artist.name, 'cyan')} but you were trying to add {styled(metadata['title'], 'green')} by {styled(artist_obj.name, 'cyan')}")
         if ask_yes_no("Do you wish to use the song already in the database?"):
             skipped.append((_entry_label(metadata), "Song already exists"))
             _backfill_youtube_link(metadata, existing_song)
@@ -941,9 +941,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     # entries shared it (see the artist_cache / _PENDING_ARTIST check in
     # resolve_artist).
     if pending_artist_conflicts:
-        print("\n" + "="*70)
-        print(f"REVIEW: {len(pending_artist_conflicts)} artist(s) found a similar match in the database")
-        print("="*70)
+        review_header(f"REVIEW: {len(pending_artist_conflicts)} artist(s) found a similar match in the database")
         for conflict in pending_artist_conflicts:
             conflict_metadata = conflict["metadata"]
             normalized_name = conflict["normalized_name"]
@@ -951,7 +949,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
 
             resolved_artist = None
             for candidate in conflict["candidate_artists"]:
-                print(f"Found similar artist [blue]{candidate.name}[/blue] but you were trying to add [green]{new_artist_name}[/green]")
+                show(f"Found similar artist {styled(candidate.name, 'blue')} but you were trying to add {styled(new_artist_name, 'green')}")
                 confirmation = ask_yes_no("Do you wish to use the artist already in the database?")
                 if confirmation:
                     resolved_artist = candidate
@@ -994,9 +992,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     # ask about each one in a single batch, instead of interrupting the
     # import every time one came up.
     if pending_song_conflicts:
-        print("\n" + "="*70)
-        print(f"REVIEW: {len(pending_song_conflicts)} song(s) found a similar match in the database")
-        print("="*70)
+        review_header(f"REVIEW: {len(pending_song_conflicts)} song(s) found a similar match in the database")
         new_songs, skipped = _settle_song_conflicts(pending_song_conflicts, music_session)
         added_count += len(new_songs)
         added_songs += new_songs
@@ -1013,9 +1009,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     offer_album_resolution(added_songs)
 
     # Print timing summary
-    print("\n" + "="*70)
-    print("PERFORMANCE SUMMARY")
-    print("="*70)
+    review_header("PERFORMANCE SUMMARY")
     if entry_timings:
         total_time_all = sum(t['total'] for t in entry_timings.values())
         avg_time = total_time_all / len(entry_timings)
@@ -1046,7 +1040,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     print()
     print(MBStats.format_summary())
 
-    print("="*70)
+    print("=" * REVIEW_WIDTH)
 
     print(f"Skipped {len(skipped_songs)} songs:")
     for s_s, reason in zip(skipped_songs, reason_for_skipping):

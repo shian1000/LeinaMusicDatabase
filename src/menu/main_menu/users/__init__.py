@@ -51,6 +51,7 @@ from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
 from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
+from utils.ui.file_batch import apply_to_files, report_failures
 from utils.ui.menu_utils import clear_screen, execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 from utils.ui.user_picker import pick_user, show_error, usernames_or_explain
 from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
@@ -301,17 +302,15 @@ def _offer_file_fix(music_session, tracks: list) -> None:
         print(f"  {track.file.name}  ->  {song_file_name(songs[id(track)], track.file.suffix)}")
     if not ask_yes_no("Fix the names and tags of these mp3 files?"):
         return
-    failed = []
-    for track in tracks:
+
+    def fix(track):
         song = songs[id(track)]
-        try:
-            write_song_tags(track.file, song)
-            track.file = rename_to_song(track.file, song)
-        except Exception as exc:
-            failed.append((track.file, exc))
+        write_song_tags(track.file, song)
+        track.file = rename_to_song(track.file, song)
+
+    _, failed = apply_to_files(tracks, fix, lambda track: track.file)
     print(f"Fixed {len(tracks) - len(failed)} file(s).")
-    for file, exc in failed:
-        _error(f"  Couldn't fix {file}: {exc}")
+    report_failures(failed)
 
 
 def _offer_tag_update(music_session, tracks: list) -> None:
@@ -321,16 +320,12 @@ def _offer_tag_update(music_session, tracks: list) -> None:
         return
     if not ask_yes_no(f"Update the mp3 tags of these {len(tracks)} file(s) with the data from the database?"):
         return
-    changed, failed = 0, []
-    for track in tracks:
-        song = music_session.get(Song, track.song_id)
-        try:
-            changed += write_song_tags(track.file, song)
-        except Exception as exc:
-            failed.append((track.file, exc))
+    written, failed = apply_to_files(
+        tracks, lambda track: write_song_tags(track.file, music_session.get(Song, track.song_id)),
+        lambda track: track.file)
+    changed = sum(written)
     print(f"Tags updated in {changed} file(s); {len(tracks) - changed - len(failed)} already matched.")
-    for file, exc in failed:
-        _error(f"  Couldn't write {file}: {exc}")
+    report_failures(failed, "write")
 
 
 def _create_playlist_from_folder(username: str) -> None:

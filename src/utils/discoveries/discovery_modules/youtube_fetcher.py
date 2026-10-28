@@ -96,7 +96,7 @@ def _find_matching_song(soup: BeautifulSoup, artist: str, title: str):
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     driver = get_global_driver()
     if driver is None:
-        slog("[YouTube] No driver open. Call open_global_driver() first.")
+        flog("[YouTube] No driver open. Call open_global_driver() first.")
         return None
 
     query = quote(f"{artist} {title}")

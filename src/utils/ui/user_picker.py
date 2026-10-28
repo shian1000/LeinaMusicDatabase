@@ -4,9 +4,8 @@ Moods, so the same question behaves the same in both menus."""
 import questionary
 
 from utils.database import users as users_db
+from utils.common.output import RED, RESET
 
-RED = "\033[91m"
-RESET = "\033[0m"
 BACK = "Back"
 
 

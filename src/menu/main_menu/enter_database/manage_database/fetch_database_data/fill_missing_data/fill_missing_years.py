@@ -3,6 +3,7 @@ import random
 from collections import defaultdict
 from datetime import date
 import questionary
+from utils.common.output import RESET, YELLOW, error, review_header
 from utils.ui.prompts import ask_yes_no
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
 from utils.database.database_management import edit_db_entry
@@ -69,7 +70,7 @@ def fill_missing_years():
     try:
         open_global_driver()
     except ChromeDriverLaunchError as exc:
-        print(f"\033[91m{exc}\033[0m")
+        error(f"{exc}")
         submit_global_database_session()  # keep the years taken from the database
         return
 
@@ -93,7 +94,7 @@ def fill_missing_years():
             for (artist_name, album_name), songs in groups.items():
                 print()
                 label = f"{artist_name} - {album_name}"
-                print(f"Checking release year for \033[93m{label}\033[0m")
+                print(f"Checking release year for {YELLOW}{label}{RESET}")
                 result = (release_year_from_stored_link(songs)
                           or discover_release_year_result(
                               artist_name, album_name, False, modules, artist_match_synonyms(songs[0].artist),
@@ -105,7 +106,7 @@ def fill_missing_years():
             for song in singles:
                 print()
                 label = f"{song.artist.name} - {song.title}"
-                print(f"Checking release year for single \033[93m{label}\033[0m")
+                print(f"Checking release year for single {YELLOW}{label}{RESET}")
                 result = (release_year_from_stored_link([song])
                           or discover_release_year_result(
                               song.artist.name, song.title, True, modules, artist_match_synonyms(song.artist), song=song,
@@ -193,7 +194,7 @@ def _fill_years_known_in_database(songs) -> list:
         year = get_known_album_year(artist_id, group[0].album)
         if year is None:
             continue
-        print(f"Found year \033[93m{year}\033[0m for \033[93m{group[0].artist.name} - {group[0].album}\033[0m "
+        print(f"Found year {YELLOW}{year}{RESET} for {YELLOW}{group[0].artist.name} - {group[0].album}{RESET} "
               f"in the database ({len(group)} song(s))")
         for song in group:
             edit_db_entry(song, "year", str(year))
@@ -204,13 +205,13 @@ def _fill_years_known_in_database(songs) -> list:
 
 def _collect(label, result, songs, results, review_results) -> None:
     if result is None:
-        print(f"Couldn't find release year for \033[93m{label}\033[0m")
+        print(f"Couldn't find release year for {YELLOW}{label}{RESET}")
         results.append((label, None, songs))
     elif result.needs_review:
-        print(f"Found year \033[93m{result.year}\033[0m for \033[93m{label}\033[0m (unsure, to review at the end)")
+        print(f"Found year {YELLOW}{result.year}{RESET} for {YELLOW}{label}{RESET} (unsure, to review at the end)")
         review_results.append((label, result.year, songs, result.source_url))
     else:
-        print(f"Found year \033[93m{result.year}\033[0m for \033[93m{label}\033[0m ({len(songs)} song(s))")
+        print(f"Found year {YELLOW}{result.year}{RESET} for {YELLOW}{label}{RESET} ({len(songs)} song(s))")
         results.append((label, result.year, songs))
 
 
@@ -234,10 +235,7 @@ def _review_unsure_years(review_results) -> list:
     if not review_results:
         return []
 
-    print()
-    print("=" * 70)
-    print(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date")
-    print("=" * 70)
+    review_header(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date")
     choices = [
         questionary.Choice(title=f"{label}: {year}" + (f"  ({url})" if url else ""), value=i, checked=True)
         for i, (label, year, _, url) in enumerate(review_results)
