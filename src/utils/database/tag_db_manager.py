@@ -79,32 +79,3 @@ def get_tag_session():
     """
     return SessionLocal()
 
-
-def delete_tag(tag_name: str):
-    """
-    Delete a tag and all its song references from tag.db.
-    Case-insensitive.
-    """
-    tag_name = tag_name.strip().lower()
-    session = get_tag_session()
-
-    from sqlalchemy import func
-    tag = session.query(Tag).filter(func.lower(Tag.name) == tag_name).first()
-
-    if not tag:
-        session.close()
-        print(f"❌ Tag '{tag_name}' not found (case-insensitive).")
-        return
-
-    deleted_links = (
-        session.query(SongTag)
-        .filter(SongTag.tag_id == tag.id)
-        .delete(synchronize_session=False)
-    )
-
-    session.delete(tag)
-    session.commit()
-    session.close()
-
-    print(f"🗑️ Deleted tag '{tag.name}' and {deleted_links} links.")
-

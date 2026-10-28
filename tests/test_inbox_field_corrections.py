@@ -284,6 +284,7 @@ def test_artist_name_twin_can_be_merged(env, monkeypatch):
     from utils.database import database_management as dm
     s = env["session"]
     monkeypatch.setattr(dm, "get_global_database_sessions", lambda: (s, None))
+    monkeypatch.setattr(dm, "require_global_database_sessions", lambda: (s, None))
     _request(env["inbox"], "2026-10-14_10-00-00_001.db",
              [_row("artists", 11, "name", "Vulfpeck", "Elise trouw", song_id=4603, title="Dean Town")])
     _, [case] = _cases(env)
@@ -447,6 +448,8 @@ def test_artist_merge_happens_in_the_session_given(env, monkeypatch):
     from utils.database import database_management as dm
     s = env["session"]
     monkeypatch.setattr(dm, "get_global_database_sessions",
+                        lambda: pytest.fail("the merge must use the session it was given"))
+    monkeypatch.setattr(dm, "require_global_database_sessions",
                         lambda: pytest.fail("the merge must use the session it was given"))
     _request(env["inbox"], "2026-10-14_10-00-00_001.db",
              [_row("artists", 11, "name", "Vulfpeck", "Elise trouw", song_id=4603, title="Dean Town")])

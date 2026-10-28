@@ -34,6 +34,59 @@ class FakeCompletedProcess:
 
 
 # ---------------------------------------------------------
+# ytdlp_command() / run_ytdlp()
+# ---------------------------------------------------------
+
+def _fake_venv(tmp_path, monkeypatch, with_ytdlp=True):
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    if with_ytdlp:
+        (bin_dir / "yt-dlp").write_text("")
+    monkeypatch.setattr(m.sys, "prefix", str(tmp_path / "venv"))
+    return bin_dir
+
+
+def test_ytdlp_command_prefers_the_venvs_ytdlp_over_path(tmp_path, monkeypatch):
+    bin_dir = _fake_venv(tmp_path, monkeypatch)
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    assert m.ytdlp_command() == [str(bin_dir / "yt-dlp")]
+
+
+def test_ytdlp_command_falls_back_to_path_then_module_then_bare_name(tmp_path, monkeypatch):
+    _fake_venv(tmp_path, monkeypatch, with_ytdlp=False)
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/yt-dlp" if name == "yt-dlp" else None)
+    assert m.ytdlp_command() == ["/usr/bin/yt-dlp"]
+
+    monkeypatch.setattr(m.shutil, "which", lambda name: None)
+    monkeypatch.setattr(m.importlib.util, "find_spec", lambda name: object())
+    assert m.ytdlp_command() == [m.sys.executable, "-m", "yt_dlp"]
+
+    monkeypatch.setattr(m.importlib.util, "find_spec", lambda name: None)
+    assert m.ytdlp_command() == ["yt-dlp"]
+
+
+def test_run_ytdlp_puts_the_venvs_bin_first_on_path(tmp_path, monkeypatch):
+    # yt-dlp finds deno (YouTube's JS challenges) on PATH - the venv's one
+    # must win also when the venv isn't activated
+    bin_dir = _fake_venv(tmp_path, monkeypatch)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    calls = []
+    monkeypatch.setattr(m.subprocess, "run", lambda cmd, **k: calls.append((cmd, k)) or FakeCompletedProcess())
+    m.run_ytdlp(["--version"], timeout=5)
+    cmd, kwargs = calls[0]
+    assert cmd == [str(bin_dir / "yt-dlp"), "--version"]
+    assert kwargs["env"]["PATH"] == f"{bin_dir}:/usr/bin:/bin"
+    assert kwargs["timeout"] == 5
+
+
+def test_every_ytdlp_call_goes_through_run_ytdlp():
+    # A bare "yt-dlp" misses the venv's one (none on the system PATH here)
+    youtube = repo_root / "src" / "utils" / "youtube"
+    assert (youtube / "manage_youtube_playlists.py").read_text(encoding="utf-8").count("subprocess.run(") == 1
+    assert "subprocess.run(" not in (youtube / "import_from_playlist.py").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------
 # is_video_id_valid()
 # ---------------------------------------------------------
 

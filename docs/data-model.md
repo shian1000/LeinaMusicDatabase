@@ -215,11 +215,11 @@ fetched_at    NOT NULL, default datetime('now')
   gone stale (deleted/private) rather than trusting it blindly — and if that fallback search also
   comes up empty, the dead link is cleared from the DB (`save_video_id_to_song(song, None)`) rather
   than left to fail validation again on every future run. Can also be set to the literal string
-  `"N/A"` (`manage_youtube_playlists.NO_VIDEO_SENTINEL`) — a human's record that no video for this
+  `"N/A"` (`manage_youtube_playlists.NO_VIDEO_SENTINEL`) — a record that no video for this
   song exists on YouTube at all (as opposed to existing but excluded from search).
   `create_yt_playlist()` leaves such a song out without searching (never overwriting it), and so
   does Years' `youtube_fetcher.get_release_year()`. Set via the
-  songs menu's "Report no YouTube video". See
+  songs menu's "Report no YouTube video" or the inbox's NO_VIDEO decision. See
   [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
   The MusicDatabaseApp phone client reads this column too: an id = linked, `"N/A"` = confirmed no
   video (the app won't search), NULL or `""` = unknown (the phone may search YouTube itself and

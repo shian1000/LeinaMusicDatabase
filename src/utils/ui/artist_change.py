@@ -17,7 +17,8 @@ from utils.database.artist_reassignment import (
     set_primary_artist,
     swap_names_of_artist,
 )
-from utils.database.database_getter import get_artists_from_db_session, get_global_database_sessions
+from utils.database.database_getter import get_artists_from_db_session
+from utils.database.database_sessions import require_global_database_sessions
 from utils.database.database_management import add_db_entry, merge_artists_in_db
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.datatables import Artist, Song, artist_categories
@@ -105,7 +106,7 @@ def change_songs_artist(songs: list[Song]) -> None:
             print("Aborted")
             return
 
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     old_artists = []
     moved = 0
     for song in to_move:
@@ -200,7 +201,7 @@ def swap_titles_and_artist_names(songs: list[Song]) -> None:
         print("Aborted")
         return
 
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     renamed_artist_ids = set()
     swapped = 0
     for song in songs:
@@ -228,7 +229,7 @@ def rename_artist(artist: Artist, new_name: str) -> bool:
     """Called before renaming `artist` to `new_name`: when another artist
     already has that name, offer merging into it instead. True = handled
     here (merged or cancelled), False = go on with the plain rename."""
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     twins = artists_named(session, new_name, exclude=artist)
     if not twins:
         return False
@@ -250,7 +251,7 @@ def rename_artist(artist: Artist, new_name: str) -> bool:
 
 def has_artist_twin(artist: Artist, new_name: str) -> bool:
     """Another artist already has `new_name` (after normalize())."""
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     return bool(artists_named(session, new_name, exclude=artist))
 
 

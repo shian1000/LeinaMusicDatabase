@@ -73,7 +73,7 @@ SETTING_STEPS = [
     ),
     SettingStep(
         "MUSIC_LIBRARY_DIR", "Your music library", False,
-        "The folder with your own music files (mp3, flac, ...). It's indexed into files.db, so Leina "
+        "The folder with your own mp3 files (other formats aren't indexed). It's indexed into files.db, so Leina "
         "Radio can play a song's file from this PC (the source \"Serwer\"). An smb://server/share/path/ "
         "library can be indexed for MusicDatabase but isn't served to Leina Radio.",
         "Leina Radio plays only its own files and YouTube.",

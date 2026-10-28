@@ -211,8 +211,9 @@ def ui(session, monkeypatch):
     monkeypatch.setattr(ac.questionary, "select", select)
     monkeypatch.setattr(ac.questionary, "confirm", confirm)
     monkeypatch.setattr("builtins.input", lambda prompt="": inputs.pop(0))
-    monkeypatch.setattr(ac, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(ac, "require_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(database_management, "require_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(ac, "submit_global_database_session", session.commit)
     monkeypatch.setattr(ac, "display_songs", lambda songs: None)
     monkeypatch.setattr(ac, "pick_from_db_objects", lambda objects, **kw: objects[0])
@@ -383,7 +384,7 @@ def test_rename_artist_without_a_twin_or_when_renaming_anyway(session, ui):
 def _resolve_unknown(session, monkeypatch):
     import importlib
     clean_names = importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")
-    monkeypatch.setattr(clean_names, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(clean_names, "require_global_database_sessions", lambda: (session, None))
     clean_names.resolve_unknown_artist(session.query(Song).order_by(Song.id).all())
     session.flush()
 
@@ -428,6 +429,7 @@ def test_an_artist_with_songs_is_not_deleted_and_other_changes_survive(session, 
     import menu.artist_actions as artist_actions
 
     monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(database_management, "require_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(artist_actions, "ask_yes_no", lambda question: True)
     monkeypatch.setattr(artist_actions, "display_artists", lambda artists: None)
     monkeypatch.setattr(artist_actions, "submit_global_database_session", session.commit)
@@ -447,6 +449,7 @@ def test_an_artist_with_songs_is_not_deleted_and_other_changes_survive(session, 
 
 def test_delete_db_entry_refuses_an_artist_credited_as_an_additional_artist(session, monkeypatch):
     monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(database_management, "require_global_database_sessions", lambda: (session, None))
     queen, bowie = _artist(session, "Queen"), _artist(session, "David Bowie")
     song = _song(session, "Under Pressure", queen)
     add_additional_artist(song, bowie, "main")
@@ -541,6 +544,7 @@ def test_songs_loaded_before_a_merge_follow_it(session, monkeypatch):
     deleted artist's id back (or failed with StaleDataError)."""
     from utils.database import database_management
     monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(database_management, "require_global_database_sessions", lambda: (session, None))
     keep, drop = Artist(name="Björk"), Artist(name="Bjork")
     song = Song(title="Army of Me", artist=drop)
     session.add_all([keep, drop, song])

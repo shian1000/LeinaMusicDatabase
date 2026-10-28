@@ -1,4 +1,3 @@
-from utils.database.music_db_manager import get_music_session
 from utils.database.datatables import Album, COMPOSED_FIELDS, Song, Artist
 from sqlalchemy import func
 from utils.database.datatables import song_categories, search_only_categories, artist_categories
@@ -7,7 +6,11 @@ from utils.common.debug import slog
 from utils.common.normalizer import composed
 from sqlalchemy import text
 from sqlalchemy.orm import object_session
-from utils.database.database_getter import get_global_database_sessions
+from utils.database.database_sessions import (
+    get_global_database_sessions,
+    open_and_set_global_database_sessions,
+    require_global_database_sessions,
+)
 from utils.database.tags_management import remove_tag_from_song
 from utils.database.song_artists import count_artist_songs, merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
@@ -93,7 +96,7 @@ def delete_db_entry(db_object):
     song raises ArtistHasSongsError before anything changes - deleted, it
     would only fail at the next commit and take every other unsaved change
     with it."""
-    music_session, tag_session = get_global_database_sessions()
+    music_session, tag_session = require_global_database_sessions()
     slog(type(db_object))
     if isinstance(db_object, Artist) and db_object.id is not None:
         songs = count_artist_songs(music_session, db_object.id)
@@ -144,7 +147,7 @@ def merge_artists_in_db(merge_from, merge_to, session=None):
     if session is None:
         session = object_session(merge_to) if isinstance(merge_to, Artist) else None
     if session is None:
-        session, _ = get_global_database_sessions()
+        session, _ = require_global_database_sessions()
 
     session.flush()
     session.execute(
@@ -172,7 +175,7 @@ def merge_artists_in_db(merge_from, merge_to, session=None):
 
 def artist_primary_songs(artist: Artist) -> list[Song]:
     """The songs crediting `artist` as their primary artist, oldest first."""
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
     return music_session.query(Song).filter(Song.artist_id == artist.id).order_by(Song.id).all()
 
 
@@ -181,7 +184,7 @@ def divide_artist(db_object):
     artist record with the same name (the menu shows the songs and asks first).
     Commits the changes to the global music session.
     """
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
     songs = artist_primary_songs(db_object)
 
     original_name = db_object.name
@@ -212,7 +215,9 @@ def add_db_entry(db_object):
     Returns the created ORM object on success.
     """
 
-    music_session, _ = get_global_database_sessions() or (get_music_session(), None)
+    # Outside the menu (an import run on its own) the global sessions open
+    # here, so the entry lands in the session its caller commits
+    music_session, _ = get_global_database_sessions() or open_and_set_global_database_sessions()
 
     # If it's already an ORM instance of Artist
     if isinstance(db_object, Artist):

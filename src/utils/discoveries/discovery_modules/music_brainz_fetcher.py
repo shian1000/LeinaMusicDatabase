@@ -189,50 +189,53 @@ def _release_is_eligible(release, artist: str | None = None) -> bool:
     return not is_blacklisted_album(_release_title(release), artist)
 
 
-def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> str | None:
-    """Simple helper: fetch album for a single (artist, song) pair.
+def _spell_checked(artist: str, song: str) -> tuple[str, str]:
+    """(artist, song) as check_spelling() corrects them, unchanged when it
+    found nothing."""
+    spell_check_result = check_spelling(artist, song)
+    slog(spell_check_result)
+    if spell_check_result["found"]:
+        return spell_check_result["corrected_artist"], spell_check_result["corrected_title"]
+    return artist, song
 
-    Calls `fetch_albums_from_musicbrainz_batch` with a single-item list and returns
-    the album title or None if not found or on error.
-    """
 
-    slog(f"{artist} - {song}", priority=1)
-    if spell_check:
-        spell_check_result = check_spelling(artist, song)
-        slog(spell_check_result)
-        if(spell_check_result["found"]):
-            if artist != spell_check_result["corrected_artist"] or song != spell_check_result["corrected_title"]:
-                artist = spell_check_result["corrected_artist"]
-                song = spell_check_result["corrected_title"]
-    slog(f"{artist} - {song}", priority=1)
-    
+def _search_album(artist: str, song: str) -> DiscoveryResult | None:
+    """The album of the first 5 recording hits, then of the first 25 (a later
+    hit's studio album can still beat an early hit's single)."""
     query = f'recording:{lucene_quote(song)} AND artist:{lucene_quote(artist)}'
     slog(query, priority=1)
-    try:
+    for limit in (5, 25):
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
-            response = musicbrainzngs.search_recordings(query=query, limit=5)
+            response = musicbrainzngs.search_recordings(query=query, limit=limit)
         recordings = response.get("recording-list", [])
-
         result, result_recording, result_release = _pick_release_with_entry(recordings, artist)
         slog(result)
-
-        if result and not is_blacklisted_album(result, artist):
-            if not spell_check:
-                return get_album_name(artist, song, delay=delay, spell_check=True)
-            time.sleep(delay)
+        if result:
             return _album_result(result, result_recording, result_release, artist)
+    return None
 
 
-        with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
-            response = musicbrainzngs.search_recordings(query=query, limit=25)
-        recordings = response.get("recording-list", [])
+def get_album_name(artist: str, song: str, delay: float = 1.0, spell_check = False) -> DiscoveryResult | None:
+    """Album of (artist, song) from a MusicBrainz recordings search, or None
+    when nothing is found or on error.
 
-        final, final_recording, final_release = _pick_release_with_entry(recordings, artist)
-
+    Searches as given first. Only when that finds nothing, searches again with
+    the spelling check_spelling() corrects (if it corrects anything).
+    spell_check=True corrects the spelling before the first search instead.
+    """
+    slog(f"{artist} - {song}", priority=1)
+    try:
+        if spell_check:
+            artist, song = _spell_checked(artist, song)
+        result = _search_album(artist, song)
+        if result is None and not spell_check:
+            corrected = _spell_checked(artist, song)
+            if corrected != (artist, song):
+                artist, song = corrected
+                slog(f"{artist} - {song}", priority=1)
+                result = _search_album(artist, song)
         time.sleep(delay)
-        if not final:
-            return None
-        return _album_result(final, final_recording, final_release, artist)
+        return result
 
     except musicbrainzngs.WebServiceError as e:
         print(f"MusicBrainz error for '{song}' by '{artist}': {e}")

@@ -1,3 +1,4 @@
+import importlib.util
 import logging
 import math
 import os
@@ -39,13 +40,15 @@ SCOPES = ["https://www.googleapis.com/auth/youtube"]
 TOKEN_PATH = str(PROJECT_ROOT / ".secrets" / "token.json")
 CLIENT_SECRET_PATH = str(PROJECT_ROOT / ".secrets" / "client_secret.json")
 
-# Manual `Song.youtube_video_id` annotation meaning "a human has confirmed
-# this song has no video on YouTube at all" — distinct from the field being
-# empty/unset (never checked) and from a real video_id (found, possibly
-# stale), as opposed to the existing "excluded from search results" escape
-# hatch (see docs/agent-notes/youtube-search-matching.md), where a real
-# video_id does exist and is stored instead. create_yt_playlist() leaves such
-# a song out without searching, and never overwrites the annotation.
+# `Song.youtube_video_id` value meaning "confirmed: this song has no video on
+# YouTube at all" — distinct from the field being empty/unset (never checked)
+# and from a real video_id (found, possibly stale), as opposed to the
+# "excluded from search results" escape hatch (see
+# docs/agent-notes/youtube-search-matching.md), where a real video_id does
+# exist and is stored instead. Set by hand (the song's YouTube link) and by
+# the inbox's NO_VIDEO decision (inbox_requests / inbox_found_links). Respected by create_yt_playlist()
+# (leaves the song out, never overwrites it), youtube_fetcher, the yt-dlp
+# lookups below, and Leina Radio, which doesn't search for such a song.
 NO_VIDEO_SENTINEL = "N/A"
 
 
@@ -332,6 +335,37 @@ def get_youtube_service():
 
 
 # ---------------------------------------------------------
+# RUNNING YT-DLP
+# ---------------------------------------------------------
+
+def ytdlp_command() -> list[str]:
+    """How to start yt-dlp: the venv's own first (the one ytdlp_update keeps
+    current - there is none on the system PATH here), then one on PATH, then
+    `python -m yt_dlp`. Plain "yt-dlp" when none is found, so the caller's
+    FileNotFoundError says it's missing."""
+    venv_ytdlp = Path(sys.prefix) / "bin" / "yt-dlp"
+    if venv_ytdlp.exists():
+        return [str(venv_ytdlp)]
+    on_path = shutil.which("yt-dlp") or shutil.which("yt-dlp.exe")
+    if on_path:
+        return [on_path]
+    if importlib.util.find_spec("yt_dlp") is not None:
+        return [sys.executable, "-m", "yt_dlp"]
+    return ["yt-dlp"]
+
+
+def run_ytdlp(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Runs yt-dlp with `args` (keyword arguments go to subprocess.run). The venv's bin goes first on
+    PATH, so yt-dlp finds the venv's deno for YouTube's JS challenges also
+    when the venv isn't activated (`venv/bin/python main.py`)."""
+    env = os.environ.copy()
+    venv_bin = Path(sys.prefix) / "bin"
+    if venv_bin.is_dir():
+        env["PATH"] = os.pathsep.join(filter(None, [str(venv_bin), env.get("PATH")]))
+    return subprocess.run([*ytdlp_command(), *args], env=env, **kwargs)
+
+
+# ---------------------------------------------------------
 # DOWNLOADING VIDEOS
 # ---------------------------------------------------------
 
@@ -345,24 +379,8 @@ def download_youtube_video(url: str, output_dir: str | None = None) -> str | Non
     target_dir = output_dir or str(Path(__file__).resolve().parents[3] / "import")
     Path(target_dir).mkdir(parents=True, exist_ok=True)
 
-    yt_dlp_executable = shutil.which("yt-dlp") or shutil.which("yt-dlp.exe")
-    if not yt_dlp_executable:
-        venv_bin = Path(sys.prefix) / "bin"
-        candidate = venv_bin / "yt-dlp"
-        if candidate.exists():
-            yt_dlp_executable = str(candidate)
-
-    if not yt_dlp_executable:
-        try:
-            import yt_dlp  # type: ignore
-        except ModuleNotFoundError:
-            print("  ✖ yt-dlp is not installed or not available on PATH")
-            return None
-        yt_dlp_executable = sys.executable
-
     output_template = str(Path(target_dir) / "%(title)s.%(ext)s")
     command = [
-        yt_dlp_executable,
         "--no-playlist",
         "-x",
         "--audio-format",
@@ -376,12 +394,9 @@ def download_youtube_video(url: str, output_dir: str | None = None) -> str | Non
         link,
     ]
 
-    if yt_dlp_executable == sys.executable:
-        command = [yt_dlp_executable, "-m", "yt_dlp", *command[1:]]
-
     print(f"\nDownloading from: {link}")
     try:
-        result = subprocess.run(
+        result = run_ytdlp(
             command,
             capture_output=True,
             text=True,
@@ -444,45 +459,6 @@ def create_playlist(youtube, title: str, description: str = "") -> str:
 # ---------------------------------------------------------
 # SEARCHING VIDEOS
 # ---------------------------------------------------------
-
-def search_video_cached(youtube, cache: dict, artist: str, title: str) -> str | None:
-    key = make_song_key(artist, title)
-    entry = cache["songs"][key]
-
-    # Already searched
-    if entry["video_id"] is not None:
-        return entry["video_id"]
-
-    print(f"\nSearching for: {artist} - {title}")
-
-    try:
-        response = youtube.search().list(
-            part="snippet",
-            q=f"{artist} - {title}",
-            type="video",
-            maxResults=1,
-            safeSearch="none"
-        ).execute()
-
-    except HttpError as e:
-        if e.resp.status == 403 and b"quotaExceeded" in e.content:
-            print("🛑 Quota exceeded — progress saved.")
-            save_cache(cache)
-            raise QuotaExceededError() from e
-        raise
-
-    items = response.get("items", [])
-    video_id = items[0]["id"]["videoId"] if items else None
-
-    entry["video_id"] = video_id
-    save_cache(cache)
-
-    if video_id:
-        print(f"  ✔ Found video: {video_id}")
-    else:
-        print("  ✖ No results found")
-
-    return video_id
 
 def _bracket_selector_hints(title: str) -> list[str]:
     """Extract bracket-wrapped text from a DB title before _relevance_text()
@@ -1227,9 +1203,8 @@ def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
     """One yt-dlp `--dump-json` search attempt. Returns the completed process,
     or None on timeout/missing-binary (a real failure, not worth retrying)."""
     try:
-        return subprocess.run(
+        return run_ytdlp(
             [
-                "yt-dlp",
                 "--dump-json",
                 "--no-playlist",
                 f"ytsearch{max_results}:{query}",
@@ -1240,6 +1215,7 @@ def _run_ytdlp_search(query: str, max_results: int, timeout: int = 30):
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  ✖ yt-dlp unavailable: {e}")
+        flog(f"[yt-dlp] unavailable: {e}")
         return None
 
 
@@ -1538,8 +1514,8 @@ def video_playability(video_id: str | None, timeout: int = 20) -> bool | None:
     if not video_id:
         return False
     try:
-        result = subprocess.run(
-            ["yt-dlp", "--simulate", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
+        result = run_ytdlp(
+            ["--simulate", "--no-warnings", f"https://www.youtube.com/watch?v={video_id}"],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1693,9 +1669,9 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
     if not video_id or video_id == NO_VIDEO_SENTINEL:
         return None
     try:
-        result = subprocess.run(
+        result = run_ytdlp(
             [
-                "yt-dlp", "--skip-download", "--no-warnings",
+                "--skip-download", "--no-warnings",
                 "--print", "%(release_date)s|%(release_year)s|%(upload_date)s",
                 f"https://www.youtube.com/watch?v={video_id}",
             ],
@@ -1705,6 +1681,7 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  ✖ yt-dlp unavailable: {e}")
+        flog(f"[yt-dlp] unavailable: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
         errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]
@@ -1726,9 +1703,9 @@ def get_video_album(video_id: str | None, timeout: int = 30) -> tuple[str, str, 
     if not video_id or video_id == NO_VIDEO_SENTINEL:
         return None
     try:
-        result = subprocess.run(
+        result = run_ytdlp(
             [
-                "yt-dlp", "--skip-download", "--no-warnings",
+                "--skip-download", "--no-warnings",
                 "--print", "%(album)s\t%(track)s\t%(artist)s",
                 f"https://www.youtube.com/watch?v={video_id}",
             ],
@@ -1738,6 +1715,7 @@ def get_video_album(video_id: str | None, timeout: int = 30) -> tuple[str, str, 
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  ✖ yt-dlp unavailable: {e}")
+        flog(f"[yt-dlp] unavailable: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
         errors = [line for line in (getattr(result, "stderr", None) or "").splitlines() if line.startswith("ERROR")]

@@ -10,7 +10,7 @@ from utils.common.debug import mlog, slog
 from utils.common.text_utils import is_soundtrack_artist, normalize_text
 from utils.common.normalizer import normalize
 from collections import Counter
-from utils.database.database_sessions import get_global_database_sessions
+from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import (
     additional_artist_name_contains,
     artist_name_or_synonym_contains,
@@ -300,7 +300,7 @@ def extract_db_object_info(songs, categories: str = None) -> list[tuple]:
 
 def get_songs_with_empty_category(category: str) -> list[Song]:
 
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
 
     db_query = (
         music_session.query(Song)
@@ -333,7 +333,7 @@ def get_songs_with_album_missing_year() -> list[Song]:
     only look up a year once we know what to search for (an album name, or
     the song title itself for a single)."""
 
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
 
     return (
         music_session.query(Song)
@@ -364,7 +364,7 @@ def get_known_album_year(artist_id: int, album: str) -> int | None:
     if not target:
         return None
 
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
     query = music_session.query(Song.album, Song.year).filter(Song.year != None, Song.album != None)
     if not is_soundtrack_artist(album):
         query = query.filter(Song.artist_id == artist_id)
@@ -384,7 +384,7 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
         query = str(query)
         
     slog(query)
-    music_session, tag_session = get_global_database_sessions()
+    music_session, tag_session = require_global_database_sessions()
     base_query = (
         music_session.query(Song)
         .join(Artist)
@@ -462,7 +462,7 @@ def get_artists_from_db_session(
 
     slog(category)
     slog(query)
-    music_session, tag_session = get_global_database_sessions()
+    music_session, tag_session = require_global_database_sessions()
     db_query = music_session.query(Artist).order_by(Artist.name)
 
     if category is None:

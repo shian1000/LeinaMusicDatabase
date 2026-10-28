@@ -15,6 +15,7 @@ from utils.youtube.manage_youtube_playlists import (
     _run_ytdlp_search,
     _is_official_release,
     _log_ytdlp_errors,
+    run_ytdlp,
 )
 from utils.common.normalizer import split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
@@ -22,6 +23,7 @@ from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
 from utils.common.text_utils import strip_trailing_junk_suffix
 from config.constants import YTDLP_PLAYLIST_LANG
+from utils.common.debug import flog
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -421,9 +423,9 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
     """
     url = f"https://www.youtube.com/playlist?list={playlist_id}"
     try:
-        result = subprocess.run(
+        result = run_ytdlp(
             [
-                "yt-dlp", "--dump-json", "--flat-playlist", "--ignore-errors", "--no-warnings",
+                "--dump-json", "--flat-playlist", "--ignore-errors", "--no-warnings",
                 "--extractor-args", f"youtube:lang={YTDLP_PLAYLIST_LANG}", url,
             ],
             capture_output=True,
@@ -432,6 +434,7 @@ def _fetch_playlist_items_ytdlp(playlist_id: str, timeout: int = 180) -> list | 
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         print(f"  ✖ yt-dlp unavailable ({e})")
+        flog(f"[yt-dlp] playlist {playlist_id} unavailable: {e}")
         return None
 
     if not result.stdout.strip():
@@ -620,8 +623,8 @@ def _fetch_video_description(video_id: str, timeout: int = 30) -> str | None:
         return None
     url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--no-warnings", "--skip-download", url],
+        result = run_ytdlp(
+            ["--dump-json", "--no-warnings", "--skip-download", url],
             capture_output=True,
             text=True,
             timeout=timeout,

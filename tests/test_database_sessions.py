@@ -73,3 +73,24 @@ def test_a_failed_commit_on_close_still_closes_and_unsets(sessions):
     assert database_sessions.get_global_database_sessions() is None
     assert not sessions.in_transaction() and len(sessions.identity_map) == 0 and not sessions.new
 
+
+
+def test_requiring_unopened_sessions_says_so(monkeypatch):
+    # DB-21: callers unpacked None - a TypeError far from the cause
+    monkeypatch.setattr(database_sessions, "_GLOBAL_DATABASE_SESSION", None)
+    with pytest.raises(RuntimeError, match="aren't open"):
+        database_sessions.require_global_database_sessions()
+    from utils.database import database_getter
+    with pytest.raises(RuntimeError, match="aren't open"):
+        database_getter.get_songs_from_db_session("title", "Waterloo")
+
+
+def test_add_db_entry_without_open_sessions_uses_the_global_ones(sessions, monkeypatch):
+    # DB-21: it opened a session of its own that nobody closed or shared
+    from utils.database import database_management
+    music = sessions
+    monkeypatch.setattr(database_sessions, "_GLOBAL_DATABASE_SESSION", None)
+    monkeypatch.setattr(database_sessions, "open_database_sessions", lambda: (music, None))
+    artist = database_management.add_db_entry(Artist(name="ABBA"))
+    assert database_sessions.get_global_database_sessions() == (music, None)
+    assert music.query(Artist).one() is artist

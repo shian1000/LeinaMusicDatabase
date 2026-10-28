@@ -481,6 +481,7 @@ def _review_with(monkeypatch, session, selects, checkboxes=()):
     monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(review, "submit_global_database_session", session.commit)
     monkeypatch.setattr(database_management, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(database_management, "require_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(review.questionary, "select", lambda *args, **kwargs: _Answer(next(selects)))
     monkeypatch.setattr(review.questionary, "checkbox", lambda *args, **kwargs: _Answer(next(checkboxes)))
     return review

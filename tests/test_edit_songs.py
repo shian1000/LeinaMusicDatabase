@@ -132,6 +132,7 @@ def test_divide_artists_lists_the_artists_songs(session, song, monkeypatch, caps
     session.add(Song(title="Message in a Bottle", artist=song.artist, year=1979))
     session.commit()
     monkeypatch.setattr(dm, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(dm, "require_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(menu, "ask_for_entires_list", lambda mode: [song.artist])
     monkeypatch.setattr(menu, "pick_from_db_objects", lambda objects, question: objects[0])
     monkeypatch.setattr(menu, "ask_yes_no", lambda q: True)

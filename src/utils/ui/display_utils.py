@@ -10,7 +10,7 @@ from rich.table import Table
 from utils.database.datatables import Song, Artist
 from sqlalchemy.orm import Session
 from utils.common.debug import slog
-from utils.database.database_sessions import get_global_database_sessions
+from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
 from utils.database.tags_management import tag_names_by_song
 from utils.database.song_kinds import is_full_album
@@ -155,7 +155,7 @@ def display_artists(artists: Optional[List[Artist]]) -> None:
     ])
 
     music_session: Session
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
 
     for artist in artists:
         songs_count: int = count_artist_songs(music_session, artist.id)

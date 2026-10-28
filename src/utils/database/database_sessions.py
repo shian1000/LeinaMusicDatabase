@@ -23,6 +23,14 @@ def set_global_database_sessions(sessions: Tuple[Session, Session]) -> None:
 def get_global_database_sessions() -> Optional[Tuple[Session, Session]]:
     return _GLOBAL_DATABASE_SESSION
 
+def require_global_database_sessions() -> Tuple[Session, Session]:
+    """The menu's (music, tag) sessions, for code that only runs once they're
+    open - a clear error instead of unpacking None (TypeError)."""
+    sessions = _GLOBAL_DATABASE_SESSION
+    if sessions is None:
+        raise RuntimeError("The database sessions aren't open - call open_and_set_global_database_sessions() first")
+    return sessions
+
 def open_and_set_global_database_sessions() -> Tuple[Session, Session]:
     global _GLOBAL_DATABASE_SESSION
     with _GLOBAL_DB_LOCK:

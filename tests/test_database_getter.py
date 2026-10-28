@@ -21,7 +21,7 @@ def session(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     s = sessionmaker(bind=engine)()
-    monkeypatch.setattr(g, "get_global_database_sessions", lambda: (s, None))
+    monkeypatch.setattr(g, "require_global_database_sessions", lambda: (s, None))
     yield s
     s.close()
 

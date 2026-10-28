@@ -123,8 +123,16 @@ anonymous clients to roughly 1 request/second and answers 503 above that.
    (`_bounded_socket_timeout()`, 20s) — enough to turn a permanent hang into a
    handled `musicbrainzngs.WebServiceError`/`NetworkError`, but it still doesn't
    share `mb_get()`'s session, rate limiter, or `MBStats` counters. Migrating this
-   fetcher onto `mb_get()` properly is still outstanding; if you touch this file
-   again, prefer finishing that migration over patching around the gap further.
+   fetcher onto `mb_get()` properly is still outstanding (code review DSC-05,
+   deferred 2026-10-28): it means rewriting every parser and test fixture, since
+   `musicbrainzngs` reshapes the JSON (`recording-list`, `release-list`,
+   `secondary-type-list`, `artist-credit` with join strings between the credits).
+   The global timeout touches nothing else today only because `main.py` has no
+   threads and the sharing server never imports the fetcher — adding either
+   makes the migration urgent. `get_album_name()` searches as given first (5 hits,
+   then 25) and tries `check_spelling()`'s corrected names only when that finds
+   nothing; until 2026-10-28 every hit was searched again after a spell check
+   (≥3 requests per album found, at ~1 request/s).
 4. **Split retry policy** in `mb_get()` — 429/503 get linear backoff
    (`5 * attempt` seconds) because they mean "cool off". Plain
    connection/timeout errors (`RequestException` that isn't an `HTTPError`) get

@@ -45,7 +45,7 @@ def session_factory():
 @pytest.fixture
 def session(session_factory, monkeypatch):
     s = session_factory()
-    monkeypatch.setattr(g, "get_global_database_sessions", lambda: (s, None))
+    monkeypatch.setattr(g, "require_global_database_sessions", lambda: (s, None))
     monkeypatch.setattr(ie, "open_and_set_global_database_sessions", lambda: (s, None))
     yield s
     s.close()

@@ -92,14 +92,14 @@ def _clean_names_module(monkeypatch, session):
     import menu.main_menu  # noqa: F401  (import order, see AGENTS.md)
     # the package's clean_names() function shadows the submodule
     cn = importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")
-    monkeypatch.setattr(cn, "get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(cn, "require_global_database_sessions", lambda: (session, None))
     return cn
 
 
 def test_clean_names_composes_stored_names_without_moving_anything(session, monkeypatch):
     _insert_decomposed(session)
     cn = _clean_names_module(monkeypatch, session)
-    monkeypatch.setattr("utils.ui.artist_change.get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr("utils.ui.artist_change.require_global_database_sessions", lambda: (session, None))
     held = {}
 
     cn.compose_decomposed_letters(held)
@@ -119,7 +119,7 @@ def test_clean_names_holds_an_artist_composed_onto_another_artists_name(session,
     session.add(Artist(name="Pete Rodríguez"))
     session.commit()
     cn = _clean_names_module(monkeypatch, session)
-    monkeypatch.setattr("utils.ui.artist_change.get_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr("utils.ui.artist_change.require_global_database_sessions", lambda: (session, None))
     held = {}
 
     cn.compose_decomposed_letters(held)

@@ -77,26 +77,6 @@ def test_search_video_disables_safe_search_on_api_fallback(monkeypatch):
     assert youtube.captured.get("safeSearch") == "none"
 
 
-def test_search_video_cached_disables_safe_search(monkeypatch):
-    monkeypatch.setattr(m, "save_cache", lambda cache: None)
-
-    items = [
-        {
-            "id": {"videoId": BERLIN_SEX_VIDEO_ID},
-            "snippet": {"title": "Berlin - Sex (I'm A...) [Official Audio]"},
-        }
-    ]
-    youtube = FakeYoutube(items)
-
-    key = m.make_song_key(BERLIN_SEX_ARTIST, BERLIN_SEX_TITLE)
-    cache = {"songs": {key: {"artist": BERLIN_SEX_ARTIST, "title": BERLIN_SEX_TITLE, "video_id": None, "added": False}}}
-
-    video_id = m.search_video_cached(youtube, cache, BERLIN_SEX_ARTIST, BERLIN_SEX_TITLE)
-
-    assert video_id == BERLIN_SEX_VIDEO_ID
-    assert youtube.captured.get("safeSearch") == "none"
-
-
 # Real case: for a short, exact title ("2001"), every candidate — original,
 # remix, dub, demo, live session — scores identical (1.0) title relevance via
 # _title_containment, so the pick comes down entirely to `quality`. HQ_KEYWORDS

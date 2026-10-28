@@ -380,8 +380,8 @@ artist — `"Berlin Sex audio"`, `"Madonna Sex audio"`, `"Paris Sex audio"`, and
 audio"` all return zero, while longer, more sentence-like titles that merely contain "sex" (e.g.
 `"Let's Talk About Sex"`, `"I Wanna Sex You Up"`) are unaffected. This hits `search_video_ytdlp()`
 (anonymous scraping, no way to disable) and hit `search_video()`'s YouTube Data API fallback too,
-because the API's `safeSearch` param defaults to `"moderate"` when unset. Both `search_video()`
-and `search_video_cached()` now pass `safeSearch="none"` explicitly to opt out of that filtering —
+because the API's `safeSearch` param defaults to `"moderate"` when unset. `search_video()` now
+passes `safeSearch="none"` explicitly to opt out of that filtering —
 the yt-dlp path still comes back empty for these queries, but the API fallback (already the
 designed catch-all) now succeeds instead of also returning nothing.
 
@@ -995,11 +995,12 @@ right answer. Every reuse, validation failure, search miss, and DB save in this 
 gates `debug.log`) — check it first if a playlist run picks an unexpected video or a stored link
 stops working.
 
-A separate, human-only annotation — `manage_youtube_playlists.NO_VIDEO_SENTINEL` (the literal
+A separate annotation — `manage_youtube_playlists.NO_VIDEO_SENTINEL` (the literal
 string `"N/A"`) — can also be written to `Song.youtube_video_id` to record "checked, this song has
 no video on YouTube in any form" (as opposed to the above, where a real video exists but is
-unreachable by search). Writing it is a menu action (`report_no_yt_video()` in
-`menu/song_actions/__init__.py`, "Report no YouTube video" in the songs action menu), and
+unreachable by search). It's written by a menu action (`report_no_yt_video()` in
+`menu/song_actions/__init__.py`, "Report no YouTube video" in the songs action menu) or by the
+inbox's NO_VIDEO decision on a request from Leina Radio, and
 `create_yt_playlist()` leaves such a song out of the playlist without validating or searching,
 so the annotation is never overwritten by a found video. It also never adds or saves a found video
 that music.db's `bad_youtube_videos` rules out (for every song, or for that one), and a used-up

@@ -5,7 +5,7 @@ import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.database.artist_reassignment import credit_unknown_artist_song
 from utils.database.database_management import decomposed_names, edit_db_entry
-from utils.database.database_sessions import get_global_database_sessions, submit_global_database_session
+from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffix
 from config.constants import TITLE_JUNK_SUFFIXES
@@ -163,7 +163,7 @@ def compose_decomposed_letters(held=None):
     column the models compose on write - albums' and artists' too, not just
     the songs' title/artist/album. Looks the same, so nothing is asked. An
     artist name onto another artist's goes to `held` (_hold_artist_rename())."""
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     changes = []
     for row, field, _old, new in decomposed_names(session):
         if isinstance(row, Artist) and field == "name" and _hold_artist_rename(held, row, new):
@@ -310,7 +310,7 @@ def resolve_unknown_artist(songs):
     """Songs by an unknown artist with an "Artist - Title" title are credited
     to that artist (artist_reassignment.credit_unknown_artist_song()); what
     changed is printed as one summary at the end."""
-    session, _ = get_global_database_sessions()
+    session, _ = require_global_database_sessions()
     changes = []
     for song in songs:
         old_label = f"{song.artist.name} - {song.title}"
@@ -331,7 +331,7 @@ def _load_songs():
     be kept: the session holds its rows only weakly, so a discarded one is
     gone again and every song.artist becomes a query of its own."""
     songs = get_songs_from_db_session()
-    music_session, _ = get_global_database_sessions()
+    music_session, _ = require_global_database_sessions()
     return songs, music_session.query(Artist).all()
 
 

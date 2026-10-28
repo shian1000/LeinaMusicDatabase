@@ -86,7 +86,7 @@ def test_get_album_name_returns_the_ep(monkeypatch):
     assert result.matched_title == "Notion"
 
 
-def test_get_album_name_keeps_its_delay_in_the_spell_checked_pass(monkeypatch):
+def test_get_album_name_sleeps_its_own_delay_once(monkeypatch):
     # DSC-03: the second (spell-checked) pass called itself without delay=,
     # so it always slept the default 1.0 s
     monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings",
@@ -97,6 +97,55 @@ def test_get_album_name_keeps_its_delay_in_the_spell_checked_pass(monkeypatch):
 
     assert get_album_name("The Rare Occasions", "Notion", delay=0.25).album == "Futureproof"
     assert slept == [0.25]
+
+
+def _counting_search(monkeypatch, results_for):
+    """search_recordings() answering by the queried title; returns the list of
+    (query, limit) calls and check_spelling() calls."""
+    searches, spell_checks = [], []
+
+    def search(query, limit):
+        searches.append((query, limit))
+        return {"recording-list": next((r for title, r in results_for.items() if f'recording:"{title}"' in query), [])}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", search)
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+    return searches, spell_checks
+
+
+def test_get_album_name_takes_the_first_hit_without_a_spell_check(monkeypatch):
+    # DSC-12: a hit was thrown away and searched again after check_spelling() -
+    # at least three MusicBrainz requests for every album found
+    searches, spell_checks = _counting_search(monkeypatch, {"Notion": NOTION_RECORDINGS})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling",
+                        lambda artist, song: spell_checks.append(song) or {"found": False})
+
+    assert get_album_name("The Rare Occasions", "Notion").album == "Futureproof"
+    assert [limit for _, limit in searches] == [5]
+    assert spell_checks == []
+
+
+def test_get_album_name_tries_the_corrected_spelling_only_when_nothing_was_found(monkeypatch):
+    # DSC-12: a miss never got a spell check at all
+    searches, spell_checks = _counting_search(monkeypatch, {"Notion": NOTION_RECORDINGS})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: spell_checks.append(song) or {
+        "found": True, "corrected_artist": "The Rare Occasions", "corrected_title": "Notion"})
+
+    result = get_album_name("The Rare Ocasions", "Notoin")
+
+    assert result.album == "Futureproof"
+    assert spell_checks == ["Notoin"]
+    assert [limit for _, limit in searches] == [5, 25, 5]
+    assert 'recording:"Notion"' in searches[-1][0]
+
+
+def test_get_album_name_does_not_search_again_when_the_spelling_is_already_right(monkeypatch):
+    searches, spell_checks = _counting_search(monkeypatch, {})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: spell_checks.append(song) or {
+        "found": True, "corrected_artist": artist, "corrected_title": song})
+
+    assert get_album_name("The Rare Occasions", "Unreleased Song") is None
+    assert [limit for _, limit in searches] == [5, 25]
+    assert spell_checks == ["Unreleased Song"]
 
 
 def test_get_album_name_reports_the_queried_artist_among_several_credits(monkeypatch):
@@ -213,6 +262,7 @@ def test_quotes_and_backslashes_in_names_are_escaped_in_the_query(monkeypatch):
     monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", search)
     monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_release_groups",
                         lambda query, limit: queries.append(query) or {"release-group-list": []})
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: {"found": False})
     monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
 
     get_album_name('New "Order"', 'Blue Monday 12" Mix')

@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,670 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,700 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -436,6 +436,10 @@ non-trivial work in that area.
   offers a newer yt-dlp from PyPI (`utils/ui/ytdlp_update_prompt.py`) and re-pins
   requirements.txt. yt-dlp is installed as `yt-dlp[default]` (with `yt-dlp-ejs`) plus the pinned
   `deno` package as its JS runtime, all in the venv; without deno YouTube blocks it much sooner.
+  Start yt-dlp only through `manage_youtube_playlists.run_ytdlp()` (`ytdlp_command()`), never a bare
+  `"yt-dlp"`: this machine has none on the system PATH, so outside an activated venv
+  (`venv/bin/python main.py`) a bare call fails; it takes the venv's yt-dlp and puts `venv/bin` first
+  on PATH so yt-dlp finds the venv's deno (a test checks no other `subprocess.run(` in those modules).
 - `src/utils/ui/menu_utils.py` — shared menu flows, including `search_and_pick_db_object()`. Reuse
   it for "search then resolve to one DB row" rather than re-duplicating.
   `docs/agent-notes/database-search.md`.
@@ -684,7 +688,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,670 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,700 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
@@ -799,9 +803,9 @@ non-trivial work in that area.
   `save_video_id_to_song()` after every fresh search hit, re-validated by `is_video_id_valid()`
   before reuse, and cleared back to `None` if a stale link fails both validation and a fallback
   re-search, both logged to `youtube_link_cache.log`; see also `NO_VIDEO_SENTINEL`, the separate
-  `"N/A"` human annotation for "confirmed no video exists at all," settable via the songs menu's
-  "Report no YouTube video"; playlists still treat it as an empty field, only Years' YouTube
-  date lookup and the album lookup's last-resort read of the stored link skip the song),
+  `"N/A"` annotation for "confirmed no video exists at all," set via the songs menu's "Report no
+  YouTube video" or the inbox's NO_VIDEO decision; playlists leave such a song out, never
+  overwriting it, and Years' YouTube date lookup and the album lookup skip it too),
   `transliteration.py`'s alternate-script
   retry for a title only findable under the other alphabet (Cyrillic↔Lacinka only so far, triggered
   when the winning pick isn't a confirmed official release, not by a relevance floor), why a collab
