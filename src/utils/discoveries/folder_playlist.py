@@ -21,7 +21,8 @@ from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
 from utils.discoveries.mp3_utils import audio_duration
-from utils.discoveries.import_engine import LocalSongMatcher, is_distinctive_title, find_matching_artist, find_song_loosely
+from utils.database.database_management import add_db_entry
+from utils.discoveries.import_engine import LocalSongMatcher, create_song_entry, is_distinctive_title, find_matching_artist, find_song_loosely
 
 
 @dataclass
@@ -74,7 +75,7 @@ def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
     artist matching `artist_name` (None = a new one is made), and the song
     of that artist the title already is, as loosely as files are matched
     (None = a new one is made)."""
-    artist = find_matching_artist(artist_name)
+    artist = find_matching_artist(artist_name, session)
     if artist is None:
         return None, None
     songs = session.query(Song).filter(Song.artist_id == artist.id).all()
@@ -85,14 +86,15 @@ def add_song_for_file(session, artist_name: str, title: str, even_if_similar: bo
     """Add a song by `artist_name` titled `title` for a file the database
     has nothing for - the existing artist (and song) when there is one, as
     song_for_file_plan() shows it; with `even_if_similar` a new song even
-    then (the user said the one found isn't it). Commits."""
+    then (the user said the one found isn't it). Made like an import's
+    song (create_song_entry(): "X (Full Album)" is a full album). The
+    caller commits."""
     artist, song = song_for_file_plan(session, artist_name, title)
     if song is not None and not even_if_similar:
         return song
-    song = Song(title=title, artist=artist or Artist(name=artist_name))
-    session.add(song)
-    session.commit()
-    return song
+    if artist is None:
+        artist = add_db_entry(Artist(name=artist_name), session)
+    return create_song_entry({"title": title}, artist, session)
 
 
 def folder_mp3_files(folder: Path) -> list[Path]:

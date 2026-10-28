@@ -526,6 +526,17 @@ non-trivial work in that area.
 - Constants and config load from `constants.py` / `settings.py`; don't scatter literals.
 - SQL goes through SQLAlchemy and stays parameterized — never build a query by string-concatenating
   user input.
+- Sessions and commits: a function in `src/utils/` works in the session it's given (a `session=`
+  parameter, defaulting to the global one) and never commits — it may `flush()` for an id. The
+  entry point commits: a menu action calls `submit_global_database_session()` once the operation is
+  done (never `session.commit()` on the global session — it skips the rollback and
+  `apply_song_id_changes()`), `run_import_batch()` commits after each entry and answer, the server
+  and timers in their own sessions. A lookup whose result gets attached to a row uses that row's
+  session (`find_matching_artist(name, session)`): an object from another session can't be added.
+  Documented exceptions that commit themselves: a step that writes a file outside the DB right
+  after (`moods.promote_user_mood()`, `apply_global_mood_changes()`, `apply_song_id_changes()`),
+  its own `files.db` / `user.db` session, and a long batch saving as it goes (cover import,
+  inbox checks). Pick a tag session with `database_sessions.tag_session_for()`.
 
 ## Database safety
 

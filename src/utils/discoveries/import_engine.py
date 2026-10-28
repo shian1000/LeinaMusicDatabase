@@ -172,7 +172,7 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
 
     return None
 
-def find_matching_artist(name: str) -> Artist | None:
+def find_matching_artist(name: str, session=None) -> Artist | None:
     """
     Look up whether `name` matches an artist already in the database - exact
     match (case-insensitive) first, falling back to local fuzzy similarity
@@ -182,13 +182,14 @@ def find_matching_artist(name: str) -> Artist | None:
     anything. Shared by resolve_artist() (deciding whether a parsed artist
     name already exists) and the YouTube playlist importer's artist/title
     swap detection (checking whether a parsed *title* is actually an
-    existing artist's name).
+    existing artist's name). Looks in `session`, default the global music
+    session - pass the one the found artist will be attached to.
     """
-    artist, _ = _match_artist_locally(name)
+    artist, _ = _match_artist_locally(name, session)
     return artist
 
 
-def _match_artist_locally(name: str) -> tuple:
+def _match_artist_locally(name: str, session=None) -> tuple:
     """Does the exact/fuzzy local lookup for find_matching_artist(), also
     returning whether the broad (pre-similarity-filter) search found any
     candidates at all.
@@ -201,7 +202,7 @@ def _match_artist_locally(name: str) -> tuple:
     if not name:
         return None, False
 
-    music_session, _ = open_and_set_global_database_sessions()
+    music_session = session or open_and_set_global_database_sessions()[0]
     candidates = music_session.query(Artist).filter(
         func.lower(Artist.name) == name.lower()
     ).all()
@@ -225,11 +226,11 @@ def _match_artist_locally(name: str) -> tuple:
         # Punctuation only (")" read from a broken file name): nothing to search by
         return None, False
     key = name_key(name)
-    existing_artists = get_artists_from_db_session(artist_categories[0], search)
+    existing_artists = get_artists_from_db_session(artist_categories[0], search, session=music_session)
     if not existing_artists and search.startswith("the "):
         # The search is substring-based, so "The Caesars" never finds
         # "Caesars": only the same name without its "The" is taken then
-        same = [a for a in get_artists_from_db_session(artist_categories[0], search[4:])
+        same = [a for a in get_artists_from_db_session(artist_categories[0], search[4:], session=music_session)
                 if any(name_key(n) == key for n in known_names(a))]
         return (same[0], True) if same else (None, False)
     if not existing_artists:
@@ -333,7 +334,9 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
 
     return new_artist_obj, False
 
-def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
+def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
+    """Add the song `metadata` describes, by `artist_obj` (one with an id),
+    to `session` (default: the global music session). The caller commits."""
     new_song_obj = Song()
     new_song_obj.artist_id = artist_obj.id
     new_song_obj.title = metadata["title"]
@@ -351,14 +354,12 @@ def create_song_entry(metadata: dict, artist_obj: Artist) -> Song:
     # those are left to Manage database -> "Find full albums".
     if title_has_full_album_marker(new_song_obj.title):
         set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM)
-    add_db_entry(new_song_obj)
+    add_db_entry(new_song_obj, session)
     # A caller that split "Title ft. X" off its title (song requests) names X here
     if metadata.get("feat_artists"):
         from sqlalchemy.orm import object_session
         from utils.database.song_duplicates import credit_feat_artists
-        session = object_session(new_song_obj)
-        credit_feat_artists(session, new_song_obj, metadata["feat_artists"])
-        session.commit()
+        credit_feat_artists(object_session(new_song_obj), new_song_obj, metadata["feat_artists"])
     return new_song_obj
 
 # Songs whose missing YouTube link the running import filled in - the
@@ -494,10 +495,10 @@ class LocalSongMatcher:
 
     def _artist(self, name: str) -> Artist | None:
         if name not in self._artists:
-            artist = find_matching_artist(name)
+            artist = find_matching_artist(name, self.session)
             proposal = None if artist else propose_artist_split(name)
             if proposal and proposal.main:
-                artist = find_matching_artist(proposal.main[0])
+                artist = find_matching_artist(proposal.main[0], self.session)
             self._artists[name] = artist
         return self._artists[name]
 
@@ -782,11 +783,12 @@ def _entry_label(metadata: dict) -> str:
     return metadata.get("_label") or f"{metadata.get('artist_name')} - {metadata.get('title')}"
 
 
-def _settle_song_conflicts(pending_conflicts: list) -> tuple[list, list]:
+def _settle_song_conflicts(pending_conflicts: list, session) -> tuple[list, list]:
     """Ask about each new entry that found a similar song (resolve_song()):
     use that song, or add the entry as a new one. An entry this review has
     added already - the same song twice in one import - is never added a
-    second time. Returns (the songs added, [(entry label, why skipped)])."""
+    second time. Each answer is committed in `session` as it's given.
+    Returns (the songs added, [(entry label, why skipped)])."""
     added, skipped = [], []
     for conflict in pending_conflicts:
         metadata = conflict["metadata"]
@@ -799,6 +801,7 @@ def _settle_song_conflicts(pending_conflicts: list) -> tuple[list, list]:
                   "from this import - not added twice")
             skipped.append((_entry_label(metadata), "Added already in this import"))
             _backfill_youtube_link(metadata, added_now)
+            session.commit()
             continue
         print(f"Found similar song [blue]{existing_song.title}[/blue] by [cyan]{existing_song.artist.name}[/cyan] but you were trying to add [green]{metadata['title']}[/green] by [cyan]{artist_obj.name}[/cyan]")
         if ask_yes_no("Do you wish to use the song already in the database?"):
@@ -806,6 +809,7 @@ def _settle_song_conflicts(pending_conflicts: list) -> tuple[list, list]:
             _backfill_youtube_link(metadata, existing_song)
         else:
             added.append(create_song_entry(metadata, artist_obj))
+        session.commit()
         print()
     return added, skipped
 
@@ -834,6 +838,10 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     so the user isn't kept waiting for the batch to start, and returns
     (extra_metadata_list, extra_skipped) - processed exactly like
     `metadata_list` / `pre_skipped`, before any of the reviews below.
+
+    The import owns its commits (the functions it calls don't commit): the
+    global music session is committed after every entry and every answer,
+    so a run stopped half-way keeps what it added.
     """
     added_songs = []
     skipped_songs = []
@@ -915,6 +923,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
 
     for idx, metadata in enumerate(metadata_list, 1):
         process_entry(metadata, idx, len(metadata_list))
+        music_session.commit()
 
     if late_entries:
         extra_metadata_list, extra_skipped = late_entries()
@@ -923,6 +932,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             reason_for_skipping.append(reason)
         for idx, metadata in enumerate(extra_metadata_list or [], 1):
             process_entry(metadata, idx, len(extra_metadata_list))
+            music_session.commit()
 
     # Now that every entry has been processed, go through the ambiguous-artist
     # matches that were queued along the way and ask about each one in a
@@ -955,6 +965,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
                 if new_artist_origin:
                     resolved_artist.origin = new_artist_origin
                 add_db_entry(resolved_artist)
+                music_session.commit()
 
             # Unblocks every entry that shared this artist name (they all hit
             # the artist_cache fast path in resolve_artist from here on).
@@ -968,6 +979,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     for deferred_metadata in deferred_entries:
         deferred_artist_obj, _ = resolve_artist(deferred_metadata, artist_cache, pending_artist_conflicts)
         deferred_song_obj, deferred_is_pending = resolve_song(deferred_metadata, deferred_artist_obj, pending_song_conflicts)
+        music_session.commit()
         if deferred_is_pending:
             continue
         elif deferred_song_obj:
@@ -985,7 +997,7 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
         print("\n" + "="*70)
         print(f"REVIEW: {len(pending_song_conflicts)} song(s) found a similar match in the database")
         print("="*70)
-        new_songs, skipped = _settle_song_conflicts(pending_song_conflicts)
+        new_songs, skipped = _settle_song_conflicts(pending_song_conflicts, music_session)
         added_count += len(new_songs)
         added_songs += new_songs
         for label, reason in skipped:

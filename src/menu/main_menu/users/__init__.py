@@ -10,7 +10,7 @@ from utils.ui.prompts import ask_yes_no
 from config.constants import FILE_PAIR_VIDEO_CHOICES_MAX, USER_PLAYLIST_SOURCE_FOLDER
 from settings import settings
 from utils.common.debug import slog
-from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.song_references import apply_song_id_changes
 from utils.database.user_playlists import (PlaylistChangedError, delete_playlist, list_playlists, playlist_songs,
                                            save_playlist)
@@ -260,9 +260,10 @@ def _add_song_for_file(music_session, track):
     print(f"  Title:  {title}")
     if not ask_yes_no("Add this song to the database?" if existing is None else "Add it as a new song instead?"):
         return None
+    # add_db_entry() says what it added
     song = add_song_for_file(music_session, artist.name if artist else artist_name, title,
                              even_if_similar=existing is not None)
-    print(f"Added song '{song.title}' with id {song.id}.")
+    submit_global_database_session()
     return song
 
 

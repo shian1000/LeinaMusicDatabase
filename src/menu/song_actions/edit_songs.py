@@ -215,12 +215,16 @@ def remove_song_menu(mode: str = None):
         return
 
     label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
-    confirmation = ask_yes_no(f"Do you really want to delete {label}?")
-    if confirmation:
-        delete_db_entry(db_object)
-        print(f"Deleted {label}")
-    else:
+    if not ask_yes_no(f"Do you really want to delete {label}?"):
         print("Aborted")
+        return
+    try:
+        delete_db_entry(db_object)
+    except ArtistHasSongsError as exc:
+        print(f"Not deleted: {exc}. {HAS_SONGS_HINT}")
+        return
+    submit_global_database_session()
+    print(f"Deleted {label}")
 
 
 def edit_songs_menu(songs_objects):

@@ -128,7 +128,7 @@ def test_resolve_duplicated_artists_folds_spelling_only_duplicates(session, monk
     session.add_all([a, b, near])
     session.commit()
     monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (session, None))
-    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
+    monkeypatch.setattr(rd, "submit_global_database_session", session.commit)
 
     rd.remove_duplicate_songs()
 
@@ -144,7 +144,7 @@ def test_review_merges_only_the_ticked_groups(session, monkeypatch, capsys):
                      Song(title="No Scrubs", artist=pluto)])
     session.commit()
     monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
-    monkeypatch.setattr(review, "apply_song_id_changes", lambda: None)
+    monkeypatch.setattr(review, "submit_global_database_session", session.commit)
     offered = []
 
     def checkbox(message, choices):
@@ -229,7 +229,8 @@ def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
     conflict = {"metadata": {"title": "Is This Love", "artist_name": "Bob Marley"},
                 "artist_obj": artist, "existing_song": similar}
 
-    added, skipped = import_engine._settle_song_conflicts([conflict, dict(conflict)])
+    session = SimpleNamespace(commit=lambda: None)
+    added, skipped = import_engine._settle_song_conflicts([conflict, dict(conflict)], session)
 
     assert [s.title for s in added] == ["Is This Love"] and len(created) == 1
     assert skipped == [("Bob Marley - Is This Love", "Added already in this import")]

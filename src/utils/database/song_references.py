@@ -335,19 +335,10 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
             flog(f"Song id changes: {label} not updated: {exc!r}")
             print(f"Warning: {label} couldn't follow the merged/deleted songs ({exc}) - tried again later.")
 
-    own_session = None
-    if tag_session is None:
-        from utils.database.database_sessions import get_global_database_sessions
-        sessions = get_global_database_sessions()
-        tag_session = sessions[1] if sessions else None
-    if tag_session is None:
-        from utils.database.tag_db_manager import get_tag_session
-        tag_session = own_session = get_tag_session()
-    try:
-        replay("tag.db", tag_session, lambda session: _replay_tag_db(session, changes))
-    finally:
-        if own_session is not None:
-            own_session.close()
+    # Imported here: database_sessions imports this module
+    from utils.database.database_sessions import tag_session_for
+    with tag_session_for(tag_session) as session:
+        replay("tag.db", session, lambda session: _replay_tag_db(session, changes))
 
     if FILES_DB.exists():
         from utils.database.files_index import files_db_session

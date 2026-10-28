@@ -1,11 +1,10 @@
-from utils.database.music_db_manager import get_music_session, Song, Artist
+from utils.database.music_db_manager import Song, Artist
 from sqlalchemy import text
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
 from utils.database.latin_names import artist_match_synonyms
-from utils.database.song_references import apply_song_id_changes
 from utils.database.song_duplicates import find_duplicate_groups, merge_songs, spelling_key
-from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize, normalize_apostrophes
 from utils.common.script_utils import fix_mixed_script_words
@@ -19,11 +18,6 @@ def remove_duplicate_songs(report_none: bool = True) -> int:
     share a title but aren't duplicates (different kind). Returns how many
     songs were merged away."""
     session, _ = open_and_set_global_database_sessions()
-    # remove_duplicate_artists() moves songs to another artist through a
-    # session of its own; songs this long-lived one already holds would keep
-    # their old artist_id and hide the duplicates that merge made.
-    session.flush()
-    session.expire_all()
     groups = find_duplicate_groups(session, spelling_key)
     if not groups:
         if report_none:
@@ -35,8 +29,7 @@ def remove_duplicate_songs(report_none: bool = True) -> int:
         for song in dropped:
             print(f"  - [{song.id}] {song.artist.name} — {song.title}  ->  kept [{kept.id}] {kept.title}")
             merge_songs(session, kept, song)
-    session.commit()
-    apply_song_id_changes()
+    submit_global_database_session()
     merged = sum(len(g) - 1 for g in groups)
     print(f"Merged {merged} duplicate song(s).")
     return merged
@@ -50,7 +43,7 @@ def remove_duplicate_artists(report_none: bool = True) -> int:
     """Merge artists whose names differ only in case, apostrophe or a
     look-alike letter, or match another artist's synonym, without asking.
     Returns how many artists were removed."""
-    session = get_music_session()
+    session, _ = open_and_set_global_database_sessions()
 
     all_artists = session.query(Artist).order_by(Artist.name).all()
 
@@ -95,7 +88,6 @@ def remove_duplicate_artists(report_none: bool = True) -> int:
     if not duplicates:
         if report_none:
             print("No duplicate artists found.")
-        session.close()
         return 0
 
     print(f"Found {len(duplicates)} duplicate(s):")
@@ -120,8 +112,9 @@ def remove_duplicate_artists(report_none: bool = True) -> int:
             {"id": duplicate.id}
         )
 
-    session.commit()
-    session.close()
+    # The raw UPDATE/DELETE bypassed the songs and artists this session
+    # holds: the commit expires them, so they're read again
+    submit_global_database_session()
     print(f"\nRemoved {len(duplicates)} duplicate artist(s).")
     return len(duplicates)
 

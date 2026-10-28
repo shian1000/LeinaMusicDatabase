@@ -277,7 +277,7 @@ def test_album_merge_keeps_a_latin_form(session, monkeypatch, tmp_path):
 def test_song_dedup_keeps_a_latin_form(session_factory, monkeypatch):
     s = session_factory()
     monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (s, None))
-    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
+    monkeypatch.setattr(rd, "submit_global_database_session", s.commit)
     kino = _artist(s, "Кино")
     _song(s, "Кукушка", kino)
     _song(s, "Кукушка", kino, title_latin="Kukushka")

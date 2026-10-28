@@ -111,7 +111,7 @@ def credit_feat_artists(session, song: Song, names: list) -> None:
     from utils.discoveries.import_engine import find_matching_artist
 
     for name in names:
-        artist = find_matching_artist(name) or Artist(name=name)
+        artist = find_matching_artist(name, session) or Artist(name=name)
         if artist.id is None:
             session.add(artist)
         try:

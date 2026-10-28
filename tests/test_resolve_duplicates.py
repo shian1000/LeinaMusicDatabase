@@ -26,8 +26,11 @@ def session_factory(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
-    monkeypatch.setattr(rd, "get_music_session", lambda: SessionLocal())
-    return SessionLocal
+    global_session = SessionLocal()
+    monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (global_session, None))
+    monkeypatch.setattr(rd, "submit_global_database_session", global_session.commit)
+    yield SessionLocal
+    global_session.close()
 
 
 def test_remove_duplicate_artists_merges_artist_matching_a_synonym(session_factory):
@@ -110,18 +113,17 @@ def test_remove_duplicate_artists_still_merges_exact_name_duplicates(session_fac
 
 @pytest.fixture
 def both_passes(tmp_path, monkeypatch):
-    """A file database reached the way the app reaches it: the songs pass
-    through the long-lived global session, the artists pass through sessions
-    of its own - so the songs pass sees the artists pass's merges only if it
-    doesn't trust what the global session already loaded."""
+    """A file database reached the way the app reaches it: both passes
+    through the long-lived global session - the artists pass's raw SQL
+    merges must not leave the songs pass reading what that session loaded
+    before them."""
     engine = create_engine(f"sqlite:///{tmp_path / 'music.db'}")
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     sr.register_song_reference_sync(SessionLocal)
     global_session = SessionLocal()
-    monkeypatch.setattr(rd, "get_music_session", lambda: SessionLocal())
     monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (global_session, None))
-    monkeypatch.setattr(rd, "apply_song_id_changes", lambda: None)
+    monkeypatch.setattr(rd, "submit_global_database_session", global_session.commit)
     yield SessionLocal, global_session
     global_session.close()
 

@@ -14,7 +14,7 @@ from config.constants import PERMISSION_LABELS
 from settings import settings
 from utils.common.debug import slog
 from utils.database import global_mood_log
-from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.datatables import Song
 from utils.database.mood_sync import NotMigratedError
 from utils.database.moods import (
@@ -102,6 +102,7 @@ def _add_song(mood_id: int) -> None:
         print("Nothing picked.")
         return
     added = add_song_to_global_mood(tag_session, mood_id, song.id)
+    submit_global_database_session()
     print(f"Added {_song_label(song)}." if added else f"{_song_label(song)} is already in this mood.")
 
 
@@ -120,6 +121,7 @@ def _remove_songs(mood_id: int) -> None:
         return
     for song_id in picked:
         remove_song_from_global_mood(tag_session, mood_id, song_id)
+    submit_global_database_session()
     print(f"Removed {len(picked)} song(s).")
 
 
@@ -134,6 +136,7 @@ def _rename(mood_id: int, name: str) -> str | None:
     except MoodError as exc:
         _error(exc)
         return None
+    submit_global_database_session()
     print(f"Renamed to '{new_name.strip()}'. Leina Radio sees it after the next copy for sharing.")
     return _BACK
 
@@ -146,6 +149,7 @@ def _delete(mood_id: int, name: str) -> str | None:
     if not ask_yes_no("Delete it?"):
         return None
     delete_global_mood(tag_session, mood_id)
+    submit_global_database_session()
     print(f"Deleted '{name}'.")
     return _BACK
 
@@ -176,6 +180,7 @@ def _create() -> None:
     except MoodError as exc:
         _error(exc)
         return
+    submit_global_database_session()
     print(f"Created '{name.strip()}'. Leina Radio sees it after the next copy for sharing.")
 
 

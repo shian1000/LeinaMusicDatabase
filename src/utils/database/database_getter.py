@@ -452,13 +452,16 @@ def get_songs_from_db_session(category: str = None, query: str = None) -> list[S
 def get_artists_from_db_session(
     category: str = None,
     query: str = None,
-    artist_id: int = None,
-    aggressive_search: bool = False
+    aggressive_search: bool = False,
+    session=None,
 ) -> list[Artist]:
+    """The artists matching `query` in `category`, by name; every artist
+    without a category, none without a query. `session` defaults to the
+    global music session."""
 
     slog(category)
     slog(query)
-    music_session, tag_session = require_global_database_sessions()
+    music_session = session or require_global_database_sessions()[0]
     db_query = music_session.query(Artist).order_by(Artist.name)
 
     if category is None:
@@ -469,52 +472,33 @@ def get_artists_from_db_session(
     if category is None:
         return []
 
-    if query:
-        query = query.strip()
-        words = [w for w in query.split() if w]
-        if not words:
-            slog(words)
+    query = (query or "").strip()
+    words = [w for w in query.split() if w]
+    if not words:
+        return []
+
+    if category == artist_categories[2]:  # "artist id": a whole number, never a substring
+        if not query.isascii() or not query.isdigit():
+            print(f"'{query}' isn't an artist id - type a whole number.")
             return []
+        return db_query.filter(Artist.id == int(query)).all()
 
-        if category == artist_categories[2]:  # "artist id": a whole number, never a substring
-            if not query.isascii() or not query.isdigit():
-                print(f"'{query}' isn't an artist id - type a whole number.")
-                return []
-            return db_query.filter(Artist.id == int(query)).all()
+    # Determine if the query contains any ASCII alphanumeric characters,
+    # same logic as get_songs_from_db_session.
+    query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in query)
 
-        # Determine if the query contains any ASCII alphanumeric characters,
-        # same logic as get_songs_from_db_session.
-        query_has_any_standard_latin_characters = any(c.isascii() and c.isalnum() for c in query)
+    CATEGORY_DB_FILTERS = {
+        artist_categories[0]: lambda w: artist_name_or_synonym_contains(Artist, w),
+        artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
+    }
 
-        CATEGORY_DB_FILTERS = {
-            artist_categories[0]: lambda w: artist_name_or_synonym_contains(Artist, w),
-            artist_categories[1]: lambda w: func.lower(Artist.origin).contains(w.lower()),
-        }
+    CATEGORY_NORMALIZED_FIELDS = {
+        artist_categories[0]: _artist_name_and_synonyms,
+        artist_categories[1]: lambda artist: normalize_text(artist.origin),
+    }
 
-        CATEGORY_NORMALIZED_FIELDS = {
-            artist_categories[0]: _artist_name_and_synonyms,
-            artist_categories[1]: lambda artist: normalize_text(artist.origin),
-        }
-
-        if aggressive_search or not query_has_any_standard_latin_characters:
-            # Python-side normalized filtering — handles Polish and other non-ASCII characters
-            slog("Falling back to Python-side normalized filtering")
-            get_field = CATEGORY_NORMALIZED_FIELDS[category]
-            candidates = db_query.all()
-            filtered = _normalized_python_filter(candidates, words, get_field)
-            if not filtered:
-                slog("No such artists found")
-            return filtered
-
-        # Primary DB-level filtering (ASCII queries)
-        filtered_query = db_query
-        for word in words:
-            filtered_query = filtered_query.filter(CATEGORY_DB_FILTERS[category](word))
-        results = filtered_query.all()
-        if results:
-            return results
-
-        # Python fallback even for ASCII queries, in case DB-level filtering missed anything
+    if aggressive_search or not query_has_any_standard_latin_characters:
+        # Python-side normalized filtering — handles Polish and other non-ASCII characters
         slog("Falling back to Python-side normalized filtering")
         get_field = CATEGORY_NORMALIZED_FIELDS[category]
         candidates = db_query.all()
@@ -523,10 +507,20 @@ def get_artists_from_db_session(
             slog("No such artists found")
         return filtered
 
-    if artist_id:
-        slog(artist_id)
-        return [music_session.query(Artist).filter(Artist.id == artist_id).first()]
+    # Primary DB-level filtering (ASCII queries)
+    filtered_query = db_query
+    for word in words:
+        filtered_query = filtered_query.filter(CATEGORY_DB_FILTERS[category](word))
+    results = filtered_query.all()
+    if results:
+        return results
 
-    print("get_artist_from_db_session needs either str or id to get artists list")
-    return
+    # Python fallback even for ASCII queries, in case DB-level filtering missed anything
+    slog("Falling back to Python-side normalized filtering")
+    get_field = CATEGORY_NORMALIZED_FIELDS[category]
+    candidates = db_query.all()
+    filtered = _normalized_python_filter(candidates, words, get_field)
+    if not filtered:
+        slog("No such artists found")
+    return filtered
 

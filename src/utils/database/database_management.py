@@ -197,29 +197,25 @@ def divide_artist(db_object):
 
     
 
-def add_db_entry(db_object):
-    """Add a new Artist or Song entry to the music database.
+def add_db_entry(db_object, session=None):
+    """Add a new Artist or Song entry to `session` (default: the global
+    music session) and flush it, so it has its id. The caller commits.
 
     Accepts an `Artist` or `Song` instance; anything else raises ValueError.
+    A Song needs its artist (an Artist, persisted or not - a new one is
+    matched to an existing artist of that name first - or an artist_id).
 
-    Behavior:
-    - If `db_object` is an `Artist` instance: add it to the music session and
-      commit. Returns the persisted Artist (with id).
-    - If `db_object` is a `Song` instance: ensure the referenced artist exists
-      (by Artist instance or artist_id), add the Song, commit and return it.
-
-    Returns the created ORM object on success.
+    Returns the added object.
     """
 
     # Outside the menu (an import run on its own) the global sessions open
     # here, so the entry lands in the session its caller commits
-    music_session, _ = get_global_database_sessions() or open_and_set_global_database_sessions()
+    music_session = session or (get_global_database_sessions() or open_and_set_global_database_sessions())[0]
 
     # If it's already an ORM instance of Artist
     if isinstance(db_object, Artist):
         music_session.add(db_object)
-        music_session.commit()
-        music_session.refresh(db_object)
+        music_session.flush()
         print(f"Added Artist '{db_object.name}' with id {db_object.id}")
         return db_object
 
@@ -241,8 +237,7 @@ def add_db_entry(db_object):
                 db_object.artist_id = db_object.artist.id
 
         music_session.add(db_object)
-        music_session.commit()
-        music_session.refresh(db_object)
+        music_session.flush()
         print(f"Added Song '{db_object.title}' with id {db_object.id}")
         return db_object
 

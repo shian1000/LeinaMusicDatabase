@@ -2,6 +2,7 @@ from utils.database.music_db_manager import get_music_session
 from utils.database.tag_db_manager import get_tag_session
 from sqlalchemy.orm import Session
 from typing import Tuple, Optional
+from contextlib import contextmanager
 import threading
 from utils.database.song_references import apply_song_id_changes
 
@@ -30,6 +31,23 @@ def require_global_database_sessions() -> Tuple[Session, Session]:
     if sessions is None:
         raise RuntimeError("The database sessions aren't open - call open_and_set_global_database_sessions() first")
     return sessions
+
+@contextmanager
+def tag_session_for(tag_session: Optional[Session] = None):
+    """`tag_session`, else the global tag session if one is open (a second
+    connection could wait on its lock), else a session of its own, closed
+    on exit. Committing stays with the caller."""
+    if tag_session is None:
+        sessions = _GLOBAL_DATABASE_SESSION
+        tag_session = sessions[1] if sessions else None
+    if tag_session is not None:
+        yield tag_session
+        return
+    own = get_tag_session()
+    try:
+        yield own
+    finally:
+        own.close()
 
 def open_and_set_global_database_sessions() -> Tuple[Session, Session]:
     global _GLOBAL_DATABASE_SESSION

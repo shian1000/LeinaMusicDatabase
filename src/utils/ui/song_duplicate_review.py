@@ -5,7 +5,7 @@ the ticked groups are merged into the song with the most data."""
 
 import questionary
 
-from utils.database.database_sessions import open_and_set_global_database_sessions
+from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.song_artists import song_artist_label
 from utils.database.song_duplicates import (
     clean_title,
@@ -15,7 +15,6 @@ from utils.database.song_duplicates import (
     merge_songs,
     missing_feat_artists,
 )
-from utils.database.song_references import apply_song_id_changes
 
 
 def _label(group: list) -> str:
@@ -71,6 +70,5 @@ def resolve_duplicated_songs() -> None:
         credit_feat_artists(session, kept, feats.get(id(kept), []))
         for song in dropped:
             merge_songs(session, kept, song)
-    session.commit()
-    apply_song_id_changes()
+    submit_global_database_session()
     print(f"Merged {sum(len(groups[i]) - 1 for i in picked)} duplicate song(s) in {len(picked)} group(s).")

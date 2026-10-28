@@ -205,7 +205,9 @@ def test_reassign_drops_link_when_song_primary_became_the_target(session):
 
 
 def test_remove_duplicate_artists_carries_additional_links_over(session_factory, monkeypatch):
-    monkeypatch.setattr(rd, "get_music_session", lambda: session_factory())
+    global_session = session_factory()
+    monkeypatch.setattr(rd, "open_and_set_global_database_sessions", lambda: (global_session, None))
+    monkeypatch.setattr(rd, "submit_global_database_session", global_session.commit)
     session = session_factory()
     primary, original, duplicate = _artists(session, "Primary", "Maxim", "maxim")
     song = _song(session, "Collab", primary)

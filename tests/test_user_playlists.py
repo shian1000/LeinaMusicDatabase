@@ -474,6 +474,7 @@ def _menu_for_folder(monkeypatch, music_session, folder, tags: dict, selects: li
     monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(tags[f.name]))
     monkeypatch.setattr(menu, "open_file_browser_terminal", lambda start: folder)
     monkeypatch.setattr(menu, "open_and_set_global_database_sessions", lambda: (music_session, None))
+    monkeypatch.setattr(menu, "submit_global_database_session", music_session.commit)
     monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer(
         "Mix" if message.startswith("Playlist") else (texts or {}).get(message, default)))
     monkeypatch.setattr(menu.questionary, "select", lambda *a, **k: _Answer(next(selects)))

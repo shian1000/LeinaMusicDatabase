@@ -16,9 +16,14 @@ order. Built on the tags (docs/data-model.md):
 Only songs in music.db can be in a mood: every member is a songs.id.
 tags.name is unique per file, so a global mood can't take the name of a
 marker such as "spellchecked" - that's refused, never merged.
+
+The caller commits the tag session (AGENTS.md -> sessions). Only
+promote_user_mood() and apply_global_mood_changes() commit themselves: each
+writes a file outside tag.db (a user.db, the phones' change files) right
+after, and that write must follow a saved tag.db, never a rolled-back one.
 """
 
-from contextlib import closing, contextmanager
+from contextlib import closing
 from pathlib import Path
 
 from sqlalchemy import func
@@ -27,6 +32,7 @@ from config.constants import TAG_KIND_MOOD, USER_DB_FILENAME
 from settings import Settings
 from utils.common.debug import mlog, slog
 from utils.database import global_mood_log, mood_sync, playlist_sync
+from utils.database.database_sessions import tag_session_for
 from utils.database.tag_db_manager import SongTag, Tag
 from utils.database.users import user_dir, users_available
 
@@ -35,25 +41,6 @@ GLOBAL_MOOD_CHANGES_DIR = Path(str(Settings.global_mood_changes_dir)) if Setting
 
 class MoodError(ValueError):
     """A mood operation that can't be done (name taken, mood gone, ...)."""
-
-
-@contextmanager
-def _tag_db(tag_session=None):
-    """`tag_session`, else the global tag session if one is open (a second
-    connection could wait on its lock), else a session of its own."""
-    if tag_session is None:
-        from utils.database.database_sessions import get_global_database_sessions
-        sessions = get_global_database_sessions()
-        tag_session = sessions[1] if sessions else None
-    if tag_session is not None:
-        yield tag_session
-        return
-    from utils.database.tag_db_manager import get_tag_session
-    own = get_tag_session()
-    try:
-        yield own
-    finally:
-        own.close()
 
 
 # --------------------
@@ -97,14 +84,13 @@ def _check_free_name(tag_session, name: str, exclude_id: int | None = None) -> s
 def create_global_mood(tag_session, name: str) -> int:
     tag = Tag(name=_check_free_name(tag_session, name), kind=TAG_KIND_MOOD)
     tag_session.add(tag)
-    tag_session.commit()
+    tag_session.flush()
     return tag.id
 
 
 def rename_global_mood(tag_session, mood_id: int, new_name: str) -> None:
     tag = _global_mood(tag_session, mood_id)
     tag.name = _check_free_name(tag_session, new_name, exclude_id=mood_id)
-    tag_session.commit()
 
 
 def delete_global_mood(tag_session, mood_id: int) -> int:
@@ -112,7 +98,6 @@ def delete_global_mood(tag_session, mood_id: int) -> int:
     tag = _global_mood(tag_session, mood_id)
     removed = tag_session.query(SongTag).filter(SongTag.tag_id == mood_id).delete(synchronize_session=False)
     tag_session.delete(tag)
-    tag_session.commit()
     return removed
 
 
@@ -128,7 +113,6 @@ def add_song_to_global_mood(tag_session, mood_id: int, song_id: int) -> bool:
     """True if the song wasn't in the mood yet."""
     _global_mood(tag_session, mood_id)
     added = _add_songs(tag_session, mood_id, [song_id])
-    tag_session.commit()
     return bool(added)
 
 
@@ -137,7 +121,6 @@ def remove_song_from_global_mood(tag_session, mood_id: int, song_id: int) -> boo
     _global_mood(tag_session, mood_id)
     removed = (tag_session.query(SongTag).filter(SongTag.tag_id == mood_id, SongTag.song_id == song_id)
                .delete(synchronize_session=False))
-    tag_session.commit()
     return bool(removed)
 
 
@@ -168,8 +151,9 @@ def promote_user_mood(tag_session, username: str, mood_id: int) -> tuple[int, st
     so their phones switch to the global one. Returns (global id, name,
     whether it merged into an existing mood, songs added to it).
 
-    tag.db is written first: if the user.db step fails, the global mood
-    already has the songs and promoting again only repeats the union."""
+    Commits tag_session (with whatever else it holds) before the user.db
+    step: if that step fails, the global mood already has the songs and
+    promoting again only repeats the union."""
     folder = user_dir(username)
     with closing(mood_sync.connect(folder / USER_DB_FILENAME)) as conn:
         row = conn.execute("SELECT id, name, kind, deleted_at FROM tags WHERE id = ?", (mood_id,)).fetchone()
@@ -212,9 +196,10 @@ def _resolve(song_id: int, checked_to: int, changes: list) -> int | None:
 def apply_global_mood_changes(tag_session=None, changes_dir: Path | None = None) -> list[dict]:
     """Apply every pending change to tag.db in the order they arrived, then
     append them to history.jsonl and delete them. Returns the history
-    records written ([] when there's nothing, or the data drive isn't mounted). A crash
-    between the commit and deleting the files re-applies them next time,
-    which ends in the same state."""
+    records written ([] when there's nothing, or the data drive isn't mounted).
+    Commits the tag session before the files go, so a change is never
+    deleted unsaved; a crash between the commit and deleting the files
+    re-applies them next time, which ends in the same state."""
     from utils.database.song_references import existing_song_ids, load_changes
 
     changes_dir = changes_dir or GLOBAL_MOOD_CHANGES_DIR
@@ -227,7 +212,7 @@ def apply_global_mood_changes(tag_session=None, changes_dir: Path | None = None)
     existing = existing_song_ids()
     applied_at = playlist_sync.now_ms()
     history = []
-    with _tag_db(tag_session) as session:
+    with tag_session_for(tag_session) as session:
         for _, record in pending:
             result = dict(record)
             song_id = _resolve(record.get("song_id"), record.get("song_ids_checked_to") or 0, log)
