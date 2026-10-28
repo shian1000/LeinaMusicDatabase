@@ -66,5 +66,5 @@ brotli==1.2.0
 deno==2.9.7
 pycryptodomex==3.24.1
 websockets==17.2
-yt-dlp==2026.10.21
+yt-dlp==2026.10.26
 yt-dlp-ejs==0.8.0
