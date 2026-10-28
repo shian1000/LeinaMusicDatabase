@@ -88,6 +88,10 @@ class Collection:
     check: Callable[[dict], None]
     label: str         # for the server's log
 
+    @property
+    def revisions(self) -> "playlist_sync.RevisionCounter":
+        return playlist_sync.RevisionCounter(self.counter, self.table)
+
 
 SAVED_SONGS = Collection("saved-songs", "saved_songs", "saved_song_revision", "songs", _check_song_item,
                          "Saved song")
@@ -116,16 +120,12 @@ def _song_id(data: dict):
 # --------------------
 
 def current_revision(conn, collection: Collection) -> int:
-    row = conn.execute(f"SELECT last_revision FROM {collection.counter} WHERE id = 1").fetchone()
-    return row[0] if row else 0
+    return collection.revisions.current(conn)
 
 
 def next_revision(conn, collection: Collection) -> int:
     """The next number of the collection's counter. Inside a transaction."""
-    if conn.execute(f"UPDATE {collection.counter} SET last_revision = last_revision + 1 WHERE id = 1").rowcount == 0:
-        conn.execute(f"INSERT INTO {collection.counter} (id, last_revision) "
-                     f"SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM {collection.table}")
-    return current_revision(conn, collection)
+    return collection.revisions.next(conn)
 
 
 # --------------------

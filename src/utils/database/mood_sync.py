@@ -66,17 +66,9 @@ def connect(db_path) -> sqlite3.Connection:
 # Revisions
 # --------------------
 
-def current_revision(conn) -> int:
-    row = conn.execute("SELECT last_revision FROM mood_revision WHERE id = 1").fetchone()
-    return row[0] if row else 0
-
-
-def next_revision(conn) -> int:
-    """The next number of the user's mood counter. Inside a transaction."""
-    if conn.execute("UPDATE mood_revision SET last_revision = last_revision + 1 WHERE id = 1").rowcount == 0:
-        conn.execute("INSERT INTO mood_revision (id, last_revision) "
-                     "SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM tags")
-    return current_revision(conn)
+_REVISIONS = playlist_sync.RevisionCounter("mood_revision", "tags")
+current_revision = _REVISIONS.current
+next_revision = _REVISIONS.next
 
 
 def mark_changed(conn, tag_ids) -> None:
@@ -305,17 +297,9 @@ def mark_promoted(conn, user_folder, tag_id: int, global_id: int, global_name: s
 # Private covers of global moods
 # --------------------
 
-def current_cover_revision(conn) -> int:
-    row = conn.execute("SELECT last_revision FROM global_mood_cover_revision WHERE id = 1").fetchone()
-    return row[0] if row else 0
-
-
-def _next_cover_revision(conn) -> int:
-    if conn.execute("UPDATE global_mood_cover_revision SET last_revision = last_revision + 1 "
-                    "WHERE id = 1").rowcount == 0:
-        conn.execute("INSERT INTO global_mood_cover_revision (id, last_revision) "
-                     "SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM global_mood_covers")
-    return current_cover_revision(conn)
+_COVER_REVISIONS = playlist_sync.RevisionCounter("global_mood_cover_revision", "global_mood_covers")
+current_cover_revision = _COVER_REVISIONS.current
+_next_cover_revision = _COVER_REVISIONS.next
 
 
 def global_cover_json(row) -> dict:

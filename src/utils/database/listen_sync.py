@@ -72,17 +72,9 @@ def connect(db_path):
 # Revisions
 # --------------------
 
-def current_revision(conn) -> int:
-    row = conn.execute("SELECT last_revision FROM listen_revision WHERE id = 1").fetchone()
-    return row[0] if row else 0
-
-
-def next_revision(conn) -> int:
-    """The next number of the user's listen counter. Inside a transaction."""
-    if conn.execute("UPDATE listen_revision SET last_revision = last_revision + 1 WHERE id = 1").rowcount == 0:
-        conn.execute("INSERT INTO listen_revision (id, last_revision) "
-                     "SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM listens")
-    return current_revision(conn)
+_REVISIONS = playlist_sync.RevisionCounter("listen_revision", "listens")
+current_revision = _REVISIONS.current
+next_revision = _REVISIONS.next
 
 
 # --------------------

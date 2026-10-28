@@ -39,6 +39,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -124,17 +125,29 @@ def _transaction(conn):
 # Revisions
 # --------------------
 
-def current_revision(conn) -> int:
-    row = conn.execute("SELECT last_revision FROM playlist_revision WHERE id = 1").fetchone()
-    return row[0] if row else 0
+@dataclass(frozen=True)
+class RevisionCounter:
+    """A per-user revision counter: one row (id 1) in `counter`, started
+    from MAX(revision) of `table` the first time it's bumped. Every synced
+    collection has its own (playlists, moods, folders, listens, ...)."""
+    counter: str
+    table: str
+
+    def current(self, conn) -> int:
+        row = conn.execute(f"SELECT last_revision FROM {self.counter} WHERE id = 1").fetchone()
+        return row[0] if row else 0
+
+    def next(self, conn) -> int:
+        """The counter's next number. Inside a transaction."""
+        if conn.execute(f"UPDATE {self.counter} SET last_revision = last_revision + 1 WHERE id = 1").rowcount == 0:
+            conn.execute(f"INSERT INTO {self.counter} (id, last_revision) "
+                         f"SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM {self.table}")
+        return self.current(conn)
 
 
-def next_revision(conn) -> int:
-    """The next number of the user's counter. Inside a transaction."""
-    if conn.execute("UPDATE playlist_revision SET last_revision = last_revision + 1 WHERE id = 1").rowcount == 0:
-        conn.execute("INSERT INTO playlist_revision (id, last_revision) "
-                     "SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM playlists")
-    return current_revision(conn)
+_REVISIONS = RevisionCounter("playlist_revision", "playlists")
+current_revision = _REVISIONS.current
+next_revision = _REVISIONS.next
 
 
 def mark_changed(conn, playlist_ids) -> None:

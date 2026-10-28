@@ -115,6 +115,8 @@ with every path passed on the command line.
   PUT /users/<name>/global-mood-covers/<mood id> sync the user's private
   covers of global moods like moods. After every applied write, blobs the
   user's rows no longer use are removed once a day old.
+- Every path above that needs --users answers only its own methods
+  (USER_ROUTES); another method -> 405 with Allow.
 - Library files (only with --library): GET / HEAD /library/<files.id> serve
   one audio file of the music library, looked up in <dir>/files.db - the
   copy the phone downloaded, so its ids are the ones the phone knows - and
@@ -221,8 +223,7 @@ COVER_CACHE_CONTROL = "private, max-age=31536000, immutable"
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 # /library/<files.id>
 LIBRARY_PATH_RE = re.compile(r"^/library/(?P<id>[1-9][0-9]{0,17})$")
-# The synced collections answer only these; anything else is 405, never a
-# handler reading a POST as a DELETE
+# The synced collections answer only these
 ITEM_METHODS = ("GET", "PUT", "DELETE")
 # A number in a query or a Content-Length: ASCII digits only (str.isdigit()
 # also takes "²"), at most 18 - an SQLite integer
@@ -232,6 +233,22 @@ PLAIN_INT_RE = re.compile(r"[0-9]{1,18}")
 def plain_int(text: str | None) -> int | None:
     """`text` as a non-negative integer, None when it isn't a plain one."""
     return int(text) if text is not None and PLAIN_INT_RE.fullmatch(text) else None
+
+
+# The endpoints that need --users: (path, the methods it answers, handler
+# method called with (method, match)). A path of these with another method is
+# 405 - checked here once, never in a handler, which once read a POST as a DELETE
+USER_ROUTES = (
+    (PLAYLISTS_PATH_RE, ITEM_METHODS, "_playlists"),
+    (MOODS_PATH_RE, ITEM_METHODS, "_moods"),
+    (FOLDERS_PATH_RE, ITEM_METHODS, "_folders"),
+    (SAVED_PATH_RE, ITEM_METHODS, "_saved"),
+    (LISTENS_PATH_RE, ("GET", "POST"), "_listens"),
+    (COVERS_PATH_RE, ("GET", "PUT"), "_cover_blob"),
+    (GLOBAL_MOOD_COVERS_PATH_RE, ("GET", "PUT"), "_global_mood_covers"),
+    (USER_PATH_RE, ("GET",), "_profile"),
+    (GLOBAL_MOOD_SONG_PATH_RE, ("PUT", "DELETE"), "_global_mood_song"),
+)
 # Copy of config.constants.LIBRARY_AUDIO_EXTENSIONS (this script can't import
 # it; a test keeps the two equal). Compared lowercased.
 LIBRARY_AUDIO_EXTENSIONS = (".mp3",)
@@ -401,30 +418,16 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if users_dir is None:
                 return False
             path = urlsplit(self.path).path
-            item_paths = (PLAYLISTS_PATH_RE, MOODS_PATH_RE, FOLDERS_PATH_RE, SAVED_PATH_RE)
-            if method not in ITEM_METHODS and any(r.match(path) for r in item_paths):
-                self._reply(HTTPStatus.METHOD_NOT_ALLOWED, headers={"Allow": ", ".join(ITEM_METHODS)})
-            elif PLAYLISTS_PATH_RE.match(path):
-                self._playlists(method)
-            elif MOODS_PATH_RE.match(path):
-                self._moods(method)
-            elif FOLDERS_PATH_RE.match(path):
-                self._folders(method)
-            elif SAVED_PATH_RE.match(path):
-                self._saved(method)
-            elif method in ("GET", "POST") and LISTENS_PATH_RE.match(path):
-                self._listens(method)
-            elif method in ("GET", "PUT") and COVERS_PATH_RE.match(path):
-                self._cover_blob(method)
-            elif GLOBAL_MOOD_COVERS_PATH_RE.match(path):
-                self._global_mood_covers(method)
-            elif method == "GET" and USER_PATH_RE.match(path):
-                self._profile(USER_PATH_RE.match(path).group("user"))
-            elif method in ("PUT", "DELETE") and GLOBAL_MOOD_SONG_PATH_RE.match(path):
-                self._global_mood_song(method)
-            else:
-                return False
-            return True
+            for path_re, methods, handler in USER_ROUTES:
+                match = path_re.match(path)
+                if match is None:
+                    continue
+                if method in methods:
+                    getattr(self, handler)(method, match)
+                else:
+                    self._reply(HTTPStatus.METHOD_NOT_ALLOWED, headers={"Allow": ", ".join(methods)})
+                return True
+            return False
 
         def do_GET(self):
             if not self._route_users("GET"):
@@ -558,19 +561,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._login()
 
         def _login(self):
-            length = self.headers.get("Content-Length")
-            if plain_int(length) is None:
-                self._reply(HTTPStatus.LENGTH_REQUIRED)
+            data = self._read_body(LOGIN_MAX_BODY_BYTES)
+            if data is None:
                 return
-            if int(length) > LOGIN_MAX_BODY_BYTES:
-                self.close_connection = True
-                self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
-                return
-            self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
             try:
-                body = json.loads(self.rfile.read(int(length)))
+                body = json.loads(data)
                 username, password = body["username"], body["password"]
-            except (OSError, ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError):
                 self._reply(HTTPStatus.BAD_REQUEST, "expected JSON {\"username\", \"password\"}")
                 return
             if not data_available():
@@ -648,28 +645,56 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return False
             return True
 
-        def _profile(self, username: str):
+        def _open_user_db(self, connect: Callable, username: str, log_name: str):
+            """`connect` (a sync module's) to `username`'s user.db, or None
+            after replying 503: not migrated yet (the server never migrates)
+            or unreadable."""
+            try:
+                return connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
+            except playlist_sync.NotMigratedError as exc:
+                print(f"{log_name}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
+            except (OSError, sqlite3.Error) as exc:
+                print(f"{log_name}: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            return None
+
+        def _profile(self, method: str, match: re.Match):
+            username = match.group("user")
             if self._authorize(username, "another user"):
                 self._reply_json(HTTPStatus.OK, {"username": username,
                                                  "permissions": account_auth.user_permissions(users_dir, username)})
 
         # ---- playlists ----
 
-        def _read_json_body(self, limit: int):
-            """The parsed body, or None after replying (411/413/400)."""
-            length = self.headers.get("Content-Length")
-            if plain_int(length) is None:
+        def _read_body(self, limit: int) -> bytes | None:
+            """The whole body, or None after replying 411 (no or a malformed
+            Content-Length) / 413 (over `limit`), or after closing the
+            connection when it doesn't arrive whole (the phone gave up)."""
+            length = plain_int(self.headers.get("Content-Length"))
+            if length is None:
                 self._reply(HTTPStatus.LENGTH_REQUIRED)
                 return None
-            if int(length) > limit:
+            if length > limit:
+                # Refused on the header alone: the body is never read, so the
+                # connection can't serve another request
                 self.close_connection = True
                 self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"at most {limit} bytes")
                 return None
             self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
             try:
-                data = self.rfile.read(int(length))
+                data = self.rfile.read(length)
             except OSError:
+                data = None
+            if data is None or len(data) != length:
                 self.close_connection = True
+                return None
+            return data
+
+        def _read_json_body(self, limit: int):
+            """The parsed body, or None after replying (411/413/400; see _read_body)."""
+            data = self._read_body(limit)
+            if data is None:
                 return None
             try:
                 return json.loads(data)
@@ -677,9 +702,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, "not JSON")
                 return None
 
-        def _playlists(self, method: str):
+        def _playlists(self, method: str, match: re.Match):
             url = urlsplit(self.path)
-            match = PLAYLISTS_PATH_RE.match(url.path)
             username, uid = match.group("user"), match.group("uid")
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
@@ -711,19 +735,11 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
 
             folder = os.path.join(users_dir, username)
-            try:
-                if method == "PUT":
-                    # Before the transaction: it reads another file
-                    checked_to = playlist_sync.resolve_song_ids(playlist["tracks"],
-                                                                os.path.join(share_dir, "music.db"))
-                conn = playlist_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
-            except playlist_sync.NotMigratedError as exc:
-                print(f"Playlists of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Playlists of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            if method == "PUT":
+                # Before the transaction: it reads another file
+                checked_to = playlist_sync.resolve_song_ids(playlist["tracks"], os.path.join(share_dir, "music.db"))
+            conn = self._open_user_db(playlist_sync.connect, username, f"Playlists of {username}")
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -756,9 +772,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         # ---- moods (a user's own) ----
 
-        def _moods(self, method: str):
+        def _moods(self, method: str, match: re.Match):
             url = urlsplit(self.path)
-            match = MOODS_PATH_RE.match(url.path)
             username, uid = match.group("user"), match.group("uid")
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
@@ -790,18 +805,11 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
 
             folder = os.path.join(users_dir, username)
-            try:
-                if method == "PUT":
-                    mood["song_ids"], checked_to = mood_sync.resolve_song_ids(mood["song_ids"],
-                                                                              os.path.join(share_dir, "music.db"))
-                conn = mood_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
-            except mood_sync.NotMigratedError as exc:
-                print(f"Moods of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Moods of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            if method == "PUT":
+                mood["song_ids"], checked_to = mood_sync.resolve_song_ids(mood["song_ids"],
+                                                                          os.path.join(share_dir, "music.db"))
+            conn = self._open_user_db(mood_sync.connect, username, f"Moods of {username}")
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -837,9 +845,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         # ---- folders (the phone's Biblioteka) ----
 
-        def _folders(self, method: str):
+        def _folders(self, method: str, match: re.Match):
             url = urlsplit(self.path)
-            match = FOLDERS_PATH_RE.match(url.path)
             username, uid = match.group("user"), match.group("uid")
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
@@ -870,15 +877,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
 
-            try:
-                conn = folder_sync.connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
-            except folder_sync.NotMigratedError as exc:
-                print(f"Folders of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Folders of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            conn = self._open_user_db(folder_sync.connect, username, f"Folders of {username}")
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -901,9 +901,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         # ---- saved songs and links (liked / "Na później") ----
 
-        def _saved(self, method: str):
+        def _saved(self, method: str, match: re.Match):
             url = urlsplit(self.path)
-            match = SAVED_PATH_RE.match(url.path)
             username, uid = match.group("user"), match.group("uid")
             collection = saved_sync.COLLECTIONS[match.group("collection")]
             if (method == "GET") != (uid is None):
@@ -936,15 +935,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
 
             log_name = f"{collection.path} of {username}"
-            try:
-                conn = saved_sync.connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
-            except saved_sync.NotMigratedError as exc:
-                print(f"{log_name}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"{log_name}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            conn = self._open_user_db(saved_sync.connect, username, log_name)
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -967,9 +959,9 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         # ---- listens (plays, for the phone's listening stats) ----
 
-        def _listens(self, method: str):
+        def _listens(self, method: str, match: re.Match):
             url = urlsplit(self.path)
-            username = LISTENS_PATH_RE.match(url.path).group("user")
+            username = match.group("user")
             body = None
             if method == "POST":
                 body = self._read_json_body(LISTEN_MAX_BODY_BYTES)
@@ -990,15 +982,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
 
-            try:
-                conn = listen_sync.connect(os.path.join(users_dir, username, playlist_sync.USER_DB_FILENAME))
-            except listen_sync.NotMigratedError as exc:
-                print(f"Listens of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Listens of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            conn = self._open_user_db(listen_sync.connect, username, f"Listens of {username}")
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -1034,27 +1019,12 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if removed:
                 print(f"Removed {len(removed)} unused cover(s) of {username}", flush=True)
 
-        def _cover_blob(self, method: str):
-            match = COVERS_PATH_RE.match(urlsplit(self.path).path)
+        def _cover_blob(self, method: str, match: re.Match):
             username, sha = match.group("user"), match.group("sha")
             data = None
             if method == "PUT":
-                length = self.headers.get("Content-Length")
-                if plain_int(length) is None:
-                    self._reply(HTTPStatus.LENGTH_REQUIRED)
-                    return
-                if int(length) > covers.MAX_COVER_BYTES:
-                    self.close_connection = True
-                    self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"at most {covers.MAX_COVER_BYTES} bytes")
-                    return
-                self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
-                try:
-                    data = self.rfile.read(int(length))
-                except OSError:
-                    self.close_connection = True
-                    return
-                if len(data) != int(length):
-                    self.close_connection = True
+                data = self._read_body(covers.MAX_COVER_BYTES)
+                if data is None:
                     return
             if not self._authorize(username, "another user's covers"):
                 return
@@ -1095,12 +1065,11 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 print(f"Cover {sha} of {username} stored ({len(data)} bytes)", flush=True)
             self._reply(HTTPStatus.CREATED if created else HTTPStatus.OK, "stored" if created else "already stored")
 
-        def _global_mood_covers(self, method: str):
+        def _global_mood_covers(self, method: str, match: re.Match):
             """The user's private covers of global moods (mood_sync.py)."""
             url = urlsplit(self.path)
-            match = GLOBAL_MOOD_COVERS_PATH_RE.match(url.path)
             username, mood_id = match.group("user"), match.group("mood")
-            if method not in ("GET", "PUT") or (method == "GET") != (mood_id is None):
+            if (method == "GET") != (mood_id is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
             body = None
@@ -1124,15 +1093,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             folder = os.path.join(users_dir, username)
-            try:
-                conn = mood_sync.connect(os.path.join(folder, playlist_sync.USER_DB_FILENAME))
-            except mood_sync.NotMigratedError as exc:
-                print(f"Covers of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE, "this user's database isn't ready yet")
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Covers of {username}: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+            conn = self._open_user_db(mood_sync.connect, username, f"Covers of {username}")
+            if conn is None:
                 return
             try:
                 if method == "GET":
@@ -1159,10 +1121,9 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         # ---- global moods (tag.db), only with the permission ----
 
-        def _global_mood_song(self, method: str):
+        def _global_mood_song(self, method: str, match: re.Match):
             """PUT adds a song to a global mood, DELETE removes it. Recorded
             in --mood-changes for MusicDatabase to apply (global_mood_log.py)."""
-            match = GLOBAL_MOOD_SONG_PATH_RE.match(urlsplit(self.path).path)
             if mood_changes_dir is None:
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
@@ -1234,22 +1195,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if not match:
                 self._reply(HTTPStatus.BAD_REQUEST, "not a request file name")
                 return
-            length = self.headers.get("Content-Length")
-            if plain_int(length) is None:
-                self._reply(HTTPStatus.LENGTH_REQUIRED)
-                return
-            length = int(length)
-            if length > max_request_bytes:
-                self._reply(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"at most {max_request_bytes} bytes")
-                return
-            self.connection.settimeout(UPLOAD_SOCKET_TIMEOUT)
-            try:
-                data = self.rfile.read(length)
-            except OSError:
-                self.close_connection = True
-                return
-            if len(data) != length:
-                self.close_connection = True
+            data = self._read_body(max_request_bytes)
+            if data is None:
                 return
             if not data.startswith(SQLITE_HEADER):
                 self._reply(HTTPStatus.BAD_REQUEST, "not an SQLite file")

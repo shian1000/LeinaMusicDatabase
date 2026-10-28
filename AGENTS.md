@@ -278,6 +278,11 @@ non-trivial work in that area.
   `resolve_song_ids()`, the inbox's `resolve_song_id()`) walks a chain with the one rule
   `playlist_sync.follow_song_id_changes()` — don't write another loop.
   Details: `docs/runbooks/database.md` → "Saved songs and links on the phone".
+  A new synced collection reuses the shared pieces instead of copying a handler: its counter is a
+  `playlist_sync.RevisionCounter(counter_table, data_table)`, its endpoint a row of
+  `sharing_server.USER_ROUTES` (the one method check: another method → 405 with `Allow`), its body
+  read by `_read_body()` / `_read_json_body()` (411 / 413 / a short body closes without an answer)
+  and the user.db opened by `_open_user_db()` (503 when not migrated or unreadable).
   `song_references.py` keeps every reference to
   `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
   tracks, private tags and saved songs (a mood whose songs change gets a new revision too).

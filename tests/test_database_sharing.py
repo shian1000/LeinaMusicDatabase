@@ -1141,6 +1141,38 @@ def test_a_malformed_content_length_is_411(playlist_server):
     assert _raw_status(url, "PUT", headers) == 411
 
 
+@pytest.mark.parametrize("method, path, allowed", [
+    ("POST", f"/users/ola_k/moods/{UID}", "GET, PUT, DELETE"),
+    ("PUT", "/users/ola_k/listens", "GET, POST"),
+    ("DELETE", "/users/ola_k/covers/" + "a" * 64, "GET, PUT"),
+    ("DELETE", "/users/ola_k/global-mood-covers/1", "GET, PUT"),
+    ("POST", "/users/ola_k", "GET"),
+    ("GET", "/global-moods/1/songs/4", "PUT, DELETE"),
+])
+def test_a_known_path_with_another_method_is_405(playlist_server, method, path, allowed):
+    start, users_dir, tokens = playlist_server
+    req = urllib.request.Request(f"{start()}{path}", data=b"{}" if method in ("POST", "PUT") else None,
+                                 method=method, headers={"Authorization": f"Bearer {tokens['ola_k']}"})
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(req)
+    assert (err.value.code, err.value.headers["Allow"]) == (405, allowed)
+
+
+def test_a_body_cut_short_gets_no_answer_and_stores_nothing(playlist_server):
+    import socket
+    from urllib.parse import urlsplit
+    start, users_dir, tokens = playlist_server
+    parts = urlsplit(start())
+    body = json.dumps(_body()).encode()
+    with socket.create_connection((parts.hostname, parts.port), timeout=10) as sock:
+        sock.sendall(f"PUT /users/ola_k/playlists/{UID} HTTP/1.1\r\nHost: x\r\n"
+                     f"Authorization: Bearer {tokens['ola_k']}\r\nContent-Type: application/json\r\n"
+                     f"Content-Length: {len(body)}\r\n\r\n".encode() + body[:-5])
+        sock.shutdown(socket.SHUT_WR)
+        assert sock.recv(1024) == b""
+    assert _call("GET", f"{start()}/users/ola_k/playlists", tokens["ola_k"])[1]["playlists"] == []
+
+
 def test_an_unexpected_failure_still_gets_an_answer(playlist_server, monkeypatch):
     start, users_dir, tokens = playlist_server
     base = f"{start()}/users/ola_k/playlists"
@@ -1378,7 +1410,7 @@ def test_global_mood_changes_are_checked(mood_server, tmp_path):
     assert _call("PUT", f"{base}/global-moods/1/songs/77", token)[0] == 404
     assert _call("PUT", f"{base}/global-moods/x/songs/4", token)[0] == 400
     assert _call("PUT", f"{base}/global-moods/1/songs/0", token)[0] == 400
-    assert _call("GET", f"{base}/global-moods/1/songs/4", token)[0] == 404
+    assert _call("GET", f"{base}/global-moods/1/songs/4", token)[0] == 405
     unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
     assert _call("PUT", f"{unmounted}/global-moods/1/songs/4", token)[0] == 503
     assert _call("PUT", f"{start(mood_changes_dir=None)}/global-moods/1/songs/4", token)[0] == 404
@@ -1615,7 +1647,7 @@ def test_bad_or_unavailable_listen_requests(playlist_server, tmp_path):
     assert _call("GET", f"{url}?since=x", token)[0] == 400
     assert _call("GET", f"{url}?limit=0", token)[0] == 400
     assert _call("GET", f"{url}/a", token)[0] == 404
-    assert _call("PUT", url, token, {"listens": []})[0] == 404
+    assert _call("PUT", url, token, {"listens": []})[0] == 405
     assert _call("GET", f"{base}/users/bob/listens", tokens["bob"])[0] == 503  # no user.db
     unmounted = start(mount=str(tmp_path / "not-a-mount-point"))
     assert _call("GET", f"{unmounted}/users/ola_k/listens", token)[0] == 503
@@ -1743,7 +1775,7 @@ def test_global_mood_covers(mood_server):
     assert _call("PUT", f"{url}/0", token, body)[0] == 400
     assert _call("PUT", f"{url}/1", token, {"base_revision": 0, "updated_at": 1})[0] == 400  # cover required
     assert _call("GET", f"{url}/1", token)[0] == 404
-    assert _call("DELETE", f"{url}/1", token)[0] == 404
+    assert _call("DELETE", f"{url}/1", token)[0] == 405
     assert _call("GET", url, tokens["bob"])[0] == 403
     assert _call("GET", f"{base}/users/bob/global-mood-covers", tokens["bob"])[0] == 503  # no user.db
 
