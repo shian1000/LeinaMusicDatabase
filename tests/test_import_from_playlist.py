@@ -409,7 +409,33 @@ def test_unbracketed_trailing_junk_phrase_is_stripped():
 
 
 def test_unbracketed_junk_phrase_is_kept_when_it_is_the_whole_title():
-    assert _build("Artist - Music Video")["title"] == "Music Video"
+    # The artist's own channel: the left side is the artist, not a title
+    assert _build("Artist - Music Video", channel="Artist")["title"] == "Music Video"
+
+
+@pytest.mark.parametrize("title", ["Glow - Lyric Video (English / French)", "Glow - Official Video",
+                                   "Glow - Visualizer", "Glow - Official Music Video #dreampop"])
+def test_a_junk_only_right_side_makes_the_left_the_title_and_the_channel_the_artist(title):
+    metadata = _build(title, channel="Attic Ocean")
+    assert (metadata["artist_name"], metadata["title"]) == ("Attic Ocean", "Glow")
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("India.Arie - Video", ("India.Arie", "Video")),       # a song called "Video"
+    ("Madonna - Music", ("Madonna", "Music")),
+    ("Attic Ocean - Glow (Lyric Video)", ("Attic Ocean", "Glow")),
+])
+def test_a_real_title_on_the_right_is_kept(title, expected):
+    metadata = _build(title, channel="Some Channel")
+    assert (metadata["artist_name"], metadata["title"]) == expected
+
+
+def test_junk_only_title():
+    assert m.is_junk_only_title("Lyric Video (English / French)")
+    assert m.is_junk_only_title("Lyrics")
+    assert not m.is_junk_only_title("Video")
+    assert not m.is_junk_only_title("Glow (Lyric Video)")
+    assert not m.is_junk_only_title("")
 
 
 def test_unbracketed_junk_phrase_needs_a_whole_word_match():

@@ -53,6 +53,13 @@ Each is spelt as the database spells it, and a name it doesn't know that is
 known artists side by side is split into them ("Fisz Emade Tworzywo" ->
 "Fisz / Emade / Tworzywo Sztuczne"). The rejected-before and "already in the
 database" checks try every suggestion.
+
+A YouTube request whose title is only an upload annotation ("Glow" /
+"Lyric Video (English / French)": Leina Radio split "Glow - Lyric Video
+(English / French)" as "Artist - Title", the artist being only the
+channel, "Attic Ocean") gets the video's title and channel fetched (yt-dlp)
+and read the way the playlist import reads them (build_metadata_from_item()),
+suggesting "Attic Ocean" / "Glow". Also only when nothing else settles it.
 """
 
 import re
@@ -88,6 +95,7 @@ REJECTED_BEFORE = "rejected before"
 # Where a suggestion comes from (shown in the review)
 SUGGESTED_FROM_TITLE = "the title starts with the artist"
 SUGGESTED_FROM_DESCRIPTION = "credited in the YouTube video's description"
+SUGGESTED_FROM_CHANNEL = "the YouTube video's title and channel"
 
 # Answers
 ADD = "added"
@@ -118,7 +126,7 @@ class SongRequestCase:
     auto_note: str | None = None  # why the automatic pass left it to the owner
     suggested: tuple | None = None  # (artist, title) read out of the title or the description, see the module docstring
     also_suggested: list = field(default_factory=list)  # the description's other readings, (artist, title) each
-    suggested_from: str | None = None  # SUGGESTED_FROM_TITLE / SUGGESTED_FROM_DESCRIPTION
+    suggested_from: str | None = None  # SUGGESTED_FROM_TITLE / _DESCRIPTION / _CHANNEL
 
     @property
     def suggestions(self) -> list[tuple]:
@@ -343,6 +351,49 @@ def _description_credits(case: SongRequestCase) -> list[str] | None:
     return None
 
 
+# video id -> its (artist, title) read by build_metadata_from_item(), for this run
+_channel_readings: dict = {}
+
+
+def fetch_video_info(video_id: str) -> dict | None:
+    """The video's yt-dlp metadata, None when it can't be had."""
+    from utils.youtube.import_from_playlist import fetch_video_info as fetch
+    return fetch(video_id)
+
+
+def _junk_only_request(case: SongRequestCase) -> bool:
+    """Whether the case's title (or the title its suggestion split off) is
+    only an upload annotation ("Lyric Video (English / French)")."""
+    from utils.youtube.import_from_playlist import is_junk_only_title
+    titles = [case.latest.title, *(s[1] for s in case.suggestions)]
+    return any(is_junk_only_title(t) for t in titles)
+
+
+def channel_suggestion(case: SongRequestCase) -> tuple | None:
+    """(artist, title) of the case's YouTube video as the playlist import
+    reads its title and channel, for a request whose title is junk only -
+    None otherwise, or when the video's data can't be had or gives no
+    artist and title."""
+    if not case.youtube_video_ids or not _junk_only_request(case):
+        return None
+    from utils.youtube.import_from_playlist import build_metadata_from_item, is_junk_only_title
+    for video_id in case.youtube_video_ids:
+        if video_id not in _channel_readings:
+            info = fetch_video_info(video_id)
+            reading = None
+            if info:
+                metadata = build_metadata_from_item(
+                    {"title": info.get("title"), "channel": info.get("channel") or info.get("uploader"),
+                     "video_id": video_id})
+                artist, title = metadata["artist_name"], metadata["title"]
+                if artist and title and not is_junk_only_title(title):
+                    reading = (artist, title)
+            _channel_readings[video_id] = reading
+        if _channel_readings[video_id]:
+            return _channel_readings[video_id]
+    return None
+
+
 def description_suggestions(session, credits: list[str], title: str, matcher) -> list[tuple]:
     """(artist, title) with each credited artist as the main one and the
     others featured in the title, the one with most songs in the database
@@ -448,6 +499,12 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
             case.suggested, *case.also_suggested = description_suggestions(
                 session, credits, case.latest.title, matcher)
             case.suggested_from = SUGGESTED_FROM_DESCRIPTION
+            _settle(session, key, case, rejected, matcher)
+            continue
+        reading = channel_suggestion(case)
+        if reading:
+            case.suggested, case.also_suggested = (_database_spelling(reading[0], matcher), reading[1]), []
+            case.suggested_from = SUGGESTED_FROM_CHANNEL
             _settle(session, key, case, rejected, matcher)
     return list(cases.values())
 

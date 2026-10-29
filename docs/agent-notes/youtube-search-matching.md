@@ -75,7 +75,13 @@ Zulu - so the setting only matters for playlist pages.
    in order - so don't fold it back into the `", "`-joined string.
 2. Otherwise, try `split_artist_title()` (`normalizer.py` - the same "Artist - Title" splitter
    `extract_unknown_data()` uses for mp3 filenames, factored out so both callers share it) on the
-   video title.
+   video title. When the right side is only an upload annotation (`is_junk_only_title()`: every
+   word, brackets and hashtags aside, from `_JUNK_ONLY_WORDS` - "Lyric Video (English / French)",
+   "Official Video"; one word alone only from `_JUNK_ONLY_SINGLE_WORDS`, since "Video", "Audio",
+   "Music" are real song titles), the left side is the title and the channel the artist (real
+   case, channel "Attic Ocean": "Glow - Lyric Video (English / French)"). Not when there's no
+   channel, nor when the left side *is* the channel ("Artist - Music Video" from the artist's own
+   channel keeps "Music Video"). Leina Radio's song requests reuse it (below / runbook).
 3. If that finds no separator at all, fall back to the channel name as the artist anyway - real
    case found testing this: Culture Beat's own (non-Topic) channel, video titled just
    `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is

@@ -76,7 +76,11 @@ def env(tmp_path, monkeypatch):
     descriptions = {}
     monkeypatch.setattr(sr, "fetch_video_description", lambda video_id: descriptions.get(video_id))
     monkeypatch.setattr(sr, "_credits_by_video", {})
-    return {"inbox": inbox, "session": session, "matcher": matcher, "descriptions": descriptions}
+    videos = {}
+    monkeypatch.setattr(sr, "fetch_video_info", lambda video_id: videos.get(video_id))
+    monkeypatch.setattr(sr, "_channel_readings", {})
+    return {"inbox": inbox, "session": session, "matcher": matcher, "descriptions": descriptions,
+            "videos": videos}
 
 
 def _request(inbox: Path, name: str, rows, folder: str = "new") -> Path:
@@ -337,6 +341,54 @@ def test_the_description_counts_only_for_a_generic_channel_and_the_same_title(en
     _fisz_emade_tworzywo(env)
     _request(env["inbox"], "2026-10-26_16-26-30_031.db",
              [{"title": title, "artist": artist, "youtube_video_id": "sn1"}])
+
+    _, [case] = _cases(env)
+
+    assert case.pending and case.suggestions == []
+
+
+GLOW = {"title": "Glow - Lyric Video (English / French)", "channel": "Attic Ocean"}
+
+
+@pytest.mark.parametrize("row", [
+    {"artist": "Glow", "title": "Lyric Video (English / French)"},   # Leina Radio's own split
+    {"artist": None, "title": "Glow - Lyric Video (English / French)"},
+])
+def test_a_junk_only_title_suggests_the_videos_channel_and_title(env, row):
+    env["videos"]["QrS48ruO-8U"] = GLOW
+    _request(env["inbox"], "2026-10-27_21-09-10_042.db", [{**row, "youtube_video_id": "QrS48ruO-8U"}])
+
+    _, [case] = _cases(env)
+
+    assert case.pending
+    assert case.suggested_from == sr.SUGGESTED_FROM_CHANNEL
+    assert case.suggestions == [("Attic Ocean", "Glow")]
+    assert case.metadata(*case.suggested)["youtube_video_id"] == "QrS48ruO-8U"
+
+
+def test_the_channel_suggestion_finds_a_song_in_the_database(env):
+    env["videos"]["chrom2"] = {"title": "Chromatic - Official Video", "channel": "Elise Trouw"}
+    _request(env["inbox"], "2026-10-27_21-09-10_042.db",
+             [{"artist": "Chromatic", "title": "Official Video", "youtube_video_id": "chrom2"}])
+
+    _, [case] = _cases(env)
+
+    assert case.status == sr.ALREADY_IN_DATABASE and case.existing.id == 1
+
+
+def test_a_real_title_needs_no_video_data(env, monkeypatch):
+    monkeypatch.setattr(sr, "fetch_video_info", lambda video_id: pytest.fail("fetched"))
+    _request(env["inbox"], "2026-10-27_21-09-10_042.db",
+             [{"artist": "Attic Ocean", "title": "Glow", "youtube_video_id": "QrS48ruO-8U"}])
+
+    _, [case] = _cases(env)
+
+    assert case.pending and case.suggestions == []
+
+
+def test_video_data_that_cant_be_had_leaves_the_request_as_it_is(env):
+    _request(env["inbox"], "2026-10-27_21-09-10_042.db",
+             [{"artist": "Glow", "title": "Lyric Video (English / French)", "youtube_video_id": "gone"}])
 
     _, [case] = _cases(env)
 

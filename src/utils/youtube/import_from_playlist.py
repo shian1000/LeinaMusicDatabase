@@ -20,7 +20,7 @@ from utils.youtube.manage_youtube_playlists import (
     run_ytdlp,
     video_durations_via_api,
 )
-from utils.common.normalizer import split_artist_title
+from utils.common.normalizer import name_key, split_artist_title
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
@@ -272,6 +272,28 @@ _QUOTED_TITLE_FEAT_CREDIT_RE = re.compile(
     r"""(?:\s+[-–—]\s+.*)?$""",
     re.IGNORECASE,
 )
+
+
+# What an uploader puts after " - " when the left side is the song's title
+# and the artist is only the channel (real case, channel "Attic Ocean":
+# "Glow - Lyric Video (English / French)"). A side that is all these words,
+# brackets aside, is no title. One word alone counts only when no song is
+# called that ("Video" by India.Arie, "Music", "Audio" are songs).
+_JUNK_ONLY_WORDS = frozenset({
+    "official", "officiel", "oficial", "music", "lyric", "lyrics", "video", "audio", "clip",
+    "videoclip", "musicvideo", "visualizer", "visualiser", "hd", "hq", "4k",
+})
+_JUNK_ONLY_SINGLE_WORDS = frozenset({"lyrics", "videoclip", "musicvideo", "visualizer", "visualiser"})
+
+
+def is_junk_only_title(text: str | None) -> bool:
+    """Whether `text` (a video title's side) is only an upload annotation -
+    "Lyric Video (English / French)", "Official Video", "Visualizer" - with
+    no song title in it."""
+    words = strip_hashtags(_ANY_BRACKET_RE.sub(" ", text or "")).lower().split()
+    if not words or any(w not in _JUNK_ONLY_WORDS for w in words):
+        return False
+    return len(words) > 1 or words[0] in _JUNK_ONLY_SINGLE_WORDS
 
 
 def split_quoted_title_feat_credit(title: str) -> tuple | None:
@@ -634,6 +656,13 @@ def _fetch_video_description(video_id: str, timeout: int = 30) -> str | None:
     _find_official_match_via_search() found nothing (e.g. the song was never
     officially distributed to YouTube under its own upload), since
     --flat-playlist (the normal playlist fetch) never includes it."""
+    info = fetch_video_info(video_id, timeout)
+    return info.get("description") if info else None
+
+
+def fetch_video_info(video_id: str, timeout: int = 30) -> dict | None:
+    """One video's yt-dlp metadata (title, channel, description, ...), None
+    when it can't be had (the reason in debug.log)."""
     if not video_id:
         return None
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -645,18 +674,17 @@ def _fetch_video_description(video_id: str, timeout: int = 30) -> str | None:
             timeout=timeout,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        flog(f"[yt-dlp] no description for video {video_id}: {e}")
+        flog(f"[yt-dlp] no data for video {video_id}: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
-        flog(f"[yt-dlp] no description for video {video_id} exit={result.returncode}: "
+        flog(f"[yt-dlp] no data for video {video_id} exit={result.returncode}: "
              f"{ytdlp_errors(result) or 'no output'}")
         return None
     try:
-        info = json.loads(result.stdout.strip().splitlines()[0])
+        return json.loads(result.stdout.strip().splitlines()[0])
     except (json.JSONDecodeError, IndexError) as e:
-        flog(f"[yt-dlp] unreadable description data for video {video_id}: {e}")
+        flog(f"[yt-dlp] unreadable data for video {video_id}: {e}")
         return None
-    return info.get("description")
 
 
 # Matches a "Music : <title> by <artist>" line the way SPECIAL_DESCRIPTION_
@@ -861,7 +889,11 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
             artist, song_title = quoted_credit
         else:
             artist, song_title = split_artist_title(parse_title)
-            if not artist or not song_title:
+            if (channel.strip() and artist and is_junk_only_title(song_title)
+                    and name_key(artist) != name_key(channel)):
+                # "Glow - Lyric Video": the title on the left, the artist only the channel
+                artist, song_title = channel.strip(), artist
+            elif not artist or not song_title:
                 corner_credit = split_corner_bracket_credit(parse_title)
                 if corner_credit:
                     artist, song_title = corner_credit

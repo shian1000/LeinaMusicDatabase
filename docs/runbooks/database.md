@@ -383,6 +383,12 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   doesn't know that is known artists side by side is split into as many of them as possible
   ("Fisz Emade Tworzywo" -> "Fisz / Emade / Tworzywo Sztuczne", though "Fisz Emade" is an artist
   too), up to `SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS` words.
+  A YouTube request whose title (or the title its "<artist> - <title>" split leaves) is only an
+  upload annotation ("Glow" / "Lyric Video (English / French)": Leina Radio split the video title
+  "Glow - Lyric Video (English / French)" itself, the real artist being only the channel) gets
+  the video's title and channel fetched (yt-dlp, once per video per run, only when nothing else
+  settles it) and read by the playlist import's `build_metadata_from_item()`: suggested "Attic
+  Ocean" / "Glow" (`SUGGESTED_FROM_CHANNEL`), the artist as music.db spells it.
 - A file moves to `Inbox/processed/` once every row is settled. It stays in `review/` while a row is
   skipped, while it has a table this version doesn't know (a future request type), or while its
   `request.format` isn't 1. An unreadable file goes to `Inbox/rejected/`.
