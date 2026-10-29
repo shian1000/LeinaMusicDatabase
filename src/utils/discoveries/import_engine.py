@@ -409,7 +409,7 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
 
 
 # What separates an artist from the title inside a tag's title field
-_TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—]\s+")
+_TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—/]\s+")
 
 
 # A release year left at the end of a file's title ("... [Full Length] 2006")
@@ -460,7 +460,7 @@ def title_after_artists(title: str, artist: str) -> str | None:
     """The title part of a tag's title field that starts with the artists
     themselves - "Христина Соловій & YanGo — Шкідлива звичка" for artist
     "Христина Соловій" -> "Шкідлива звичка" - or None: the part before the
-    first " - " / " – " / " — " must hold the artist's whole name."""
+    first " - " / " – " / " — " / " / " must hold the artist's whole name."""
     parts = _TITLE_ARTIST_SEPARATOR.split(title or "", maxsplit=1)
     wanted = normalize(artist)
     if len(parts) < 2 or not wanted or not parts[1].strip():

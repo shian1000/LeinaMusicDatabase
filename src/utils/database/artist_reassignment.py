@@ -11,9 +11,12 @@ songs.album_id because the change goes through `song.artist`.
 The menus asking the questions live in utils/ui/artist_change.py.
 """
 
+from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, ADDITIONAL_ARTIST_ROLE_MAIN, COMPILATION_ARTIST_NAMES, TITLE_ARTISTS_SEPARATOR
 from utils.common.normalizer import normalize
 from utils.database.albums import album_key, link_songs, reassign_artist_albums
+from utils.database.artist_splitting import propose_artist_split
 from utils.database.datatables import Artist, Song
+from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import (
     add_additional_artist,
     additional_artist_role,
@@ -21,6 +24,7 @@ from utils.database.song_artists import (
     merge_artist_synonyms,
     reassign_additional_artist_links,
     remove_additional_artist,
+    song_all_artists,
 )
 
 
@@ -65,6 +69,66 @@ def credit_unknown_artist_song(session, song: Song) -> Artist | None:
     song.title = title
     set_primary_artist(session, song, artist)
     return artist
+
+
+def _names_of(artist: Artist) -> list[str]:
+    synonyms = [s.strip() for s in (artist_match_synonyms(artist) or "").split(",")]
+    return [normalize(n) for n in (artist.name, *synonyms) if n and normalize(n)]
+
+
+def _credited_as(song: Song, name: str) -> Artist | None:
+    """The song's artist `name` stands for: its name or a synonym, or the
+    surname of one ("Malenczuk" of "Maciej Maleńczuk" - not any word:
+    "Orkiestra" of "Męskie Granie Orkiestra 2022" is a song's title)."""
+    wanted = normalize(name)
+    for artist in song_all_artists(song):
+        for known in _names_of(artist):
+            if wanted == known or (len(wanted) >= 3 and known.endswith(f" {wanted}")):
+                return artist
+    return None
+
+
+def split_title_artists(session, song: Song) -> list[Artist] | None:
+    """A title written "Artists / Title" ("Yugopolis & Malenczuk / Gdzie sa
+    przyjaciele moi?"): the title becomes the part after " / ", and the names
+    before it not credited yet are credited as main artists. Only when the
+    names are the song's own artists - the song's main artist among them, or
+    the song is a compilation's ("Various Artists": "Lao Che / Życie jest jak
+    tramwaj", the first name becoming its artist) - and every other name is
+    an artist already in the database, so two titles ("Old Love / New
+    Love") are never taken apart. Returns the artists newly credited (the
+    first one the new main artist of a compilation's song), None when the
+    song isn't one of these. Caller commits."""
+    prefix, separator, rest = (song.title or "").partition(TITLE_ARTISTS_SEPARATOR)
+    rest = rest.strip()
+    if not separator or not rest or not prefix.strip():
+        return None
+    split = propose_artist_split(prefix.strip())
+    roles = ([(n, ADDITIONAL_ARTIST_ROLE_MAIN) for n in split.main] + [(n, ADDITIONAL_ARTIST_ROLE_FEAT) for n in split.feat]
+             if split else [(prefix.strip(), ADDITIONAL_ARTIST_ROLE_MAIN)])
+    names = [n for n, _role in roles]
+    compilation = is_unknown_artist(song.artist) or normalize(song.artist.name or "") in COMPILATION_ARTIST_NAMES
+    if not compilation and not any(_credited_as(song, n) is song.artist for n in names):
+        return None
+    new = []
+    for name, role in roles:
+        if _credited_as(song, name) and not compilation:
+            continue
+        found = artists_named(session, name)
+        if not found:
+            return None
+        new.append((found[0], role))
+    if compilation and (not new or new[0][1] != ADDITIONAL_ARTIST_ROLE_MAIN):
+        return None
+    song.title = rest
+    if compilation:
+        set_primary_artist(session, song, new[0][0])
+    for artist, role in new[1:] if compilation else new:
+        try:
+            add_additional_artist(song, artist, role)
+        except ValueError:
+            pass  # already credited
+    return [artist for artist, _role in new]
 
 
 def set_primary_artist(session, song: Song, artist: Artist, keep_old_as: str | None = None) -> None:

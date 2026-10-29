@@ -288,9 +288,21 @@ returns "Ma³pa i ja" for "Małpa i ja" (ł and ³ share byte 0xB3). It scored
 94% instead of matching. `read_file_metadata()` runs
 `normalizer.fix_cp1250_mojibake()`, which re-reads the whole text as
 Windows-1250 only when it holds a character real text never has: "³", "¹",
-a control character 0x80-0x9F (ś, ź, Ś, Ź), or "¿" inside a word (ż). It
-can't simply re-read everything: "ñ", "ê", "ó" are fine Latin-1 letters
-("España") that Windows-1250 would turn into "ń", "ę", "ó".
+"¯" (Ż), a control character 0x80-0x9F (ś, ź, Ś, Ź), or "¿" inside a word (ż).
+It can't simply re-read everything: "ñ", "ê", "ó" are fine Latin-1 letters
+("España") that Windows-1250 would turn into "ń", "ę", "ó" - so "Mêskie
+Granie" (Męskie), with nothing else wrong, stays for a hand fix. Text misread
+as Windows-1252 rather than Latin-1 has "œ" (ś), which Latin-1 can't encode:
+it is re-encoded as cp1252 then. Clean names (`repair_polish_mojibake()`)
+applies the same to rows stored before the import repaired them, with two
+more signals: a sure sign in one field of a song means its whole tag was
+mis-read, so its title and album are re-read regardless (`force=True`; the
+artist row is shared, so never forced); and a text without any sign is
+re-read when every word that changes becomes a word the catalog already has
+(`fix_cp1250_mojibake_by_words()`): "Mêskie Granie 2011-1" -> "Męskie", with
+dozens of "Męskie Granie" albums around, while "Efêmera" would become
+"Efęmera", a word nowhere else. Correct Polish text is never touched by a
+forced re-read: its "ę", "ł" can't be encoded as Latin-1.
 
 ## Tags can carry HTML entities and site names
 

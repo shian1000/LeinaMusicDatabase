@@ -214,6 +214,12 @@ SINGLES_MARKER = [
 # one by one by title instead of grouping them like an album.
 SINGLES_ALBUM = "Singles"
 
+# Artist names of a compilation's songs, after normalize(): their real artist
+# may stand in the title ("Lao Che / Życie jest jak tramwaj")
+COMPILATION_ARTIST_NAMES = ("various", "various artists", "va")
+# Between the artists and the title in "Yugopolis & Malenczuk / Gdzie sa przyjaciele moi?"
+TITLE_ARTISTS_SEPARATOR = " / "
+
 # File browser menu options
 FILE_BROWSER_SELECT_OPTION = "[SELECT THIS DIRECTORY]"
 FILE_BROWSER_BACK_OPTION = "<= [Go Back]"

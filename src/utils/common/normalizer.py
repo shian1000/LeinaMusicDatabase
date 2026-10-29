@@ -254,22 +254,53 @@ def _drop_junk(text: str) -> str:
     return _EDGE_SEPARATORS_RE.sub("", re.sub(r"\s{2,}", " ", text))
 
 
-# Polish (Windows-1250) tags read as Latin-1: "Ma³pa" for "Małpa". These
-# never stand in real text - "³" / "¹" (ł / ą), control characters 0x80-0x9F
-# (ś, ź, Ś, Ź, ...), "¿" inside a word (ż) - while "ñ", "ê", "ó" do, so only
-# one of them triggers re-reading the whole text as Windows-1250.
-_CP1250_MOJIBAKE_RE = re.compile(r"[³¹\x80-\x9f]|(?<=\w)¿")
+# Polish (Windows-1250) tags read as Latin-1 or Windows-1252: "Ma³pa" for
+# "Małpa". These never stand in real text - "³" / "¹" (ł / ą), "¯" (Ż),
+# control characters 0x80-0x9F (ś, ź, Ś, Ź, ...), "¿" inside a word (ż) -
+# while "ñ", "ê", "ó" do, so only one of them triggers re-reading the whole
+# text as Windows-1250. A text with none ("Mêskie" for "Męskie") stays,
+# unless another field of the same record shows one (`force`).
+_CP1250_MOJIBAKE_RE = re.compile(r"[³¹¯\x80-\x9f]|(?<=\w)¿")
 
 
-def fix_cp1250_mojibake(text: str) -> str:
+def has_cp1250_mojibake(text: str) -> bool:
+    """Does `text` hold a character only Polish mis-read as Latin-1 has?"""
+    return bool(text) and bool(_CP1250_MOJIBAKE_RE.search(text))
+
+
+def fix_cp1250_mojibake(text: str, force: bool = False) -> str:
     """`text` re-read as Windows-1250 when it's Polish mis-read as Latin-1
-    ("Ma³pa i ja" -> "Małpa i ja"); unchanged otherwise."""
-    if not text or not _CP1250_MOJIBAKE_RE.search(text):
+    or Windows-1252 ("Ma³pa i ja" -> "Małpa i ja", "Wspania³oœæ" ->
+    "Wspaniałość"); unchanged otherwise. `force`: re-read it even without a
+    sure sign ("Mêskie" -> "Męskie"), for a field of a record another field
+    of which has one - correct Polish text is left alone either way, since
+    its "ę", "ł" can't be encoded as Latin-1."""
+    if not text or not (force or has_cp1250_mojibake(text)):
         return text
-    try:
-        return text.encode("latin-1").decode("cp1250")
-    except (UnicodeEncodeError, UnicodeDecodeError):
+    for misread_as in ("latin-1", "cp1252"):  # cp1252: "œ" for ś, which Latin-1 lacks
+        try:
+            return text.encode(misread_as).decode("cp1250")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    return text
+
+
+def fix_cp1250_mojibake_by_words(text: str, known_words: set[str]) -> str:
+    """`text` re-read as Windows-1250 without a sure sign, when every word
+    the re-reading changes then is a word the database already has
+    (`known_words`, casefolded): "Mêskie Granie" -> "Męskie Granie", while
+    "Efêmera" ("Efęmera" nowhere) stays."""
+    fixed = fix_cp1250_mojibake(text, force=True)
+    if fixed == text:
         return text
+    old, new = text.split(), fixed.split()
+    changed = [n.casefold() for o, n in zip(old, new) if o != n]
+    if len(old) != len(new) or not all(_WORD_EDGES_RE.sub("", w) in known_words for w in changed):
+        return text
+    return fixed
+
+
+_WORD_EDGES_RE = re.compile(r"^\W+|\W+$")
 
 
 def strip_site_names(text: str) -> str:

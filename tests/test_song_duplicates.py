@@ -24,6 +24,7 @@ from utils.database.song_duplicates import (
     credit_feat_artists,
     duplicate_key,
     feat_credits,
+    find_cross_artist_groups,
     find_duplicate_groups,
     looks_like_versions,
     merge_songs,
@@ -166,6 +167,63 @@ def test_review_merges_only_the_ticked_groups(session, monkeypatch, capsys):
     tamagotchi = session.query(Song).filter(Song.title == "Tamagotchi").one()
     assert [(a.name, additional_artist_role(tamagotchi, a)) for a in additional_artists(tamagotchi)] == [
         ("Dawid Podsiadło", "feat")]
+
+
+def test_one_title_of_two_main_artists_sharing_an_artist_or_a_link(session):
+    hasiok, yugo, mal = Artist(name="Hasiok"), Artist(name="Yugopolis"), Artist(name="Maciej Maleńczuk")
+    # A tie on data: the real album wins over "Singles", though the other is older
+    wrong = Song(title="Sługi Za Szlugi", artist=hasiok, album="Singles", year=2014, language="Polish")
+    right = Song(title="Sługi za szlugi", artist=yugo, album="The Best Of Yugopolis", year=2014, language="Unknown")
+    a, b = Artist(name="A"), Artist(name="B")
+    linked = [Song(title="Linked", artist=a, youtube_video_id="v1"), Song(title="Linked", artist=b, youtube_video_id="v1")]
+    feat = [Song(title="Feat (feat. B)", artist=a), Song(title="Feat", artist=b)]
+    not_a_link = [Song(title="Gone", artist=a, youtube_video_id="N/A"), Song(title="Gone", artist=b, youtube_video_id="N/A")]
+    title_only = [Song(title="Intro", artist=a), Song(title="Intro", artist=b)]
+    # The song naming both artists is kept, though the other has more data
+    collins, bailey = Artist(name="Phil Collins"), Artist(name="Philip Bailey")
+    solo = Song(title="Easy Lover", artist=collins, album="No Jacket Required", year=1984)
+    duet = Song(title="Easy Lover", artist=bailey)
+    session.add_all([wrong, right, mal, *linked, *feat, *not_a_link, *title_only, solo, duet])
+    session.flush()
+    add_additional_artist(wrong, mal, "main")
+    add_additional_artist(right, mal, "main")
+    add_additional_artist(duet, collins, "main")
+    session.commit()
+
+    groups = find_cross_artist_groups(session)
+    assert sorted([s.id for s in g] for g in groups) == sorted(
+        [[feat[0].id, feat[1].id], [linked[0].id, linked[1].id], [right.id, wrong.id], [duet.id, solo.id]])
+    assert find_cross_artist_groups(session, skip_ids={wrong.id}) and all(
+        wrong not in g for g in find_cross_artist_groups(session, skip_ids={wrong.id}))
+
+
+def test_review_offers_cross_artist_groups_unticked_and_removes_the_emptied_artist(session, monkeypatch):
+    from utils.ui import song_duplicate_review as review
+
+    hasiok, yugo, mal = Artist(name="Hasiok"), Artist(name="Yugopolis"), Artist(name="Maciej Maleńczuk")
+    wrong = Song(title="Sługi Za Szlugi", artist=hasiok)
+    right = Song(title="Sługi Za Szlugi", artist=yugo, album="The Best Of Yugopolis")
+    session.add_all([wrong, right, mal])
+    session.flush()
+    add_additional_artist(wrong, mal, "main")
+    add_additional_artist(right, mal, "main")
+    session.commit()
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review, "submit_global_database_session", session.commit)
+    offered = []
+
+    def checkbox(message, choices):
+        offered.extend((c.title, c.checked) for c in choices)
+        return _Answer([c.value for c in choices])  # tick it
+
+    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    review.resolve_duplicated_songs()
+
+    assert [checked for _, checked in offered] == [False]
+    assert "credited to Yugopolis only" in offered[0][0]
+    song = session.query(Song).one()
+    assert (song.artist.name, [a.name for a in additional_artists(song)]) == ("Yugopolis", ["Maciej Maleńczuk"])
+    assert sorted(a.name for a in session.query(Artist)) == ["Maciej Maleńczuk", "Yugopolis"]
 
 
 def test_feat_credits_and_the_ones_the_kept_song_lacks(session, monkeypatch):

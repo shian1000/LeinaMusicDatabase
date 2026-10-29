@@ -149,3 +149,49 @@ def test_album_lookup_hands_modules_composed_text(monkeypatch):
     dm._call_year_module(Module, "m", "Module", DECOMPOSED_ARTIST, DECOMPOSED, True)
 
     assert calls == [("Pete Rodríguez", COMPOSED)] * 2
+
+
+def test_clean_names_repairs_polish_letters_and_merges_the_album_twin(session, monkeypatch):
+    """"S³oneczna strona miasta" (Windows-1250 read as Latin-1) is the
+    artist's "Słoneczna strona miasta": one album row afterwards, both songs
+    on it; a song title is repaired too, real accents ("Efêmera") stay."""
+    yugo = Artist(name="Yugopolis")
+    broken = Song(title="Gdzie są przyjaciele moi?", album="S³oneczna strona miasta", artist=yugo)
+    right = Song(title="Czy pamiętasz", album="Słoneczna strona miasta", artist=yugo)
+    title = Song(title="¯ycie jest jak tramwaj", album="Singles", artist=yugo)
+    fine = Song(title="Efêmera", album="Efêmera", artist=yugo)
+    session.add_all([broken, right, title, fine])
+    session.commit()
+    assert session.query(Album).filter(Album.title.like("S%")).count() == 2
+    cn = _clean_names_module(monkeypatch, session)
+
+    cn.repair_polish_mojibake(session.query(Song).all(), {})
+    session.commit()
+
+    albums = session.query(Album).filter(Album.title.like("S%oneczna%")).all()
+    assert [a.title for a in albums] == ["Słoneczna strona miasta"]
+    assert broken.album == "Słoneczna strona miasta" and broken.album_id == right.album_id == albums[0].id
+    assert title.title == "Życie jest jak tramwaj"
+    assert fine.title == fine.album == "Efêmera"
+
+
+def test_clean_names_repairs_every_field_of_a_misread_song(session, monkeypatch):
+    """The title's "¯" shows the whole tag was mis-read, so the album's
+    "Mêskie" (no sure sign of its own) is repaired with it; elsewhere a
+    "Mêskie" is repaired only because "Męskie" is a word the database has."""
+    various, lao = Artist(name="Various Artists"), Artist(name="Lao Che")
+    misread = Song(title="Lao Che / ¯ycie jest jak tramwaj", album="Mêskie Granie 2011-1", artist=various)
+    other = Song(title="Warszawa", album="Mêskie Granie 2012", artist=lao)
+    known = Song(title="Kto przepłynie", album="Męskie Granie", artist=lao)
+    fine = Song(title="Efêmera", album="Efêmera", artist=lao)
+    session.add_all([misread, other, known, fine])
+    session.commit()
+    cn = _clean_names_module(monkeypatch, session)
+
+    cn.repair_polish_mojibake(session.query(Song).all(), {})
+    session.commit()
+
+    assert (misread.title, misread.album) == ("Lao Che / Życie jest jak tramwaj", "Męskie Granie 2011-1")
+    assert other.album == "Męskie Granie 2012"
+    assert fine.title == fine.album == "Efêmera"
+    assert session.get(Album, misread.album_id).title == "Męskie Granie 2011-1"

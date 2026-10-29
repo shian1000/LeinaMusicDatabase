@@ -191,6 +191,11 @@ non-trivial work in that area.
   (`utils/ui/song_duplicate_review.py`) asks in one checkbox list, version-looking pairs unticked,
   then in a second one whether to credit the featured artists only a folded title named
   (`missing_feat_artists()` → `credit_feat_artists()`, role `feat`, an existing artist reused).
+  The same list ends with `find_cross_artist_groups()`, unticked: one title under different
+  main artists who share another artist (feat. credits in the title count) or a YouTube /
+  Spotify link ("Hasiok x Maleńczuk" / "Yugopolis x Maleńczuk"); kept is the song naming every
+  artist, else the one on a real album over "Singles", else the most data; the dropped song's main
+  artist is not carried over, and is removed when left without songs. Never silently merged.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
   instead of renaming the shared row, removing an artist left without songs (album rows go to its
   heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.
@@ -388,8 +393,12 @@ non-trivial work in that area.
   write a second one. `composed()` is the NFC form every stored name is kept in: the models'
   `@validates` (`datatables.COMPOSED_FIELDS`) compose each ORM write, Clean names the older rows
   (decomposed letters from YouTube titles / macOS file names defeat MusicBrainz's search;
-  `docs/data-model.md`). `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 ("Ma³pa"),
-  only when a never-genuine character shows it. `strip_site_names()` drops download-site junk from mp3 file names and tags
+  `docs/data-model.md`). `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 / Windows-1252 ("Ma³pa"),
+  only when a never-genuine character shows it - in the mp3 import, and for older rows in Clean
+  names (`repair_polish_mojibake()`, album rows through `rename_album()` so a twin merges). There
+  a sure sign in one field of a song repairs its other fields too (`force=True`; never the shared
+  artist row), and a text without one only when every re-read word is already a word of the
+  catalog (`fix_cp1250_mojibake_by_words()`: "Mêskie" -> "Męskie", "Efêmera" stays). `strip_site_names()` drops download-site junk from mp3 file names and tags
   before they're read (domains in `SITE_NAME_TLDS`, the words in `src/config/file_name_junk.txt` —
   the owner's list, add entries there — and Y2Mate's id/bitrate/timestamp suffix). `normalize()` is `lru_cache`d (pure function of its arguments): the artist
   search re-normalizes every artist per lookup, so keep it free of side effects and global state. `docs/agent-notes/normalization-and-matching.md`.
@@ -489,7 +498,13 @@ non-trivial work in that area.
   to auto-apply to existing data. A new exact phrase goes in `TITLE_JUNK_SUFFIXES` once and is
   caught in both places. `resolve_unknown_artist()` still applies its
   artist/title split unconditionally (no yes/no there) but prints one summary instead of pausing
-  per song.
+  per song. `split_artists_from_titles()` does the same for "Artists / Title"
+  (`artist_reassignment.split_title_artists()`): only when the names before " / " include the
+  song's main artist (its name, a synonym or the surname — "Malenczuk" of "Maciej Maleńczuk", not
+  any word: "Orkiestra" of "Męskie Granie Orkiestra 2022" is a title) or the song is a
+  compilation's (`COMPILATION_ARTIST_NAMES`), and every other name is an existing artist — so
+  "Old Love / New Love" stays. `title_after_artists()` accepts " / " too, so files still
+  tagged the old way match the cleaned song.
 - `tests/` — regression tests, catalogued in [`tests/README.md`](tests/README.md) (what each file
   covers — keep it in sync with the tests). App code never imports from `tests/`.
   `tests/manual/` holds manual diagnostic scripts (real imports + live network), excluded from

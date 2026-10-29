@@ -51,6 +51,42 @@ def _names(session):
     return sorted(a.name for a in session.query(Artist))
 
 
+# ---- "Artists / Title" titles --------------------------------------------------
+
+def test_split_title_artists_takes_the_songs_own_artists_out_of_the_title(session):
+    yugo, mal = _artist(session, "Yugopolis"), _artist(session, "Maciej Maleńczuk")
+    hey, lao, various = _artist(session, "Hey"), _artist(session, "Lao Che"), _artist(session, "Various Artists")
+    orkiestra = _artist(session, "Męskie Granie Orkiestra 2022")
+    twin = _artist(session, "Twin Shadow")
+    gdzie = _song(session, "Yugopolis & Malenczuk / Gdzie sa przyjaciele moi?", yugo)
+    add_additional_artist(gdzie, mal, "main")
+    cud = _song(session, "HEY / CUD", hey)
+    zycie = _song(session, "Lao Che / Życie jest jak tramwaj", various)
+    pani = _song(session, "Orkiestra / Pani W Obuwniczym", orkiestra)  # a word of the name, not the surname
+    two_titles = _song(session, "Old Love / New Love", twin)
+    stranger = _song(session, "Hey & Nobody Known / Song", hey)          # an artist not in the database
+    session.flush()
+
+    # "Malenczuk" is the surname of an artist the song already credits
+    assert ar.split_title_artists(session, gdzie) == []
+    assert (gdzie.title, song_artist_label(gdzie)) == ("Gdzie sa przyjaciele moi?", "Yugopolis x Maciej Maleńczuk")
+    assert ar.split_title_artists(session, cud) == [] and cud.title == "CUD"
+    # A compilation's song: the name becomes its artist
+    assert ar.split_title_artists(session, zycie) == [lao]
+    assert (zycie.title, zycie.artist) == ("Życie jest jak tramwaj", lao)
+    for song, title in ((pani, "Orkiestra / Pani W Obuwniczym"), (two_titles, "Old Love / New Love"),
+                        (stranger, "Hey & Nobody Known / Song")):
+        assert ar.split_title_artists(session, song) is None and song.title == title
+
+
+def test_split_title_artists_credits_an_existing_artist_named_there(session):
+    yugo, mal = _artist(session, "Yugopolis"), _artist(session, "MALEŃCZUK")
+    song = _song(session, "Yugopolis & Malenczuk / Gdzie sa przyjaciele moi?", yugo)
+
+    assert ar.split_title_artists(session, song) == [mal]
+    assert (song.title, additional_artist_role(song, mal)) == ("Gdzie sa przyjaciele moi?", "main")
+
+
 # ---- artist_reassignment ------------------------------------------------------
 
 def test_set_primary_artist_moves_only_that_song(session):

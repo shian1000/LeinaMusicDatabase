@@ -1297,6 +1297,8 @@ def test_artists_before_the_title_and_a_trailing_feat_are_ignored(music_session)
     assert matcher.match_exact({"artist_name": "Unlike Pluto", "title": "No Scrubs ft. Joanna Jones HD"}) is cover
 
     assert title_after_artists("AC-DC - Back in Black", "AC-DC") == "Back in Black"
+    assert title_after_artists("Yugopolis & Malenczuk / Gdzie sa przyjaciele moi?", "Yugopolis") == \
+        "Gdzie sa przyjaciele moi?"
     assert title_after_artists("Love - Me Do", "Beatles") is None  # the artist isn't before the dash
     assert title_after_artists("Karma", "Hey") is None
 
@@ -1424,6 +1426,16 @@ def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
 
     misread = lambda text: text.encode("cp1250").decode("latin-1")
     assert fix_cp1250_mojibake(misread("Żółć gęślą jaźń")) == "Żółć gęślą jaźń"
+    # Read as Windows-1252 ("œ" for ś, not in Latin-1), and a leading "Ż" ("¯")
+    assert fix_cp1250_mojibake("Wasza Wspania³oœæ") == "Wasza Wspaniałość"
+    assert fix_cp1250_mojibake("¯ycie jest jak tramwaj") == "Życie jest jak tramwaj"
+    # No sure sign: only forced, or when the re-read word is one the database has
+    from utils.common.normalizer import fix_cp1250_mojibake_by_words
+    assert fix_cp1250_mojibake("Mêskie Granie") == "Mêskie Granie"
+    assert fix_cp1250_mojibake("Mêskie Granie", force=True) == "Męskie Granie"
+    assert fix_cp1250_mojibake("Męskie Granie", force=True) == "Męskie Granie"  # correct Polish stays
+    assert fix_cp1250_mojibake_by_words("Mêskie Granie 2011-1", {"męskie", "granie"}) == "Męskie Granie 2011-1"
+    assert fix_cp1250_mojibake_by_words("Efêmera", {"męskie"}) == "Efêmera"
     for fine in ("España", "¿Dónde estás?", "Crème brûlée", "Hey"):
         assert fix_cp1250_mojibake(fine) == fine
 

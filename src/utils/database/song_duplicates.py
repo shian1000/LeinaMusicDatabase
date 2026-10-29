@@ -9,12 +9,22 @@ of the dropped row is lost (its empty-in-the-kept fields, its extra artists),
 and every reference to its id follows (song_references.record_song_merge()).
 Menu: Manage database -> Resolve duplicates -> "Resolve duplicated songs"
 (utils/ui/song_duplicate_review.py); "Resolve duplicated artists" folds the
-songs whose titles only differ in spelling without asking."""
+songs whose titles only differ in spelling without asking. The same review
+also offers, unticked, one title credited to two main artists that share
+another artist or a link (find_cross_artist_groups()); the kept song's main
+artist stays, the dropped one's isn't carried over."""
 
 import re
 from collections import defaultdict
 
-from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, DUPLICATE_TITLE_EXTRA_JUNK, DUPLICATE_VERSION_WORDS, TITLE_JUNK_SUFFIXES
+from config.constants import (
+    ADDITIONAL_ARTIST_ROLE_FEAT,
+    DUPLICATE_TITLE_EXTRA_JUNK,
+    DUPLICATE_VERSION_WORDS,
+    NO_VIDEO_SENTINEL,
+    SINGLES_ALBUM,
+    TITLE_JUNK_SUFFIXES,
+)
 from utils.common.normalizer import normalize
 from utils.common.text_utils import strip_trailing_feat, strip_trailing_junk_suffix
 from utils.database.datatables import Artist, Song
@@ -153,6 +163,71 @@ def find_duplicate_groups(session, key=duplicate_key) -> list[list]:
         if len(group) > 1:
             kept = song_to_keep(group)
             found.append([kept, *[s for s in group if s is not kept]])
+    return sorted(found, key=lambda g: ((g[0].artist.name or "").lower(), g[0].title.lower()))
+
+
+def _artist_names(song: Song) -> set[str]:
+    """Every artist a song names: its artists and its title's feat. credits."""
+    return {normalize(a.name) for a in song_all_artists(song)} | {normalize(n) for n in feat_credits(song.title)}
+
+
+def _links(song: Song) -> set[str]:
+    video = song.youtube_video_id if song.youtube_video_id != NO_VIDEO_SENTINEL else None
+    return {link for link in (video, song.spotify_url) if link}
+
+
+def _same_recording(a: Song, b: Song) -> bool:
+    """Two songs of the same title are one when they share an artist
+    ("Hasiok x Maciej Maleńczuk" / "Yugopolis x Maciej Maleńczuk") or a link."""
+    return bool(_artist_names(a) & _artist_names(b)) or bool(_links(a) & _links(b))
+
+
+def _cross_artist_song_to_keep(group: list) -> Song:
+    """The song already naming every artist the others name ("Philip Bailey
+    x Phil Collins" over "Phil Collins"), so no credit is lost; else the one
+    on a real album over a "Singles" one (an upload credited to whoever put
+    it up: "Hasiok" vs "Yugopolis" on "The Best Of Yugopolis"); then the one
+    with the most data."""
+    everyone = set().union(*(_artist_names(s) for s in group))
+    complete = [s for s in group if _artist_names(s) >= everyone] or group
+    return max(complete, key=lambda s: (bool(s.album) and s.album != SINGLES_ALBUM, _filled(s), -s.id))
+
+
+def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
+    """Groups of songs with the same duplicate_key and kind but different
+    main artists, joined by a shared artist or link - one song credited to
+    two artist rows, usually one of them wrong; the song to keep first
+    (_cross_artist_song_to_keep()). Never merged without asking: a title
+    alone is too common. `skip_ids`: songs
+    already in a same-artist group."""
+    buckets = defaultdict(list)
+    for song in session.query(Song).order_by(Song.id).all():
+        if song.id not in skip_ids:
+            buckets[(song.kind, duplicate_key(song.title))].append(song)
+    found = []
+    for songs in buckets.values():
+        if len({s.artist_id for s in songs}) < 2:
+            continue
+        # Connected components: A~B and B~C put all three in one group
+        parent = list(range(len(songs)))
+
+        def root(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i in range(len(songs)):
+            for j in range(i + 1, len(songs)):
+                if songs[i].artist_id != songs[j].artist_id and _same_recording(songs[i], songs[j]):
+                    parent[root(j)] = root(i)
+        components = defaultdict(list)
+        for i, song in enumerate(songs):
+            components[root(i)].append(song)
+        for group in components.values():
+            if len(group) > 1:
+                kept = _cross_artist_song_to_keep(group)
+                found.append([kept, *[s for s in group if s is not kept]])
     return sorted(found, key=lambda g: ((g[0].artist.name or "").lower(), g[0].title.lower()))
 
 

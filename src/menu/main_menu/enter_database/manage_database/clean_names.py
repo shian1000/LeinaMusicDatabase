@@ -3,7 +3,9 @@ from utils.database.database_getter import get_songs_from_db_session
 from utils.common.text_utils import is_blacklisted_album
 import questionary
 from utils.ui.prompts import ask_yes_no
-from utils.database.artist_reassignment import credit_unknown_artist_song
+from utils.database.albums import rename_album
+from utils.database.song_artists import song_artist_label
+from utils.database.artist_reassignment import credit_unknown_artist_song, split_title_artists
 from utils.database.database_management import decomposed_names, edit_db_entry
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
@@ -11,7 +13,7 @@ from utils.common.text_utils import copy_to_clipboard, strip_trailing_junk_suffi
 from config.constants import TITLE_JUNK_SUFFIXES
 from utils.database.datatables import Album, Artist, Song
 import re
-from utils.common.normalizer import strip_brackets, strip_format_characters
+from utils.common.normalizer import fix_cp1250_mojibake, fix_cp1250_mojibake_by_words, has_cp1250_mojibake, strip_brackets, strip_format_characters
 from utils.common.script_utils import fix_mixed_script_words
 from utils.ui.artist_change import has_artist_twin, review_held_artist_renames
 
@@ -125,6 +127,61 @@ def convert_characters_encoding(songs, held=None):
         needs_transform=lambda v: "&amp;" in v,
         transform=lambda v: v.replace("&amp;", "&"),
         action_description="Converted",
+        held=held,
+    )
+
+def _known_words(songs) -> set[str]:
+    """Every word of the titles, albums and artist names, casefolded, edge
+    punctuation dropped - what a re-read word must be to count as repaired."""
+    words = set()
+    for song in songs:
+        for _name, get, _set in _CLEANUP_FIELDS:
+            for word in (get(song) or "").split():
+                words.add(re.sub(r"^\W+|\W+$", "", word.casefold()))
+    return words
+
+
+def repair_polish_mojibake(songs, held=None):
+    """Polish names imported before the mp3 import repaired them ("S³oneczna
+    strona miasta" -> "Słoneczna ..."), nothing asked: fix_cp1250_mojibake()
+    only acts on characters real text never has - or on every field of a
+    song one field of which has one (title "¯ycie jest jak tramwaj", album
+    "Mêskie Granie": the whole tag was mis-read). Album rows first, through
+    rename_album(), so a repaired title meeting its correct twin merges with
+    it instead of leaving an empty album row behind."""
+    session, _ = require_global_database_sessions()
+    misread = {song.id for song in songs
+               if any(has_cp1250_mojibake(get(song)) for _name, get, _set in _CLEANUP_FIELDS)}
+    known = _known_words(songs)
+    for album in session.query(Album).all():
+        if any(song.id in misread for song in album.songs):
+            fixed = fix_cp1250_mojibake(album.title, force=True)
+        else:
+            fixed = fix_cp1250_mojibake_by_words(fix_cp1250_mojibake(album.title), known)
+        if fixed != album.title:
+            print(f"Repaired Polish letters in {YELLOW}album: '{fixed}'{RESET}")
+            rename_album(session, album, fixed)
+    # The rest of a mis-read song's own fields; an artist row is shared by
+    # other songs, so only its own sure sign (below) repairs its name
+    for song in songs:
+        if song.id not in misread:
+            continue
+        changed = []
+        for field in ("title", "album"):
+            value = getattr(song, field)
+            fixed = fix_cp1250_mojibake(value, force=True)
+            if fixed != value:
+                setattr(song, field, fixed)
+                changed.append(f"{field}: '{fixed}'")
+        if changed:
+            print(f"Repaired Polish letters in {YELLOW}{', '.join(changed)}{RESET} for "
+                  f"{YELLOW}{song.artist.name} - {song.title}{RESET}")
+    repair = lambda v: fix_cp1250_mojibake_by_words(fix_cp1250_mojibake(v), known)
+    _apply_field_cleanup(
+        songs,
+        needs_transform=lambda v: repair(v) != v,
+        transform=repair,
+        action_description="Repaired Polish letters in",
         held=held,
     )
 
@@ -317,6 +374,20 @@ def resolve_unknown_artist(songs):
         review_header(f"Credited {len(changes)} song(s) of an unknown artist:", *(f"  {change}" for change in changes))
 
 
+def split_artists_from_titles(songs):
+    """Titles written "Artists / Title" by the song's own artists, split
+    (artist_reassignment.split_title_artists()); one summary at the end."""
+    session, _ = require_global_database_sessions()
+    changes = []
+    for song in songs:
+        old_label = f"{song.artist.name} - {song.title}"
+        credited = split_title_artists(session, song)
+        if credited is not None:
+            changes.append(f"song_id {song.id}: '{old_label}' -> {YELLOW}'{song_artist_label(song)}' - '{song.title}'{RESET}")
+    if changes:
+        review_header(f"Took the artists out of {len(changes)} title(s):", *(f"  {change}" for change in changes))
+
+
 def _load_songs():
     """All songs, with their artists loaded in one query. The artist list must
     be kept: the session holds its rows only weakly, so a discarded one is
@@ -337,11 +408,13 @@ def clean_names():
     unchecked = [song for song in songs if song.id not in checked_ids]
     held = {}
     convert_characters_encoding(songs, held)
+    repair_polish_mojibake(songs, held)
     compose_decomposed_letters(held)
     remove_invisible_characters(songs, held)
     strip_leading_spaces(songs, held)
     replace_double_spaces(songs, held)
     resolve_unknown_artist(unchecked)
+    split_artists_from_titles(songs)
     submit_global_database_session()
     # The commit expired every song: reload them all in two queries rather
     # than one per song (~20 s)

@@ -229,7 +229,8 @@ Afterwards: Manage database -> Fetch database data -> "Fill missing data" (album
 All in Enter database -> Manage database:
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names
     differ only in case, apostrophes or look-alike letters, without asking. "Resolve duplicated
-    songs": near duplicates ('feat.', '(Visualiser)') in one list to tick.
+    songs": near duplicates ('feat.', '(Visualiser)') in one list to tick, and - unticked - one
+    title credited to two different artists who share another artist or a link.
   - Merge artists / Divide artists: by hand, when one artist row is really two, or two are one.
   - Split joined artist names: 'A & B' stored as one artist.
   - Find full albums: songs that are a whole album in one recording.
@@ -239,7 +240,8 @@ All in Enter database -> Manage database:
     after their song.
   - Spell check existing data: artist and title spelling against MusicBrainz.
   - Clean names: invisible characters, double spaces, broken encoding, accented letters stored in
-    two parts, look-alike letters, junk like 'Official Video' in titles.
+    two parts, look-alike letters, junk like 'Official Video' in titles, the song's own artists
+    written into its title ('Artist / Title').
 MusicDatabase backs the databases up once a day when it starts (unless switched off in Settings ->
 "Start-up tasks") and always before a database upgrade; Settings -> Server -> "Back up database
 now" takes a snapshot before something big.
