@@ -406,7 +406,12 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 - `wikipedia_fetcher.py` returns a `DiscoveryResult` with only `album` set — no matched title or
   artist. It already requires the query title to appear in the page title (song page) or the
   tracklist text (artist/album page) before accepting a result, so the page title would only echo
-  the query and give the manager no independent check.
+  the query and give the manager no independent check. That makes the tracklist scan its only
+  guard, and it fires on non-song pages: the manager's first query cuts a title at "&" ("Initial
+  D - Night & Day" → "Night"), Wikipedia answers with the franchise page "Initial D", and its
+  "See also" list held "Wangan Midnight" — "See also" came back as the album. So the scan skips
+  `NON_TRACK_HEADINGS` (see also, references, external links, ...) and matches the title as
+  whole words (`_contains_words()`), never as a substring.
 
 ## MusicBrainz: which release becomes the album, and what it can't find
 

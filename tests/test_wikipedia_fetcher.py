@@ -69,3 +69,40 @@ def test_get_album_name_returns_a_discovery_result(monkeypatch):
     result = module.get_album_name("Lykke Li", "Sadness Is a Blessing")
 
     assert result == DiscoveryResult(album="So Sad So Sexy")
+
+
+# A franchise page found for "Initial D - Night" (the title cut at "&"): its
+# "See also" list held "Wangan Midnight", and "See also" came back as the album
+FRANCHISE_PAGE = """
+<html><body>
+<div class="mw-heading mw-heading2"><h2>Initial D Fourth Stage D Selection</h2></div>
+<ul><li>"Night of Fire" - Niko</li><li>"Running in the 90s" - Max Coveri</li></ul>
+<div class="mw-heading mw-heading2"><h2>See also</h2></div>
+<ul><li>Wangan Midnight, another car racing-themed manga</li><li>Night Racer</li></ul>
+</body></html>
+"""
+
+
+def _franchise_soup():
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(FRANCHISE_PAGE, "html.parser")
+
+
+def test_track_listing_skips_the_see_also_section():
+    module = load_wikipedia_fetcher_module()
+
+    album = module._extract_from_track_listing(_franchise_soup(), "Initial D", "Night Racer")
+
+    assert album is None
+
+
+def test_track_listing_matches_the_title_as_whole_words():
+    module = load_wikipedia_fetcher_module()
+    soup = _franchise_soup()
+
+    # A part of a word ("Fir" in "Fire", "Night" in "Midnight") no longer matches
+    assert module._extract_from_track_listing(soup, "Initial D", "Night of Fire") == \
+        "Initial D Fourth Stage D Selection"
+    assert module._extract_from_track_listing(soup, "Initial D", "Fir") is None
+    assert module._contains_words("Wangan Midnight, another manga", "Night") is False
+    assert module._contains_words('"Night & Day" - Initial D', "night & day") is True

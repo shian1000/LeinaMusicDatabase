@@ -34,6 +34,12 @@ GENERIC_HEADINGS = {
     "side a", "side b", "side c", "side d",
     "standard edition", "deluxe edition", "bonus tracks",
 }
+# Sections whose lists are links or citations, never a track listing: on a
+# franchise page "See also" lists "Wangan Midnight", which held "Night"
+NON_TRACK_HEADINGS = {
+    "contents", "see also", "references", "notes", "footnotes", "citations",
+    "sources", "bibliography", "further reading", "external links",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +181,9 @@ def _extract_from_track_listing(
     for heading_text, anchor in _iter_heading_anchors(soup):
         slog(f"Checking heading: {heading_text}")
 
+        if heading_text.lower() in NON_TRACK_HEADINGS:
+            continue
+
         if is_blacklisted_album(heading_text, artist) and heading_text != SINGLES_ALBUM:
             slog("Skipping blacklisted heading")
             continue
@@ -203,7 +212,7 @@ def _find_song_under_heading(
             continue
 
         container_text = container.get_text(separator=" ", strip=True)
-        if title.lower() not in container_text.lower():
+        if not _contains_words(container_text, title):
             slog(f"Container found but song not in it: {container_text[:200]}")
             continue
 
@@ -217,6 +226,13 @@ def _find_song_under_heading(
         return album
 
     return None
+
+
+def _contains_words(text: str, title: str) -> bool:
+    """Whether `title` appears in `text` as whole words: a plain substring
+    check let "Night" match "Wangan Midnight"."""
+    pattern = r"(?<!\w)" + re.escape(title.strip().lower()) + r"(?!\w)"
+    return re.search(pattern, text.lower()) is not None
 
 
 def _find_track_container(sibling):
