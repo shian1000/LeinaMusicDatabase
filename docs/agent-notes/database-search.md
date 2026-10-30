@@ -38,6 +38,15 @@ That logic lives in exactly one place: `database_getter._normalized_python_filte
 candidates, words, get_field)`. Any new fallback-filtering call site in this file
 should call it, not re-inline the word/casefold loop.
 
+The one sanctioned twin is `ArtistPool.matching()` (same rule, fields normalized
+once): the artist fallback loads and normalizes all ~4k artists per call, ~90 ms,
+which made the library index's rematch of a few hundred unmatched files take
+~30 s. A caller doing a read-only pass over many names passes
+`artist_pool=ArtistPool(session)` (`LocalSongMatcher(load_artists_once=True)`;
+only `files_index.scan_library()` so far). It is a snapshot, so it stays off in
+interactive flows (folder playlist, cover import), where an artist added
+mid-run must still be found by the fallback. Change the filter rule in both.
+
 ## "artist name" and "name" searches also match synonyms
 
 An artist stored in its own script ("Океан Ельзи") is only findable by its Latin

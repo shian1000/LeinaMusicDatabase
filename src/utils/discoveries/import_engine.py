@@ -5,7 +5,7 @@ from utils.database.datatables import Song, Artist
 from utils.database.database_sessions import open_and_set_global_database_sessions
 
 from utils.common.debug import slog, mlog
-from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
+from utils.database.database_getter import ArtistPool, get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_trailing_junk_suffix, strip_track_number_prefix, similarity_at_least, strip_trailing_feat
@@ -172,7 +172,7 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
 
     return None
 
-def find_matching_artist(name: str, session=None) -> Artist | None:
+def find_matching_artist(name: str, session=None, artist_pool=None) -> Artist | None:
     """
     Look up whether `name` matches an artist already in the database - exact
     match (case-insensitive) first, falling back to local fuzzy similarity
@@ -184,12 +184,13 @@ def find_matching_artist(name: str, session=None) -> Artist | None:
     swap detection (checking whether a parsed *title* is actually an
     existing artist's name). Looks in `session`, default the global music
     session - pass the one the found artist will be attached to.
+    `artist_pool`: see get_artists_from_db_session().
     """
-    artist, _ = _match_artist_locally(name, session)
+    artist, _ = _match_artist_locally(name, session, artist_pool)
     return artist
 
 
-def _match_artist_locally(name: str, session=None) -> tuple:
+def _match_artist_locally(name: str, session=None, artist_pool=None) -> tuple:
     """Does the exact/fuzzy local lookup for find_matching_artist(), also
     returning whether the broad (pre-similarity-filter) search found any
     candidates at all.
@@ -226,11 +227,13 @@ def _match_artist_locally(name: str, session=None) -> tuple:
         # Punctuation only (")" read from a broken file name): nothing to search by
         return None, False
     key = name_key(name)
-    existing_artists = get_artists_from_db_session(artist_categories[0], search, session=music_session)
+    existing_artists = get_artists_from_db_session(artist_categories[0], search, session=music_session,
+                                                   artist_pool=artist_pool)
     if not existing_artists and search.startswith("the "):
         # The search is substring-based, so "The Caesars" never finds
         # "Caesars": only the same name without its "The" is taken then
-        same = [a for a in get_artists_from_db_session(artist_categories[0], search[4:], session=music_session)
+        same = [a for a in get_artists_from_db_session(artist_categories[0], search[4:], session=music_session,
+                                                       artist_pool=artist_pool)
                 if any(name_key(n) == key for n in known_names(a))]
         return (same[0], True) if same else (None, False)
     if not existing_artists:
@@ -483,10 +486,16 @@ class LocalSongMatcher:
     artist search is substring-based, so a typo in the tag - "Liiquid
     Tension Experiment" - leaves it no candidates at all), the song is
     looked up by title instead, among songs whose artist resembles the
-    tag's."""
+    tag's.
 
-    def __init__(self, session):
+    `load_artists_once`: the artist search's fallback filters an
+    ArtistPool made at the start instead of every artist per name - for a
+    read-only pass over many files (the library index); an artist added
+    meanwhile is then found only by its exact name or the SQL search."""
+
+    def __init__(self, session, load_artists_once: bool = False):
         self.session = session
+        self._artist_pool = ArtistPool(session) if load_artists_once else None
         self._artists = {}
         self._songs = {}
         self._by_title = None
@@ -495,10 +504,10 @@ class LocalSongMatcher:
 
     def _artist(self, name: str) -> Artist | None:
         if name not in self._artists:
-            artist = find_matching_artist(name, self.session)
+            artist = find_matching_artist(name, self.session, self._artist_pool)
             proposal = None if artist else propose_artist_split(name)
             if proposal and proposal.main:
-                artist = find_matching_artist(proposal.main[0], self.session)
+                artist = find_matching_artist(proposal.main[0], self.session, self._artist_pool)
             self._artists[name] = artist
         return self._artists[name]
 

@@ -91,7 +91,8 @@ non-trivial work in that area.
   Server → "Index music library", and once a day at startup after the backup, right before the
   databases are copied for the phone (which downloads `files.db` too). Only new/changed files are
   re-read, and old unmatched ones are rematched only when the catalog fingerprint changes — the
-  shared artist search is slow (~65 ms per lookup). Schema only from `migrations/files/`;
+  shared artist search is slow (~90 ms per lookup), so the scan's matcher loads the artists once
+  (`LocalSongMatcher(load_artists_once=True)` → `database_getter.ArtistPool`). Schema only from `migrations/files/`;
   merges/deletions reach it through `song_references.apply_song_id_changes()`. Details:
   `docs/data-model.md`, `docs/runbooks/database.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;

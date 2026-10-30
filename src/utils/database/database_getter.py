@@ -234,6 +234,23 @@ def _validate_category(category: str, valid_categories: set) -> str | None:
         return None
     return normalized
 
+class ArtistPool:
+    """Every artist, by name, with the text the name search's Python-side
+    fallback filters (name, Latin form, synonyms) normalized once - for a
+    pass looking up hundreds of names, where loading and normalizing ~4k
+    artists per name took ~90 ms each. An artist added or renamed after it
+    was made is missed by that fallback (the SQL search still sees it)."""
+
+    def __init__(self, session):
+        self._artists = [(a, _artist_name_and_synonyms(a).casefold())
+                         for a in session.query(Artist).order_by(Artist.name)]
+
+    def matching(self, words: list[str]) -> list[Artist]:
+        """What _normalized_python_filter() keeps for these words."""
+        normalized_words = [normalize_text(w).casefold() for w in words]
+        return [a for a, field in self._artists if all(w in field for w in normalized_words)]
+
+
 def _normalized_python_filter(candidates: list, words: list[str], get_field) -> list:
     """
     Python-side fallback filter: keep candidates whose normalized field contains
@@ -454,10 +471,12 @@ def get_artists_from_db_session(
     query: str = None,
     aggressive_search: bool = False,
     session=None,
+    artist_pool: "ArtistPool | None" = None,
 ) -> list[Artist]:
     """The artists matching `query` in `category`, by name; every artist
     without a category, none without a query. `session` defaults to the
-    global music session."""
+    global music session. With `artist_pool` the Python-side fallback for
+    names filters it instead of loading and normalizing every artist again."""
 
     slog(category)
     slog(query)
@@ -501,6 +520,8 @@ def get_artists_from_db_session(
         # Python-side normalized filtering — handles Polish and other non-ASCII characters
         slog("Falling back to Python-side normalized filtering")
         get_field = CATEGORY_NORMALIZED_FIELDS[category]
+        if artist_pool is not None and category == artist_categories[0]:
+            return artist_pool.matching(words)
         candidates = db_query.all()
         filtered = _normalized_python_filter(candidates, words, get_field)
         if not filtered:
@@ -518,6 +539,8 @@ def get_artists_from_db_session(
     # Python fallback even for ASCII queries, in case DB-level filtering missed anything
     slog("Falling back to Python-side normalized filtering")
     get_field = CATEGORY_NORMALIZED_FIELDS[category]
+    if artist_pool is not None and category == artist_categories[0]:
+        return artist_pool.matching(words)
     candidates = db_query.all()
     filtered = _normalized_python_filter(candidates, words, get_field)
     if not filtered:

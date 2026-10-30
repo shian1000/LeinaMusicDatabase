@@ -17,9 +17,9 @@ there's no bootstrap):
   files keep artist/title from their tags and are tried again whenever what
   matching reads from music.db (artist names, synonyms, song titles) has
   changed since the last scan, so a song added to the database later picks
-  up its file. Not on every scan: the shared artist search reloads every
-  artist per lookup, so ~700 unmatched files take ~30 s - too long for a
-  startup that found nothing new. A new file, or one whose contents
+  up its file. Not on every scan: even with the artists loaded once per
+  scan (LocalSongMatcher(load_artists_once=True)), ~230 unmatched files
+  take ~8 s - too long for a startup that found nothing new. A new file, or one whose contents
   changed, is always matched. Rows with match_source 'manual' are
   never rematched - a file pinned to its song by hand, link_file_to_song().
 - ids are AUTOINCREMENT, never reused: a file that's moved or renamed is a
@@ -283,7 +283,7 @@ def scan_library(music_session, root: Path = None, db_path: Path = None, progres
                 report.removed += 1
         session.commit()
 
-        matcher = LocalSongMatcher(music_session)
+        matcher = LocalSongMatcher(music_session, load_artists_once=True)
         read_now = set(to_read)
         for row in (session.query(LibraryFile)
                     .filter(LibraryFile.song_id.is_(None), LibraryFile.match_source == FILE_MATCH_AUTO)
