@@ -153,8 +153,12 @@ def repair_polish_mojibake(songs, held=None):
     misread = {song.id for song in songs
                if any(has_cp1250_mojibake(get(song)) for _name, get, _set in _CLEANUP_FIELDS)}
     known = _known_words(songs)
-    for album in session.query(Album).all():
-        if any(song.id in misread for song in album.songs):
+    albums = session.query(Album).all()
+    # From the loaded songs, not album.songs: that's a query per album (~3 s).
+    # Read after the query above, whose autoflush relinks the album ids
+    misread_albums = {song.album_id for song in songs if song.id in misread}
+    for album in albums:
+        if album.id in misread_albums:
             fixed = fix_cp1250_mojibake(album.title, force=True)
         else:
             fixed = fix_cp1250_mojibake_by_words(fix_cp1250_mojibake(album.title), known)
