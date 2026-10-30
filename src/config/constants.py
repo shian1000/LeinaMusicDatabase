@@ -293,6 +293,9 @@ FULL_ALBUM_TITLE_MARKERS = [
 ]
 # Songs the owner said aren't full albums, never offered again by the review
 FULL_ALBUM_IGNORE_FILE = PROJECT_ROOT / "data/full_album_ignore.json"
+# Groups of songs the owner left unticked in "Resolve duplicated songs" and
+# asked to remember: never offered again while no new song joins them
+SONG_DUPLICATE_IGNORE_FILE = PROJECT_ROOT / "data/song_duplicate_ignore.json"
 
 # album_covers (migration 0008)
 ALBUM_COVER_SOURCE_FILE = "file"  # embedded in the user's mp3s (APIC)

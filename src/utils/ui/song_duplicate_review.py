@@ -2,7 +2,8 @@
 near-duplicate songs of each artist (utils/database/song_duplicates.py) in
 one checkbox list, ticked except where the titles name different versions,
 then one title credited to two main artists, unticked; the ticked groups are
-merged into the song with the most data."""
+merged into the song with the most data, and the unticked ones can be
+remembered so they aren't offered again."""
 
 import questionary
 
@@ -14,10 +15,14 @@ from utils.database.song_duplicates import (
     credit_feat_artists,
     find_cross_artist_groups,
     find_duplicate_groups,
+    is_remembered_not_duplicate,
+    load_not_duplicates,
     looks_like_versions,
     merge_songs,
     missing_feat_artists,
+    remember_not_duplicates,
 )
+from utils.ui.prompts import ask_yes_no
 
 
 def _label(group: list) -> str:
@@ -54,11 +59,24 @@ def _ask_feat_credits(groups: list) -> dict | None:
     return credits
 
 
+def _offer_to_remember(unticked: list) -> None:
+    if unticked and ask_yes_no(f"Remember the {len(unticked)} unselected group(s) as different songs, "
+                               "so they aren't proposed again?"):
+        remember_not_duplicates(unticked)
+        print(f"Remembered {len(unticked)} group(s).")
+
+
 def resolve_duplicated_songs() -> None:
     session, _ = open_and_set_global_database_sessions()
     same_artist = find_duplicate_groups(session)
     cross = find_cross_artist_groups(session, skip_ids={s.id for g in same_artist for s in g})
+    remembered = load_not_duplicates()
+    hidden = sum(is_remembered_not_duplicate(g, remembered) for g in same_artist + cross)
+    same_artist = [g for g in same_artist if not is_remembered_not_duplicate(g, remembered)]
+    cross = [g for g in cross if not is_remembered_not_duplicate(g, remembered)]
     groups = same_artist + cross
+    if hidden:
+        print(f"Left out: {hidden} group(s) you said aren't one song.")
     if not groups:
         print("No duplicate songs found.")
         return
@@ -75,8 +93,13 @@ def resolve_duplicated_songs() -> None:
     choices += [questionary.Choice(title=_cross_label(g), value=len(same_artist) + i, checked=False)
                 for i, g in enumerate(cross)]
     picked = questionary.checkbox("Merge which?", choices=choices).ask()
+    if picked is None:
+        print("Nothing merged.")
+        return
+    unticked = [g for i, g in enumerate(groups) if i not in set(picked)]
     if not picked:
         print("Nothing merged.")
+        _offer_to_remember(unticked)
         return
 
     feats = _ask_feat_credits([groups[i] for i in picked])
@@ -101,3 +124,4 @@ def resolve_duplicated_songs() -> None:
     print(f"Merged {sum(len(groups[i]) - 1 for i in picked)} duplicate song(s) in {len(picked)} group(s).")
     if removed:
         print(f"Removed {len(removed)} artist(s) left without songs: {', '.join(a.name for a in removed)}")
+    _offer_to_remember(unticked)

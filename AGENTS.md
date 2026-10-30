@@ -197,6 +197,8 @@ non-trivial work in that area.
   Spotify link ("Hasiok x Maleńczuk" / "Yugopolis x Maleńczuk"); kept is the song naming every
   artist, else the one on a real album over "Singles", else the most data; the dropped song's main
   artist is not carried over, and is removed when left without songs. Never silently merged.
+  The groups left unticked can be remembered on a yes (`data/song_duplicate_ignore.json`, sets of
+  song ids); a group is left out while all its songs were in one remembered group.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
   instead of renaming the shared row, removing an artist left without songs (album rows go to its
   heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.

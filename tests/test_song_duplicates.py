@@ -18,6 +18,7 @@ sys.path.insert(0, str(repo_root / "src"))
 
 from utils.database import song_references as sr
 from utils.database.datatables import Artist, Base, Song, SongIdChange
+from utils.database import song_duplicates as sd
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists
 from utils.database.song_duplicates import (
     clean_title,
@@ -34,6 +35,13 @@ from utils.database.song_duplicates import (
 )
 
 rd = importlib.import_module("menu.main_menu.enter_database.manage_database.resolve_duplicates")
+
+
+@pytest.fixture(autouse=True)
+def ignore_file(tmp_path, monkeypatch):
+    path = tmp_path / "song_duplicate_ignore.json"
+    monkeypatch.setattr(sd, "_IGNORE_PATH", path)
+    return path
 
 
 @pytest.fixture
@@ -153,6 +161,7 @@ def test_review_merges_only_the_ticked_groups(session, monkeypatch, capsys):
         return _Answer([c.value for c in choices if c.checked])
 
     monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    monkeypatch.setattr(review, "ask_yes_no", lambda *a, **k: False)  # don't remember the unticked cover
     from utils.database import database_sessions
     database_sessions.set_global_database_sessions((session, None))  # find_matching_artist() reads it
     try:
@@ -167,6 +176,35 @@ def test_review_merges_only_the_ticked_groups(session, monkeypatch, capsys):
     tamagotchi = session.query(Song).filter(Song.title == "Tamagotchi").one()
     assert [(a.name, additional_artist_role(tamagotchi, a)) for a in additional_artists(tamagotchi)] == [
         ("Dawid Podsiadło", "feat")]
+
+
+def test_review_remembers_the_unticked_groups_until_a_new_song_joins(session, monkeypatch, capsys):
+    from utils.ui import song_duplicate_review as review
+
+    tac = Artist(name="TACONAFIDE")
+    session.add_all([Song(title="Tamagotchi", artist=tac), Song(title="Tamagotchi (Visualiser)", artist=tac)])
+    session.commit()
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review, "submit_global_database_session", session.commit)
+    offered = []
+
+    def checkbox(message, choices):
+        offered.append(len(choices))
+        return _Answer([])
+
+    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    asked = []
+    monkeypatch.setattr(review, "ask_yes_no", lambda question: asked.append(question) or True)
+    review.resolve_duplicated_songs()
+    assert offered == [1] and len(asked) == 1 and "Remember the 1 unselected group(s)" in asked[0]
+
+    review.resolve_duplicated_songs()  # remembered: not offered again
+    assert offered == [1] and "Left out: 1 group(s)" in capsys.readouterr().out
+
+    session.add(Song(title="Tamagotchi feat. Dawid Podsiadło", artist=tac))
+    session.commit()
+    review.resolve_duplicated_songs()  # a new song in the group: asked again
+    assert offered == [1, 1]
 
 
 def test_one_title_of_two_main_artists_sharing_an_artist_or_a_link(session):

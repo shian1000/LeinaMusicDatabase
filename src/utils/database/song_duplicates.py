@@ -12,8 +12,11 @@ Menu: Manage database -> Resolve duplicates -> "Resolve duplicated songs"
 songs whose titles only differ in spelling without asking. The same review
 also offers, unticked, one title credited to two main artists that share
 another artist or a link (find_cross_artist_groups()); the kept song's main
-artist stays, the dropped one's isn't carried over."""
+artist stays, the dropped one's isn't carried over. Groups the owner left
+unticked there can be remembered (data/song_duplicate_ignore.json) and aren't
+offered again until another song joins them."""
 
+import json
 import re
 from collections import defaultdict
 
@@ -23,6 +26,7 @@ from config.constants import (
     DUPLICATE_VERSION_WORDS,
     NO_VIDEO_SENTINEL,
     SINGLES_ALBUM,
+    SONG_DUPLICATE_IGNORE_FILE,
     TITLE_JUNK_SUFFIXES,
 )
 from utils.common.normalizer import normalize
@@ -37,6 +41,7 @@ from utils.database.song_references import record_song_merge
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
                   "track_number", "disc_number")
+_IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
 _BRACKET_RE = re.compile(r"\s*[(\[]([^)\]]*)[)\]]")
 _FEAT_WORD_RE = re.compile(r"^\s*(?:feat\.?|ft\.?|featuring|with)\s", re.IGNORECASE)
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
@@ -229,6 +234,28 @@ def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
                 kept = _cross_artist_song_to_keep(group)
                 found.append([kept, *[s for s in group if s is not kept]])
     return sorted(found, key=lambda g: ((g[0].artist.name or "").lower(), g[0].title.lower()))
+
+
+def load_not_duplicates() -> list[frozenset[int]]:
+    """The groups of song ids the owner said aren't one song."""
+    try:
+        return [frozenset(ids) for ids in json.loads(_IGNORE_PATH.read_text(encoding="utf-8"))]
+    except (FileNotFoundError, ValueError, TypeError):
+        return []
+
+
+def remember_not_duplicates(groups: list) -> None:
+    """Remember these groups (lists of Song) as different songs."""
+    known = set(load_not_duplicates()) | {frozenset(s.id for s in g) for g in groups}
+    _IGNORE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _IGNORE_PATH.write_text(json.dumps(sorted(sorted(ids) for ids in known)), encoding="utf-8")
+
+
+def is_remembered_not_duplicate(group: list, remembered: list) -> bool:
+    """Whether every song of `group` was in one remembered group - a group a
+    new song joined (or a merge changed) is asked about again."""
+    ids = {s.id for s in group}
+    return any(ids <= known for known in remembered)
 
 
 def merge_songs(session, kept: Song, dropped: Song) -> None:
