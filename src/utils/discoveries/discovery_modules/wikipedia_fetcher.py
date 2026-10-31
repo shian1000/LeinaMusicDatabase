@@ -6,6 +6,7 @@ import time
 from bs4 import BeautifulSoup, GuessedAtParserWarning
 
 from utils.common.debug import flog, slog
+from utils.common.normalizer import normalize
 from utils.common.text_utils import is_blacklisted_album, title_resembles
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import MUSICBRAINZ_API_USER_AGENT, SINGLES_ALBUM
@@ -34,6 +35,8 @@ GENERIC_HEADINGS = {
     "side a", "side b", "side c", "side d",
     "standard edition", "deluxe edition", "bonus tracks",
 }
+# Between the names of a song's joint credit in an infobox
+CREDIT_SEPARATORS = re.compile(r",\s*|\s+(?:and|&|featuring|feat\.|with)\s+", re.IGNORECASE)
 # Sections whose lists are links or citations, never a track listing: on a
 # franchise page "See also" lists "Wangan Midnight", which held "Night"
 NON_TRACK_HEADINGS = {
@@ -49,9 +52,11 @@ NON_TRACK_HEADINGS = {
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     """Search Wikipedia for a song and return the album name, or None.
 
-    matched_title / matched_artist stay None: the page is found by the query
-    itself (a song page only when its title resembles the queried title,
-    else an artist/album page), so there's no independent match to report."""
+    On a song page matched_artist is its infobox's "Single by X", so the
+    manager can turn down another artist's song of a resembling title
+    ("TwoForty - Love Affair" found Alicia Keys' "Teenage Love Affair").
+    matched_title stays None: the page is picked by its title resembling the
+    queried one, so there's no independent title match to report."""
     page = _fetch_wikipedia_page(artist, title)
     if not page:
         return None
@@ -62,8 +67,10 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
 
     # The song's own page ("Low (Cracker song)"), not an artist or album page
     # that merely contains a short title ("Low" in "Lower Than Atlantis")
+    matched_artist = None
     if title_resembles(title, page.title):
         album = _extract_from_infobox(soup, title)
+        matched_artist = _infobox_artist(soup, artist)
     else:
         album = _extract_from_track_listing(soup, page.title, title, artist)
 
@@ -72,7 +79,9 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
         return None
 
     album = clean_album_title(album, artist)
-    return None if is_blacklisted_album(album, artist) else DiscoveryResult(album=album)
+    if is_blacklisted_album(album, artist):
+        return None
+    return DiscoveryResult(album=album, matched_artist=matched_artist)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +181,26 @@ def _extract_from_infobox(soup: BeautifulSoup, title: str) -> str | None:
     album = match.group(1).strip(STRIP_CHARS)
     slog(f"Infobox album (fallback): {album}")
     return album or None
+
+
+def _infobox_artist(soup: BeautifulSoup, artist: str) -> str | None:
+    """The artist a song page's infobox credits ("Single by Alicia Keys"), or
+    None when it names none. Of a joint credit ("Queen and David Bowie") the
+    name equal to the queried artist, which the manager's artist check would
+    otherwise turn down: it doesn't split names at "and"."""
+    infobox = soup.find("table", class_=re.compile(r"\binfobox\b"))
+    if not infobox:
+        return None
+    for th in infobox.find_all("th", class_="infobox-header"):
+        match = re.search(r"\bby\s+(.+)$", th.get_text(separator=" ", strip=True).replace("\xa0", " "))
+        if not match:
+            continue
+        credit = match.group(1).strip()
+        for name in CREDIT_SEPARATORS.split(credit):
+            if normalize(name) and normalize(name) == normalize(artist):
+                return name
+        return credit or None
+    return None
 
 
 def _extract_from_track_listing(

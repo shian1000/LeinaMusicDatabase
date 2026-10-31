@@ -65,10 +65,11 @@ def test_get_album_name_returns_a_discovery_result(monkeypatch):
     monkeypatch.setattr(module, "_fetch_wikipedia_page", lambda artist, title: page)
     monkeypatch.setattr(module, "_fetch_soup", lambda url: object())
     monkeypatch.setattr(module, "_extract_from_infobox", lambda soup, title: "So Sad So Sexy (Lykke Li album)")
+    monkeypatch.setattr(module, "_infobox_artist", lambda soup, artist: "Lykke Li")
 
     result = module.get_album_name("Lykke Li", "Sadness Is a Blessing")
 
-    assert result == DiscoveryResult(album="So Sad So Sexy")
+    assert result == DiscoveryResult(album="So Sad So Sexy", matched_artist="Lykke Li")
 
 
 # A franchise page found for "Initial D - Night" (the title cut at "&"): its
@@ -106,3 +107,42 @@ def test_track_listing_matches_the_title_as_whole_words():
     assert module._extract_from_track_listing(soup, "Initial D", "Fir") is None
     assert module._contains_words("Wangan Midnight, another manga", "Night") is False
     assert module._contains_words('"Night & Day" - Initial D', "night & day") is True
+
+
+def _song_page_soup(credit: str):
+    from bs4 import BeautifulSoup
+    return BeautifulSoup(f"""
+<html><body><table class="infobox vevent">
+<tr><th class="infobox-above summary">"Song"</th></tr>
+<tr><th class="infobox-header description">Single by {credit}</th></tr>
+<tr><th class="infobox-header description">from the album <a href="/wiki/x">As I Am</a></th></tr>
+</table></body></html>
+""", "html.parser")
+
+
+def test_another_artists_song_page_is_turned_down(monkeypatch):
+    # "TwoForty - Love Affair" found Alicia Keys' "Teenage Love Affair" (the
+    # titles resemble each other) and took its album "As I Am"
+    from types import SimpleNamespace
+    from utils.discoveries.discoveries_manager import _validate_result
+
+    module = load_wikipedia_fetcher_module()
+    page = SimpleNamespace(title="Teenage Love Affair", url="https://en.wikipedia.org/wiki/x")
+    monkeypatch.setattr(module, "_fetch_wikipedia_page", lambda artist, title: page)
+    monkeypatch.setattr(module, "_fetch_soup", lambda url: _song_page_soup("Alicia Keys"))
+
+    result = module.get_album_name("TwoForty", "Love Affair")
+
+    assert result.matched_artist == "Alicia Keys"
+    assert _validate_result(result, "TwoForty", "Love Affair", "Wikipedia") is None
+
+
+def test_infobox_artist_picks_the_queried_name_of_a_joint_credit():
+    module = load_wikipedia_fetcher_module()
+
+    assert module._infobox_artist(_song_page_soup("Queen and David Bowie"), "David Bowie") == "David Bowie"
+    assert module._infobox_artist(
+        _song_page_soup("Daft Punk featuring Pharrell Williams and Nile Rodgers"), "Pharrell Williams"
+    ) == "Pharrell Williams"
+    # No name equal to the query: the whole credit, for the manager to judge
+    assert module._infobox_artist(_song_page_soup("Alicia Keys"), "TwoForty") == "Alicia Keys"

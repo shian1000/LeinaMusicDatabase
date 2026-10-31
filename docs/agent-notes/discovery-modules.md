@@ -403,11 +403,15 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
   row if the track page's markup doesn't have them.
 - `youtube_fetcher.py` — reports the title/artist scraped straight from the matched row in the
   filtered "Songs" search results (no separate track page to visit; see below).
-- `wikipedia_fetcher.py` returns a `DiscoveryResult` with only `album` set — no matched title or
-  artist. It already requires the query title to appear in the page title (song page) or the
-  tracklist text (artist/album page) before accepting a result, so the page title would only echo
-  the query and give the manager no independent check. That makes the tracklist scan its only
-  guard, and it fires on non-song pages: the manager's first query cuts a title at "&" ("Initial
+- `wikipedia_fetcher.py` never reports a matched title: the page is picked because its title
+  resembles the query (song page) or the tracklist text holds it (artist/album page), so the page
+  title would only echo the query. On a song page it does report `matched_artist`, the infobox's
+  "Single by X" (`_infobox_artist()`): `title_resembles()` takes "Teenage Love Affair" for
+  "Love Affair", so the search for TwoForty's song landed on Alicia Keys' page and filed it under
+  "As I Am" until the manager could check the artist. Of a joint credit ("Queen and David Bowie")
+  the fetcher reports the name equal to the query, since `_matched_artist_resembles()` doesn't
+  split at "and". Artist/album pages still report no artist, so there the tracklist scan is the
+  only guard, and it fires on non-song pages: the manager's first query cuts a title at "&" ("Initial
   D - Night & Day" → "Night"), Wikipedia answers with the franchise page "Initial D", and its
   "See also" list held "Wangan Midnight" — "See also" came back as the album. So the scan skips
   `NON_TRACK_HEADINGS` (see also, references, external links, ...) and matches the title as
