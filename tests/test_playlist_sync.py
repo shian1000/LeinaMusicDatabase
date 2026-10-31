@@ -296,11 +296,23 @@ def _shared_music_db(path: Path, song_ids, changes):
 def test_song_ids_follow_merges_and_deletions(tmp_path):
     music = tmp_path / "music.db"
     # 2 merged into 3, 3 merged into 4 (a chain), 5 deleted
-    _shared_music_db(music, [1, 4], [(1, 2, 3), (2, 3, 4), (3, 5, None)])
-    tracks = [{"song_id": s, "title": f"t{s}"} for s in (1, 2, 3, 5, 99, None)]
+    # 7 never existed (below the copy's 8)
+    _shared_music_db(music, [1, 4, 8], [(1, 2, 3), (2, 3, 4), (3, 5, None)])
+    tracks = [{"song_id": s, "title": f"t{s}"} for s in (1, 2, 3, 5, 7, None)]
     assert ps.resolve_song_ids(tracks, music) == 3
     assert [t["song_id"] for t in tracks] == [1, 4, 4, None, None, None]
-    assert [t["title"] for t in tracks] == ["t1", "t2", "t3", "t5", "t99", "tNone"]
+    assert [t["title"] for t in tracks] == ["t1", "t2", "t3", "t5", "t7", "tNone"]
+
+
+def test_song_added_after_the_copy_was_shared_keeps_its_id(tmp_path):
+    # A folder playlist's new song (5819 on 2026-10-16) came back from the phone
+    # before the next share and lost its song: ids above every id the copy knows
+    # (its songs and both sides of its log) are newer songs
+    music = tmp_path / "music.db"
+    _shared_music_db(music, [1, 4], [(1, 2, 3), (2, 3, 4), (3, 9, None)])
+    tracks = [{"song_id": s, "title": f"t{s}"} for s in (7, 9, 10, 5819)]
+    ps.resolve_song_ids(tracks, music)
+    assert [t["song_id"] for t in tracks] == [None, None, 10, 5819]
 
 
 def test_song_ids_resolve_from_a_folder_with_uri_characters(tmp_path):

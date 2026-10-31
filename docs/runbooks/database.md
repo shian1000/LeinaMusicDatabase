@@ -457,9 +457,14 @@ because the server and the app's own writes (`user_playlists.py`) both use it.
   [`docs/handoffs/added-tracks-for-musicdatabaseapp.md`](../handoffs/added-tracks-for-musicdatabaseapp.md).
 - **Song ids** from a phone's older `music.db` are run through `song_id_changes` of the *shared
   copy* in `--dir` before they're stored (merged → kept song, chains followed, deleted → NULL; an
-  id that's neither a song nor in the log → NULL). That copy can be a day behind, so the playlist
-  keeps `song_ids_checked_to` = the last log entry checked, and the next `apply_song_id_changes()`
-  replays the entries between that and the file's cursor for that playlist only.
+  id that's neither a song nor in the log → NULL, unless it's above every id the copy knows). That
+  copy can be a day behind, so the playlist keeps `song_ids_checked_to` = the last log entry
+  checked, and the next `apply_song_id_changes()` replays the entries between that and the file's
+  cursor for that playlist only. The "above every id" exception is a song added after the copy was
+  shared: a folder playlist's new song, sent back by a phone before the next share, used to lose
+  its id that way (2026-10-16, 333 tracks in 11 playlists, restored from the backups). It relies
+  on new songs being numbered above every id songs or the log ever held (`song_references.py`):
+  change that numbering and this check has to change with it. Moods use the same function.
 - **Deleting** (phone or Users → "Show playlists" → "Delete playlist") keeps the row as a marker
   without tracks, so every phone hears about it. Before the tracks go, the whole playlist is written
   to `Users/<name>/archive/playlists/<uid>.<YYMMDD-HHMM>.json` (the deletion time; `_2`, `_3` …

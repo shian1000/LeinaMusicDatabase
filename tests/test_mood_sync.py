@@ -195,8 +195,8 @@ def test_song_ids_resolved_against_the_shared_music_db(tmp_path):
     music.executemany("INSERT INTO song_id_changes VALUES (?, ?, ?)", [(1, 2, 3), (2, 3, 4), (3, 5, None)])
     music.commit()
     music.close()
-    # 2 -> 3 -> 4 (a chain), 5 deleted, 6 kept, 77 never existed
-    assert ms.resolve_song_ids([2, 5, 6, 77, 4], tmp_path / "music.db") == ([4, 6], 3)
+    # 2 -> 3 -> 4 (a chain), 5 deleted, 6 kept, 1 never existed, 77 newer than the copy
+    assert ms.resolve_song_ids([2, 5, 6, 1, 77, 4], tmp_path / "music.db") == ([4, 6, 77], 3)
 
 
 # --------------------

@@ -307,9 +307,15 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
     (the shared copy the phone downloads): a merged song becomes the song it
     was merged into (following chains), a deleted one NULL - the title/artist
     stay. An id neither in songs nor in the log is dropped too (no phone got
-    it from a music.db). Changes `tracks` in place. Returns the last log entry
-    checked against, for playlists.song_ids_checked_to - 0 when the copy
-    can't be read, so the app replays the whole log for this playlist."""
+    it from a music.db) - unless it's above every id the copy knows: new
+    songs are numbered above every id songs or the log ever held
+    (song_references.py), so that's a song added after the copy was shared
+    (a folder playlist's new song, sent back by a phone before the next
+    share - it used to lose its song). Should it be deleted later, the
+    replay from song_ids_checked_to catches it. Changes `tracks` in place.
+    Returns the last log entry checked against, for
+    playlists.song_ids_checked_to - 0 when the copy can't be read, so the
+    app replays the whole log for this playlist."""
     try:
         # as_uri() escapes "?", "#" and "%" in the folder names
         conn = sqlite3.connect(f"{Path(music_db_path).absolute().as_uri()}?mode=ro", uri=True,
@@ -324,6 +330,8 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
             placeholders = ",".join("?" * len(wanted))
             existing = {r[0] for r in conn.execute(f"SELECT id FROM songs WHERE id IN ({placeholders})",
                                                    tuple(wanted))}
+        highest_known = max(conn.execute("SELECT MAX(id) FROM songs").fetchone()[0] or 0,
+                            max((max(old, new or 0) for _, old, new in changes), default=0))
     except sqlite3.Error:
         return 0
     finally:
@@ -333,10 +341,11 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
     for track in tracks:
         song_id = track["song_id"]
         # A merge target from the log is trusted; an id the phone sent that
-        # is neither a song nor in the log never came from a music.db
+        # is neither a song nor in the log never came from a music.db, unless
+        # it's newer than this copy
         if song_id in moved:
             song_id = follow_song_id_changes(song_id, moved)
-        elif song_id not in existing:
+        elif song_id not in existing and (song_id is None or song_id <= highest_known):
             song_id = None
         track["song_id"] = song_id
     return changes[-1][0] if changes else 0

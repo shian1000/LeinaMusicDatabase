@@ -1427,7 +1427,7 @@ def test_global_mood_changes_are_checked(mood_server, tmp_path):
     assert _call("PUT", f"{base}/global-moods/2/songs/4", token) == (404, {"error": "mood", "mood_id": 2})
     assert _call("PUT", f"{base}/global-moods/9/songs/4", token)[0] == 404
     assert _call("PUT", f"{base}/global-moods/1/songs/5", token) == (404, {"error": "song", "song_id": 5})
-    assert _call("PUT", f"{base}/global-moods/1/songs/77", token)[0] == 404
+    assert _call("PUT", f"{base}/global-moods/1/songs/3", token)[0] == 404  # never a song
     assert _call("PUT", f"{base}/global-moods/x/songs/4", token)[0] == 400
     assert _call("PUT", f"{base}/global-moods/1/songs/0", token)[0] == 400
     assert _call("GET", f"{base}/global-moods/1/songs/4", token)[0] == 405
