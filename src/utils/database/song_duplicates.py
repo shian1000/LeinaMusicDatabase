@@ -21,6 +21,7 @@ import re
 from collections import defaultdict
 
 from config.constants import (
+    ADDITIONAL_VIDEO_SONG_MERGE,
     ADDITIONAL_ARTIST_ROLE_FEAT,
     DUPLICATE_TITLE_EXTRA_JUNK,
     DUPLICATE_VERSION_WORDS,
@@ -31,6 +32,7 @@ from config.constants import (
 )
 from utils.common.normalizer import normalize
 from utils.common.text_utils import strip_trailing_feat, strip_trailing_junk_suffix
+from utils.database.additional_videos import add_additional_video
 from utils.database.datatables import Artist, Song
 from utils.database.genres import keep_genre_on_merge
 from utils.database.latin_names import keep_latin_on_merge
@@ -261,7 +263,8 @@ def is_remembered_not_duplicate(group: list, remembered: list) -> bool:
 def merge_songs(session, kept: Song, dropped: Song) -> None:
     """Fold `dropped` into `kept` (whose title loses junk-only brackets,
     clean_title()): its fields the kept song lacks, its Latin
-    form and genre, its extra artists; references to its id move to `kept`
+    form and genre, its extra artists, its link as an additional video when the kept song
+    has another one; references to its id move to `kept`
     (tags, playlists, library files, once the caller commits and runs
     song_references.apply_song_id_changes())."""
     kept.title = clean_title(kept.title)
@@ -270,6 +273,10 @@ def merge_songs(session, kept: Song, dropped: Song) -> None:
             setattr(kept, field, getattr(dropped, field))
     keep_latin_on_merge(kept, dropped)
     keep_genre_on_merge(kept, dropped)
+    # Its own link still names this recording: kept for recognising the video
+    if dropped.youtube_video_id and dropped.youtube_video_id != kept.youtube_video_id:
+        video_id, dropped.youtube_video_id = dropped.youtube_video_id, None
+        add_additional_video(session, kept, video_id, ADDITIONAL_VIDEO_SONG_MERGE)
     for artist in additional_artists(dropped):
         try:
             add_additional_artist(kept, artist, additional_artist_role(dropped, artist))

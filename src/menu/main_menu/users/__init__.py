@@ -13,7 +13,7 @@ from utils.common.debug import slog
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.song_references import apply_song_id_changes
 from utils.database.user_playlists import (PlaylistChangedError, delete_playlist, list_playlists, playlist_songs,
-                                           save_playlist)
+                                           playlist_videos, save_playlist)
 from utils.database.users import (
     InvalidUserError,
     UsersUnavailableError,
@@ -38,6 +38,7 @@ from utils.discoveries.folder_youtube_playlist import (
     rank_entries_for,
     search_entries,
     set_tracks,
+    video_links,
     youtube_entries,
     youtube_only_track,
 )
@@ -54,6 +55,7 @@ from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.file_batch import apply_to_files, report_failures
 from utils.ui.menu_utils import clear_screen, execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 from utils.ui.user_picker import pick_user, show_error, usernames_or_explain
+from utils.ui.video_link_review import review_video_links
 from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
 
 
@@ -348,9 +350,10 @@ def _create_playlist_from_folder(username: str) -> None:
     _finish_folder_playlist(music_session, username, name, folder, playlist)
 
 
-def _finish_folder_playlist(music_session, username: str, name: str, folder: Path, playlist) -> None:
+def _finish_folder_playlist(music_session, username: str, name: str, folder: Path, playlist) -> bool:
     """The files (and videos) without a song in the database, then saving
-    the playlist and offering to fix the files' names and tags."""
+    the playlist and offering to fix the files' names and tags. True when
+    saved."""
     if playlist.auto_accepted:
         print(f"\n{len(playlist.auto_accepted)} file(s) matched automatically though the artist is spelt differently:")
         for track, tag_artist in playlist.auto_accepted:
@@ -372,10 +375,10 @@ def _finish_folder_playlist(music_session, username: str, name: str, folder: Pat
         if playlist.unmatched:
             # Stopped before every file was decided on
             print(f"\n{len(playlist.unmatched)} file(s) not decided on - playlist not saved.")
-            return
+            return False
     if not playlist.tracks:
         print("Every file was left out - playlist not saved.")
-        return
+        return False
 
     playlist_id = save_playlist(username, name, playlist.tracks,
                                 source=USER_PLAYLIST_SOURCE_FOLDER, source_id=str(folder))
@@ -385,6 +388,7 @@ def _finish_folder_playlist(music_session, username: str, name: str, folder: Pat
     files = [t for t in playlist.tracks if t.file is not None]
     _offer_file_fix(music_session, [t for t in files if t.picked])
     _offer_tag_update(music_session, [t for t in files if t.song_id is not None and not t.picked])
+    return True
 
 
 # Choices when pairing the folder with a YouTube playlist
@@ -473,7 +477,8 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     """Like "Create playlist from folder", with every file paired with a
     video of a YouTube playlist holding the same songs, whose link the track
     takes. The playlist follows the YouTube playlist's order; files without
-    a video come after it, in folder order."""
+    a video come after it, in folder order. Once saved, the videos are
+    offered to their songs (utils/ui/video_link_review.py)."""
     folder = open_file_browser_terminal(settings.export_dir)
     if not folder:
         return
@@ -520,8 +525,11 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
         if result is None:
             print("Playlist not saved.")
             return
+        by_hand = {id(t) for t, _ in result[0]}
         pairs += result[0]
         left_out = result[1]
+    else:
+        by_hand = set()
     paired_entries = {id(e) for _, e in pairs}
     unpaired_entries = [e for e in entries if id(e) not in paired_entries]
     added = []
@@ -533,7 +541,7 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
             return
 
     for track, entry in pairs:
-        link_track(track, entry, matcher)
+        link_track(track, entry, matcher, by_hand=id(track) in by_hand)
     by_entry = {id(e): t for t, e in pairs}
     by_entry.update({id(e): youtube_only_track(playlist, matcher, e, min_similarity, min_score, sure_score) for e in added})
     linked = {id(t) for t in by_entry.values()}
@@ -546,7 +554,8 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     without_link = sum(1 for t in playlist.tracks if t.youtube_link is None)
     print(f"\n{len(playlist.tracks)} track(s), {len(playlist.tracks) - without_link} with a link from the YouTube playlist."
           + (f" {len(added)} of them without a file." if added else ""))
-    _finish_folder_playlist(music_session, username, name, folder, playlist)
+    if _finish_folder_playlist(music_session, username, name, folder, playlist):
+        review_video_links(music_session, video_links(playlist.tracks))
 
 
 _BACK = "Back"
@@ -581,10 +590,23 @@ def _delete_playlist(username: str, playlist_id: int, name: str) -> str | None:
     return _BACK
 
 
+def _save_playlist_videos(username: str, playlist_id: int) -> None:
+    """The tracks' videos offered to their songs, as after "Create playlist
+    from folder and compare with YT playlist" - for a playlist saved before
+    that was offered. Nobody knows any more how surely each was paired, so
+    none is ticked."""
+    music_session, _ = open_and_set_global_database_sessions()
+    pairs = [(song_id, video_id, False) for song_id, video_id in playlist_videos(username, playlist_id)]
+    if not review_video_links(music_session, pairs, "None ticked: how surely each was paired isn't known "
+                              "any more - tick the right ones (a ticks all)."):
+        print("Every video of this playlist is already its song's.")
+
+
 def _playlist_menu(username: str, playlist_id: int, name: str) -> None:
     action_map = {
         "Show playlist contents": lambda: _show_playlist(username, playlist_id, display_songs),
         "Show playlist links": lambda: _show_playlist(username, playlist_id, display_song_links),
+        "Save its YouTube videos on the songs": lambda: _save_playlist_videos(username, playlist_id),
         "Delete playlist": lambda: _delete_playlist(username, playlist_id, name),
     }
     execute_menu_item(f"Playlist: {name}", action_map, exit_label=_BACK)

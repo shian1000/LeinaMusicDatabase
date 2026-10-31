@@ -129,6 +129,15 @@ BAD_VIDEO_REASONS = {
     BAD_VIDEO_NO_VIDEO_FOR_SONG: 'the owner chose "N/A" (no video) for this song',
 }
 
+# What put a video in music.db's additional_youtube_videos (migration 0018).
+# Published with it; the phone client only needs the video and song.
+ADDITIONAL_VIDEO_FOLDER_PLAYLIST = "folder_playlist"  # paired with a file of a song that had a link
+ADDITIONAL_VIDEO_SONG_MERGE = "song_merge"  # the link of a song merged into this one
+ADDITIONAL_VIDEO_SOURCES = {
+    ADDITIONAL_VIDEO_FOLDER_PLAYLIST: "paired with a file in a playlist compared with YouTube",
+    ADDITIONAL_VIDEO_SONG_MERGE: "the link of a duplicate merged into this song",
+}
+
 # `Song.youtube_video_id` value meaning "confirmed: this song has no video on
 # YouTube at all" — distinct from the field being empty/unset (never checked)
 # and from a real video_id (found, possibly stale), as opposed to the

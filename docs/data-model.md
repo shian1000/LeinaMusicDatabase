@@ -56,7 +56,25 @@ YoutubeVideoDuration  (table youtube_video_durations, migration 0017)
 video_id      PK, a YouTube video id (joined on songs.youtube_video_id)
 duration_s    NOT NULL, > 0
 fetched_at    NOT NULL, default datetime('now')
+
+AdditionalYoutubeVideo  (table additional_youtube_videos, migration 0018)
+--------------------
+video_id      PK, a YouTube video id - one song's only
+song_id       NOT NULL, a current songs.id (trigger on song_id_changes)
+source        NOT NULL, constants.ADDITIONAL_VIDEO_SOURCES
+added_at      NOT NULL, default datetime('now')
 ```
+
+- `additional_youtube_videos` — a song's YouTube videos other than its own link, only for telling
+  which song a video is (Leina Radio looks a played video up here after `songs.youtube_video_id`,
+  which wins; handoff [`handoffs/additional-videos-for-musicdatabaseapp.md`](handoffs/additional-videos-for-musicdatabaseapp.md)). Never played or
+  searched for. `utils/database/additional_videos.py`. Filled after "Create playlist from folder and
+  compare with YT playlist" is saved (one checkbox list: a song without a link gets the paired video
+  as its own, a song with one - or marked "N/A" - gets it as additional; certain pairings ticked,
+  ones by resembling names not; a video another song has or found bad is left out), by a playlist's
+  "Save its YouTube videos on the songs", and by `merge_songs()` (the dropped song's link). A
+  trigger keeps `song_id` current like `bad_youtube_videos`'; `mark_bad_videos()` for a song drops
+  its row. The inbox treats a requested video listed here as the song in the database.
 
 - `youtube_video_durations` — how long a YouTube video is, as the Data API said once (a video's
   length never changes): `utils/database/video_durations.py`, filled by "Find full albums" for the

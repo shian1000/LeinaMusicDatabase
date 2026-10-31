@@ -861,10 +861,23 @@ def test_folder_compared_with_youtube_playlist(users_env, tmp_path, music_sessio
         raise AssertionError(message)
 
     menu = _yt_compare_env(tmp_path, music_session, monkeypatch, tags, items, select)
+    offered = []
+
+    def checkbox(message, choices):
+        offered.extend(("".join(text for _, text in c.title), c.checked) for c in choices)
+        return _Answer([c.value for c in choices])  # every one ticked
+
+    monkeypatch.setattr(menu.questionary, "checkbox", checkbox)
+    monkeypatch.setattr("utils.ui.video_link_review.submit_global_database_session", music_session.commit)
     menu._create_playlist_from_folder_and_youtube("ania")
 
     karma, teksanski, pay = (music_session.query(Song).filter(Song.title == t).one().id
                              for t in ("Karma", "Teksański", "Pay Your Respect"))
+    # Then the videos offered to their songs (Karma's is its own already),
+    # ticked: file and video are the same song
+    assert offered == [("Hey - Teksański  (its own link: https://youtu.be/ytB)", True),
+                       ("Afina - Pay Your Respect  (its own link: https://youtu.be/ytAfina)", True)]
+    assert [music_session.get(Song, i).youtube_video_id for i in (karma, teksanski, pay)] == ["vid1", "ytB", "ytAfina"]
     # The YouTube playlist's order, the file without a video last; the
     # video without a file matched to the database like a file
     assert _saved_tracks("ania") == [

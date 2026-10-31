@@ -75,6 +75,7 @@ from config.constants import (
 )
 from utils.common.debug import mlog
 from utils.common.normalizer import name_key, normalize
+from utils.database.additional_videos import song_for_video
 from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.inbox_requests import (
@@ -455,7 +456,7 @@ def _song_count(session, artist) -> int:
 
 def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
     for video_id in case.youtube_video_ids:
-        song = session.query(Song).filter(Song.youtube_video_id == video_id).first()
+        song = song_for_video(session, video_id)
         if song is not None:
             return song
     metadata = case.metadata()

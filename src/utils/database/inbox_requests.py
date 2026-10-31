@@ -80,6 +80,7 @@ from config.constants import (
 from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
+from utils.database.additional_videos import drop_additional_videos
 from utils.database.datatables import BadYoutubeVideo, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
@@ -713,7 +714,8 @@ def load_bad_videos(session) -> BadVideos:
 
 def mark_bad_videos(session, video_ids, reason: str, song_id: int | None = None) -> int:
     """Remember these videos as bad (a BAD_VIDEO_REASONS code): for every
-    song, or with `song_id` only for that song. A row already there stays.
+    song, or with `song_id` only for that song (then it stops being that
+    song's additional video too). A row already there stays.
     The caller commits. Returns how many were added."""
     video_ids = [v for v in dict.fromkeys(video_ids) if v and v != NO_VIDEO_SENTINEL]
     if not video_ids:
@@ -723,6 +725,8 @@ def mark_bad_videos(session, video_ids, reason: str, song_id: int | None = None)
                          else BadYoutubeVideo.song_id == song_id)
     there = {v for (v,) in query}
     added = [v for v in video_ids if v not in there]
+    if song_id is not None:
+        drop_additional_videos(session, video_ids, song_id)  # not that song's video after all
     for video_id in added:
         session.add(BadYoutubeVideo(video_id=video_id, song_id=song_id, reason=reason, marked_at=now_iso()))
     if added:

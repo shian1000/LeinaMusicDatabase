@@ -6,7 +6,8 @@ song (each video's parsed "Artist - Title" matched like a file), from a
 song's own link, or from resembling artist + title; the user pairs the rest
 by hand, from the unpaired ones only. A video left without a file can become
 a track of its own, matched to the database like a file. Nothing is written
-here either."""
+here either; video_links() says which videos the saved playlist may give
+its songs (utils/database/additional_videos.py)."""
 
 from dataclasses import dataclass
 
@@ -79,10 +80,14 @@ def pair_score(track: FolderTrack, entry: YouTubeEntry) -> float | None:
     return None
 
 
-def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatcher | None = None) -> None:
-    """Pair `track` with `entry`: the video becomes its link, and a song the
-    video matched while the file didn't is suggested for the file - with
-    how well the file's tags fit it, given the `matcher`."""
+def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatcher | None = None,
+               by_hand: bool = False) -> None:
+    """Pair `track` with `entry` (`by_hand`: the user picked the video): the
+    video becomes its link, and a song the video matched while the file
+    didn't is suggested for the file - with how well the file's tags fit
+    it, given the `matcher`."""
+    track.link_sure = by_hand or pair_score(track, entry) == _SAME_SONG_SCORE
+    track.link_song_id = entry.song.id if entry.song is not None else None
     track.youtube_link = track.youtube_video_id = entry.video_id
     if track.song_id is None and entry.song is not None:
         track.similar_song = entry.song
@@ -136,6 +141,7 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     track = FolderTrack(file=None, title=entry.metadata.get("title") or entry.label,
                         artist=entry.metadata.get("artist_name"), duration_s=entry.duration_s)
     track.youtube_link = track.youtube_video_id = entry.video_id
+    track.link_song_id = entry.song.id if entry.song is not None else None
     if entry.song is not None:
         assign_song(track, entry.song)
     else:
@@ -153,3 +159,14 @@ def set_tracks(playlist: FolderPlaylist, tracks: list) -> None:
     playlist.unmatched = [t for t in playlist.unmatched if id(t) in kept]
     playlist.auto_accepted = [(t, a) for t, a in playlist.auto_accepted if id(t) in kept]
     playlist.auto_accepted_scored = [entry for entry in playlist.auto_accepted_scored if id(entry[0]) in kept]
+
+
+def video_links(tracks: list) -> list[tuple]:
+    """(song id, video id, sure) of every track with both a song and a video
+    of the YouTube playlist, for additional_videos.plan_video_links(). Sure:
+    the video itself matched that song, the pairing was certain, or, for a
+    track with no file, the user picked its song (then the video is what
+    they matched)."""
+    return [(t.song_id, t.youtube_link,
+             t.link_sure or t.link_song_id == t.song_id or (t.file is None and t.picked))
+            for t in tracks if t.song_id is not None and t.youtube_link]

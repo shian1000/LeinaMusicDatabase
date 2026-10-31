@@ -46,6 +46,11 @@ class FolderTrack:
     # The video of the YouTube playlist it was paired with
     # (folder_youtube_playlist.py), which wins over its song's own link
     youtube_link: str | None = None
+    # For saving that video on the song (utils/database/additional_videos.py):
+    # the song the video itself matched, and whether the pairing was certain
+    # (the same song, or picked by hand) rather than resembling names
+    link_song_id: int | None = None
+    link_sure: bool = False
 
 
 @dataclass

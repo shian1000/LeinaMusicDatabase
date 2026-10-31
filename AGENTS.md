@@ -172,6 +172,12 @@ non-trivial work in that area.
   matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
   spelling music.db already uses); never assign `song.genre` raw text.
+  `additional_videos.py` — `additional_youtube_videos` (migration 0018): a song's YouTube videos
+  other than its own link, keyed by video, only so Leina Radio (after `songs.youtube_video_id`,
+  which wins) and the inbox's song requests (`song_for_video()`) recognise another upload as the
+  song; never played or searched for. Filled from the compared folder playlist (above) and by
+  `merge_songs()` (the dropped song's link); a trigger follows merges / deletions,
+  `mark_bad_videos()` for a song drops its row. Look a video's song up with `song_for_video()`.
   `video_durations.py` — `youtube_video_durations` (migration 0017), YouTube videos' lengths by id,
   asked once (`video_durations_via_api()`, each batch stored as it comes); "Find full albums" reads
   them, Leina Radio sums them for playlists. A live stream's 0 is never stored.
@@ -381,7 +387,12 @@ non-trivial work in that area.
   song's own link, else resembling artist + title; the rest by hand from the unpaired ones — only the
   `FILE_PAIR_VIDEO_CHOICES_MAX` most alike listed plus a search, since a `questionary` list taller
   than the terminal draws its hidden part as blank lines), whose
-  link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). A video
+  link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). Once the
+  playlist is saved, the videos are offered to their songs in one checkbox list
+  (`utils/ui/video_link_review.py`; certain pairings ticked - the same song, picked by hand - ones
+  by resembling names not): a song without a link gets the video as its own, one with a link (or
+  "N/A") as an additional video (`utils/database/additional_videos.py`, below). A saved playlist's
+  "Save its YouTube videos on the songs" offers the same, none ticked. A video
   without a file can be a track with `file` None. Deleted / private videos and those giving neither
   an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
@@ -539,7 +550,8 @@ non-trivial work in that area.
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks
-  the Data API only about videos not stored yet). Matching keeps a track apart from the full album of the same name
+  the Data API only about videos not stored yet), and `additional_youtube_videos` (migration 0018:
+  more videos of a song, only for recognising a played video; `songs.youtube_video_id` wins). Matching keeps a track apart from the full album of the same name
   (`song_kinds.songs_for_entry()`, entries carry `duration_s`); candidates are reviewed in Manage
   database → "Find full albums".
   [ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md).

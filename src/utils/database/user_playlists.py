@@ -87,3 +87,14 @@ def playlist_songs(music_session, username: str, playlist_id: int) -> tuple[list
     songs = [found[t.song_id] for t in tracks if t.song_id in found]
     missing = [t for t in tracks if t.song_id not in found]
     return songs, missing
+
+
+def playlist_videos(username: str, playlist_id: int) -> list[tuple]:
+    """(song id, video id) of every track of the playlist with both, in its
+    order - for offering the videos to their songs (additional_videos.py)."""
+    with user_db_session(user_dir(username) / USER_DB_FILENAME) as session:
+        return [(song_id, video_id) for song_id, video_id in
+                session.query(PlaylistTrack.song_id, PlaylistTrack.youtube_video_id)
+                .filter(PlaylistTrack.playlist_id == playlist_id, PlaylistTrack.song_id.isnot(None),
+                        PlaylistTrack.youtube_video_id.isnot(None), PlaylistTrack.youtube_video_id != "")
+                .order_by(PlaylistTrack.position)]

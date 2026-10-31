@@ -218,6 +218,31 @@ class YoutubeVideoDuration(Base):
     fetched_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
 
 
+# --------------------
+# A song's YouTube videos other than its own link (migration 0018), by video
+# id - read by Leina Radio too, to recognise a played video.
+# utils/database/additional_videos.py
+# --------------------
+class AdditionalYoutubeVideo(Base):
+    __tablename__ = "additional_youtube_videos"
+
+    video_id = Column(String, primary_key=True)
+    song_id = Column(Integer, nullable=False, index=True)
+    source = Column(String, nullable=False)  # constants.ADDITIONAL_VIDEO_SOURCES
+    added_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+# Same trigger as migration 0018 (see bad_youtube_videos_follow_songs above)
+event.listen(SongIdChange.__table__, "after_create", DDL("""
+CREATE TRIGGER IF NOT EXISTS additional_youtube_videos_follow_songs
+AFTER INSERT ON song_id_changes
+BEGIN
+	UPDATE additional_youtube_videos SET song_id = NEW.new_song_id
+		WHERE song_id = NEW.old_song_id AND NEW.new_song_id IS NOT NULL;
+	DELETE FROM additional_youtube_videos WHERE song_id = NEW.old_song_id;
+END
+"""))
+
+
 song_categories = [
     "title",
     "artist name",
