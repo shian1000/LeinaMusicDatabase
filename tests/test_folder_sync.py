@@ -51,7 +51,7 @@ def test_migration_exists_and_is_required(tmp_path):
     db_path = tmp_path / "user.db"
     db = sqlite3.connect(db_path)
     db.execute("CREATE TABLE schema_version (filename TEXT)")
-    db.execute("INSERT INTO schema_version VALUES (?)", (ps.EXCLUDED_TRACKS_MIGRATION,))
+    db.execute("INSERT INTO schema_version VALUES (?)", (ps.NEWEST_SYNC_MIGRATION,))
     db.commit()
     db.close()
     with pytest.raises(fs.NotMigratedError):

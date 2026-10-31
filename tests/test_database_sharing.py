@@ -1095,6 +1095,7 @@ def test_playlist_round_trip(playlist_server):
     assert [(t["song_id"], t["title"]) for t in stored["tracks"]] == [(4, "merged"), (None, "deleted"), (4, "kept")]
     assert stored["tracks"][0]["duration_s"] == 215 and stored["source_owner"] == "Someone"
     assert stored["excluded_source_tracks"] == []
+    assert [t["added"] for t in stored["tracks"]] == [False, False, False]
     assert _call("GET", f"{base}?since=0", token) == (200, {"revision": 1, "playlists": [stored]})
     assert _call("GET", f"{base}?since=1", token) == (200, {"revision": 1, "playlists": []})
     status, stored = _call("PUT", f"{base}/{UID}", token, _body(1, 1100, excluded_source_tracks=["vX"]))
@@ -1274,6 +1275,9 @@ def test_bad_playlist_parameters_and_bodies(playlist_server):
     token = tokens["ola_k"]
     assert _call("PUT", f"{url}/{UID}", token, raw=b"{not json")[0] == 400
     assert _call("PUT", f"{url}/{UID}", token, _body(excluded_source_tracks="v1"))[0] == 400
+    bad_track = _body()
+    bad_track["tracks"][0]["added"] = "yes"
+    assert _call("PUT", f"{url}/{UID}", token, bad_track)[0] == 400
     assert _call("GET", f"{url}?since=-1", token)[0] == 400
     assert _call("DELETE", f"{url}/{UID}?deleted_at=5", token)[0] == 400
     assert _call("GET", f"{url}/{UID}", token)[0] == 404

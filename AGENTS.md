@@ -254,8 +254,9 @@ non-trivial work in that area.
   Covers of playlists and moods (picked on the phone): `covers.py` (standard-library) stores the
   pictures as files `Users/<name>/covers/<sha256>.png|.jpg`, never in a DB; rows hold only
   `cover_sha256` (user migration 0006). Every sync `connect()` requires the newest user migration
-  the sync code reads (`playlist_sync.EXCLUDED_TRACKS_MIGRATION`, 0007: `playlists.excluded_source_tracks`,
-  the tracks removed from an imported playlist; a PUT without it keeps the stored list); bump that
+  the sync code reads (`playlist_sync.NEWEST_SYNC_MIGRATION`, 0011: `playlist_tracks.added`, a track added by
+  hand to an imported playlist, false when a PUT's track lacks the key; 0007 before it added
+  `playlists.excluded_source_tracks`, the tracks removed from one, kept when a PUT lacks the key); bump that
   constant when a new one adds a synced column, or the server writes a column a user.db lacks. Served and
   uploaded at `/users/<name>/covers/<sha256>`; private covers of global moods sync through
   `/users/<name>/global-mood-covers` (`mood_sync.py`). A PUT without `cover` keeps the stored one.

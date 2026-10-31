@@ -23,6 +23,9 @@ phone"; the app's docs/handoffs/musicdatabase-playlists.md):
   video ids, Spotify track ids) of tracks the user removed, which a phone
   leaves out when it imports the playlist again. Only the whole list, with
   the winning side, never merged; a PUT without the key keeps the stored one.
+- A track's `added` marks one the user added by hand to an imported playlist,
+  which a phone keeps when it imports the playlist again; a track sent
+  without the key is false.
 
 Standard-library only and free of the app's config, because the sharing
 server (sharing_server.py, run on the system python3) imports it as well as
@@ -55,8 +58,8 @@ SOURCES = ("folder", "youtube", "spotify", "spotifyAlbum")
 # 503 instead of migrating (that stays the app's job at startup)
 REQUIRED_MIGRATION = "0004_playlist_sync.sql"
 # The newest one the sync code reads (connect()'s default): every column of
-# playlists, moods and covers, and excluded_source_tracks
-EXCLUDED_TRACKS_MIGRATION = "0007_excluded_source_tracks.sql"
+# playlists, moods and covers, excluded_source_tracks and playlist_tracks.added
+NEWEST_SYNC_MIGRATION = "0011_added_tracks.sql"
 ARCHIVE_SUBDIR = Path("archive") / "playlists"
 # Same stamp as the database backups (backup.py)
 ARCHIVE_STAMP_FORMAT = "%y%m%d-%H%M"
@@ -87,7 +90,7 @@ def new_uid() -> str:
     return str(uuid.uuid4())
 
 
-def connect(db_path, required_migration: str = EXCLUDED_TRACKS_MIGRATION) -> sqlite3.Connection:
+def connect(db_path, required_migration: str = NEWEST_SYNC_MIGRATION) -> sqlite3.Connection:
     """A connection to a user.db that has `required_migration` (by default
     the newest one the sync code reads), in autocommit mode (the write functions open their own transactions).
     Raises NotMigratedError."""
@@ -164,10 +167,11 @@ def mark_changed(conn, playlist_ids) -> None:
 
 def _tracks_json(conn, playlist_id: int) -> list:
     rows = conn.execute(
-        "SELECT song_id, title, artist, youtube_video_id, spotify_track_id, youtube_removed, duration_s "
+        "SELECT song_id, title, artist, youtube_video_id, spotify_track_id, youtube_removed, duration_s, added "
         "FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (playlist_id,))
     return [{"song_id": r[0], "title": r[1], "artist": r[2], "youtube_video_id": r[3],
-             "spotify_track_id": r[4], "youtube_removed": bool(r[5]), "duration_s": r[6]} for r in rows]
+             "spotify_track_id": r[4], "youtube_removed": bool(r[5]), "duration_s": r[6],
+             "added": bool(r[7])} for r in rows]
 
 
 def playlist_json(conn, row, with_tracks: bool = True) -> dict:
@@ -264,6 +268,9 @@ def parse_playlist(body) -> dict:
         removed = t.get("youtube_removed", False)
         if not isinstance(removed, bool):
             raise BadPlaylistError(f"tracks[{i}].youtube_removed: expected true/false")
+        added = t.get("added", False)
+        if not isinstance(added, bool):
+            raise BadPlaylistError(f"tracks[{i}].added: expected true/false")
         parsed_tracks.append({
             "song_id": _int(t.get("song_id"), f"tracks[{i}].song_id", minimum=1, optional=True),
             "title": _text(t.get("title"), f"tracks[{i}].title", optional=False),
@@ -272,6 +279,7 @@ def parse_playlist(body) -> dict:
             "spotify_track_id": _text(t.get("spotify_track_id"), f"tracks[{i}].spotify_track_id"),
             "youtube_removed": removed,
             "duration_s": _int(t.get("duration_s"), f"tracks[{i}].duration_s", optional=True),
+            "added": added,
         })
     return {
         "name": name,
@@ -365,9 +373,10 @@ def _write_tracks(conn, playlist_id: int, tracks: list) -> None:
     conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,))
     conn.executemany(
         "INSERT INTO playlist_tracks (playlist_id, position, song_id, title, artist, youtube_video_id, "
-        "spotify_track_id, youtube_removed, duration_s) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "spotify_track_id, youtube_removed, duration_s, added) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [(playlist_id, i, t["song_id"], t["title"], t["artist"], t["youtube_video_id"],
-          t["spotify_track_id"], int(t["youtube_removed"]), t["duration_s"]) for i, t in enumerate(tracks)])
+          t["spotify_track_id"], int(t["youtube_removed"]), t["duration_s"], int(t["added"]))
+         for i, t in enumerate(tracks)])
 
 
 def _wins(row, base_revision: int, updated_at: int) -> bool:

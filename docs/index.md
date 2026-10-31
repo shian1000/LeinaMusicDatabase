@@ -45,6 +45,7 @@ this index is the map of everything else.
   [the videos found bad, in music.db](handoffs/bad-videos-for-musicdatabaseapp.md) and
   [the library's audio files at `/library/<id>`](handoffs/server-files-for-musicdatabaseapp.md) and
   [tracks removed from imported playlists](handoffs/excluded-tracks-for-musicdatabaseapp.md) and
+  [tracks added by hand to imported playlists](handoffs/added-tracks-for-musicdatabaseapp.md) and
   [YouTube links set by hand, music videos](handoffs/youtube-links-by-hand-for-musicdatabaseapp.md) and
   [songs' genres, `songs.genre`](handoffs/genres-for-musicdatabaseapp.md) and
   [another artist for a song, `songs.artist_id` corrections](handoffs/song-artist-for-musicdatabaseapp.md). Once

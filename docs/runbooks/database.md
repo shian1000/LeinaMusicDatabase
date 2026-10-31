@@ -448,6 +448,13 @@ because the server and the app's own writes (`user_playlists.py`) both use it.
   [`docs/handoffs/excluded-tracks-for-musicdatabaseapp.md`](../handoffs/excluded-tracks-for-musicdatabaseapp.md).
   The menu only makes folder playlists, so it never writes the list; a future menu re-import of a
   YouTube/Spotify playlist into an existing one must leave those ids out too.
+- **Tracks added by hand to an imported playlist (2026-10-31):** each track carries `added`
+  (`true` = the user added it to a YouTube / Spotify playlist, which a phone keeps after the source
+  track it followed when it imports the playlist again). User migration 0011
+  (`playlist_tracks.added`, 0/1), always in the answers; a track sent without the key is `false`,
+  anything but `true`/`false` is 400. It goes with the tracks, so the winning side brings its marks.
+  The menu ignores it. The app's request: `docs/handoffs/musicdatabase-added-tracks.md`; the answer:
+  [`docs/handoffs/added-tracks-for-musicdatabaseapp.md`](../handoffs/added-tracks-for-musicdatabaseapp.md).
 - **Song ids** from a phone's older `music.db` are run through `song_id_changes` of the *shared
   copy* in `--dir` before they're stored (merged → kept song, chains followed, deleted → NULL; an
   id that's neither a song nor in the log → NULL). That copy can be a day behind, so the playlist

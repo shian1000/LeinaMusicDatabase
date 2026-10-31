@@ -2,7 +2,8 @@
 shared by the sharing server and user_playlists.py): migration 0004 on an
 existing user.db, revisions, the conflict rules (equal base, stale base
 newer/older, delete vs edit, a resend), the source + source_id merge,
-excluded_source_tracks (kept without the key, whole list, merge, deletion), the
+excluded_source_tracks (kept without the key, whole list, merge, deletion),
+tracks added by hand (`added`, false without the key), the
 archive written before a deletion, song ids from a phone's older music.db,
 and the menu's writes (save/delete/list). Temp-file SQLite, no mocking of
 SQL; the replay side (apply_song_id_changes() bumping revisions, catching up
@@ -98,9 +99,9 @@ def test_new_playlist_and_changes_since(conn):
         "excluded_source_tracks": [],
         "tracks": [
             {"song_id": 1, "title": "Karma", "artist": "Hey", "youtube_video_id": "v1",
-             "spotify_track_id": None, "youtube_removed": True, "duration_s": 215},
+             "spotify_track_id": None, "youtube_removed": True, "duration_s": 215, "added": False},
             {"song_id": None, "title": "Only on YouTube", "artist": None, "youtube_video_id": None,
-             "spotify_track_id": None, "youtube_removed": False, "duration_s": None}]}
+             "spotify_track_id": None, "youtube_removed": False, "duration_s": None, "added": False}]}
     assert conn.execute("SELECT owner FROM playlists").fetchone()[0] == "ania"
     _put(conn, uid="uid-0002")
     assert [p["uid"] for p in ps.changes_since(conn, 0)["playlists"]] == ["uid-0001", "uid-0002"]
@@ -165,6 +166,19 @@ def test_excluded_source_tracks_kept_without_the_key_and_replaced_whole(conn):
     assert stored["excluded_source_tracks"] == []
     assert ps.parse_playlist({"name": "x", "updated_at": 1, "tracks": []})["excluded_source_tracks"] \
         is ps.KEEP_EXCLUDED
+
+
+def test_added_tracks_are_stored_and_answered(conn):
+    _, stored = _put(conn, source="youtube", source_id="PL1",
+                     tracks=[{"title": "From the source", "youtube_video_id": "v1"},
+                             {"title": "Added by hand", "song_id": 7, "added": True},
+                             {"title": "Older app"}])
+    assert [t["added"] for t in stored["tracks"]] == [False, True, False]
+    assert [r[0] for r in conn.execute("SELECT added FROM playlist_tracks ORDER BY position")] == [0, 1, 0]
+    assert [t["added"] for t in ps.changes_since(conn, 0)["playlists"][0]["tracks"]] == [False, True, False]
+    # A PUT's tracks replace the stored ones whole, marks included
+    _, stored = _put(conn, base=1, updated_at=2000, tracks=[{"title": "Added by hand", "song_id": 7}])
+    assert [t["added"] for t in stored["tracks"]] == [False]
 
 
 @pytest.mark.parametrize("value", ["v1", None, [""], ["v1", 5], [None], {"v1": 1}])
@@ -250,6 +264,8 @@ def test_deleting_unknown_or_deleted_is_done(conn, user_folder):
     {"name": "x", "updated_at": 1, "tracks": [{"artist": "no title"}]},
     {"name": "x", "updated_at": 1, "tracks": [{"title": "t", "song_id": "5"}]},
     {"name": "x", "updated_at": 1, "tracks": [{"title": "t", "youtube_removed": 1}]},
+    {"name": "x", "updated_at": 1, "tracks": [{"title": "t", "added": 1}]},
+    {"name": "x", "updated_at": 1, "tracks": [{"title": "t", "added": None}]},
     {"name": "x", "updated_at": 1, "tracks": [], "source": 3},
 ])
 def test_bad_bodies_are_refused(body):

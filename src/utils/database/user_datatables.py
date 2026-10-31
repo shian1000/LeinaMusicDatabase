@@ -49,6 +49,7 @@ class PlaylistTrack(UserBase):
     spotify_track_id = Column(String)
     youtube_removed = Column(Integer, nullable=False, default=0)  # 1 = video gone, phone finds another
     duration_s = Column(Integer)
+    added = Column(Integer, nullable=False, default=0)  # 1 = added by hand to an imported playlist
 
     playlist = relationship("Playlist", back_populates="tracks")
 

@@ -335,6 +335,7 @@ name        NOT NULL              song_id          music.db songs.id, NULL = not
 owner       (the username)        title            NOT NULL
 source, source_id, source_owner   artist, youtube_video_id, spotify_track_id, duration_s
 created_at, updated_at  (Unix ms) youtube_removed  0/1 (video gone, the phone finds another)
+                                  added            0/1 (added by hand to an imported playlist, migration 0011)
 revision, deleted_at, song_ids_checked_to
 excluded_source_tracks  JSON list of source ids the user removed (migration 0007), NULL = none
 
