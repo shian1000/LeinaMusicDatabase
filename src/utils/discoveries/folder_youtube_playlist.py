@@ -3,7 +3,8 @@ with YT playlist": the folder's mp3s (folder_playlist.build_folder_playlist())
 paired with the videos of a YouTube playlist that should hold the same songs,
 so every track gets the playlist's link. Pairs come from the same database
 song (each video's parsed "Artist - Title" matched like a file), from a
-song's own link, or from resembling artist + title; the user pairs the rest
+song's own link, or from resembling artist + title (the file's tags, or its
+name when that fits a video better); the user pairs the rest
 by hand, from the unpaired ones only. A video left without a file can become
 a track of its own, matched to the database like a file. Nothing is written
 here either; video_links() says which videos the saved playlist may give
@@ -12,7 +13,7 @@ its songs (utils/database/additional_videos.py)."""
 from dataclasses import dataclass
 
 from config.constants import SPELLING_CHECK_THRESHOLD
-from utils.common.normalizer import name_key, normalize
+from utils.common.normalizer import extract_unknown_data, name_key, normalize, strip_site_names
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
 from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track
 from utils.discoveries.import_engine import LocalSongMatcher
@@ -20,6 +21,10 @@ from utils.youtube.import_from_playlist import is_placeholder_title, playlist_it
 
 # Pairs found through the database outrank any by name
 _SAME_SONG_SCORE = 10.0
+# A file with no artist and a video with one, the same title: below any
+# pair whose artists resemble too; only one video of the playlist may have
+# it (pair_automatically()), which is what makes a short title enough
+_TITLE_ONLY_SCORE = 1.5
 
 
 @dataclass
@@ -68,11 +73,35 @@ def pair_score(track: FolderTrack, entry: YouTubeEntry) -> float | None:
         return _SAME_SONG_SCORE
     if track.youtube_video_id and track.youtube_video_id == entry.video_id:
         return _SAME_SONG_SCORE
-    title, artist = track.title or "", track.artist or ""
+    scores = [score for artist, title in _readings(track)
+              if (score := _name_score(artist, title, entry)) is not None]
+    return max(scores, default=None)
+
+
+def _readings(track: FolderTrack) -> list[tuple]:
+    """(artist, title) of `track` to pair it by: its tags (or its song's),
+    then its file name, which often names the song when the tags don't
+    ("Agnieszka Chylińska - Winna.mp3" tagged "Track 05")."""
+    readings = [(track.artist, track.title)]
+    if track.file is not None:
+        artist, title = extract_unknown_data(track.file)
+        name = (artist, title) if title else (None, strip_site_names(track.file.stem).strip() or None)
+        if name[1] and name not in readings:
+            readings.append(name)
+    return readings
+
+
+def _name_score(artist: str | None, title: str | None, entry: YouTubeEntry) -> float | None:
+    """pair_score() of one reading of a file by its names."""
+    title, artist = title or "", artist or ""
     entry_title, entry_artist = entry.metadata.get("title") or "", entry.metadata.get("artist_name") or ""
     if title and entry_title and title_resembles(title, entry_title) and _artists_resemble(artist, entry_artist):
         return 1 + similarity(normalize(title), normalize(entry_title)) \
             + similarity(normalize(artist), normalize(entry_artist))
+    # No artist in the file's tags or name, while the video has one (often
+    # only its channel: "Czlowiek Wozkow" on "Voo Voo")
+    if not artist and entry_artist and name_key(title) and name_key(title) == name_key(entry_title):
+        return _TITLE_ONLY_SCORE
     # The video's title parsed wrong (swapped, no separator): both still in it
     raw = normalize(f"{entry.label} {entry.channel}")
     if normalize(title) and normalize(artist) and normalize(title) in raw and normalize(artist) in raw:
@@ -85,15 +114,19 @@ def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatche
     """Pair `track` with `entry` (`by_hand`: the user picked the video): the
     video becomes its link, and a song the video matched while the file
     didn't is suggested for the file - with how well the file's tags fit
-    it, given the `matcher`."""
+    it, given the `matcher`. A file with no artist takes the video's."""
+    entry_artist = entry.metadata.get("artist_name")
+    if track.song_id is None and not track.artist and entry_artist:
+        track.artist, track.artist_from_video = entry_artist, True
     track.link_sure = by_hand or pair_score(track, entry) == _SAME_SONG_SCORE
     track.link_song_id = entry.song.id if entry.song is not None else None
     track.youtube_link = track.youtube_video_id = entry.video_id
     if track.song_id is None and entry.song is not None:
         track.similar_song = entry.song
         if matcher is not None:
-            track.scores[entry.song.id] = matcher.match_score(
-                {"artist_name": track.artist, "title": track.title}, entry.song)
+            track.scores[entry.song.id] = max(
+                matcher.match_score({"artist_name": artist, "title": title}, entry.song)
+                for artist, title in _readings(track))
     if track.duration_s is None:
         track.duration_s = entry.duration_s
 
@@ -103,10 +136,13 @@ def pair_automatically(tracks: list, entries: list) -> list[tuple]:
     and video in at most one."""
     scored = []
     for t, track in enumerate(tracks):
-        for e, entry in enumerate(entries):
-            score = pair_score(track, entry)
-            if score is not None:
-                scored.append((score, t, e))
+        found = [(score, t, e) for e, entry in enumerate(entries)
+                 if (score := pair_score(track, entry)) is not None]
+        # A title alone names no video when several have it
+        title_only = [s for s in found if s[0] == _TITLE_ONLY_SCORE]
+        if len(title_only) > 1:
+            found = [s for s in found if s[0] != _TITLE_ONLY_SCORE]
+        scored += found
     scored.sort(key=lambda s: (-s[0], s[1], s[2]))
     pairs, used_tracks, used_entries = [], set(), set()
     for _, t, e in scored:
@@ -120,8 +156,8 @@ def pair_automatically(tracks: list, entries: list) -> list[tuple]:
 
 def rank_entries_for(track: FolderTrack, entries: list) -> list:
     """The unpaired videos to offer for `track`, the most like it first."""
-    wanted = normalize(f"{track.artist or ''} {track.title or ''}")
-    return sorted(entries, key=lambda e: -similarity(wanted, normalize(f"{e.channel} {e.label}")))
+    wanted = [normalize(f"{artist or ''} {title or ''}") for artist, title in _readings(track)]
+    return sorted(entries, key=lambda e: -max(similarity(w, normalize(f"{e.channel} {e.label}")) for w in wanted))
 
 
 def search_entries(entries: list, query: str) -> list:

@@ -953,6 +953,52 @@ def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, t
     assert list_playlists("ania") == []
 
 
+def test_file_without_artist_paired_by_title_takes_the_videos_artist(music_session):
+    from utils.discoveries import folder_youtube_playlist as fyp
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # Real case: "Czlowiek Wozkow.mp3" with no tags, the video titled the
+    # same on the "Voo Voo" channel - only the channel names the artist
+    music_session.add(Song(title="Człowiek wózków", artist=Artist(name="Voo Voo")))
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    video = {"video_id": "ytV", "title": "Czlowiek Wozkow", "channel": "Voo Voo"}
+    (entry,) = fyp.youtube_entries(matcher, [video])
+    track = fp.FolderTrack(file=Path("Czlowiek Wozkow.mp3"), title="Czlowiek Wozkow", artist=None)
+    assert fyp.pair_automatically([track], [entry]) == [(track, entry)]
+    fyp.link_track(track, entry, matcher)
+    assert (track.artist, track.artist_from_video) == ("Voo Voo", True)
+    assert (track.song_id, track.similar_song.title, track.youtube_video_id) == (None, "Człowiek wózków", "ytV")
+
+    # Two videos with that title: the title alone pairs neither
+    other = fyp.youtube_entries(matcher, [{"video_id": "ytO", "title": "Czlowiek Wozkow", "channel": "Other"}])
+    track = fp.FolderTrack(file=Path("Czlowiek Wozkow.mp3"), title="Czlowiek Wozkow", artist=None)
+    assert fyp.pair_automatically([track], [entry] + other) == []
+
+
+def test_file_with_wrong_tags_is_paired_by_its_name(music_session):
+    from utils.discoveries import folder_youtube_playlist as fyp
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # Real case: "Agnieszka Chylińska - Winna.mp3" tagged "Track 05 (2)" by
+    # "CHYLIŃSKA - 05" - only the file name fits the video
+    matcher = LocalSongMatcher(music_session)
+    entries = fyp.youtube_entries(matcher, [
+        {"video_id": "ytW", "title": "Agnieszka Chylińska - Winna (official video)", "channel": "Agnieszka Chylińska"},
+        {"video_id": "ytH", "title": "Wieliczka", "channel": "HEY"},
+        {"video_id": "ytM", "title": "Artur Andrus - Nazywali go Marynarz (Szanta narciarska)",
+         "channel": "Artur Andrus"},
+    ])
+    winna = fp.FolderTrack(file=Path("Agnieszka Chylińska - Winna.mp3"), title="Track 05 (2)",
+                           artist="CHYLIŃSKA - 05")
+    assert fyp.pair_automatically([winna], entries) == [(winna, entries[0])]
+
+    # Left to the user: the video its name fits listed first
+    track = fp.FolderTrack(file=Path("Artur Andrus - Nazywali Go Marynarz - Szanta Narciarska.mp3"),
+                           title="Ścieżka 6", artist="Nieznany wykonawca")
+    assert fyp.rank_entries_for(track, entries)[0] is entries[2]
+
+
 def test_file_without_artist_is_offered_the_songs_sharing_its_title(users_env, tmp_path, music_session, monkeypatch):
     from utils.discoveries.import_engine import LocalSongMatcher
 

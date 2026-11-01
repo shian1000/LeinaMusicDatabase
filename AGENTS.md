@@ -393,7 +393,9 @@ non-trivial work in that area.
   the library folder get a warning (a renamed file is new to files.db).
   `folder_youtube_playlist.py` is "Create playlist from folder and compare with YT playlist": the
   same folder playlist, each file paired with a video of a YouTube playlist (same database song, the
-  song's own link, else resembling artist + title; the rest by hand from the unpaired ones — only the
+  song's own link, else resembling artist + title - from the tags or the file name, whichever fits
+  the video better (`_readings()`; wrong tags like "Track 05" are common), or for a file with no artist the same title when
+  only one video has it, the video's artist then taken for the file; the rest by hand from the unpaired ones — only the
   `FILE_PAIR_VIDEO_CHOICES_MAX` most alike listed plus a search, since a `questionary` list taller
   than the terminal draws its hidden part as blank lines), whose
   link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). Once the

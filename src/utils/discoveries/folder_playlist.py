@@ -51,6 +51,8 @@ class FolderTrack:
     # (the same song, or picked by hand) rather than resembling names
     link_song_id: int | None = None
     link_sure: bool = False
+    # `artist` is the paired video's: the file itself gave none
+    artist_from_video: bool = False
 
 
 @dataclass

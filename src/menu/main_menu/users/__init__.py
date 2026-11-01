@@ -189,7 +189,8 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
         else:
             print(f"\n[{i}/{total}] {track.file.name}")
             print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
-        print(f"  Read as: {colored_song(track.artist, track.title)}")
+        print(f"  Read as: {colored_song(track.artist, track.title)}"
+              + ("  (the artist from the YouTube video)" if track.artist_from_video else ""))
         if track.similar_song is not None:
             print(f"  Similar song in the database: {as_ansi(_scored_tokens(track, track.similar_song))}")
             verdict = questionary.select("Is this the right song?", choices=[_CONFIRM_SONG, _SIMILAR_OTHER]).ask()
