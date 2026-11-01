@@ -3,9 +3,9 @@ library folder into files.db - relative paths, audio files only, re-reading
 only new or changed files, removed files dropped and their ids never reused,
 unmatched files rematched only when the catalog changed, hand-set matches
 left alone - and files.db following merged/deleted songs through
-song_references. Temp-file SQLite for music.db, tag.db and files.db
-(files.db from the real migrations/files/); tag reading and the song matcher
-are faked."""
+song_references, and the YouTube import's offer to link its songs' files.
+Temp-file SQLite for music.db, tag.db and files.db (files.db from the real
+migrations/files/); tag reading and the song matcher are faked."""
 
 import os
 import sqlite3
@@ -276,3 +276,64 @@ def test_missing_or_remote_library_is_unavailable(env, monkeypatch, tmp_path):
     with pytest.raises(fi.LibraryUnavailableError):
         fi.scan_library(session, db_path=db)
     assert not db.exists()
+
+
+def _offer_on(monkeypatch, library, db, answer=True):
+    """offer_linking_library_files() pointed at the temp library and files.db;
+    returns the list of questions it asked."""
+    from utils.ui import library_link_prompt as lp
+    monkeypatch.setattr(lp, "library_root", lambda: library)
+    monkeypatch.setattr(fi.Settings, "local_library_dir_str", str(library))
+    monkeypatch.setattr(lp, "song_file_paths", lambda ids: fi.song_file_paths(ids, db_path=db))
+    monkeypatch.setattr(lp, "scan_library", lambda s, progress=None: fi.scan_library(s, root=library, db_path=db))
+    asked = []
+    monkeypatch.setattr(lp, "ask_yes_no", lambda question: asked.append(question) or answer)
+    return lp.offer_linking_library_files, asked
+
+
+def test_youtube_import_offer_links_the_new_songs_files(env, monkeypatch, capsys):
+    session, library, db, _, _ = env
+    _file(library, "Hey - Karma.mp3")
+    _file(library, "Old - One.mp3")
+    fi.scan_library(session, root=library, db_path=db)
+    karma = _song(session, "Hey", "Karma")
+    _song(session, "Old", "One")  # not imported now, but its file matches in the same scan
+    nothing = _song(session, "Nobody", "Nothing")
+    offer, asked = _offer_on(monkeypatch, library, db)
+
+    offer(session, [karma, nothing])
+
+    out = capsys.readouterr().out
+    assert len(asked) == 1 and "these 2 song(s)" in asked[0]
+    assert _rows(db)["Hey - Karma.mp3"][1] == karma.id
+    assert "Hey - Karma   <- Hey - Karma.mp3" in out
+    assert "1 song(s) still have no file" in out
+    assert "also linked 1 other file(s)" in out
+
+    # Every song has a file now: nothing to ask
+    asked.clear()
+    offer(session, [karma])
+    assert asked == []
+
+
+def test_youtube_import_offer_declined_scans_nothing(env, monkeypatch):
+    session, library, db, reads, _ = env
+    _file(library, "Hey - Karma.mp3")
+    karma = _song(session, "Hey", "Karma")
+    offer, asked = _offer_on(monkeypatch, library, db, answer=False)
+
+    offer(session, [karma])
+
+    assert len(asked) == 1 and reads == [] and not db.exists()
+
+
+def test_youtube_import_offer_asks_nothing_without_a_library(env, monkeypatch):
+    from utils.ui import library_link_prompt as lp
+    session = env[0]
+
+    def unavailable():
+        raise fi.LibraryUnavailableError("not plugged in")
+
+    monkeypatch.setattr(lp, "library_root", unavailable)
+    monkeypatch.setattr(lp, "ask_yes_no", lambda question: pytest.fail(f"asked: {question}"))
+    lp.offer_linking_library_files(session, [_song(session, "Hey", "Karma")])

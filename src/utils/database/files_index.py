@@ -83,6 +83,7 @@ class IndexReport:
     changed: int = 0     # re-read because size or mtime changed
     removed: int = 0
     matched_now: int = 0  # files that got a song in this scan
+    matched: list = field(default_factory=list)  # (path, song id) of those files
     unmatched: list = field(default_factory=list)  # (path, artist, title) of files still without a song
 
 
@@ -294,6 +295,7 @@ def scan_library(music_session, root: Path = None, db_path: Path = None, progres
             if song is not None:
                 row.song_id = song.id
                 report.matched_now += 1
+                report.matched.append((row.path, song.id))
             else:
                 report.unmatched.append((row.path, row.artist, row.title))
         _set_state(session, _FINGERPRINT_KEY, fingerprint)

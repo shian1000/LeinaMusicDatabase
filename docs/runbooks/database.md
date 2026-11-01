@@ -754,7 +754,10 @@ maps each file in it to its song:
 - **Scanning:** Settings → Server → "Index music library", and once a day at startup after the
   backup. Only new or changed files (size/mtime) are read; an unchanged library takes ~3 s, the
   first scan of ~4300 files ~3 min. Files without a song are listed on request and in
-  `debug.log` (`flog`).
+  `debug.log` (`flog`). "Import data from YouTube playlist" ends by offering the same scan for
+  its songs that have no file yet (`utils/ui/library_link_prompt.py`; asked only when the library
+  is there): the import changed the catalog, so every file without a song is tried again, and the
+  files linked to the imported songs are listed (`IndexReport.matched`).
 - **Backed up and migrated** like tag.db (`backup.DB_FILES`, `migrations.DB_FILES`); everything
   but a future hand-set match can be rebuilt by deleting the file and scanning again.
 - The data drive not mounted → the library folder is missing → the scan is skipped

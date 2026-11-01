@@ -12,6 +12,7 @@ from utils.database.database_sessions import submit_global_database_session, ope
 from utils.discoveries.mp3_covers import import_covers_from_mp3
 from utils.database.albums import covers_dir
 from utils.common.output import RED, RESET
+from utils.ui.library_link_prompt import offer_linking_library_files
 
 def _review_imported_songs(imported_songs):
     if imported_songs:
@@ -37,6 +38,8 @@ def import_youtube_playlist():
         return
     imported_songs = import_data_from_youtube_playlist(playlist_input)
     _review_imported_songs(imported_songs)
+    music_session, _ = open_and_set_global_database_sessions()
+    offer_linking_library_files(music_session, imported_songs)
 
 
 def import_covers():
