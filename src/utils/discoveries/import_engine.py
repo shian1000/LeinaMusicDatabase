@@ -413,6 +413,8 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
 
 # What separates an artist from the title inside a tag's title field
 _TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—/]\s+")
+# "Title By Artist" in a title field or file name, split at the last " by "
+_TITLE_BY_ARTIST = re.compile(r"^(.+)\s+by\s+(.+?)$", re.IGNORECASE)
 
 
 # A release year left at the end of a file's title ("... [Full Length] 2006")
@@ -590,20 +592,38 @@ class LocalSongMatcher:
         else:
             found = [s for s in self._songs_by_title_core(title, duration_s) if _artist_resembles(name, s)]
             song = found[0] if len(found) == 1 else None
-        if song is None and title_guesses and (unsplit := metadata.get("unsplit_title")):
-            # A file name split on a bare hyphen: the whole name as the title
-            song = self.match_similar({"title": unsplit, "duration_s": duration_s})
+        if song is None and title_guesses and (whole := metadata.get("unsplit_title") or self.joined_title(metadata)):
+            # A file name split on a bare hyphen, or an unknown artist that is
+            # the start of the title: the whole name as the title
+            song = self.match_similar({"title": whole, "duration_s": duration_s})
         return song
 
-    def match_score(self, metadata: dict, song: Song) -> float:
+    def joined_title(self, metadata: dict) -> str | None:
+        """The tag artist and title read as one title, "Svefn" - "g-englar"
+        -> "Svefn-g-englar", when the database knows no artist of that
+        name, or only one left without songs (the wrongly read song deleted,
+        its artist not): a file once split on a bare hyphen whose name and
+        tags were then rewritten that way (unsplit_title no longer sees the
+        hyphen). Never auto-accepted (folder_playlist.match_track()): an
+        unknown artist is more often just new."""
+        name, title = metadata.get("artist_name"), metadata.get("title")
+        if not name or not title or metadata.get("unsplit_title"):
+            return None
+        artist = self._artist(name)
+        if artist is not None and self._artist_songs(artist):
+            return None
+        return f"{name}-{title}"
+
+    def match_score(self, metadata: dict, song: Song, joined: bool = True) -> float:
         """0-1, how well the file's tags fit `song`: the title's similarity
         (whole and core, the better) and, when the file has an artist, the
         artist's (FILE_MATCH_SCORE_TITLE_WEIGHT : the rest) - read as tagged
         or with artist and title swapped, the better ("Ne Bucuram In Ciuda
         Lor" by "Carla's Dreams" tagged the other way round). Shown with every
-        guess; best_guesses() ranks by it."""
+        guess; best_guesses() ranks by it. Not `joined`: without the
+        joined_title() reading."""
         forms = self._title_forms(song)
-        return max(self._score(*wanted, forms, song, 0.0) for wanted in self._readings(metadata))
+        return max(self._score(*wanted, forms, song, 0.0) for wanted in self._readings(metadata, joined))
 
     def best_guesses(self, metadata: dict, limit: int, min_score: float) -> list:
         """The `limit` songs scoring at least `min_score`, best first, as
@@ -624,17 +644,30 @@ class LocalSongMatcher:
         scored.sort(key=lambda pair: (-pair[1], pair[0].id))
         return scored[:limit]
 
-    @classmethod
-    def _readings(cls, metadata: dict) -> list:
+    def _readings(self, metadata: dict, joined: bool = True) -> list:
         """The tags as written, and with artist and title swapped when both
         are there, and a file name split on a bare hyphen read whole as the
-        title ("Svefn-g-englar")."""
-        readings = [cls._wanted(metadata)]
+        title ("Svefn-g-englar"), or else (`joined`) an unknown artist read
+        with the title as one (joined_title()), and a title "X by Y" read as
+        title X by artist Y when the database knows an artist Y (by_artist())."""
+        readings = [self._wanted(metadata)]
         if metadata.get("artist_name") and metadata.get("title"):
-            readings.append(cls._wanted({"title": metadata["artist_name"], "artist_name": metadata["title"]}))
-        if unsplit := metadata.get("unsplit_title"):
-            readings.append(cls._wanted({"title": unsplit}))
+            readings.append(self._wanted({"title": metadata["artist_name"], "artist_name": metadata["title"]}))
+        if by := self.by_artist(metadata.get("title")):
+            readings.append(self._wanted({"title": by[0], "artist_name": by[1]}))
+        if whole := metadata.get("unsplit_title") or (joined and self.joined_title(metadata)):
+            readings.append(self._wanted({"title": whole}))
         return readings
+
+    def by_artist(self, title: str | None) -> tuple | None:
+        """A title "BASEBALL FURIES CHASE By Barry de Vorzon" as (title,
+        artist) - split at the last " by " - when the database knows an
+        artist of that name, else None: "Stand By Me" isn't "Stand" by "Me"."""
+        found = _TITLE_BY_ARTIST.match((title or "").strip())
+        if not found:
+            return None
+        name, artist = found.group(1).strip(), found.group(2).strip()
+        return (name, artist) if name and self._artist(artist) is not None else None
 
     @staticmethod
     def _wanted(metadata: dict) -> tuple:

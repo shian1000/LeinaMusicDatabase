@@ -18,6 +18,7 @@ from utils.database.database_management import delete_db_entry
 from utils.discoveries.discovery_modules.spotify_fetcher import normalize_spotify_url
 from utils.ui.genre_review import set_genre_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
+from utils.ui.song_delete_review import merge_instead_of_deleting
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -162,11 +163,23 @@ def remove_links_from_songs(songs_objects):
 def remove_songs_from_database(songs_objects):
     print("About to delete these songs from the database:")
     display_songs(songs_objects)
-    confirmation = ask_yes_no(f"Are you sure you want to delete {len(songs_objects)} song(s)???")
+    remaining = merge_instead_of_deleting(songs_objects)
+    if remaining is None:
+        print("Aborted")
+        return
+    if not remaining:
+        submit_global_database_session()
+        return
+    if len(remaining) < len(songs_objects):
+        display_songs(remaining)
+    confirmation = ask_yes_no(f"Are you sure you want to delete {len(remaining)} song(s)???")
     if not confirmation:
+        # The merges chosen above stay
+        submit_global_database_session()
         print("Aborted")
         return
 
+    songs_objects = remaining
     for song in songs_objects:
         delete_db_entry(song)
 

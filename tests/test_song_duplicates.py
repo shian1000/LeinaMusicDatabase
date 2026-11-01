@@ -330,3 +330,72 @@ def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
 
     assert [s.title for s in added] == ["Is This Love"] and len(created) == 1
     assert skipped == [("Bob Marley - Is This Love", "Added already in this import")]
+
+
+# ---- deleting a song that duplicates another ----------------------------------------------
+
+def _wrongly_read(session):
+    """The three duplicates folder playlists created on 2026-10-16/17 and the
+    owner deleted - each the song it should have been merged into first."""
+    rdr = "Red Dead Redemption 2 OST"
+    unshaken = Song(title="Unshaken", artist=Artist(name="D'Angelo"), album=rdr)
+    jerk = Song(title="Jerk It Out", artist=Artist(name="Caesars"), album="Love for the Streets")
+    svefn = Song(title="Svefn-G-Englar", artist=Artist(name="Sigur Rós"), album="Ágætis byrjun")
+    others = [Song(title="Unknown Soldier", artist=Artist(name="Daniel Lanois"), album=rdr),
+              Song(title="Love", artist=Artist(name="Lana Del Rey"), album="Lust for Life")]
+    pairs = [(Song(title="May I Stand Unshaken", artist=Artist(name="Banda Sonora"), album=rdr), unshaken),
+             (Song(title="The caesars", artist=Artist(name="Jerk it out"), album="Love for the Streets"), jerk),
+             (Song(title="g-englar", artist=Artist(name="Svefn")), svefn)]
+    session.add_all([unshaken, jerk, svefn, *others, *(wrong for wrong, _ in pairs)])
+    session.commit()
+    return pairs
+
+
+def test_merge_candidates_find_what_a_wrongly_read_song_duplicates(session):
+    for wrong, right in _wrongly_read(session):
+        assert sd.merge_candidates(session, wrong) == [right], wrong.title
+    # A short common title part doesn't count
+    lust = Song(title="Lust", artist=Artist(name="X"), album="Lust for Life")
+    session.add(lust)
+    session.commit()
+    assert sd.merge_candidates(session, lust) == []
+
+
+def test_deleting_a_used_song_offers_the_merge_instead(session, monkeypatch):
+    from types import SimpleNamespace
+
+    from utils.database import database_sessions
+    from utils.database.song_references import SongUses
+    review = importlib.import_module("utils.ui.song_delete_review")
+
+    (wrong, right), (unused, _), (cancelled, jerk) = _wrongly_read(session)
+    wrong_id = wrong.id
+    monkeypatch.setattr(database_sessions, "_GLOBAL_DATABASE_SESSION", (session, None))
+    monkeypatch.setattr(review, "song_uses",
+                        lambda song_id: SongUses() if song_id == unused.id else SongUses(playlists=2))
+    asked = []
+
+    def select(message, choices):
+        asked.append([c.value for c in choices])
+        return _Answer(choices[0].value)
+
+    monkeypatch.setattr(review.questionary, "select", select)
+    assert review.merge_instead_of_deleting([wrong, unused]) == [unused]
+    session.commit()
+    assert len(asked) == 1 and asked[0][0] is right  # the unused song isn't asked about
+    assert session.get(Song, wrong_id) is None
+    assert [(c.old_song_id, c.new_song_id) for c in session.query(SongIdChange)] == [(wrong_id, right.id)]
+
+    # Cancelling rolls back a merge made before it in the same run
+    answers = iter([jerk, None])
+    monkeypatch.setattr(review.questionary, "select", lambda message, choices: _Answer(next(answers)))
+    other = Song(title="Jerk it out", artist=Artist(name="The Caesars"), album="Love for the Streets")
+    session.add(other)
+    session.commit()
+    assert review.merge_instead_of_deleting([cancelled, other]) is None
+    assert session.get(Song, cancelled.id) is cancelled and session.query(SongIdChange).count() == 1
+
+    # "Delete it anyway" / "Keep it"
+    for answer, expected in ((review._DELETE, [other]), (review._KEEP, [])):
+        monkeypatch.setattr(review.questionary, "select", lambda message, choices, a=answer: _Answer(a))
+        assert review.merge_instead_of_deleting([other]) == expected

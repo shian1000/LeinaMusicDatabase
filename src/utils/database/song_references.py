@@ -42,11 +42,14 @@ exists - rows left over from before this log (143 on 2026-10-12, all
 "spellchecked"/"album_checked" markers).
 """
 
+import sqlite3
 import weakref
+from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import event, func, select, text
 
-from config.constants import FILE_MATCH_AUTO
+from config.constants import FILE_MATCH_AUTO, TAG_KIND_MOOD
 from utils.common.debug import flog, mlog
 from utils.database import mood_sync, playlist_sync, saved_sync
 from utils.database.backup import DB_FILES
@@ -351,3 +354,57 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
     if failed:
         _changes_pending = True
     return results
+
+
+# --------------------
+# Where a song is used
+# --------------------
+
+@dataclass
+class SongUses:
+    """Where a song's id is used outside music.db: users' playlists (each
+    counted once), moods (users' and global), library files."""
+    playlists: int = 0
+    moods: int = 0
+    files: int = 0
+
+    def __bool__(self) -> bool:
+        return bool(self.playlists or self.moods or self.files)
+
+
+def _count(path, query: str, song_id: int) -> int:
+    """`query`'s count (parameters: the song id, then TAG_KIND_MOOD if it asks)
+    in the SQLite file `path`, read-only; 0 when it can't be read."""
+    try:
+        conn = sqlite3.connect(f"{Path(path).absolute().as_uri()}?mode=ro", uri=True, timeout=5)
+        try:
+            params = (song_id, TAG_KIND_MOOD)[:query.count("?")]
+            return conn.execute(query, params).fetchone()[0] or 0
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        flog(f"Counting the uses of song {song_id} in {Path(path).name} failed: {exc}")
+        return 0
+
+
+def song_uses(song_id: int, user_dbs=None, tag_db=None, files_db=None) -> SongUses:
+    """What deleting song `song_id` would leave pointing at nothing:
+    playlist tracks keep their title with song_id NULL, mood entries and
+    library matches go. Merging instead (song_duplicates.merge_songs())
+    moves them all to the kept song. Read-only; the paths default to every
+    user's user.db, tag.db and files.db."""
+    uses = SongUses()
+    for path in (user_dbs if user_dbs is not None else user_db_files().values()):
+        uses.playlists += _count(path, "SELECT COUNT(DISTINCT t.playlist_id) FROM playlist_tracks t "
+                                       "JOIN playlists p ON p.id = t.playlist_id "
+                                       "WHERE t.song_id = ? AND p.deleted_at IS NULL", song_id)
+        uses.moods += _count(path, "SELECT COUNT(*) FROM song_tags st JOIN tags t ON t.id = st.tag_id "
+                                   "WHERE st.song_id = ? AND t.kind = ? AND t.deleted_at IS NULL", song_id)
+    tag_db = tag_db or DB_FILES["tag"]
+    if Path(tag_db).exists():
+        uses.moods += _count(tag_db, "SELECT COUNT(*) FROM song_tags st JOIN tags t ON t.id = st.tag_id "
+                                     "WHERE st.song_id = ? AND t.kind = ?", song_id)
+    files_db = files_db or FILES_DB
+    if Path(files_db).exists():
+        uses.files += _count(files_db, "SELECT COUNT(*) FROM files WHERE song_id = ?", song_id)
+    return uses

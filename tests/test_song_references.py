@@ -297,3 +297,42 @@ def test_one_broken_user_db_doesnt_stop_the_others_and_is_tried_again(env, capsy
     db.close()
     assert sr.apply_song_id_changes(tag_session=tag())["user aaron"] == 1
     assert sr.apply_song_id_changes(tag_session=tag()) == {}
+
+
+def test_song_uses_count_playlists_moods_and_files(tmp_path):
+    import sqlite3
+
+    user = tmp_path / "user.db"
+    db = sqlite3.connect(user)
+    db.executescript("""
+        CREATE TABLE playlists (id INTEGER PRIMARY KEY, deleted_at INTEGER);
+        CREATE TABLE playlist_tracks (playlist_id INTEGER, position INTEGER, song_id INTEGER);
+        CREATE TABLE tags (id INTEGER PRIMARY KEY, kind TEXT, deleted_at INTEGER);
+        CREATE TABLE song_tags (song_id INTEGER, tag_id INTEGER);
+        INSERT INTO playlists VALUES (1, NULL), (2, NULL), (3, 5);
+        INSERT INTO playlist_tracks VALUES (1, 0, 7), (1, 1, 7), (2, 0, 7), (3, 0, 7), (2, 1, 8);
+        INSERT INTO tags VALUES (1, 'mood', NULL), (2, 'marker', NULL), (3, 'mood', 9);
+        INSERT INTO song_tags VALUES (7, 1), (7, 2), (7, 3);
+    """)
+    db.commit()
+    db.close()
+    tag = tmp_path / "tag.db"
+    db = sqlite3.connect(tag)
+    db.executescript("""
+        CREATE TABLE tags (id INTEGER PRIMARY KEY, kind TEXT);
+        CREATE TABLE song_tags (song_id INTEGER, tag_id INTEGER);
+        INSERT INTO tags VALUES (1, 'mood'), (2, 'marker');
+        INSERT INTO song_tags VALUES (7, 1), (7, 2);
+    """)
+    db.commit()
+    db.close()
+    files = tmp_path / "files.db"
+    db = sqlite3.connect(files)
+    db.executescript("CREATE TABLE files (id INTEGER PRIMARY KEY, song_id INTEGER); INSERT INTO files VALUES (1, 7);")
+    db.commit()
+    db.close()
+
+    uses = sr.song_uses(7, user_dbs=[user, tmp_path / "missing.db"], tag_db=tag, files_db=files)
+    # Two live playlists (a track twice counts once, a deleted playlist not), a user and a global mood
+    assert (uses.playlists, uses.moods, uses.files) == (2, 2, 1) and uses
+    assert not sr.song_uses(99, user_dbs=[user], tag_db=tag, files_db=files)

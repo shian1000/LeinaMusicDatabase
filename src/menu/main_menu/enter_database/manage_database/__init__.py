@@ -1,4 +1,4 @@
-from utils.common.output import GREEN, RED, RESET, review_header
+from utils.common.output import GREEN, RED, RESET, review_header, say
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
@@ -22,7 +22,7 @@ from utils.ui.prompts import ask_yes_no
 from utils.ui.artist_change import has_artist_twin, rename_artist
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
-from utils.database.tags_management import add_tag_to_song, has_tag_on_song
+from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from config.constants import SPELLING_CHECK_THRESHOLD
 
 
@@ -79,7 +79,15 @@ def _find_local_spellcheck_match(song):
 
 def check_spelling_menu():
 
-    songs = get_songs_from_db_session()
+    # One query for every checked song: has_tag_on_song() per song took
+    # two queries each, seconds of waiting when everything was checked
+    checked = song_ids_with_tag("spellchecked")
+    # MusicBrainz is asked about recordings; a whole album's title isn't one
+    songs = [song for song in get_songs_from_db_session()
+             if song.id not in checked and not is_full_album(song)]
+    if not songs:
+        say("Every song has been spell checked already.")
+        return
     spell_check_cache = dict(_MENU_SPELLCHECK_CACHE)
 
     # Corrections that need user review aren't asked about inline anymore -
@@ -92,12 +100,6 @@ def check_spelling_menu():
     pending_title_corrections = []
 
     for song in songs:
-        if has_tag_on_song(song, "spellchecked"):
-            continue
-        # MusicBrainz is asked about recordings; a whole album's title isn't one
-        if is_full_album(song):
-            continue
-
         if local_match := _find_local_spellcheck_match(song):
             slog(f"[LOCAL MATCH] Skipping remote spell check for {song.artist.name} - {song.title} because {local_match.artist.name} - {local_match.title} already exists locally", priority=1)
             add_tag_to_song(song, "spellchecked")

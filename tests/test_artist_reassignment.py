@@ -558,7 +558,7 @@ def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, mon
     sting, caps = _artist(session, "Sting"), _artist(session, "STING")
     song = _song(session, "Fields of Gold", caps)
     monkeypatch.setattr(md, "get_songs_from_db_session", lambda *a: [song])
-    monkeypatch.setattr(md, "has_tag_on_song", lambda *a: False)
+    monkeypatch.setattr(md, "song_ids_with_tag", lambda tag: set())
     monkeypatch.setattr(md, "add_tag_to_song", lambda *a: None)
     monkeypatch.setattr(md, "_find_local_spellcheck_match", lambda s: None)
     monkeypatch.setattr(md, "is_full_album", lambda s: False)

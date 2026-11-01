@@ -5,7 +5,7 @@ owner asked for it on the MusicDatabase side first. Please build the app side
 described below, and write back in `docs/handoffs/musicdatabase-additional-videos.md`
 if something doesn't fit.
 
-**Status (2026-10-31):** done on the MusicDatabase side; the app side is not started.
+**Status (2026-10-31):** done on both sides (the app also lists the videos in song info).
 
 ## Why
 

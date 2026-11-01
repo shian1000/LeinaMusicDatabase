@@ -25,6 +25,8 @@ from config.constants import (
     ADDITIONAL_ARTIST_ROLE_FEAT,
     DUPLICATE_TITLE_EXTRA_JUNK,
     DUPLICATE_VERSION_WORDS,
+    MERGE_CANDIDATE_MIN_PART,
+    MERGE_CANDIDATES_MAX,
     NO_VIDEO_SENTINEL,
     SINGLES_ALBUM,
     SONG_DUPLICATE_IGNORE_FILE,
@@ -236,6 +238,40 @@ def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
                 kept = _cross_artist_song_to_keep(group)
                 found.append([kept, *[s for s in group if s is not kept]])
     return sorted(found, key=lambda g: ((g[0].artist.name or "").lower(), g[0].title.lower()))
+
+
+def _contains_words(longer: str, shorter: str) -> bool:
+    """Is `shorter` (normalized, at least MERGE_CANDIDATE_MIN_PART characters)
+    a whole-word part of `longer`?"""
+    return len(shorter) >= MERGE_CANDIDATE_MIN_PART and f" {shorter} " in f" {longer} "
+
+
+def merge_candidates(session, song: Song, limit: int = MERGE_CANDIDATES_MAX) -> list:
+    """Songs `song` may be a wrongly read duplicate of, for deleting it:
+    merging keeps its playlists, moods and files (song_references.song_uses()),
+    deleting loses them. Best first: the same title by anyone; the title
+    with the artist read as part of it ("Svefn" - "g-englar" is
+    "Svefn-G-Englar"); on the same album, a title containing the other's
+    ("May I Stand Unshaken" / "Unshaken") or artist and title swapped ("The
+    caesars" by "Jerk it out" / "Jerk It Out" by "Caesars"). Read-only."""
+    title, artist = duplicate_key(song.title), normalize(song.artist.name if song.artist else "")
+    joined = {duplicate_key(f"{song.artist.name}{sep}{song.title}") for sep in ("-", " ")} if artist else set()
+    album = normalize(song.album or "") if song.album and song.album.strip() != SINGLES_ALBUM else ""
+    ranked = []
+    for other in session.query(Song).filter(Song.id != song.id).order_by(Song.id):
+        if other.kind != song.kind:
+            continue
+        other_title = duplicate_key(other.title)
+        if other_title and other_title == title:
+            ranked.append((0, other.id, other))
+        elif other_title and other_title in joined:
+            ranked.append((1, other.id, other))
+        elif album and normalize(other.album or "") == album:
+            other_artist = normalize(other.artist.name if other.artist else "")
+            if (_contains_words(other_title, title) or _contains_words(title, other_title)
+                    or (artist and artist == other_title) or (other_artist and other_artist == title)):
+                ranked.append((2, other.id, other))
+    return [other for _, _, other in sorted(ranked, key=lambda r: r[:2])][:limit]
 
 
 def load_not_duplicates() -> list[frozenset[int]]:

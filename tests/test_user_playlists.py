@@ -770,7 +770,8 @@ def test_file_name_split_on_a_bare_hyphen_is_also_read_whole_as_the_title(tmp_pa
     assert matcher.match_similar(metadata) is animator
     assert matcher.match(metadata) is None
     assert matcher.match_score(metadata, animator) == 1.0
-    assert matcher.match_similar({**metadata, "unsplit_title": None}) is None
+    # Without it, "Re" being no artist of the database joins the title the same way
+    assert matcher.match_similar({**metadata, "unsplit_title": None}) is animator
 
 
 def test_a_file_name_with_a_hyphen_inside_a_word_is_read_as_the_title(tmp_path, music_session):
@@ -802,6 +803,44 @@ def test_a_file_name_with_a_hyphen_inside_a_word_is_read_as_the_title(tmp_path, 
     music_session.add(Song(title="Other", artist=Artist(name="Svefn")))
     music_session.commit()
     assert LocalSongMatcher(music_session).match_similar(metadata) is svefn
+
+
+def test_an_unknown_artist_is_also_read_with_the_title_as_one(tmp_path, music_session, monkeypatch):
+    """"Svefn - g-englar.mp3" tagged "Svefn" / "g-englar": a split name once
+    written back into the file (2026-10-17), so no hyphen is left for
+    unsplit_title. "Svefn" is no artist of the database, so "Svefn-g-englar"
+    is tried as a title too - suggested, never taken without asking."""
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    svefn = Song(title="Svefn-G-Englar", artist=Artist(name="Sigur Rós"))
+    music_session.add(svefn)
+    music_session.commit()
+    tags = {"artist_name": "Svefn", "title": "g-englar"}
+
+    matcher = LocalSongMatcher(music_session)
+    assert matcher.joined_title(tags) == "Svefn-g-englar"
+    assert matcher.match_similar(tags) is svefn
+    assert matcher.match(tags) is None
+    assert matcher.match_score(tags, svefn) == 1.0
+    assert matcher.match_score(tags, svefn, joined=False) < 0.6
+    assert [song for song, _ in matcher.best_guesses(tags, 3, 0.6)] == [svefn]
+
+    folder = _folder(tmp_path, {"Svefn - g-englar.mp3": None})
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(tags))
+    (track,) = fp.build_folder_playlist(music_session, folder, 1.1, 0.6, 0.6).unmatched
+    assert track.similar_song is svefn and track.song_id is None
+
+    # An artist row left without songs (its wrongly read song deleted) is no artist either
+    left = Artist(name="Svefn")
+    music_session.add(left)
+    music_session.commit()
+    assert LocalSongMatcher(music_session).match_similar(tags) is svefn
+
+    # An artist with songs is read as tagged
+    music_session.add(Song(title="Other", artist=left))
+    music_session.commit()
+    known = LocalSongMatcher(music_session)
+    assert known.joined_title(tags) is None and known.match_similar(tags) is None
 
 
 def _yt_compare_env(tmp_path, music_session, monkeypatch, tags: dict, items: list, select):
@@ -979,6 +1018,42 @@ def test_best_guesses_rank_by_score_and_need_the_title_to_reach_it(music_session
     (top, score), *_ = matcher.best_guesses({"artist_name": None, "title": "Paranoid Androyd"}, 3, 0.6)
     assert top.title == "Paranoid Android" and score > 0.9
     assert len(matcher.best_guesses({"artist_name": None, "title": "Paranoid"}, 1, 0.3)) == 1  # the limit
+
+
+def test_title_by_artist_is_scored_with_that_artist(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    barry, ben = Artist(name="Barry De Vorzon"), Artist(name="Ben E. King")
+    chase = Song(title="Baseball Furies Chase", artist=barry)
+    stand = Song(title="Stand By Me", artist=ben)
+    music_session.add_all([chase, stand, Song(title="Stand", artist=Artist(name="R.E.M."))])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+
+    tags = {"artist_name": None, "title": "BASEBALL FURIES CHASE By Barry de Vorzon"}
+    assert matcher.by_artist(tags["title"]) == ("BASEBALL FURIES CHASE", "Barry de Vorzon")
+    assert matcher.match_score(tags, chase) == 1.0  # not the ~0.7 of the whole title alone
+    assert matcher.best_guesses(tags, 3, 0.6) == [(chase, 1.0)]
+    # Only for an artist the database knows: "Stand By Me" stays one title
+    assert matcher.by_artist("Stand By Me") is None
+    assert matcher.best_guesses({"artist_name": None, "title": "Stand By Me"}, 3, 0.6)[0] == (stand, 1.0)
+
+
+def test_title_by_artist_file_is_auto_accepted(tmp_path, music_session, monkeypatch):
+    chase = Song(title="Baseball Furies Chase", artist=Artist(name="Barry De Vorzon"))
+    music_session.add_all([chase, Song(title="Intro", artist=Artist(name="Moby"))])
+    music_session.commit()
+    tags = {"1.mp3": (None, "BASEBALL FURIES CHASE By Barry de Vorzon"),
+            "2.mp3": (None, "Intro By Nobody Known")}  # no such artist: title alone, asked
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    playlist = fp.build_folder_playlist(music_session, folder, 0.9, 0.6, 0.99)
+
+    first = playlist.tracks[0]
+    assert first.song_id == chase.id and first.picked
+    assert playlist.auto_accepted_scored == [(first, ("Barry de Vorzon", "BASEBALL FURIES CHASE"), 1.0)]
+    assert [t.file.name for t in playlist.unmatched] == ["2.mp3"]
 
 
 def test_closest_song_picked_with_its_score_shown(users_env, tmp_path, music_session, monkeypatch, capsys):

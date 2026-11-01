@@ -486,6 +486,11 @@ FILE_TITLE_PREFIX_MIN_LENGTH = 4
 # D Minor": Bach, Vanessa-Mae) is offered them to pick from, up to this many;
 # more and the user searches by title instead.
 FILE_TITLE_CANDIDATES_MAX = 5
+# Deleting a song offers merging into one of at most this many songs it may
+# duplicate (song_duplicates.merge_candidates()); a title part shorter than
+# MERGE_CANDIDATE_MIN_PART characters doesn't count ("Love" is in half the titles)
+MERGE_CANDIDATES_MAX = 5
+MERGE_CANDIDATE_MIN_PART = 4
 
 # A song request whose video title is "<artist>: <title>" ("Travie McCoy:
 # Billionaire ft. Bruno Mars" on the label's channel) is read that way only

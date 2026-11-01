@@ -230,7 +230,12 @@ When no rule above finds anything, the folder playlist offers the top 3 of
 similarity (whole and core, the better), weighted 0.65 against the artist's
 when the file has one - and the better of the tags as written and swapped:
 `match_similar()` already finds a swapped-tags song, and scoring only the
-written order showed it at ~20% next to a 100% match. Two choices that aren't obvious:
+written order showed it at ~20% next to a 100% match. A title "X By Y"
+(a nameless "BASEBALL FURIES CHASE By Barry de Vorzon.mp3", 69% as one title)
+is also read as X by Y, split at the last " by " (`by_artist()`), but only
+when the database knows an artist Y - otherwise "Stand By Me" would offer
+every song titled "Stand" at 0.65+ - and such a file is auto-accepted like
+one with an artist, the artist being real. Two choices that aren't obvious:
 
 - The **title alone** must reach the minimum score, not just the weighted
   sum. Otherwise a perfect artist (0.35) needs a title of only ~0.38 to pass

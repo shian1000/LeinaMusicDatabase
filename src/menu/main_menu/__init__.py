@@ -13,6 +13,6 @@ def main_menu():
         "Settings": settings_menu,
         "Help": help_menu,
     }
-
+    
 
     execute_menu_item("Main Menu", action_map, exit_label="Exit")

@@ -203,6 +203,10 @@ non-trivial work in that area.
   Spotify link ("Hasiok x Maleńczuk" / "Yugopolis x Maleńczuk"); kept is the song naming every
   artist, else the one on a real album over "Singles", else the most data; the dropped song's main
   artist is not carried over, and is removed when left without songs. Never silently merged.
+  Deleting a song that is used in playlists, moods or the library index (`song_references.song_uses()`)
+  first offers merging it into a song it may duplicate (`merge_candidates()`; `utils/ui/song_delete_review.py`,
+  every song-deleting menu path): a deletion leaves the playlists' tracks without a song, which is how
+  five wrongly read folder-playlist songs got lost on 2026-10-17/18.
   The groups left unticked can be remembered on a yes (`data/song_duplicate_ignore.json`, sets of
   song ids); a group is left out while all its songs were in one remembered group.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
@@ -366,16 +370,20 @@ non-trivial work in that area.
   with its title, also not in `match()`, and when 2–5 songs share it, a list to pick from
   (`title_candidates()`, `FILE_TITLE_CANDIDATES_MAX`) — else
   same title by a resembling artist — its name, a synonym, or one part of a joined name not split
-  yet, "College" of "College & Electric Youth" — only when exactly one song fits), which the user confirms.
+  yet, "College" of "College & Electric Youth" — only when exactly one song fits; else a tag artist
+  the database doesn't know (or one left without songs) read with the title as one, "Svefn" - "g-englar" → "Svefn-G-Englar"
+  (`joined_title()`, for a split name once written back into the file; never auto-accepted)), which the user confirms.
   When none of those fits, up to 3 closest songs by `LocalSongMatcher.best_guesses()` /
   `match_score()` are offered (title, and the artist when the file has one, the tags also read with
-  artist and title swapped; the title alone must
+  artist and title swapped, and a title "X By Y" as X by Y when the database knows an artist Y,
+  `by_artist()`; the title alone must
   reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
   `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score; the
   only one reaching Settings → "Closest songs: auto-accept score" (default 0.99) is taken without
   asking and listed as auto-accepted — for a file with no artist (scored on its title alone) only the
   one song with its title, and only a distinctive title (`import_engine.is_distinctive_title()`,
-  `NAMELESS_AUTO_ACCEPT_MIN_WORDS` / `_CHARS`: "Intro" always asks). `match()` (files.db, covers) takes
+  `NAMELESS_AUTO_ACCEPT_MIN_WORDS` / `_CHARS`: "Intro" always asks), unless its title "X By Y"
+  names a known artist Y, then like a file with an artist. `match()` (files.db, covers) takes
   `match_similar()`'s safe guesses without asking, never the title-only ones nor these. After saving, files whose song was confirmed or picked are offered "Fix the names and
   tags" (`mp3_utils.rename_to_song()` → "Artist - Title.mp3", never overwriting), the rest a plain
   tag update (`mp3_utils.write_song_tags()`, which never writes the "Singles" sentinel as an album).

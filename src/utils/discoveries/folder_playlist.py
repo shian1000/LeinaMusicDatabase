@@ -138,8 +138,19 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         track.scores = {song.id: matcher.match_score(metadata, song) for song in suggested if song is not None}
         # A file with no artist in the tags is scored on its title alone (the
         # one "Intro" in the database would be 100%): only the one song with
-        # its title (match_similar()), and only for a distinctive title
-        if track.artist:
+        # its title (match_similar()), and only for a distinctive title -
+        # unless its title names a known artist ("X By Y", by_artist())
+        read_as = (track.artist, track.title)
+        by = None if track.artist else matcher.by_artist(track.title)
+        if by:
+            title, artist = by
+            read_as = (artist, title)
+            by_reading = {"artist_name": artist, "title": title, "duration_s": metadata.get("duration_s")}
+            candidates = [song for song in suggested if song is not None
+                          and matcher.match_score(by_reading, song, joined=False) == track.scores[song.id]]
+            if track.similar_song is not None and is_distinctive_title(track.title):
+                candidates.append(track.similar_song)
+        elif track.artist:
             candidates = suggested
             unsplit = metadata.get("unsplit_title")
             if unsplit and not is_distinctive_title(unsplit):
@@ -147,6 +158,10 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
                 plain = {**metadata, "unsplit_title": None}
                 candidates = [song for song in suggested if song is not None
                               and matcher.match_score(plain, song) == track.scores[song.id]]
+            elif matcher.joined_title(metadata):
+                # Never on the artist and title read as one (joined_title())
+                candidates = [song for song in suggested if song is not None
+                              and matcher.match_score(metadata, song, joined=False) == track.scores[song.id]]
         elif track.similar_song is not None and is_distinctive_title(track.title):
             candidates = [track.similar_song]
         else:
@@ -155,7 +170,6 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
                 if song is not None and track.scores[song.id] >= auto_accept_score}
         if len(sure) == 1:
             (song,) = sure.values()
-            read_as = (track.artist, track.title)
             track.picked = True  # its tags differ from the song's: offered the name/tag fix
             assign_song(track, song)
             playlist.auto_accepted_scored.append((track, read_as, track.scores[song.id]))

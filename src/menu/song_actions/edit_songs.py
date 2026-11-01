@@ -25,6 +25,7 @@ from utils.database.latin_names import latin_of
 from utils.ui.latin_forms_review import edit_latin_form
 from utils.ui.genre_review import set_genre_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
+from utils.ui.song_delete_review import merge_instead_of_deleting
 from utils.database.song_kinds import kind_label
 from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
 
@@ -173,18 +174,7 @@ def edit_entry_menu(mode: str = None, db_object = None):
         set_kind_of_songs([db_object])
         return
     if choice == delete_option:
-        label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
-        confirmation = ask_yes_no(f"Do you really want to delete {label}?")
-        if not confirmation:
-            print("Aborted")
-            return
-        try:
-            delete_db_entry(db_object)
-        except ArtistHasSongsError as exc:
-            print(f"Not deleted: {exc}. {HAS_SONGS_HINT}")
-            return
-        submit_global_database_session()
-        print(f"Deleted {label}")
+        _delete_entry(db_object, mode)
         return
     category = field_options.get(choice)
     if category is None:
@@ -213,8 +203,22 @@ def remove_song_menu(mode: str = None):
     db_object = search_and_pick_db_object(mode)
     if db_object is None:
         return
+    _delete_entry(db_object, mode)
 
-    label = db_object.name if mode == "Artist" else f"{db_object.artist.name} - {db_object.title}"
+
+def _delete_entry(db_object, mode: str = None) -> None:
+    """Delete a song or an artist after a yes; a song used in playlists or
+    moods is offered merging into the song it duplicates first
+    (merge_instead_of_deleting())."""
+    label = db_object.name if mode == "Artist" else f"{song_artist_label(db_object)} - {db_object.title}"
+    if isinstance(db_object, Song):
+        remaining = merge_instead_of_deleting([db_object])
+        if remaining is None:
+            print("Aborted")
+            return
+        if not remaining:
+            submit_global_database_session()
+            return
     if not ask_yes_no(f"Do you really want to delete {label}?"):
         print("Aborted")
         return
