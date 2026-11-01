@@ -598,21 +598,24 @@ def _ask_song_request(case):
         show("[red]Both the artist and the title are needed.[/red]")
 
 
-def _add_requested_songs(approved: list) -> None:
+def _add_requested_songs(approved: list, after_import=None) -> None:
     """The approved songs through the import, in one batch (its questions
-    about similar artists / songs come at the end, as for any import)."""
+    about similar artists / songs come at the end, as for any import), then
+    `after_import(result)` - the menu's offer to fill in their missing data."""
     if not approved:
         return
     from utils.discoveries.import_engine import run_import_batch
 
     show(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
-    run_import_batch([case.metadata(artist, title) for case, artist, title in approved])
+    result = run_import_batch([case.metadata(artist, title) for case, artist, title in approved])
     submit_global_database_session()
     for case, artist, title in approved:
         mark_song_added(case, artist, title)
+    if after_import is not None:
+        after_import(result)
 
 
-def _review_song_requests(session, requests) -> tuple[list, bool]:
+def _review_song_requests(session, requests, after_import=None) -> tuple[list, bool]:
     """Returns (cases, stopped)."""
     cases = collect_song_request_cases(session, requests)
     settled = [c for c in cases if not c.pending]
@@ -643,7 +646,7 @@ def _review_song_requests(session, requests) -> tuple[list, bool]:
         _, artist, title = answer
         approved.append((case, artist, title))
     # What was approved before a stop is still added
-    _add_requested_songs(approved)
+    _add_requested_songs(approved, after_import)
     return cases, stopped
 
 
@@ -671,7 +674,9 @@ def _auto_pass(session) -> None:
     show(f"{len(result.moved)} file(s) done, {len(result.left)} left for you to review.")
 
 
-def resolve_new_requests() -> None:
+def resolve_new_requests(after_import=None) -> None:
+    """Manage database -> "Resolve new requests". `after_import(result)` is
+    called once the approved song requests are added (an ImportResult)."""
     if not inbox_available():
         show(f"The inbox isn't available: {inbox_unavailable_message()}")
         return
@@ -747,7 +752,7 @@ def resolve_new_requests() -> None:
     else:
         field_cases = collect_field_correction_cases(session, requests)
     if not stopped:
-        song_cases, stopped = _review_song_requests(session, requests)
+        song_cases, stopped = _review_song_requests(session, requests, after_import)
     else:
         song_cases = collect_song_request_cases(session, requests)
     cases = cases + found_cases + field_cases + song_cases

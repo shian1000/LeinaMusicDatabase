@@ -14,7 +14,7 @@ from utils.common.normalizer import name_key, normalize
 from utils.common.script_utils import scripts_in
 from utils.common.text_utils import resembles_across_scripts, similarity
 from utils.database.artist_reassignment import move_swapped_song
-from utils.database.artist_splitting import propose_artist_split
+from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
 

@@ -36,7 +36,9 @@ def _pick_package() -> Path | None:
     return Path(typed).expanduser() if typed and typed.strip() else None
 
 
-def import_request_package() -> None:
+def import_request_package(after_import=None) -> None:
+    """Manage database -> "Import a request package"; `after_import` goes to
+    resolve_new_requests()."""
     path = _pick_package()
     if path is None:
         return
@@ -52,4 +54,4 @@ def import_request_package() -> None:
     for name in result.already_there:
         warn(f"{name} is in the inbox already (imported before?) - skipped.")
     if result.added and ask_yes_no("Resolve the new requests now?"):
-        resolve_new_requests()
+        resolve_new_requests(after_import)

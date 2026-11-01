@@ -30,7 +30,7 @@ from utils.common.debug import flog, mlog, slog
 from utils.common.normalizer import composed, name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms
-from utils.database.artist_splitting import propose_artist_split
+from utils.common.artist_credits import propose_artist_split
 from utils.common.script_utils import cyrillic_search_variant, has_non_latin
 from utils.common.romanize import suggest_latin
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR

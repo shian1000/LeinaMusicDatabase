@@ -12,6 +12,7 @@ from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.request_package_import import import_request_package
+from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_for_import
 from utils.ui.latin_forms_review import fill_latin_forms
 from utils.ui.file_fix_review import fix_file_names_and_tags
 from utils.ui.song_duplicate_review import resolve_duplicated_songs
@@ -177,8 +178,10 @@ def check_spelling_menu():
 def manage_database():
     waiting = count_new_requests()
     action_map = {
-        f"Resolve new requests{f' ({waiting})' if waiting else ''}": resolve_new_requests,
-        "Import a request package": import_request_package,
+        # Songs added from the requests: offered their missing data right after
+        f"Resolve new requests{f' ({waiting})' if waiting else ''}":
+            lambda: resolve_new_requests(after_import=fill_missing_for_import),
+        "Import a request package": lambda: import_request_package(after_import=fill_missing_for_import),
         "Fetch database data": fetch_database_data,
         "Manual management": manual_management,
         "Resolve duplicates": resolve_duplicates,

@@ -10,7 +10,6 @@ from utils.common.title_patterns import BRACKETED, FEAT_WORD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import mb_get, MBStats
 from config.constants import (
-    TITLE_JUNK_SUFFIXES,
     MUSICBRAINZ_API_BASE_URL,
     MUSICBRAINZ_API_LIMIT,
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
@@ -384,12 +383,6 @@ def are_artists_entries_similar(
     return artist_score >= scaled_similarity_threshold(artist_query, db_object.name, threshold)
 
 
-_TITLE_JUNK_SUFFIX_RE = re.compile(
-    r"\s*\b(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
-    re.IGNORECASE,
-)
-
-
 # "T03: Song", "03. Song", "03 - Song", "Track 5) Song": a track number with
 # a separator *and* a space after it, so "1979", "7 Rings" or "2:00 AM" stay
 _TRACK_NUMBER_PREFIX_RE = re.compile(r"^(?:(?:track|t)\s*)?\d{1,3}\s*[.:)\-–]\s+", re.IGNORECASE)
@@ -400,21 +393,3 @@ def strip_track_number_prefix(title: str) -> str:
     "Mimiga Town"), unchanged when nothing would be left."""
     title = (title or "").strip()
     return _TRACK_NUMBER_PREFIX_RE.sub("", title, count=1).strip() or title
-
-
-_DANGLING_SEPARATOR_RE = re.compile(r"\s*[-–—:|]+$")
-
-
-def strip_trailing_junk_suffix(title: str) -> str:
-    """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
-    end of `title`, handling more than one stacked suffix (e.g. "Song Music
-    Video Official Audio"). Returns `title` unchanged if nothing matches.
-    A separator the phrase leaves dangling goes with it ("Secret Youth -
-    Music Video" -> "Secret Youth").
-    """
-    title = (title or "").strip()
-    while True:
-        new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
-        if new_title == title:
-            return title
-        title = _DANGLING_SEPARATOR_RE.sub("", new_title)

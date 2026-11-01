@@ -1,5 +1,5 @@
 """Clean names (Manage database -> "Clean names") on the stored catalog:
-sanitize.py's "stored" steps applied to every song's title, artist name and
+sanitize's "stored" steps applied to every song's title, artist name and
 album text, plus the repairs that need a whole record or the database
 (Polish mojibake across a song's fields, decomposed letters in every
 column, look-alike letters as a proposal). The menu prints and asks; this
@@ -16,7 +16,8 @@ from typing import Optional
 
 from sqlalchemy.orm import object_session
 
-from utils.common.normalizer import fix_cp1250_mojibake, fix_cp1250_mojibake_by_words, has_cp1250_mojibake
+from utils.common.normalizer import name_key
+from utils.common.sanitize.text import fix_cp1250_mojibake, fix_cp1250_mojibake_by_words, has_cp1250_mojibake
 from utils.common.sanitize import FIELD_ORDER, MODE_AUTO, SOURCE_STORED, STAGE_FIELD, STEPS, Context, is_enabled
 from utils.database.albums import rename_album
 from utils.database.artist_reassignment import artists_named
@@ -55,7 +56,7 @@ def hold_artist_rename(held: dict | None, artist: Artist, new_name: str) -> bool
 
 
 def apply_step(songs: list, step_name: str, held: dict | None = None, fields=("title", "artist", "album")) -> list[Change]:
-    """sanitize.py's step `step_name` applied to `fields` of every song in
+    """sanitize's step `step_name` applied to `fields` of every song in
     `songs` - an empty value is skipped, as is a step that would empty one;
     an artist rename onto another artist's name is held
     (hold_artist_rename()). One Change per song changed."""
@@ -72,7 +73,8 @@ def apply_step(songs: list, step_name: str, held: dict | None = None, fields=("t
                 value = held[song.artist.id][1]
             if not value:
                 continue
-            new_value = step.func(value, Context(field=field_name, source=SOURCE_STORED, stage=STAGE_FIELD))
+            new_value = step.func(value, Context(field=field_name, source=SOURCE_STORED, stage=STAGE_FIELD,
+                                                 artist=song.artist.name))
             if new_value == value or not new_value:
                 # A stored name is never cleaned down to nothing
                 continue
@@ -206,7 +208,7 @@ class Proposal:
 
 
 def review_step_proposals(songs: list, step_name: str) -> list[Proposal]:
-    """What the review step `step_name` (sanitize.py, e.g.
+    """What the review step `step_name` (sanitize, e.g.
     "lookalike_letters": "Вjörk" -> "Björk") would change: one proposal per
     song title, per artist and per album text, however many songs share it."""
     step = STEPS[step_name]
@@ -244,3 +246,57 @@ def junk_title_fix(title: str | None) -> str | None:
         return None
     fixed = STEPS["junk_phrases_any_bracket"].func(title, Context(field="title", source=SOURCE_STORED, stage=STAGE_FIELD))
     return fixed if fixed != title else None
+
+
+@dataclass
+class FeatMove:
+    """A stored title whose featured-artist credits move to the song's
+    credits: "Firestone ft. Conrad Sewell" -> "Firestone", feat Conrad
+    Sewell. `known`: each name the database already has as an artist (the
+    credit reuses that row); `suspicious`: a name that looks like more than
+    one ("Andriy Khlyvnyuk of Boombox", "David Bowie Holding out for a
+    Hero") - offered unticked."""
+    song: Song
+    title: str
+    names: list
+    known: dict = field(default_factory=dict)
+    suspicious: bool = False
+
+
+_SUSPICIOUS_NAME_RE = re.compile(r"[()\[\]/]|\.\.\.|\bof\b", re.IGNORECASE)
+FEAT_NAME_MAX_WORDS = 4
+
+
+def feat_move_proposals(session, songs: list) -> list[FeatMove]:
+    """Every song of `songs` whose title credits featured artists
+    (artist_credits.split_feat_credits(), the import's own rule)."""
+    from utils.common.artist_credits import split_feat_credits
+
+    known_keys = None
+    moves = []
+    for song in songs:
+        title, names = split_feat_credits(song.title or "")
+        if not names:
+            continue
+        if known_keys is None:
+            known_keys = {name_key(n) for row in session.query(Artist.name, Artist.name_latin).all() for n in row if n}
+        moves.append(FeatMove(
+            song=song, title=title, names=names,
+            known={n: name_key(n) in known_keys for n in names},
+            suspicious=any(len(n.split()) > FEAT_NAME_MAX_WORDS or _SUSPICIOUS_NAME_RE.search(n) for n in names),
+        ))
+    return moves
+
+
+def apply_feat_moves(session, moves: list[FeatMove]) -> list[Artist]:
+    """Credit each move's names as featured artists of its song (an artist
+    the database has is reused, else a new one) and give the song the title
+    without them. Returns the artists created, for the split review."""
+    from utils.database.song_duplicates import credit_feat_artists
+
+    before = {a.id for a in session.query(Artist.id).all()}
+    for move in moves:
+        credit_feat_artists(session, move.song, move.names)
+        move.song.title = move.title
+    session.flush()
+    return [a for a in session.query(Artist).all() if a.id not in before]

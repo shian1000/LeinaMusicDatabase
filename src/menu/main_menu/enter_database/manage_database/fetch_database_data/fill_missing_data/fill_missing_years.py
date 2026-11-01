@@ -25,8 +25,16 @@ from utils.common.normalizer import compare, normalize
 from utils.common.script_utils import cyrillic_search_variant
 
 
-def fill_missing_years():
-    songs_objects = get_songs_with_album_missing_year()
+def fill_missing_years(songs: list | None = None, entries: dict | None = None):
+    """Years for the songs with an album but no year - every such song, or
+    only those of `songs` (an import's, filled in right after it). `entries`
+    (song id -> the SongEntry it was read from, ImportResult.entries): a year
+    its title had ("Legenda (1991)") is offered in the unsure-years review
+    when no module finds one."""
+    if songs is None:
+        songs_objects = get_songs_with_album_missing_year()
+    else:
+        songs_objects = [song for song in songs if song.year is None and song.album]
     slog(songs_objects)
 
     if not songs_objects:
@@ -120,6 +128,7 @@ def fill_missing_years():
     finally:
         close_global_driver()
 
+    results = _years_from_titles(results, entries, review_results)
     no_year_entries = []
     for label, year, songs in results:
         if year is not None:
@@ -204,6 +213,25 @@ def _fill_years_known_in_database(songs) -> list:
 
 
 
+def _years_from_titles(results, entries, review_results) -> list:
+    """`results` without the groups no module found a year for whose songs'
+    titles name one (SongEntry.hints, all the same year) - those go to
+    `review_results`, the title shown as the source."""
+    if not entries:
+        return results
+    left = []
+    for label, year, songs in results:
+        hinted = [(entry.hints.year, entry) for song in songs
+                  if (entry := entries.get(song.id)) is not None and entry.hints.year]
+        if year is None and hinted and len({y for y, _ in hinted}) == 1:
+            title_year, entry = hinted[0]
+            print(f"Year {YELLOW}{title_year}{RESET} from the title for {YELLOW}{label}{RESET} (to review at the end)")
+            review_results.append((label, title_year, songs, f'the title "{entry.raw_text or entry.title}"'))
+        else:
+            left.append((label, year, songs))
+    return left
+
+
 def _collect(label, result, songs, results, review_results) -> None:
     if result is None:
         print(f"Couldn't find release year for {YELLOW}{label}{RESET}")
@@ -230,16 +258,17 @@ def _typed_year(text: str) -> int | None:
 
 def _review_unsure_years(review_results) -> list:
     """List every year a module flagged needs_review (a YouTube upload date
-    is often not the release date), all ticked: like every other checkbox
+    is often not the release date) or a title named, all ticked: like every other checkbox
     review, the ticked ones are saved. Unticked ones ask for the right year
     (empty = leave the song without one). Returns the songs that got a year."""
     if not review_results:
         return []
 
-    review_header(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date")
+    review_header(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date "
+                  f"or a title")
     choices = [
-        questionary.Choice(title=f"{label}: {year}" + (f"  ({url})" if url else ""), value=i, checked=True)
-        for i, (label, year, _, url) in enumerate(review_results)
+        questionary.Choice(title=f"{label}: {year}" + (f"  ({source})" if source else ""), value=i, checked=True)
+        for i, (label, year, _, source) in enumerate(review_results)
     ]
     selected = questionary.checkbox(
         "Save the ticked years; untick a wrong one to type it (space toggles, enter confirms):",

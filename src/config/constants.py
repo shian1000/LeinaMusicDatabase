@@ -474,7 +474,7 @@ DIALOG_NO_RESULT = -1
 # "Smallville - Save Me"). Stripped from the end of the title automatically,
 # without asking for confirmation, by both the YouTube playlist import
 # (import_from_playlist.py) and Clean names
-# (clean_names.py), via text_utils.strip_trailing_junk_suffix().
+# (clean_names.py), via sanitize.text.strip_trailing_junk_suffix().
 # Matched case-insensitively as whole words at the very end of the title,
 # bracketed or not; add new phrases here as they come up. Longer phrases are listed before the shorter phrases they
 # contain (e.g. "official music video" before "music video") so the whole
@@ -593,52 +593,44 @@ TITLE_JUNK_SUFFIXES = [
 ]
 
 
-# ==================== Name cleanup (utils/common/sanitize.py) ====================
+# ==================== Name cleanup (utils/common/sanitize/) ====================
 
-# Settings -> "Name cleanup": which cleanup steps each source runs, as
-# {"steps": {step name: {source: true/false}}} - only what differs from the
-# steps' defaults is stored (utils/common/sanitize_settings.py)
+# Settings -> "Name cleanup": which cleanup steps are on, each for every
+# source at once, as {"steps": {step name: true/false}} - only what differs
+# from the steps' defaults is stored (utils/common/sanitize/settings.py)
 SANITIZE_CONFIG_FILE = PROJECT_ROOT / "sanitize_config.json"
 
-# Where a name comes from, as the menu shows it
-SANITIZE_SOURCE_LABELS = {
-    "mp3": "mp3 tags",
-    "file_name": "file names",
-    "youtube": "YouTube videos",
-    "request": "Leina Radio requests",
-    "stored": "the database (Clean names)",
-}
-
-# step name -> (menu label, what it does); every step of sanitize.STEPS and
-# its metadata steps has one
-SANITIZE_STEP_LABELS = {
-    "amp_entity": ("'&amp;' as '&'", "Only the '&amp;' entity."),
-    "html_entities": ("HTML entities", "'&amp;', '&#39;' ... as the characters they stand for."),
-    "cp1250_mojibake": ("Polish letters read wrongly",
-                        "'Ma³pa' -> 'Małpa': only when a character real text never has shows it."),
-    "nfc": ("Accented letters stored in two parts",
-            "'a' + a separate accent as one letter 'á'; in Clean names for every column."),
-    "invisible_chars": ("Invisible characters", "Zero-width spaces, soft hyphens, direction marks (an emoji joiner stays)."),
-    "whitespace": ("Spaces", "Spaces at either end, two or more spaces in a row."),
-    "lookalike_letters": ("Look-alike letters (asked)",
-                          "'Вjörk' -> 'Björk': a Cyrillic letter in a Latin word; offered in a list to tick."),
-    "site_names": ("Download-site names", "'y2meta.com - ', '(greenmp3.com)', the words in file_name_junk.txt."),
-    "edge_separators": ("Separators at the ends", "'Song_', '- Piano Solo -', 'A -  - B'; also '-!-' -> '!', so not for the database."),
-    "youtube_spaces": ("Spaces in a video title", "Runs of spaces in a whole video title as one, before it is split."),
-    "pipe_suffix": ("'| Label' at the end", "Everything from the first '|' of a title on."),
-    "junk_brackets_anywhere": ("Junk brackets anywhere",
-                               "A bracket with 'Official', 'Lyrics', 'Visualiser', 'Remastered' ... wherever in the title."),
-    "hashtags": ("Hashtags", "'#word' tags at the end ('Funk #49' and a title that is one stay)."),
-    "media_extension": ("File extensions", "'.mp4', '.mpg', '.mp3' ... at the end."),
-    "artist_in_title": ("The artist repeated in the title", "'SIAMÉS \"Summer Nights\"' by SIAMES -> 'Summer Nights'."),
-    "junk_marker_brackets": ("Junk brackets at the end",
-                             "A last bracket that is junk: '(Official Video)', '(Pes 2009 Soundtrack)', '(2022)'."),
-    "junk_phrases_any_bracket": ("Junk phrases at the end, any bracket",
-                                 "'Official Video', 'HD' ... at the end, bare or in any bracket ('《...》')."),
-    "junk_phrases": ("Junk phrases at the end", "'Official Lyric Video', 'HD' ... at the end, without a bracket."),
-    "trailing_dash_year": ("' - 1982' at the end", "A year after a dash at the end of the title."),
-    "quote_marks": ("Quote marks", "Quotes around a title ('“Golden”'); quotes inside one stay."),
-    "file_name_artifacts": ("File-name leftovers", "'pejzaz_bez_ciebie.mpg' -> 'Pejzaz Bez Ciebie'."),
-    "feat_to_credits": ("'ft. X' as a featured artist",
-                        "'Billionaire ft. Bruno Mars' -> 'Billionaire', Bruno Mars credited as featured."),
+# Settings -> "Name cleanup": switch -> (group, menu label, what it does), in
+# the order the steps run and are shown (sanitize.SWITCHES)
+SANITIZE_SWITCH_LABELS = {
+    "html_entities": ("Characters", "HTML entities",
+                      "'&amp;' -> '&', '&#39;' -> \"'\" (web pages and some tags write characters so)."),
+    "encoding": ("Characters", "Incorrectly encoded characters",
+                 "'Ma³pa' -> 'Małpa' (Polish read with the wrong code page), 'a' + a separate accent -> 'á' "
+                 "(looks the same, but searches miss it)."),
+    "file_names_in_titles": ("Characters", "File names in titles",
+                             "'pejzaz_bez_ciebie.mpg' -> 'Pejzaz Bez Ciebie', 'safri_duo' -> 'Safri Duo', "
+                             "'do you remember me.mp3' -> 'do you remember me'."),
+    "lookalike_letters": ("Characters", "Look-alike letters",
+                          "'Вjörk' -> 'Björk': a Cyrillic letter in a Latin word, or the other way round. "
+                          "In Clean names offered in a list to tick."),
+    "featured_artists": ("What the title says (kept with the song before it's cut)", "Featured artists",
+                         "'Song ft. X' -> 'Song', X credited as a featured artist. "
+                         "In Clean names offered in a list to tick."),
+    "year_in_title": ("What the title says (kept with the song before it's cut)", "Year in the title",
+                      "'Legenda (1991)', 'Lumea Viseaza - 2002' -> the year taken off the title; it's offered "
+                      "when looking up years, never saved without you."),
+    "artist_in_title": ("What the title says (kept with the song before it's cut)", "The artist repeated in the title",
+                        "'Lynyrd Skynyrd - Free Bird' -> 'Free Bird', 'Hard Times (Paramore)' -> 'Hard Times'; "
+                        "only at the start or in a bracket, never 'White Queen'."),
+    "site_names": ("Removing", "Download-site names",
+                   "'y2meta.com - ', '(greenmp3.com)', 'Y2Mate.is', Y2Mate's '-<id>-160k-<time>'."),
+    "junk_in_titles": ("Removing", "Junk in titles",
+                       "'(Official Video)', '(Visualiser)', '(Remastered)', 'Lyric Video', 'HD', '| Label', "
+                       "'#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),
+    "quote_marks": ("Removing", "Quote marks around a title",
+                    "'“Golden”' -> 'Golden'; quotes inside a title stay ('Take The \"A\" Train')."),
+    "spaces": ("Tidying", "Invisible characters and extra spaces",
+               "zero-width spaces, spaces at the ends or doubled, a separator left at the end "
+               "('Da li želiš_', '... - Piano Solo -')."),
 }

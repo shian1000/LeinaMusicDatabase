@@ -140,9 +140,8 @@ non-trivial work in that area.
   songs without one, and `inbox_song_requests.py` for songs the phone played that music.db doesn't
   have (`song_requests`): never added automatically - the owner adds them (through
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
-  `create_song_entry()` credits as feat - only requests do that so far: the mp3 / YouTube imports keep the
-  credit in the title, since `find_existing_song()` wouldn't then see "Song ft. X" as the stored "Song"
-  and would add it again), skips or rejects them; a rejected one goes to music.db's
+  `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
+  `feat_to_credits`), skips or rejects them; a rejected one goes to music.db's
   `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
@@ -416,25 +415,57 @@ non-trivial work in that area.
   `docs/runbooks/database.md`. `docs/agent-notes/discovery-modules.md` (fetcher
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
-- `src/utils/common/sanitize.py` — the one place for cleaning names before they're stored: each
-  cleanup a named step (`STEPS`, run in `RAW_ORDER` / `FIELD_ORDER`), each source (`mp3`,
-  `youtube`, `request`, `stored`, ...) running its own (`sanitize_raw()`, `sanitize_field()`,
-  `sanitize_metadata()`, `sanitize_changes()`). Holds the YouTube title cleanup (the
-  `YOUTUBE_TITLE_JUNK_*` lists, `strip_junk_suffix()`, `strip_artist_from_title()`, ...) and Clean
-  names' `strip_trailing_junk()`. The defaults did exactly what each source did before
+- `src/utils/common/sanitize/` — the one place for cleaning names before they're stored
+  ([ADR-0005](docs/decisions/0005-one-name-cleanup.md)): each
+  cleanup a named step, every source (`mp3`, `youtube`, `request`, `stored`, ...) calling
+  `sanitize_raw()` / `sanitize_field()` / `sanitize_metadata()` / `sanitize_changes()` (all imported
+  from the package). `text.py` is what a step does to a text - pure functions: the YouTube title
+  cleanup (the `YOUTUBE_TITLE_JUNK_*` lists, `strip_junk_suffix()`, `strip_artist_from_title()`, ...),
+  Clean names' `strip_trailing_junk()`, junk phrases (`strip_trailing_junk_suffix()`, shared with the
+  comparison keys), download-site names (`strip_site_names()`: domains in `SITE_NAME_TLDS`, the
+  words in `src/config/file_name_junk.txt` - the owner's list, add entries there - and Y2Mate's
+  id/bitrate/timestamp suffix), Polish mojibake (`fix_cp1250_mojibake()`, below), the dangling
+  separator; `pipeline.py` is which step runs when (`STEPS`, `SWITCHES`, `RAW_ORDER` /
+  `FIELD_ORDER`, `runs_for()`, the runners); `settings.py` the settings file. The defaults did exactly what each source did before
   (`tests/test_name_cleanup_characterization.py`); a default changed since is marked "Changed:" there,
   measured on the catalog first (normalization note). The YouTube import (`build_metadata_from_item()`) and the mp3 import
   (`read_file_metadata()`, `extract_unknown_data()`, folder playlists' file names) run through it;
   so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
   (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
   is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
-  switches each step per source (`set_step_sources()`, `configurable_sources()`), saved in
-  `sanitize_config.json` (`sanitize_settings.py`, only what differs from a step's defaults, read once
-  per process); Clean names runs every step on for the database (`name_cleanup.stored_step_passes()`)
-  and never empties a stored name. A new step needs a label in `constants.SANITIZE_STEP_LABELS`
-  (a test checks). A new cleanup goes in as a step
-  here, not into a caller. Comparison keys (`normalize()`, `name_key()`, `_title_core()`) are not
-  steps. `docs/agent-notes/normalization-and-matching.md` → "Cleaning before storing".
+  turns each of its 11 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
+  (`set_switch_on()`; where a step runs follows from
+  what it works on, `runs_for()`, owner's choice 2026-11-01: the same everywhere, so every step must be
+  safe for every name - measure on the catalog before adding or loosening one), saved in
+  `sanitize_config.json` (`sanitize/settings.py`, only a switch turned off, read once
+  per process); Clean names runs every step that is on (`name_cleanup.stored_step_passes()`, with the
+  song's artist) and never empties a stored name. The order (owner, 2026-11-01, also the Settings
+  order): characters, then what a title says (kept on the entry - featured artists, the year), then
+  removing, then tidying - normalization note → "Step order". A new step gets a switch (or joins one)
+  and a place in that order; labels and examples in `constants.SANITIZE_SWITCH_LABELS` (a test checks).
+  A new cleanup goes in as a step here, not into a caller. Comparison keys (`normalize()`, `name_key()`, `_title_core()`) are not
+  steps. Featured artists leave every title (`feat_to_credits`, 2026-11-01, owner's choice: know what is
+  what, show it as we like): the imports credit them to the song created or found (`find_existing_song()`
+  reads a stored title without its credit and tries the songs crediting the entry's guests first, so a
+  "ft. X" version isn't taken for the plain song); Clean names moves the catalog's in a checkbox list
+  (`name_cleanup.feat_move_proposals()`). `docs/agent-notes/normalization-and-matching.md` → "Cleaning
+  before storing".
+- `src/utils/common/artist_credits.py` — who a name or title credits, as text only: a joined artist
+  name read as several (`propose_artist_split()`, `SplitProposal`; `utils/database/artist_splitting.py`
+  turns a proposal into rows after the review) and a title's featured artists (`feat_credits()`,
+  `split_feat_credits()`, `strip_feat_credits()`). No database - import it from anywhere.
+- `src/utils/common/song_entry.py` — `SongEntry`, one song as an import or a request reads it: for
+  now a `dict` of the import's metadata keys (also attributes: `entry.artist` = `"artist_name"`)
+  plus where it came from (`source`, `raw_text`, `originals`, `parsed_by`, `channel`, `file`) and what
+  the cleanup cut (`removed`, from `sanitize.CUTTING_STEPS`) with `hints` read from it (a year, a
+  remaster, "from …", an official clip, a track number, featured artists - only offered, unused yet); built
+  by `build_metadata_from_item()`, `read_file_metadata()`, `SongRequestCase.metadata()`; the import engine,
+  `LocalSongMatcher` and the reviews read attributes (`metadata = as_entry(metadata)` first). Copy with
+  `copy_with()` - `{**entry}` drops the attributes; never a `Song`. Only in memory: `run_import_batch()`
+  returns an `ImportResult` (the added songs as a list, plus `entries`: song id -> its SongEntry, added
+  or found) for the steps run right after: the end of the mp3 / YouTube import and of the request review
+  offers Albums and Years for those songs (`fill_missing_for_import()`, in the `fill_missing_data`
+  menu package; `resolve_new_requests(after_import=...)`). `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/title_patterns.py` — regex pieces the title rules share, one spelling each:
   `FEAT_WORD` ("feat." / "ft" / "featuring"; `FEAT_OR_WITH_WORD` inside a bracket), `BRACKETED`
   ("(...)" / "[...]"), `YOUTUBE_BRACKETED` / `YOUTUBE_BRACKET_PAIRS` (with "【】", "（）", "［］"),
@@ -449,14 +480,12 @@ non-trivial work in that area.
   write a second one. `composed()` is the NFC form every stored name is kept in: the models'
   `@validates` (`datatables.COMPOSED_FIELDS`) compose each ORM write, Clean names the older rows
   (decomposed letters from YouTube titles / macOS file names defeat MusicBrainz's search;
-  `docs/data-model.md`). `fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 / Windows-1252 ("Ma³pa"),
+  `docs/data-model.md`). `sanitize.text.fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 / Windows-1252 ("Ma³pa"),
   only when a never-genuine character shows it - in the mp3 import, and for older rows in Clean
   names (`repair_polish_mojibake()`, album rows through `rename_album()` so a twin merges). There
   a sure sign in one field of a song repairs its other fields too (`force=True`; never the shared
   artist row), and a text without one only when every re-read word is already a word of the
-  catalog (`fix_cp1250_mojibake_by_words()`: "Mêskie" -> "Męskie", "Efêmera" stays). `strip_site_names()` drops download-site junk from mp3 file names and tags
-  before they're read (domains in `SITE_NAME_TLDS`, the words in `src/config/file_name_junk.txt` —
-  the owner's list, add entries there — and Y2Mate's id/bitrate/timestamp suffix). `normalize()` is `lru_cache`d (pure function of its arguments): the artist
+  catalog (`fix_cp1250_mojibake_by_words()`: "Mêskie" -> "Męskie", "Efêmera" stays). `normalize()` is `lru_cache`d (pure function of its arguments): the artist
   search re-normalizes every artist per lookup, so keep it free of side effects and global state. `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/text_utils.py` — similarity helpers and `check_spelling()`. Signature and
   short-string-threshold pitfalls: `docs/agent-notes/normalization-and-matching.md`. The
@@ -557,7 +586,7 @@ non-trivial work in that area.
   "Song 《Official Music Video》" -> "Song" — any bracket pair, since uploaders also use CJK ones)
   with no confirmation, then queues whatever's still blacklisted (album/title) and asks about it in
   one batch at the end (see the Coding conventions entry above). Its exact-phrase list,
-  `TITLE_JUNK_SUFFIXES` (`constants.py`, applied by `text_utils.strip_trailing_junk_suffix()`),
+  `TITLE_JUNK_SUFFIXES` (`constants.py`, applied by `sanitize.text.strip_trailing_junk_suffix()`),
   is shared with the YouTube playlist import, which uses it for *unbracketed* trailing junk
   ("Golden Official Lyric Video" -> "Golden"). The import's bracket-only lists
   (`YOUTUBE_TITLE_JUNK_PHRASES`/`*_MARKER_WORDS`, see `docs/agent-notes/youtube-search-matching.md`)
@@ -740,7 +769,7 @@ non-trivial work in that area.
   in `clean_names.py` for the pattern). A `questionary.Choice` title can be coloured,
   though, given as prompt_toolkit `(style, text)` tokens: `utils/ui/song_colors.py` builds artist
   (cyan) / title (yellow) labels that way, the featured artists a title credits in the artist
-  colour (`title_tokens()`, names from `song_duplicates.feat_credits()`, "(feat. " / ")" plain),
+  colour (`title_tokens()`, names from `artist_credits.feat_credits()`, "(feat. " / ")" plain),
   and turns them into ANSI (`as_ansi()`) or rich markup (`as_rich_markup()`) only for `print()` -
   don't hand-write the colours in markup.
 - Output: a message for the user goes through `utils/common/output.py` - `say()` (plain, taken
@@ -774,7 +803,8 @@ non-trivial work in that area.
   for any new pre-import question — and `review_artist_splits()`
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
-  `needs_review`, e.g. YouTube upload dates; all ticked, the ticked ones saved), and
+  `needs_review`, e.g. YouTube upload dates, or an imported title named - `fill_missing_years(songs,
+  entries)`; all ticked, the ticked ones saved), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
@@ -908,7 +938,7 @@ non-trivial work in that area.
   `--flat-playlist` (without it, a large playlist blows past the subprocess timeout and looks like
   a hang), the Topic-channel/channel-name artist-detection fallback, the three extensible title
   cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`,
-  `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`, now in `sanitize.py`) and diacritic-insensitive `strip_artist_from_title()`,
+  `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`, now in `sanitize`) and diacritic-insensitive `strip_artist_from_title()`,
   why album-name scraping was investigated but not implemented, `SPECIAL_DESCRIPTION_CHANNELS`'
   reverse-search resolution (`resolve_special_channel_metadata()`) for channels whose titles carry
   no "Artist - Title" structure at all, and a since-fixed debug video limiter. **Search matching**

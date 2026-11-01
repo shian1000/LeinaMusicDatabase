@@ -14,7 +14,7 @@ The menus asking the questions live in utils/ui/artist_change.py.
 from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, ADDITIONAL_ARTIST_ROLE_MAIN, COMPILATION_ARTIST_NAMES, TITLE_ARTISTS_SEPARATOR
 from utils.common.normalizer import normalize
 from utils.database.albums import album_key, link_songs, reassign_artist_albums
-from utils.database.artist_splitting import propose_artist_split
+from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import (

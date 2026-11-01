@@ -24,17 +24,80 @@ logic and it's not in `import_data_from_mp3_tags.py` anymore, it's in
 Each source is now just a **metadata builder**: it turns its own input (mp3
 files on disk, or a YouTube playlist's videos - see
 `docs/agent-notes/youtube-search-matching.md` for that side) into a list of
-plain dicts (`artist_name`, `title` required; `album`, `year`, `language`,
-`origin`, `youtube_video_id`, `_label` optional - except that `create_song_entry()`
-reads `metadata["year"]` directly, so a new song's dict must carry the `year` key
-(None is fine; a missing key is a `KeyError` - "Add song" passes every key) - `_label` is what shows up in
-skip/timing messages instead of the default `"<artist> - <title>"`), then hands
+metadata dicts (`artist_name`, `title` required; `album`, `year`, `language`,
+`origin`, `youtube_video_id`, `_label` optional - `_label` is what shows up
+in skip/timing messages instead of the default `"<artist> - <title>"`), then hands
 that list to `run_import_batch()`. `run_import_batch()` itself doesn't know or
 care which source it came from - a metadata dict missing `artist_name`/`title`
 entirely is just skipped with reason `"Missing artist or title"`, which is how
 an mp3 with no usable filename fallback and a YouTube title that failed to
 split both end up handled by the same generic path rather than two different
 skip mechanisms.
+
+**`SongEntry` (`utils/common/song_entry.py`, since 2026-11-01).** The YouTube
+import (`build_metadata_from_item()`), the mp3 tags (`read_file_metadata()`,
+so also the cover import, `files.db` and folder playlists) and song requests
+(`SongRequestCase.metadata()`) build a `SongEntry` instead of a plain dict: a
+`dict` subclass with exactly those keys, so it goes everywhere the dict went
+(`["key"]`, `.get()`, equal to a dict of the same keys), the keys also as
+attributes (`entry.artist` = `"artist_name"`), plus what a dict lost -
+`source`, `raw_text` (the whole video title / file name), `originals` (each
+field before the cleanup), `parsed_by` (how artist and title were told apart,
+before only in the `[Parse]` log line), `channel`, `file`, and `removed`:
+what the cleanup cut, one `Removed(step, field, text)` per piece - the
+sanitize steps in `sanitize.CUTTING_STEPS` (those that take a part out, not
+the ones rewriting characters), found by diffing each step's before and after
+(`cut_parts()`), so no step had to change. `entry.hints` (`hints_from()`)
+reads them: a year ("(1991)", " - 2002", "Bál ⎮ 2017"), a remaster's year
+kept apart ("(2015 Remastered)"), the work it is from ("(from “Chess”)",
+"(Baby Driver Soundtrack)"), an official clip ("(Official Video)", "Clip
+Officiel" - not a lyric video), a leading track number ("T03: ") and the
+featured artists of the title. Shown in the import's trace (`[Parse]` for a
+video, `[Read]` for a file at verbosity 2 - `describe_cuts()`), not used yet.
+Owner's plan: read the text into one object at the first chance and keep
+everything it knew. Measured on the catalog read as video titles (2026-11-01):
+a cut year equals the stored year in 6 of 9 titles - the others
+("PARACHUTE LIMIT … (1988, HQ)" stored as 2015) look like upload years
+stored. The consumers read attributes, not keys: every function of
+`import_engine.py` taking `metadata` (`run_import_batch()`, `resolve_artist()`
+/ `resolve_song()`, `create_song_entry()`, every `LocalSongMatcher` method)
+starts with `metadata = as_entry(metadata)` - the SongEntry itself, or one
+made of a plain dict ("Add song", a test, an ad-hoc reading) - and so do the
+folder playlists, `files.db`'s tag reading and the YouTube import's reviews;
+a copy is `entry.copy_with(title=...)`, keeping the attributes. A missing key
+reads as None, no `KeyError`. The YouTube reviews change the entries the
+playlist gave (`_resolve_artist_synonyms()` turns its list's items into
+entries in place, so the import's `id()` bookkeeping holds).
+
+The entries stay in memory only (owner's choice, 2026-11-01: no table for
+them) and are passed on as arguments to whatever needs them right after.
+`run_import_batch()` returns an `ImportResult`: still the sorted list of the
+songs it added (every caller and test treats it as one), plus `entries`,
+song id -> the SongEntry the song came from, for every song the import added
+*or found already there* - the exact match in `resolve_song()`, the "use the
+existing song" answer, a song added in the review, an entry held back for a
+similar artist (`_remember()`, the first entry of a song stays). Planned on
+top (owner's plan; featured artists done - normalization note): Years
+takes `songs` and `entries` - `fill_missing_years(songs, entries)` looks
+only at those songs (with an album and no year), and a group no module found
+a year for whose entries' titles all name one ("Legenda (1991)") goes to the
+unsure-years review with the title as its source, ticked, never written
+unasked; a module's year still wins, and without entries (the menu) nothing
+changes. At the end of the mp3 / YouTube import and of "Resolve new requests"
+(also after "Import a request package") a checkbox list asks what to fill in
+for the import's songs, added or found - `fill_missing_for_import(result)`
+in the `fill_missing_data` menu package: Albums, then Years
+(`fill_missing_albums(songs, entries)`, `fill_missing_years(songs,
+entries)`), each step asking its own questions; the request review gets it
+as `resolve_new_requests(after_import=...)`, so `utils/ui` doesn't import
+the menu. The questions belong to those steps, not to the cleanup. Not used for: the official clip (`music_video_youtube_id` - a
+video the import reads only names the song, it goes to `youtube_video_id` /
+additional videos), genres (later). A file whose tags
+lacked artist or title is cleaned twice (tags, then the file name), so its
+`removed` can hold pieces of a tag it no longer uses. Two traps while it is still a dict: `{**entry}`
+and `.copy()` give a plain dict without the attributes - use `copy_with()` -
+and it is never a `Song` - a transient `Song` given an existing artist
+joins the session through `back_populates` and an autoflush inserts it.
 
 A builder with its own questions about some entries (the YouTube importer's
 missing-artist and artist/title-swap reviews) must not ask them before calling

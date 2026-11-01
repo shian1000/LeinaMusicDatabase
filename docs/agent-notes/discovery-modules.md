@@ -346,7 +346,7 @@ live session, a reupload), so it returns `YearDiscoveryResult(needs_review=True,
 `discover_release_year_result()` passes that flag through. `fill_missing_years.py` doesn't write flagged years straight away:
 `_review_unsure_years()` lists them all at the end in one checkbox prompt, all ticked, and like
 every other checkbox review the ticked years are written. An unticked one asks for the right year
-(1900 to next year), and an empty answer leaves the song without one. Albums are looked up too (one track's video date says little about
+(1900 to next year), and an empty answer leaves the song without one. The same review takes a year an imported title named ("Legenda (1991)", from the import's `SongEntry` hints) when no module found one - only when Years runs with the import's `entries` (`fill_missing_years(songs, entries)`). Albums are looked up too (one track's video date says little about
 the album, but the year goes through that same review anyway, so a wrong guess costs one tick). It's last in `DEFAULT_DISCOVERY_MODULE_YEAR_ORDER`, and an existing config
 gets it appended at the end by `_reconcile_config()`. It reuses a stored `Song.youtube_video_id`
 first: `_call_year_module()` passes the songs being looked up (the single, or the album's songs

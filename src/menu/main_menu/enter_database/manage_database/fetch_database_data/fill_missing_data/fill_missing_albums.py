@@ -20,10 +20,16 @@ def _set_track_position(song, match):
         song.disc_number = match.disc_number
 
 
-def fill_missing_albums():
+def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
+    """Albums for the songs without one - every such song, or only those of
+    `songs` (an import's, filled in right after it). `entries` (song id ->
+    SongEntry) is taken for the import's sake and not used yet."""
     category = "album"
 
-    songs_objects = get_songs_with_empty_category(category)
+    if songs is None:
+        songs_objects = get_songs_with_empty_category(category)
+    else:
+        songs_objects = [song for song in songs if not song.album]
 
     if not songs_objects:
         print("No songs with missing albums found")

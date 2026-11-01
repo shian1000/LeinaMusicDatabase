@@ -16,7 +16,8 @@ from pathlib import Path
 from config.constants import FILE_BEST_GUESSES_MAX, FILE_TITLE_CANDIDATES_MAX
 
 from utils.common.debug import flog
-from utils.common.sanitize import unescape_entities
+from utils.common.sanitize import SOURCE_MP3, unescape_entities
+from utils.common.song_entry import SongEntry, as_entry
 from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
@@ -120,6 +121,7 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
     best_guesses(), `auto_accept_score`: the score from which the one
     suggestion reaching it is taken without asking - the user's settings;
     the defaults (above 1) never auto-accept nor guess."""
+    metadata = as_entry(metadata)
     song = matcher.match_exact(metadata)
     confident = None if song else matcher.match_confident(metadata, min_artist_similarity)
     if song is not None:
@@ -128,9 +130,9 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         # Its tags are wrong, so it's offered the name/tag fix like a pick
         track.picked = True
         assign_song(track, confident)
-        playlist.auto_accepted.append((track, metadata.get("artist_name")))
+        playlist.auto_accepted.append((track, metadata.artist))
     else:
-        track.title, track.artist = metadata["title"], metadata.get("artist_name")
+        track.title, track.artist = metadata.title, metadata.artist
         track.similar_song = matcher.match_similar(metadata)
         if track.similar_song is None:
             track.title_candidates = matcher.title_candidates(metadata, FILE_TITLE_CANDIDATES_MAX)
@@ -147,17 +149,17 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         if by:
             title, artist = by
             read_as = (artist, title)
-            by_reading = {"artist_name": artist, "title": title, "duration_s": metadata.get("duration_s")}
+            by_reading = metadata.copy_with(artist=artist, title=title)
             candidates = [song for song in suggested if song is not None
                           and matcher.match_score(by_reading, song, joined=False) == track.scores[song.id]]
             if track.similar_song is not None and is_distinctive_title(track.title):
                 candidates.append(track.similar_song)
         elif track.artist:
             candidates = suggested
-            unsplit = metadata.get("unsplit_title")
+            unsplit = metadata.unsplit_title
             if unsplit and not is_distinctive_title(unsplit):
                 # Scored on the whole file name as a title alone: like a file with no artist
-                plain = {**metadata, "unsplit_title": None}
+                plain = metadata.copy_with(unsplit_title=None)
                 candidates = [song for song in suggested if song is not None
                               and matcher.match_score(plain, song) == track.scores[song.id]]
             elif matcher.joined_title(metadata):
@@ -177,7 +179,7 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
             playlist.auto_accepted_scored.append((track, read_as, track.scores[song.id]))
             return
         playlist.unmatched.append(track)
-        flog(f"Playlist from folder: no song in the database for {track.file or metadata.get('_label')}")
+        flog(f"Playlist from folder: no song in the database for {track.file or metadata.label}")
 
 
 def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 1.1,
@@ -187,17 +189,17 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
     matcher = LocalSongMatcher(session)
     for file in folder_mp3_files(folder):
         try:
-            metadata = read_file_metadata(file)
+            metadata = as_entry(read_file_metadata(file))
         except ValueError:
-            metadata = {}
-        if not metadata.get("title"):
+            metadata = SongEntry(source=SOURCE_MP3, file=file, raw_text=file.stem)
+        if not metadata.title:
             # No title tag and no "Artist - Title" name: the name is the title,
             # as the user is shown it
-            metadata = {**metadata, "title": unescape_entities(file.stem)}
-        track = FolderTrack(file=file, title=metadata["title"], artist=None)
-        track.duration_s = metadata.get("duration_s") or audio_duration(file)
+            metadata = metadata.copy_with(title=unescape_entities(file.stem))
+        track = FolderTrack(file=file, title=metadata.title, artist=None)
+        track.duration_s = metadata.duration_s or audio_duration(file)
         # The length tells a whole-album file from a track (song_kinds.songs_for_entry())
-        metadata = {**metadata, "duration_s": track.duration_s}
+        metadata = metadata.copy_with(duration_s=track.duration_s)
         match_track(playlist, matcher, track, metadata, min_artist_similarity, best_guess_min_score,
                     auto_accept_score)
         playlist.tracks.append(track)

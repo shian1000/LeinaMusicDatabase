@@ -154,15 +154,15 @@ it (ID3 `artist`/`title` fields are already separate).
 
 ### Title cleanup: independently-extensible word lists (plus a year check), applied in a fixed order
 
-The functions and word lists below live in `utils/common/sanitize.py` since 2026-11 (each one a
+The functions and word lists below live in `utils/common/sanitize/` since 2026-11 (each one a
 named step there, see `docs/agent-notes/normalization-and-matching.md` → "Cleaning before storing:
-`sanitize.py`"); `build_metadata_from_item()` runs them as the `youtube` source's steps
+`sanitize`"); `build_metadata_from_item()` runs them as the `youtube` source's steps
 (`sanitize_raw()` before the split, `sanitize_field()` after), in the order below.
 
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
 -> `strip_hashtags()` -> media-extension strip (`strip_media_extension()`) over the *raw* video title
 (before any artist/title split), then later runs `strip_artist_from_title()` -> `strip_junk_suffix()`
--> `text_utils.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
+-> `sanitize.text.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
 `TITLE_JUNK_SUFFIXES`, shared with Clean names - real case: `'“Golden” Official Lyric
 Video | KPop Demon Hunters | Sony Animation'` -> `"Golden"`; skipped if it would empty the title)
 -> `strip_trailing_dash_year()` (an unbracketed `" - 1982"`, real case: `"Hank Williams Jr. -
@@ -185,10 +185,9 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
 - `YOUTUBE_TITLE_JUNK_MARKER_WORDS` (checked by `strip_junk_suffix()`, same trailing-only scope) -
   a single word appearing anywhere *inside* the trailing bracket condemns the whole thing, for
   content too source-specific to enumerate as exact phrases - currently `"Soundtrack"` (real case:
-  `"(Pes 2009 Soundtrack)"`), `"Audio"`, `"From"` (real case:
-  `"Army of Me (Sucker Punch Remix) [From Sucker Punch]"` -> the `[From ...]` bracket is dropped,
-  the genuine `(Sucker Punch Remix)` subtitle right before it is untouched since it's no longer the
-  trailing bracket once the `[From ...]` one is stripped first), and `"Video"` (real case:
+  `"(Pes 2009 Soundtrack)"`), `"Audio"` (`"From"` was one until 2026-11-01: it cut "(from “Chess”)"
+  and "ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)" too - "[From Sucker Punch]" now stays and says where the
+  song is from; a bracket naming a version, `VERSION_MARKER_RE`, is never cut), and `"Video"` (real case:
   `"Hideki Naganuma - GET ENUF (music video)"` -> the bracket doesn't match any whole phrase in
   `YOUTUBE_TITLE_JUNK_PHRASES`, but the word alone condemns it same as `"Audio"` does), and
   `"Reupload"`/`"Re-upload"` (real case: `"DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)"`).

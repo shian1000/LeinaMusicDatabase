@@ -1,10 +1,12 @@
 import re
 from pathlib import Path
 
-from utils.common.debug import mlog
+from utils.common.debug import debug_on, mlog
+from utils.common import trace
+from utils.common.song_entry import SongEntry, describe_cuts
 from utils.common.sanitize import SOURCE_FILE_NAME, SOURCE_MP3, sanitize_metadata, sanitize_raw, unescape_entities
 from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
-from utils.discoveries.import_engine import run_import_batch
+from utils.discoveries.import_engine import ImportResult, run_import_batch
 
 
 def _clean_fields(metadata: dict) -> dict:
@@ -12,46 +14,52 @@ def _clean_fields(metadata: dict) -> dict:
     Polish tags read as Latin-1: "Ma³pa" -> "Małpa")
     and without download-site names ("y2meta.com", "(greenmp3.com)"); a
     field that was nothing but one is empty, so the file name is read -
-    sanitize.py's "mp3" steps."""
+    sanitize's "mp3" steps."""
     return sanitize_metadata(metadata, SOURCE_MP3)
 
 
-def read_file_metadata(file: Path) -> dict:
+def read_file_metadata(file: Path) -> SongEntry:
     """One mp3's artist/title/album/year/language/origin: ID3 tags, falling
     back to the filename when the artist or title tag is missing. Shared
     with the cover import (utils/discoveries/mp3_covers.py), so both match a
     file to the same song."""
-    metadata = _clean_fields(extract_metadata_with_fallback(file))
+    tags = extract_metadata_with_fallback(file)
+    metadata = _clean_fields(SongEntry(tags, source=SOURCE_MP3, raw_text=file.stem, file=file, originals={
+        field: tags.get(key) for field, key in (("artist", "artist_name"), ("title", "title"), ("album", "album"))
+        if tags.get(key) is not None}))
 
-    if metadata["artist_name"] in {"Unknown Artist", None, ""} or metadata["title"] in {"Unknown Title", None, ""}:
+    if metadata.artist in {"Unknown Artist", None, ""} or metadata.title in {"Unknown Title", None, ""}:
         print("Warning - title/artist tags missing. Trying to extract data from filename")
         artist, title = extract_unknown_data(file)
         if not artist:
             print("The filename didn't have a proper separator")
             print(metadata)
             print(file)
-            if metadata["title"] in {"Unknown Title", None, ""}:
+            if metadata.title in {"Unknown Title", None, ""}:
                 # The whole name may be the title ("Svefn-g-englar" by Sigur
                 # Rós, "Jay-Z Song" is not split either): read with no artist,
                 # LocalSongMatcher then tries it as a title alone
-                metadata["title"] = file.stem.strip() or None
+                metadata.title = file.stem.strip() or None
                 metadata = _clean_fields(metadata)
         else:
-            metadata["artist_name"] = artist
-            metadata["title"] = title
+            metadata.artist = artist
+            metadata.title = title
             metadata = _clean_fields(metadata)
     stem = sanitize_raw(file.stem, SOURCE_FILE_NAME)
-    if metadata["artist_name"] and not re.search(r" [–—\-_] ", stem):
+    if metadata.artist and not re.search(r" [–—\-_] ", stem):
         artist, title = extract_unknown_data(file)
         split = _clean_fields({"artist_name": artist, "title": title})
-        if (split["artist_name"], split["title"]) == (metadata["artist_name"], metadata["title"]):
+        if (split["artist_name"], split["title"]) == (metadata.artist, metadata.title):
             # Read from a name split on a bare hyphen or a double space (here or
             # in extract_metadata_with_fallback()) - only a guess, the whole name
             # may be the title ("Svefn-g-englar" by Sigur Rós), which
             # LocalSongMatcher tries too
-            metadata["unsplit_title"] = unescape_entities(stem)
+            metadata.unsplit_title = unescape_entities(stem)
     # Tells a whole-album file from a track when matching (song_kinds.songs_for_entry())
-    metadata["duration_s"] = audio_duration(file)
+    metadata.duration_s = audio_duration(file)
+    if debug_on(trace.DETAIL):  # the library scan reads every file
+        mlog(f"[Read] {file.name} -> \"{metadata.artist}\" - \"{metadata.title}\"{describe_cuts(metadata)}",
+             trace.DETAIL)
     return metadata
 
 
@@ -79,21 +87,21 @@ def _build_metadata_list(folder_path: str) -> tuple:
 
         metadata = read_file_metadata(file)
 
-        if metadata["artist_name"] == "Unknown Artist" or not metadata["artist_name"]:
+        if metadata.artist == "Unknown Artist" or not metadata.artist:
             print("Couldn't establish the artist and title")
             print("##########")
             print()
-            pre_skipped.append((f"{metadata['artist_name']} - {metadata['title']}", f"Couldn't establish the artist and title (Filename: {file})"))
+            pre_skipped.append((f"{metadata.artist} - {metadata.title}", f"Couldn't establish the artist and title (Filename: {file})"))
             continue
 
-        metadata["_label"] = file_name
+        metadata.label = file_name
         metadata_list.append(metadata)
 
     return metadata_list, pre_skipped
 
 
-def import_data_from_mp3_tags(folder_path: str) -> list:
+def import_data_from_mp3_tags(folder_path: str) -> ImportResult:
     metadata_list, pre_skipped = _build_metadata_list(folder_path)
     if not metadata_list and not pre_skipped:
-        return []
+        return ImportResult()
     return run_import_batch(metadata_list, pre_skipped)

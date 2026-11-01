@@ -8,72 +8,20 @@ import pytest
 
 from utils.common import sanitize as s
 from utils.common.normalizer import composed, strip_format_characters
-from utils.common.text_utils import strip_trailing_junk_suffix
+from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.discoveries.import_data_from_mp3_tags import _clean_fields
-from utils.database.song_duplicates import split_feat_credits
+from utils.common.artist_credits import split_feat_credits
 
 from test_name_cleanup_characterization import MP3_CASES, REQUEST_FEAT_CASES, STORED_JUNK_CASES, YOUTUBE_CASES
+from utils.common.song_entry import SongEntry
 
 
-# --- YouTube: the chain build_metadata_from_item() runs ---
-
-def _youtube_raw_today(title):
-    title = s.strip_pipe_suffix(title)
-    title = s.strip_junk_brackets_anywhere(title)
-    title = s.strip_hashtags(title)
-    return s.MEDIA_EXTENSION_RE.sub("", title).strip()
-
-
-def _youtube_title_today(title, artist):
-    if title and artist:
-        title = s.strip_artist_from_title(title, artist)
-    if title:
-        title = s.strip_junk_suffix(title)
-        title = strip_trailing_junk_suffix(title) or title
-        title = s.strip_trailing_dash_year(title)
-        title = s.strip_junk_suffix(title)
-        title = s.strip_quote_marks(title)
-        title = s.clean_file_name_title(title)
-    return title
-
-
-YOUTUBE_RAW = [title for _channel, title, _expected in YOUTUBE_CASES]
-# (artist, title as split off a video title)
-YOUTUBE_FIELDS = [
-    ("SIAMES", 'SIAMÉS "Summer Nights" [Official Animated Video]'),
-    ("Ado", "【Ado】 unravel 歌いました"),
-    ("Łona", "Lona Song"),
-    ("Artist", "Song (Official Video) (HD)"),
-    ("Artist", "Song (Official Video) Official Audio"),
-    ("Artist", "Song Lyrics (HD) Official Video"),
-    ("Artist", "Song Official Video (Lyrics) - 1999 (HD)"),
-    ("Artist", "Song - 1999 (HD)"),
-    ("Artist", "HD"),
-    ("Artist", "(Official Video)"),
-    ("Artist", '"Need You Tonight" (INXS cover)'),
-    ("Artist", "pejzaz_bez_ciebie.mpg"),
-    ("Artist", "Sierpień (2022)"),
-    ("Artist", "Song (Remix)"),
-    (None, "Mind Me (Official Audio)"),
-    ("pejzaz_bez_ciebie", "Song"),
-    ("Artist", ""),
-]
-
-
-@pytest.mark.parametrize("title", YOUTUBE_RAW)
-def test_youtube_raw_steps_match_the_import(title):
-    assert s.sanitize_raw(title, s.SOURCE_YOUTUBE) == _youtube_raw_today(title)
-
-
-@pytest.mark.parametrize("artist, title", YOUTUBE_FIELDS)
-def test_youtube_field_steps_match_the_import(artist, title):
-    assert s.sanitize_field(title, s.TITLE, s.SOURCE_YOUTUBE, artist=artist) == _youtube_title_today(title, artist)
-    expected_artist = s.clean_file_name_title(artist) if artist else artist
-    assert s.sanitize_field(artist, s.ARTIST, s.SOURCE_YOUTUBE) == expected_artist
-
+# --- YouTube: build_metadata_from_item()'s results are pinned in
+# test_name_cleanup_characterization.py (the steps' order since 2026-11-01:
+# characters, what the title says, removing, tidying) ---
 
 def test_youtube_metadata_cleans_the_title_with_the_artist_as_it_came():
-    metadata = s.sanitize_metadata({"artist_name": "pejzaz_bez_ciebie", "title": "pejzaz_bez_ciebie Song",
+    metadata = s.sanitize_metadata({"artist_name": "pejzaz_bez_ciebie", "title": "pejzaz_bez_ciebie - Song",
                                     "album": None}, s.SOURCE_YOUTUBE)
     assert metadata == {"artist_name": "Pejzaz Bez Ciebie", "title": "Song", "album": None}
 
@@ -87,7 +35,7 @@ def test_mp3_steps_match_clean_fields(tags, expected):
 
 @pytest.mark.parametrize("stem", ["y2meta.com - Artist - Song", "y2meta.com", "Artist - Song-AzEBH6DZJVk-160k-1645418932557"])
 def test_file_name_raw_step_is_strip_site_names(stem):
-    from utils.common.normalizer import strip_site_names
+    from utils.common.sanitize.text import strip_site_names
     assert s.sanitize_raw(stem, s.SOURCE_FILE_NAME) == strip_site_names(stem)
 
 
@@ -128,7 +76,7 @@ def test_review_step_is_only_proposed():
 
 def test_changes_name_each_step_that_changed_something():
     assert s.sanitize_changes("  Song &amp; Dance (Official Video)", s.TITLE, s.SOURCE_STORED) == [
-        ("amp_entity", "  Song &amp; Dance (Official Video)", "  Song & Dance (Official Video)"),
+        ("html_entities", "  Song &amp; Dance (Official Video)", "  Song & Dance (Official Video)"),
         ("whitespace", "  Song & Dance (Official Video)", "Song & Dance (Official Video)"),
         ("junk_brackets_anywhere", "Song & Dance (Official Video)", "Song & Dance"),
     ]
@@ -140,14 +88,20 @@ def test_changes_name_each_step_that_changed_something():
 def test_request_metadata_splits_feat_credits(title, expected):
     metadata = s.sanitize_metadata({"artist_name": "Artist", "title": title, "album": None}, s.SOURCE_REQUEST)
     split_title, feat_artists = split_feat_credits(title)
-    assert (metadata["title"], metadata["feat_artists"]) == (split_title or None, feat_artists) == expected
+    assert (metadata["title"], metadata.get("feat_artists", [])) == (split_title or None, feat_artists) == expected
     assert metadata["artist_name"] == "Artist"
 
 
-def test_only_requests_split_feat_credits():
-    for source in (s.SOURCE_MP3, s.SOURCE_YOUTUBE, s.SOURCE_STORED, s.SOURCE_MANUAL):
+def test_the_imports_split_feat_credits_and_a_typed_name_keeps_them():
+    # Since 2026-11-01 the mp3 and YouTube imports too, not only requests
+    for source in (s.SOURCE_MP3, s.SOURCE_YOUTUBE, s.SOURCE_REQUEST):
         metadata = s.sanitize_metadata({"artist_name": "A", "title": "Song ft. B", "album": None}, source)
-        assert metadata["title"] == "Song ft. B" and "feat_artists" not in metadata
+        assert (metadata["title"], metadata["feat_artists"]) == ("Song", ["B"])
+    metadata = s.sanitize_metadata({"artist_name": "A", "title": "Song ft. B", "album": None}, s.SOURCE_MANUAL)
+    assert metadata["title"] == "Song ft. B" and "feat_artists" not in metadata
+    # Cleaned twice (tags, then the file name): the names found first stay
+    twice = s.sanitize_metadata({"artist_name": "A", "title": "Song ft. B", "feat_artists": ["C"]}, s.SOURCE_MP3)
+    assert twice["feat_artists"] == ["C", "B"]
 
 
 # --- the registry itself ---
@@ -174,21 +128,23 @@ def test_every_ordered_step_exists_and_every_step_is_ordered():
             assert name in s.RAW_ORDER
         if s.STAGE_FIELD in step.stages:
             assert name in s.FIELD_ORDER and step.fields
-        assert step.sources <= set(s.SOURCES)
 
 
 def test_a_step_listed_twice_runs_twice():
+    # The agreed order: characters, what the title says, removing, tidying
     names = [step.name for step in s.enabled_steps(s.SOURCE_YOUTUBE, s.STAGE_FIELD, s.TITLE)]
-    assert names == ["amp_entity", "html_entities", "cp1250_mojibake", "nfc", "invisible_chars", "whitespace",
-                     "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
-                     "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases",
-                     "trailing_dash_year", "junk_marker_brackets", "quote_marks", "file_name_artifacts"]
+    assert names == ["html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
+                     "invisible_chars", "whitespace", "lookalike_letters",
+                     "feat_to_credits", "title_year", "artist_in_title",
+                     "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+                     "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year",
+                     "junk_marker_brackets", "quote_marks", "whitespace", "edge_separators"]
 
 
-# --- Settings -> "Name cleanup" ---
+# --- Settings -> "Name cleanup": one switch per meaning, for every source ---
 
-from config.constants import SANITIZE_SOURCE_LABELS, SANITIZE_STEP_LABELS  # noqa: E402
-from utils.common import sanitize_settings  # noqa: E402
+from config.constants import SANITIZE_SWITCH_LABELS  # noqa: E402
+from utils.common.sanitize import settings as sanitize_settings  # noqa: E402
 
 
 @pytest.fixture
@@ -200,68 +156,105 @@ def settings_file(tmp_path, monkeypatch):
     sanitize_settings.forget_cache()
 
 
-def test_a_step_switched_off_or_on_for_a_source(settings_file):
-    tags = {"artist_name": "A &amp; B", "title": "Song (Official Video)", "album": None}
-    s.set_step_sources("html_entities", set())
-    s.set_step_sources("amp_entity", set())
-    s.set_step_sources("junk_brackets_anywhere", set())
-    s.set_step_sources("junk_marker_brackets", {s.SOURCE_MP3, s.SOURCE_YOUTUBE})
-    assert s.sanitize_metadata(dict(tags), s.SOURCE_MP3) == {"artist_name": "A &amp; B", "title": "Song", "album": None}
+def test_every_step_has_one_switch_shown_in_order():
+    assert list(SANITIZE_SWITCH_LABELS) == list(s.SWITCHES)
+    assert {step.switch for step in s.STEPS.values()} == set(s.SWITCHES)
+    # The menu's order is the run's order: a switch's first step comes after the one before's
+    # (the spaces are tidied at both ends, shown last)
+    first = [min(s.FIELD_ORDER.index(n) for n in s.switch_steps(sw) if n in s.FIELD_ORDER)
+             for sw in s.SWITCHES if sw != "spaces"]
+    assert first == sorted(first) and s.SWITCHES[-1] == "spaces"
+
+
+def test_a_switch_is_the_same_for_every_source(settings_file):
+    assert all(s.switch_on(switch) for switch in s.SWITCHES)  # every switch on by default
+    s.set_switch_on("junk_in_titles", False)
     sanitize_settings.forget_cache()  # read back from the file
-    assert not s.is_enabled("html_entities", s.SOURCE_MP3) and s.is_enabled("junk_marker_brackets", s.SOURCE_MP3)
+    for source in s.FIELD_SOURCES:
+        assert not s.is_enabled("junk_brackets_anywhere", source) and not s.is_enabled("junk_phrases", source)
+    for source in s.SOURCES:
+        assert s.is_enabled("whitespace", source) == (source in s.FIELD_SOURCES)
+    assert s.sanitize_field("Song (Visualiser)", s.TITLE, s.SOURCE_MP3) == "Song (Visualiser)"
+    assert s.sanitize_field("Song (1991)", s.TITLE, s.SOURCE_MP3) == "Song"  # the year is its own switch
+
+
+def test_where_a_step_runs_follows_from_what_it_works_on():
+    assert s.runs_for("pipe_suffix") == s.RAW_SOURCES | s.FIELD_SOURCES
+    assert s.runs_for("whitespace") == s.FIELD_SOURCES
+    assert s.runs_for(s.FEAT_TO_CREDITS) == s.FIELD_SOURCES
+    for name in s.STEPS:
+        assert s.SOURCE_MANUAL not in s.runs_for(name)
 
 
 def test_only_what_differs_from_the_defaults_is_stored(settings_file):
     import json
-    s.set_step_sources("junk_marker_brackets", {s.SOURCE_YOUTUBE, s.SOURCE_MP3})
-    s.set_step_sources("hashtags", s.default_sources("hashtags"))
-    s.set_step_sources("quote_marks", s.default_sources("quote_marks") - {s.SOURCE_STORED})
-    assert json.loads(settings_file.read_text()) == {"steps": {"junk_marker_brackets": {"mp3": True},
-                                                               "quote_marks": {"stored": False}}}
-    s.reset_step_sources()
-    assert s.step_sources("junk_marker_brackets") == s.default_sources("junk_marker_brackets")
+    s.set_switch_on("quote_marks", False)
+    s.set_switch_on("spaces", True)
+    assert json.loads(settings_file.read_text()) == {"steps": {"quote_marks": False}}
+    s.reset_switches()
+    assert s.switch_on("quote_marks")
 
 
-def test_unreadable_or_odd_settings_mean_the_defaults(settings_file):
+def test_unreadable_odd_or_older_settings(settings_file):
     settings_file.write_text("{not json")
-    assert s.step_sources("html_entities") == s.default_sources("html_entities")
+    assert s.switch_on("html_entities")
     sanitize_settings.forget_cache()
-    settings_file.write_text('{"steps": {"html_entities": {"mp3": "no", "manual": true}, "hashtags": 3}}')
-    assert s.step_sources("html_entities") == s.default_sources("html_entities")
-    # "manual" can't be turned on, whatever the file says
+    settings_file.write_text('{"steps": {"html_entities": "no", "spaces": 3}}')
+    assert s.switch_on("html_entities") and s.switch_on("spaces")
+    # Files of older versions, which switched each step (and once per source):
+    # a switch is off when one of its steps was switched off
     sanitize_settings.forget_cache()
-    settings_file.write_text('{"steps": {"html_entities": {"manual": true}}}')
-    assert s.SOURCE_MANUAL not in s.step_sources("html_entities")
+    settings_file.write_text('{"steps": {"hashtags": false, "amp_entity": {"stored": false}, "nfc": true,'
+                             ' "trailing_dash_year": {"mp3": true}}}')
+    assert not s.switch_on("junk_in_titles") and not s.switch_on("html_entities")
+    assert s.switch_on("encoding") and s.switch_on("year_in_title")
+    # Switching it on again drops the older steps' settings
+    s.set_switch_on("junk_in_titles", True)
+    assert s.switch_on("junk_in_titles") and "hashtags" not in sanitize_settings.load_overrides()
 
 
-def test_which_sources_a_step_can_be_switched_for():
-    for name in s.step_names():
-        allowed = s.configurable_sources(name)
-        assert s.default_sources(name) <= set(allowed)
-        assert s.SOURCE_MANUAL not in allowed
-        assert name in SANITIZE_STEP_LABELS
-    assert s.configurable_sources("lookalike_letters") == (s.SOURCE_STORED,)
-    assert s.configurable_sources("youtube_spaces") == (s.SOURCE_FILE_NAME, s.SOURCE_YOUTUBE)
-    # Steps known to break real names stay where they were written for
-    for name in ("artist_in_title", "junk_marker_brackets", "file_name_artifacts"):
-        assert s.default_sources(name) == {s.SOURCE_YOUTUBE}
-    assert s.SOURCE_STORED not in s.default_sources("edge_separators")
-    assert s.SOURCE_STORED not in s.configurable_sources("artist_in_title")  # Clean names has no entry artist
-    assert s.configurable_sources(s.FEAT_TO_CREDITS) == (s.SOURCE_REQUEST,)
-    assert set(SANITIZE_SOURCE_LABELS) == set(s.SOURCES) - {s.SOURCE_MANUAL}
+def test_a_title_year_is_kept_even_behind_other_junk():
+    entry = SongEntry({"artist_name": "A", "title": "Song (2020) (Official Video)"}, source=s.SOURCE_YOUTUBE)
+    s.sanitize_metadata(entry, s.SOURCE_YOUTUBE)
+    assert entry.title == "Song" and entry.hints.year == 2020
+    assert s.strip_title_year("(1991)") == "(1991)" and s.strip_title_year("Song (Live 1998)") == "Song (Live 1998)"
 
 
-def test_clean_names_runs_every_step_turned_on_for_the_database(settings_file):
+def test_featured_artists_are_read_before_the_junk_is_cut():
+    entry = s.sanitize_metadata(SongEntry({"artist_name": "SASSJA", "title": "Savana_feat_Darko_Rundek_Official_Video"}),
+                                s.SOURCE_MP3)
+    assert (entry.title, entry.feat_artists) == ("Savana", ["Darko Rundek"])
+    # With nowhere to keep them, the credits stay in the title
+    assert s.sanitize_field("Song ft. X", s.TITLE, s.SOURCE_MP3) == "Song ft. X"
+
+
+def test_a_review_step_asks_only_in_the_database():
+    # "Вjörk": a Cyrillic "В" in a Latin name - fixed as it comes in, offered for a stored one
+    assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_MP3) == "Björk"
+    assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_STORED) == "Вjörk"
+    assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_MANUAL) == "Вjörk"
+
+
+def test_clean_names_runs_every_step_that_is_on(settings_file):
     from utils.database import name_cleanup
-    everything_after = ["invisible_chars", "whitespace", "site_names", "pipe_suffix", "junk_brackets_anywhere",
-                        "hashtags", "media_extension", "junk_phrases", "trailing_dash_year", "quote_marks"]
-    assert name_cleanup.stored_step_passes() == (["amp_entity", "html_entities", "cp1250_mojibake"], everything_after)
-    # Never the ones that break stored names, unless turned on
-    s.set_step_sources("junk_marker_brackets", {s.SOURCE_YOUTUBE, s.SOURCE_STORED})
-    s.set_step_sources("trailing_dash_year", {s.SOURCE_YOUTUBE})
-    assert name_cleanup.stored_step_passes()[1] == [
-        "invisible_chars", "whitespace", "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
-        "media_extension", "junk_marker_brackets", "junk_phrases", "junk_marker_brackets", "quote_marks"]
+    before, after = name_cleanup.stored_step_passes()
+    assert before == ["html_entities", "cp1250_mojibake"]
+    assert after == ["media_extension", "file_name_artifacts", "invisible_chars", "whitespace", "title_year",
+                     "artist_in_title", "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+                     "junk_marker_brackets", "junk_phrases", "title_year", "junk_marker_brackets", "quote_marks",
+                     "whitespace", "edge_separators"]
+    s.set_switch_on("artist_in_title", False)
+    assert "artist_in_title" not in name_cleanup.stored_step_passes()[1]
+
+
+def test_clean_names_takes_the_artist_out_of_a_title_it_starts_with():
+    from types import SimpleNamespace
+    from utils.database import name_cleanup
+    free_bird = SimpleNamespace(title="Lynyrd Skynyrd - Free Bird", album=None,
+                                artist=SimpleNamespace(id=1, name="Lynyrd Skynyrd"))
+    white_queen = SimpleNamespace(title="White Queen", album=None, artist=SimpleNamespace(id=2, name="Queen"))
+    name_cleanup.apply_step([free_bird, white_queen], "artist_in_title")
+    assert (free_bird.title, white_queen.title) == ("Free Bird", "White Queen")
 
 
 def test_a_stored_name_is_never_cleaned_to_nothing():
@@ -273,7 +266,7 @@ def test_a_stored_name_is_never_cleaned_to_nothing():
     assert [c.fields for c in changes] == [["album: 'Album'"]]
 
 
-def test_the_menu_offers_the_database_too(settings_file, monkeypatch):
+def test_the_menu_switches_steps_for_everything(settings_file, monkeypatch, capsys):
     import menu.main_menu  # noqa: F401 - imported first, as main.py does
     from menu.main_menu.settings import name_cleanup as menu
 
@@ -284,17 +277,24 @@ def test_the_menu_offers_the_database_too(settings_file, monkeypatch):
         def ask(self):
             return self.value
 
-    monkeypatch.setattr(menu.questionary, "checkbox", lambda *a, **kw: _Answer([s.SOURCE_YOUTUBE, s.SOURCE_MP3]))
-    asked = []
-    monkeypatch.setattr(menu, "ask_yes_no", lambda q: asked.append(q) or True)
-    menu._change_step("junk_marker_brackets")
-    assert asked and s.step_sources("junk_marker_brackets") == {s.SOURCE_YOUTUBE, s.SOURCE_MP3, s.SOURCE_STORED}
+    shown = []
+    everything_but_quotes = [n for n in s.SWITCHES if n != "quote_marks"]
 
-    # Turned off only: nothing to ask
-    asked.clear()
-    monkeypatch.setattr(menu.questionary, "checkbox", lambda *a, **kw: _Answer([]))
-    menu._change_step("junk_marker_brackets")
-    assert not asked and s.step_sources("junk_marker_brackets") == frozenset()
+    def checkbox(message, choices):
+        shown.append([c.title for c in choices])
+        return _Answer(picked)
+
+    monkeypatch.setattr(menu.questionary, "checkbox", checkbox)
+    picked = everything_but_quotes
+    menu.name_cleanup_menu()
+    out = capsys.readouterr().out
+    assert shown[0][:3] == ["HTML entities", "Incorrectly encoded characters", "File names in titles"]
+    assert out.index("Characters") < out.index("What the title says") < out.index("Removing") < out.index("Tidying")
+    assert not s.switch_on("quote_marks") and "Off: Quote marks around a title." in out
+    picked = list(s.SWITCHES)
+    menu.name_cleanup_menu()
+    out = capsys.readouterr().out
+    assert s.switch_on("quote_marks") and "On: Quote marks around a title." in out and "Clean names" in out
 
 
 # --- the shared regex pieces (utils/common/title_patterns.py) ---

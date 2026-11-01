@@ -9,6 +9,7 @@ sys.path.insert(0, str(repo_root / "src"))
 
 from utils.youtube import import_from_playlist as m
 from utils.common import sanitize
+from utils.common.song_entry import SongEntry
 
 
 def _fake_artist(name, synonyms=None):
@@ -328,9 +329,10 @@ def _fake_text_answers(monkeypatch, answers):
 
 def test_review_missing_artists_fills_in_or_skips(monkeypatch):
     _fake_text_answers(monkeypatch, ["Oordaya", ""])
-    ok = {"artist_name": "A", "title": "x"}
-    filled = {"artist_name": None, "title": "Mind Me", "_label": "Mind Me"}
-    skipped = {"artist_name": "", "title": "Slide", "_label": "Slide"}
+    # Entries as playlist_item_metadata() gives them: filled in in place
+    ok = SongEntry({"artist_name": "A", "title": "x"})
+    filled = SongEntry({"artist_name": None, "title": "Mind Me", "_label": "Mind Me"})
+    skipped = SongEntry({"artist_name": "", "title": "Slide", "_label": "Slide"})
 
     remaining, pre_skipped = m._review_missing_artists([ok, filled, skipped])
 

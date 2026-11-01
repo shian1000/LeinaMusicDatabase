@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common.normalizer import extract_unknown_data, name_key, normalize
 from utils.common.sanitize import SOURCE_FILE_NAME, sanitize_raw
+from utils.common.song_entry import as_entry
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
 from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track
 from utils.discoveries.import_engine import LocalSongMatcher
@@ -47,10 +48,10 @@ def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry
         title = (item.get("title") or "").strip()
         if not title or is_placeholder_title(title):
             continue
-        metadata = playlist_item_metadata(item)
-        if not metadata.get("artist_name") and not metadata.get("title"):
+        metadata = as_entry(playlist_item_metadata(item))
+        if not metadata.artist and not metadata.title:
             continue
-        song = matcher.match_exact(metadata) if metadata.get("title") else None
+        song = matcher.match_exact(metadata) if metadata.title else None
         duration = item.get("duration")
         entries.append(YouTubeEntry(video_id=item["video_id"], label=title, channel=item.get("channel") or "",
                                     metadata=metadata, song=song,
@@ -95,7 +96,7 @@ def _readings(track: FolderTrack) -> list[tuple]:
 def _name_score(artist: str | None, title: str | None, entry: YouTubeEntry) -> float | None:
     """pair_score() of one reading of a file by its names."""
     title, artist = title or "", artist or ""
-    entry_title, entry_artist = entry.metadata.get("title") or "", entry.metadata.get("artist_name") or ""
+    entry_title, entry_artist = entry.metadata.title or "", entry.metadata.artist or ""
     if title and entry_title and title_resembles(title, entry_title) and _artists_resemble(artist, entry_artist):
         return 1 + similarity(normalize(title), normalize(entry_title)) \
             + similarity(normalize(artist), normalize(entry_artist))
@@ -116,7 +117,7 @@ def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatche
     video becomes its link, and a song the video matched while the file
     didn't is suggested for the file - with how well the file's tags fit
     it, given the `matcher`. A file with no artist takes the video's."""
-    entry_artist = entry.metadata.get("artist_name")
+    entry_artist = entry.metadata.artist
     if track.song_id is None and not track.artist and entry_artist:
         track.artist, track.artist_from_video = entry_artist, True
     track.link_sure = by_hand or pair_score(track, entry) == _SAME_SONG_SCORE
@@ -175,8 +176,8 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
                        auto_accept_score: float = 1.1) -> FolderTrack:
     """A track for a video no file was paired with, matched to the
     database like a file (folder_playlist.match_track())."""
-    track = FolderTrack(file=None, title=entry.metadata.get("title") or entry.label,
-                        artist=entry.metadata.get("artist_name"), duration_s=entry.duration_s)
+    track = FolderTrack(file=None, title=entry.metadata.title or entry.label,
+                        artist=entry.metadata.artist, duration_s=entry.duration_s)
     track.youtube_link = track.youtube_video_id = entry.video_id
     track.link_song_id = entry.song.id if entry.song is not None else None
     if entry.song is not None:

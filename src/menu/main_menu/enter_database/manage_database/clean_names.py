@@ -9,12 +9,13 @@ from utils.database.database_management import edit_db_entry
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
 from utils.common.text_utils import copy_to_clipboard
-from utils.common.sanitize import SOURCE_STORED, is_enabled
-from config.constants import SANITIZE_STEP_LABELS
+from utils.common.sanitize import FEAT_TO_CREDITS, SOURCE_STORED, STEPS, is_enabled
+from config.constants import SANITIZE_SWITCH_LABELS
 from utils.database import name_cleanup
 from utils.database.datatables import Artist
 from utils.common.normalizer import strip_brackets
 from utils.ui.artist_change import review_held_artist_renames
+from utils.ui.artist_split_review import review_artist_splits
 
 
 def _print_changes(changes, action_description):
@@ -28,8 +29,8 @@ def _print_changes(changes, action_description):
 
 
 def _apply_step(songs, step_name, held=None):
-    """sanitize.py's "stored" step `step_name` on every song."""
-    label = SANITIZE_STEP_LABELS[step_name][0]
+    """sanitize's "stored" step `step_name` on every song."""
+    label = SANITIZE_SWITCH_LABELS[STEPS[step_name].switch][1]
     _print_changes(name_cleanup.apply_step(songs, step_name, held), f"{label} -")
 
 
@@ -81,6 +82,38 @@ def fix_lookalike_letters(songs, held=None):
         return
     fixed = name_cleanup.apply_proposals([proposals[i] for i in selected], held)
     print(f"Fixed {fixed} name(s).")
+
+def move_feat_credits(songs):
+    """Titles crediting featured artists ("Firestone ft. Conrad Sewell"): the
+    names move to the song's featured artists, the title loses them - in one
+    checkbox list, all ticked but a name that looks like more than one. The
+    artists it creates are offered for splitting afterwards."""
+    if not is_enabled(FEAT_TO_CREDITS, SOURCE_STORED):
+        return
+    session, _ = require_global_database_sessions()
+    moves = name_cleanup.feat_move_proposals(session, songs)
+    if not moves:
+        return
+    review_header(f"REVIEW: {len(moves)} title(s) credit featured artists - move them to the songs' artists",
+                  "(existing) = an artist the database has; unticked = a name that looks like more than one")
+    choices = []
+    for i, move in enumerate(moves):
+        names = ", ".join(f"{name} ({'existing' if move.known[name] else 'new'})" for name in move.names)
+        choices.append(questionary.Choice(
+            title=f"{move.song.artist.name} - {move.song.title}  ->  {move.title}  + feat. {names}",
+            value=i, checked=not move.suspicious))
+    selected = questionary.checkbox(
+        "Select the titles to change (space toggles, enter confirms):", choices=choices
+    ).ask()
+    if selected is None:
+        print("Aborted, nothing changed.")
+        return
+    created = name_cleanup.apply_feat_moves(session, [moves[i] for i in selected])
+    print(f"Moved the featured artists of {len(selected)} title(s), {len(created)} new artist(s).")
+    if created:
+        submit_global_database_session()
+        review_artist_splits(created)
+
 
 def seek_nonsense_names(songs):
     # Blacklisted album/title values used to ask "do you wish to edit it?" right
@@ -225,6 +258,7 @@ def clean_names():
     # than one per song (~20 s)
     songs, _artists = _load_songs()
     fix_lookalike_letters(songs, held)
+    move_feat_credits(songs)
     submit_global_database_session()
     seek_nonsense_names(unchecked)
     submit_global_database_session()

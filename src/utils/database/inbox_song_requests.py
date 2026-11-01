@@ -88,6 +88,7 @@ from utils.database.inbox_requests import (
     save_decision,
 )
 from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata
+from utils.common.song_entry import SongEntry
 
 # Settled statuses of their own
 ALREADY_IN_DATABASE = "already in the database"
@@ -173,23 +174,27 @@ class SongRequestCase:
     def sources(self) -> list[str]:
         return list(dict.fromkeys(SOURCE_LABELS.get(r.source, r.source) for r in self.reports))
 
-    def metadata(self, artist: str | None = None, title: str | None = None) -> dict:
+    def metadata(self, artist: str | None = None, title: str | None = None) -> SongEntry:
         """An import_engine metadata dict (run_import_batch()); `artist` /
         `title` as the owner corrected them, else the request's. A
         featured-artist credit leaves the title for `feat_artists`, which the
         import credits on the new song ("Billionaire ft. Bruno Mars" ->
-        "Billionaire", Bruno Mars as feat) - sanitize.py's "request" steps
+        "Billionaire", Bruno Mars as feat) - sanitize's "request" steps
         (its feat_to_credits)."""
-        return sanitize_metadata({
-            "artist_name": artist if artist is not None else self.latest.artist,
-            "title": title if title is not None else self.latest.title or "",
+        latest = self.latest
+        return sanitize_metadata(SongEntry({
+            "artist_name": artist if artist is not None else latest.artist,
+            "title": title if title is not None else latest.title or "",
+            "feat_artists": [],  # filled from the title by the "request" cleanup
             "album": self._first("album"),
             "year": self._first("year"),
             "language": "Unknown",
             "origin": None,
             "youtube_video_id": self.youtube_video_ids[0] if self.youtube_video_ids else None,
             "duration_s": self._first("duration_s"),
-        }, SOURCE_REQUEST)
+        }, source=SOURCE_REQUEST, raw_text=latest.title, originals={
+            field: value for field, value in (("artist", latest.artist), ("title", latest.title),
+                                              ("album", latest.album)) if value is not None}), SOURCE_REQUEST)
 
 
 def _rejected_rows(session) -> tuple[set, set, set]:
@@ -389,7 +394,7 @@ def channel_suggestion(case: SongRequestCase) -> tuple | None:
                 metadata = build_metadata_from_item(
                     {"title": info.get("title"), "channel": info.get("channel") or info.get("uploader"),
                      "video_id": video_id})
-                artist, title = metadata["artist_name"], metadata["title"]
+                artist, title = metadata.artist, metadata.title
                 if artist and title and not is_junk_only_title(title):
                     reading = (artist, title)
             _channel_readings[video_id] = reading
@@ -467,9 +472,9 @@ def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
         song = matcher.match(case.metadata(*suggestion))
         if song is not None:
             return song
-    if is_generic_channel_artist(metadata["artist_name"]):
+    if is_generic_channel_artist(metadata.artist):
         return None
-    if not metadata["artist_name"]:
+    if not metadata.artist:
         return None
     return matcher.match(metadata)
 

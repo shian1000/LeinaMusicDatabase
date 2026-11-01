@@ -19,7 +19,13 @@ offered again until another song joins them."""
 import json
 import re
 from collections import defaultdict
-from utils.common.title_patterns import BRACKETED, FEAT_OR_WITH_WORD, FEAT_WORD
+from utils.common.artist_credits import (
+    BRACKET_RE as _BRACKET_RE,
+    FEAT_WORD_RE as _FEAT_WORD_RE,
+    feat_credits,
+    split_feat_credits,
+    strip_feat_credits,
+)
 
 from config.constants import (
     ADDITIONAL_VIDEO_SONG_MERGE,
@@ -34,12 +40,13 @@ from config.constants import (
     TITLE_JUNK_SUFFIXES,
 )
 from utils.common.normalizer import normalize
-from utils.common.text_utils import strip_trailing_feat, strip_trailing_junk_suffix
+from utils.common.text_utils import strip_trailing_feat
+from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.database.additional_videos import add_additional_video
 from utils.database.datatables import Artist, Song
 from utils.database.genres import keep_genre_on_merge
 from utils.database.latin_names import keep_latin_on_merge
-from utils.database.artist_splitting import propose_artist_split
+from utils.common.artist_credits import propose_artist_split
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists, song_all_artists
 from utils.database.song_references import record_song_merge
 
@@ -47,8 +54,6 @@ from utils.database.song_references import record_song_merge
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
                   "track_number", "disc_number")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
-_BRACKET_RE = re.compile(r"\s*" + BRACKETED)
-_FEAT_WORD_RE = re.compile(r"^\s*" + FEAT_OR_WITH_WORD + r"\s", re.IGNORECASE)
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 
 
@@ -71,43 +76,6 @@ def clean_title(title: str) -> str:
 
     cleaned = strip_trailing_junk_suffix(_BRACKET_RE.sub(drop, title or "")).strip()
     return cleaned or title
-
-
-_FEAT_CREDIT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+(.+)$", re.IGNORECASE)
-
-
-def feat_credits(title: str) -> list[str]:
-    """The featured artists a title credits, bracketed or not: "Hollywood
-    feat. Snoop Dogg & Jamie Principle (Visualiser)" -> ["Snoop Dogg",
-    "Jamie Principle"]."""
-    credits = []
-    for match in _BRACKET_RE.finditer(title or ""):
-        if _FEAT_WORD_RE.match(match.group(1).strip() + " "):
-            credits.append(match.group(1).strip())
-    bare = _FEAT_CREDIT_RE.search(_BRACKET_RE.sub("", title or ""))
-    if bare:
-        credits.append(bare.group(0).strip())
-    names = []
-    for credit in credits:
-        split = propose_artist_split(f"X {credit}")
-        names += split.feat if split else []
-    return names
-
-
-# An unbracketed credit up to the next bracket: "(Remix)" after it stays
-_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+[^()\[\]]+", re.IGNORECASE)
-
-
-def split_feat_credits(title: str) -> tuple[str, list[str]]:
-    """(title without its featured-artist credits, the artists they name):
-    "Billionaire ft. Bruno Mars" -> ("Billionaire", ["Bruno Mars"]). A title
-    that is nothing but a credit, or names nobody, comes back unchanged."""
-    names = feat_credits(title)
-    if not names:
-        return title, []
-    bare = _BRACKET_RE.sub(lambda m: "" if _FEAT_WORD_RE.match(m.group(1).strip() + " ") else m.group(0), title)
-    bare = " ".join(_UNBRACKETED_FEAT_RE.sub(" ", bare).split())
-    return (bare, names) if bare else (title, [])
 
 
 def missing_feat_artists(group: list) -> list[str]:

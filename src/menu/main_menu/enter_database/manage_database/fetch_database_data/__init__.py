@@ -1,5 +1,5 @@
 from utils.ui.menu_utils import execute_menu_item
-from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data
+from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_data, fill_missing_for_import
 from utils.discoveries.import_data_from_mp3_tags import import_data_from_mp3_tags
 from utils.youtube.import_from_playlist import import_data_from_youtube_playlist
 from utils.ui.menu_utils import open_file_browser_terminal
@@ -32,6 +32,7 @@ def import_data():
         return
     imported_songs = import_data_from_mp3_tags(songs_path)
     _review_imported_songs(imported_songs)
+    fill_missing_for_import(imported_songs)
 
 def import_youtube_playlist():
     playlist_input = questionary.text("Paste the YouTube playlist URL (or just its ID):").ask()
@@ -42,6 +43,8 @@ def import_youtube_playlist():
         imported_songs = import_data_from_youtube_playlist(playlist_input)
         with trace.phase("Review the imported songs (includes waiting for answers)"):
             _review_imported_songs(imported_songs)
+        with trace.phase("Fill in missing data (includes waiting for answers)"):
+            fill_missing_for_import(imported_songs)
         music_session, _ = open_and_set_global_database_sessions()
         with trace.phase("Link music library files (includes waiting for answers)"):
             offer_linking_library_files(music_session, imported_songs)

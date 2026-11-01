@@ -217,7 +217,7 @@ def package(tmp_path, monkeypatch):
             raise state.result
         return state.result
     monkeypatch.setattr(rpi, "import_package", fake_import)
-    monkeypatch.setattr(rpi, "resolve_new_requests", lambda: state.resolved.append(True))
+    monkeypatch.setattr(rpi, "resolve_new_requests", lambda after_import=None: state.resolved.append(True))
     monkeypatch.setattr(rpi, "ask_yes_no", lambda q: state.answers.pop(0))
     state.downloads = downloads
     return state

@@ -199,16 +199,17 @@ def link_file_to_song(rel_path: str, song_id: int, db_path: Path = None) -> None
 def _read_tags(file: Path) -> tuple:
     """(artist, title, duration_s) - tags, else the filename, like the tag import."""
     from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+    from utils.common.song_entry import SongEntry, as_entry
     from utils.discoveries.mp3_utils import audio_duration
     # read_file_metadata() prints a warning per file without tags - fine for
     # one import, thousands of lines for a whole library
     with contextlib.redirect_stdout(io.StringIO()):
         try:
-            metadata = read_file_metadata(file)
+            metadata = as_entry(read_file_metadata(file))
         except Exception as exc:
             slog(f"[FILES INDEX] can't read tags of {file}: {exc}")
-            metadata = {}
-    return metadata.get("artist_name") or None, metadata.get("title") or file.stem, metadata.get("duration_s") or audio_duration(file)
+            metadata = SongEntry()
+    return metadata.artist or None, metadata.title or file.stem, metadata.duration_s or audio_duration(file)
 
 
 def catalog_fingerprint(music_session) -> str:

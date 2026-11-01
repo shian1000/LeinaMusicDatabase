@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import Optional
 from pathlib import Path
 
-from config.constants import FILE_NAME_JUNK_FILE, SITE_NAME_TLDS
 
 # Small mapping for special latin letters that don't decompose nicely
 _SPECIAL_REPLACEMENTS = {
@@ -226,132 +225,9 @@ def _bare_separator(name: str) -> int | None:
         candidates.append((not spaced, "-~_".index(char), at))
     return min(candidates)[2] if candidates else None
 
-_SITE_NAME_RE = re.compile(
-    r"[(\[]?\s*\b[\w-]+(?:\.[\w-]+)*\.(?:" + "|".join(SITE_NAME_TLDS) + r")\b\s*[)\]]?", re.IGNORECASE)
-_EDGE_SEPARATORS_RE = re.compile(r"^[\s\-–—_|:]+|[\s\-–—_|:]+$")
-# What Y2Mate appends to a file name: the video id, the bitrate and a
-# timestamp in ms ("...Blues)-AzEBH6DZJVk-160k-1645418932557")
-_CONVERTER_SUFFIX_RE = re.compile(r"-[A-Za-z0-9_-]{11}-\d{2,3}k-\d{10,}$")
-# Two separators left touching once a word between them is gone ("A -  - B")
-_DOUBLED_SEPARATOR_RE = re.compile(r"\s+[-–—|]\s+(?:[-–—|]\s+)+")
-
-
-@lru_cache(maxsize=1)
-def _junk_words_re():
-    """FILE_NAME_JUNK_FILE's words as one pattern (None when there are none),
-    with a bracket around them if any."""
-    path = Path(__file__).resolve().parents[2] / "config" / FILE_NAME_JUNK_FILE
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-    words = sorted({w.strip() for w in lines if w.strip() and not w.lstrip().startswith("#")}, key=len, reverse=True)
-    if not words:
-        return None
-    alternatives = "|".join(re.escape(w) for w in words)
-    return re.compile(r"[(\[]?\s*(?<![\w.])(?:" + alternatives + r")(?![\w.])\s*[)\]]?", re.IGNORECASE)
-
-
-def _drop_junk(text: str) -> str:
-    text = _CONVERTER_SUFFIX_RE.sub("", text)
-    text = _SITE_NAME_RE.sub(" ", text)
-    if (words := _junk_words_re()) is not None:
-        text = words.sub(" ", text)
-    return _trim(text)
-
-
-def _trim(text: str) -> str:
-    text = _DOUBLED_SEPARATOR_RE.sub(" - ", text)
-    return _EDGE_SEPARATORS_RE.sub("", re.sub(r"\s{2,}", " ", text))
-
-
-def has_site_name(text: str) -> bool:
-    """Does `text` hold a download-site name, a FILE_NAME_JUNK_FILE word or
-    Y2Mate's suffix - what strip_site_names() takes out?"""
-    if not text:
-        return False
-    words = _junk_words_re()
-    return bool(_CONVERTER_SUFFIX_RE.search(text) or _SITE_NAME_RE.search(text) or (words and words.search(text)))
-
-
-def trim_separators(text: str) -> str:
-    """`text` without the separators at its ends and doubled in it ("A -  -
-    B", "Song_", "- Piano Solo -"), runs of spaces as one - what
-    strip_site_names() also does with a name holding no site; unchanged when
-    nothing would be left ("---"). Too much for a stored name: "-!-" -> "!"."""
-    if not text:
-        return text
-    return _trim(text) or text
-
-
-# Polish (Windows-1250) tags read as Latin-1 or Windows-1252: "Ma³pa" for
-# "Małpa". These never stand in real text - "³" / "¹" (ł / ą), "¯" (Ż),
-# control characters 0x80-0x9F (ś, ź, Ś, Ź, ...), "¿" inside a word (ż) -
-# while "ñ", "ê", "ó" do, so only one of them triggers re-reading the whole
-# text as Windows-1250. A text with none ("Mêskie" for "Męskie") stays,
-# unless another field of the same record shows one (`force`).
-_CP1250_MOJIBAKE_RE = re.compile(r"[³¹¯\x80-\x9f]|(?<=\w)¿")
-
-
-def has_cp1250_mojibake(text: str) -> bool:
-    """Does `text` hold a character only Polish mis-read as Latin-1 has?"""
-    return bool(text) and bool(_CP1250_MOJIBAKE_RE.search(text))
-
-
-def fix_cp1250_mojibake(text: str, force: bool = False) -> str:
-    """`text` re-read as Windows-1250 when it's Polish mis-read as Latin-1
-    or Windows-1252 ("Ma³pa i ja" -> "Małpa i ja", "Wspania³oœæ" ->
-    "Wspaniałość"); unchanged otherwise. `force`: re-read it even without a
-    sure sign ("Mêskie" -> "Męskie"), for a field of a record another field
-    of which has one - correct Polish text is left alone either way, since
-    its "ę", "ł" can't be encoded as Latin-1."""
-    if not text or not (force or has_cp1250_mojibake(text)):
-        return text
-    for misread_as in ("latin-1", "cp1252"):  # cp1252: "œ" for ś, which Latin-1 lacks
-        try:
-            return text.encode(misread_as).decode("cp1250")
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            pass
-    return text
-
-
-def fix_cp1250_mojibake_by_words(text: str, known_words: set[str]) -> str:
-    """`text` re-read as Windows-1250 without a sure sign, when every word
-    the re-reading changes then is a word the database already has
-    (`known_words`, casefolded): "Mêskie Granie" -> "Męskie Granie", while
-    "Efêmera" ("Efęmera" nowhere) stays."""
-    fixed = fix_cp1250_mojibake(text, force=True)
-    if fixed == text:
-        return text
-    old, new = text.split(), fixed.split()
-    changed = [n.casefold() for o, n in zip(old, new) if o != n]
-    if len(old) != len(new) or not all(_WORD_EDGES_RE.sub("", w) in known_words for w in changed):
-        return text
-    return fixed
-
-
-_WORD_EDGES_RE = re.compile(r"^\W+|\W+$")
-
-
-def strip_site_names(text: str) -> str:
-    """`text` without download-site names ("y2meta.com - David Dean
-    Burkhart Playlist" -> "David Dean Burkhart Playlist", "Song (greenmp3.com)"
-    -> "Song"), the words in FILE_NAME_JUNK_FILE ("Y2Mate.is") and Y2Mate's
-    "-<video id>-160k-<timestamp>" suffix; separators left over trimmed; unchanged when
-    nothing else would be left."""
-    if not text:
-        return text
-    cleaned = _drop_junk(text)
-    return cleaned or text
-
-
-def is_site_name(text: str) -> bool:
-    """Is `text` nothing but download-site names ("y2meta.com")?"""
-    return bool(text) and not _drop_junk(text).strip()
-
 
 def extract_unknown_data(filepath: Path):
-    """(artist, title) read off a file's name, cleaned by sanitize.py's
+    """(artist, title) read off a file's name, cleaned by sanitize's
     "file_name" steps first."""
     from utils.common.sanitize import SOURCE_FILE_NAME, sanitize_raw  # sanitize imports this module
     return split_artist_title(sanitize_raw(filepath.stem, SOURCE_FILE_NAME))

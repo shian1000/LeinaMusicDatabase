@@ -19,7 +19,7 @@ _RESET = "\033[0m"
 _RICH = {ARTIST_STYLE: "bright_cyan", TITLE_STYLE: "bright_yellow", DETAIL_STYLE: "bright_black"}
 
 # Where a title's featured-artist credit starts: a bracketed "(feat. " or a
-# bare " ft. " (the names themselves come from song_duplicates.feat_credits())
+# bare " ft. " (the names themselves come from artist_credits.feat_credits())
 _FEAT_START_RE = re.compile(r"[(\[]\s*" + FEAT_OR_WITH_WORD + r"\s|(?:^|\s)" + FEAT_WORD + r"\s",
                             re.IGNORECASE)
 
@@ -28,7 +28,7 @@ def title_tokens(title: str) -> list:
     """The title as (style, text) tokens: title colour, except a
     featured-artist credit - its names in the artist colour, the "(feat. ",
     " & " and ")" around them plain."""
-    from utils.database.song_duplicates import feat_credits
+    from utils.common.artist_credits import feat_credits
 
     names = feat_credits(title)
     tokens, position = [], 0

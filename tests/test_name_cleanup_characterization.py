@@ -8,7 +8,7 @@ import pytest
 
 from utils.common.normalizer import extract_unknown_data
 from utils.database.name_cleanup import junk_title_fix
-from utils.database.song_duplicates import split_feat_credits
+from utils.common.artist_credits import split_feat_credits
 from utils.discoveries.import_data_from_mp3_tags import _clean_fields
 from utils.youtube.import_from_playlist import build_metadata_from_item
 
@@ -50,9 +50,12 @@ YOUTUBE_CASES = [
     ("Some Channel", "Artist - Song (Official Video) (HD)", ("Artist", "Song")),
     ("Some Channel", "Artist - Song (Official Video) Official Audio", ("Artist", "Song")),
     ("Some Channel", "Artist - Song (Remix)", ("Artist", "Song (Remix)")),
-    ("Some Channel", "Artist - Song (feat. Other)", ("Artist", "Song (feat. Other)")),
-    ("Some Channel", "Artist - Song ft. Other (Official Video)", ("Artist", "Song ft. Other")),
-    ("Some Channel", "Łona - Lona Song", ("Łona", "Song")),
+    # Changed 2026-11-01: a featured artist leaves the title for feat_artists
+    ("Some Channel", "Artist - Song (feat. Other)", ("Artist", "Song")),
+    ("Some Channel", "Artist - Song ft. Other (Official Video)", ("Artist", "Song")),
+    # Changed 2026-11-01: the artist goes only at the start before a separator,
+    # or alone in a bracket ("White Queen" by Queen stays)
+    ("Some Channel", "Łona - Lona Song", ("Łona", "Lona Song")),
     ("Some Channel", "AC_DC-Thunderstruck", ("AC DC", "Thunderstruck")),
     ("Some Channel", "Artist – Song【Kan/Rom/Eng Lyrics】", ("Artist", "Song")),
     # Stacked junk: one pass of the junk steps leaves some of it - a loop
@@ -60,11 +63,13 @@ YOUTUBE_CASES = [
     ("Some Channel", "Artist - Song Lyrics (HD) Official Video", ("Artist", "Song Lyrics")),
     ("Some Channel", "Artist - Song - 1999 (HD)", ("Artist", "Song")),
     ("Some Channel", "Artist - Song Official Video (Lyrics) - 1999 (HD)", ("Artist", "Song Official Video")),
-    ("Some Channel", "Artist - (Official Video)", ("Some Channel", "Artist -")),
+    # Changed 2026-11-01: a separator left dangling goes
+    ("Some Channel", "Artist - (Official Video)", ("Some Channel", "Artist")),
     ("Some Channel", "", ("Some Channel", "")),
     # Changed 2026-11-01: only hashtags at the end, starting with a letter
     ("Some Channel", "James Gang - Funk #49", ("James Gang", "Funk #49")),
-    ("Some Channel", "Artist - #ВІЛЬНА_КАСА #shorts", ("Artist", "#ВІЛЬНА КАСА")),
+    # Changed 2026-11-01: "_" is a space only between words of letters
+    ("Some Channel", "Artist - #ВІЛЬНА_КАСА #shorts", ("Artist", "#ВІЛЬНА_КАСА")),
     # Changed 2026-11-01: no separator left dangling by a junk phrase
     ("Some Channel", "Artist - Secret Youth - Music Video", ("Artist", "Secret Youth")),
     # Changed 2026-11-01: only a quoted title is unwrapped, quotes inside stay

@@ -1473,7 +1473,7 @@ def test_score_reads_swapped_tags_too(tmp_path, music_session, monkeypatch):
     ("Mylo - In My Arms", "Mylo - In My Arms"),
 ])
 def test_strip_site_names(text, expected):
-    from utils.common.normalizer import strip_site_names
+    from utils.common.sanitize.text import strip_site_names
     assert strip_site_names(text) == expected
 
 
@@ -1555,7 +1555,7 @@ def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
     """Tags written in Windows-1250 come out as "Ma³pa"; read_file_metadata()
     re-reads them, but leaves genuine Latin-1 letters ("España") alone."""
     from mutagen.easyid3 import EasyID3
-    from utils.common.normalizer import fix_cp1250_mojibake
+    from utils.common.sanitize.text import fix_cp1250_mojibake
     from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
 
     misread = lambda text: text.encode("cp1250").decode("latin-1")
@@ -1564,7 +1564,7 @@ def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
     assert fix_cp1250_mojibake("Wasza Wspania³oœæ") == "Wasza Wspaniałość"
     assert fix_cp1250_mojibake("¯ycie jest jak tramwaj") == "Życie jest jak tramwaj"
     # No sure sign: only forced, or when the re-read word is one the database has
-    from utils.common.normalizer import fix_cp1250_mojibake_by_words
+    from utils.common.sanitize.text import fix_cp1250_mojibake_by_words
     assert fix_cp1250_mojibake("Mêskie Granie") == "Mêskie Granie"
     assert fix_cp1250_mojibake("Mêskie Granie", force=True) == "Męskie Granie"
     assert fix_cp1250_mojibake("Męskie Granie", force=True) == "Męskie Granie"  # correct Polish stays

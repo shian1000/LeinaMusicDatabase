@@ -377,3 +377,40 @@ def test_each_entry_and_phase_is_logged_from_verbosity_1(env, tmp_path, monkeypa
     assert any(p.startswith("Reviews after the import (includes waiting for answers) - ") for p in phases)
     assert any("[Import] done: 1 added, 1 linked to a video, 2 skipped; MusicBrainz request stats:" in line
                for line in lines)
+
+
+# ==================== which entry each song came from (ImportResult) ====================
+
+def test_the_result_pairs_every_song_with_its_entry(env):
+    from utils.common.song_entry import SongEntry
+    session = env["session"]
+    _artist(session, "Rammstein", "Engel", "Du hast")
+    env["answers"].append(True)  # "Du hasst" is the "Du hast" already there
+    new = SongEntry(_entry("AURORA", "Runaway"), source="youtube", raw_text="AURORA - Runaway (Official Video)")
+    found = SongEntry(_entry("Rammstein", "engel"), source="mp3")
+    similar = SongEntry(_entry("Rammstein", "Du hasst"), source="youtube")
+
+    result = ie.run_import_batch([new, found, similar, _entry("Rammstein", "Engel")])
+
+    assert [s.title for s in result] == ["Runaway"] and isinstance(result, list)
+    by_title = {session.get(Song, song_id).title: entry for song_id, entry in result.entries.items()}
+    # added, matched, chosen in the review - the first entry of a song stays
+    assert by_title == {"Runaway": new, "Engel": found, "Du hast": similar}
+    assert by_title["Runaway"] is new and result.entry_for(result[0]).raw_text == new.raw_text
+
+
+def test_a_song_added_after_a_review_has_its_entry(env):
+    session = env["session"]
+    _artist(session, "Rammstein", "Du hast")
+    env["answers"].append(False)  # "Du hasst" is a new song
+    result = ie.run_import_batch([_entry("Rammstein", "Du hasst")])
+    assert [s.title for s in result] == ["Du hasst"] and result.entry_for(result[0]).title == "Du hasst"
+
+
+def test_an_entry_held_back_for_a_similar_artist_has_its_song_too(env):
+    session = env["session"]
+    _artist(session, "Rammstein", "Engel")
+    env["spelling"]["Ramstein"] = {"found": True, "corrected_artist": "Rammstein", "corrected_title": ""}
+    env["answers"].append(True)
+    result = ie.run_import_batch([_entry("Ramstein", "Sonne")])
+    assert result.entry_for(result[0]).artist == "Ramstein"

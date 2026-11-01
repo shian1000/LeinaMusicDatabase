@@ -15,11 +15,13 @@ call sites delegate to it.
 Do not write a new ad-hoc normalize/compare function anywhere else — extend this
 one.
 
-## Cleaning before storing: `sanitize.py`
+## Cleaning before storing: `sanitize`
+
+The decision and what was rejected: [ADR-0005](../decisions/0005-one-name-cleanup.md).
 
 `normalize()` makes a comparison key and is never stored. What *is* stored -
 an artist name, title or album after junk is taken off - goes through
-`utils/common/sanitize.py` (owner's plan, 2026-11-01: one place for every
+`utils/common/sanitize/` (owner's plan, 2026-11-01: one place for every
 cleanup, used by the imports, Clean names and Leina Radio's requests, with
 Settings choosing the steps). Each cleanup is a named `Step` (its name is
 its settings key: never rename one), run in one fixed order
@@ -27,53 +29,115 @@ its settings key: never rename one), run in one fixed order
 for one field after; a step may be listed twice - the YouTube trailing
 bracket check runs again after the plain phrases and the year are gone).
 A source (`mp3`, `file_name`, `youtube`, `request`, `manual`, `stored`)
-runs the steps whose `sources` hold it. Those defaults reproduce what each
-source did before the module existed, which
-`tests/test_name_cleanup_characterization.py` pins and `tests/test_sanitize.py`
-checks step by step - so a new default is a behaviour change to decide on,
-not a refactoring. Defaults since 2026-11-01 (owner: "where a step can be
-on, it is on"): every step runs for every source it can, measured on the
-whole catalog first (6,373 songs). Only YouTube, which they were written
-for, keeps the three that broke real stored titles: `artist_in_title`
-("White Queen" by Queen -> "White", "Feng Suave EP" -> "EP", 48 hits),
-`junk_marker_brackets` ("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)") and
-`file_name_artifacts` ("2_00" -> "2 00"); and `edge_separators` - what
-`strip_site_names()` also did to any name, trimming separators at its ends -
-stays with mp3 tags and file names (":/" -> "/", "-!-" -> "!"). For that it
-was split off: `site_names` now changes only a name that holds a site
-(`normalizer.has_site_name()`), `edge_separators` is `trim_separators()`.
-The steps that take something out (`pipe_suffix`, `junk_brackets_anywhere`,
+runs the steps that are on and work on what it has (below). Their first
+defaults reproduced what each source did before the module existed, which
+`tests/test_name_cleanup_characterization.py` pins ("Changed:" marks every
+change made on purpose since) and `tests/test_sanitize` checks step by
+step - so a new default is a behaviour change to decide on, not a
+refactoring. Since 2026-11-01 (owner: one switch per step, the same
+everywhere) every step is on everywhere it can run, each made safe for every
+name first - measured on the catalog (6,373 songs) and the library's tags
+(4,281 files): `artist_in_title` only at the start before a separator or a
+quoted title, or alone in a bracket ("Lynyrd Skynyrd - Free Bird", "Hard
+Times (Paramore)"; never "White Queen" by Queen, "Feng Suave EP" - 48 such
+cuts before); `junk_marker_brackets` without the marker word "From"
+("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)", "(from “Chess”)") and, like
+`junk_brackets_anywhere`, never a bracket naming a version
+(`VERSION_MARKER_RE`: "(live at Le Bataclan, ... 1998)", "(Official
+Acoustic Live Video)"); `file_name_artifacts` turns "_" into spaces only
+between words of letters ("2_00", "#ВІЛЬНА_КАСА" stay);
+`edge_separators` is `sanitize.text.trim_dangling_separator()` - a "_" or a
+spaced dash left at the end ("Da li želiš_", "... - Piano Solo -"), not a
+styled "- I m p u l s i o n -", "暁月夜-アカツキヅクヨ-" or ":/" - and
+`site_names` changes only a name holding a site (`has_site_name()`). The
+steps that take something out (`pipe_suffix`, `junk_brackets_anywhere`,
 `hashtags`, `media_extension`) leave a name alone when there is nothing to
 take out, since their functions collapse every whitespace - two spaces are
 where a file name "Artist  Title" is split, an ideographic space belongs to
-"ｚｂｉｇｎｉｅｗ\u3000ｓｔｏｎｏｇａ"; a video title's spaces are collapsed by
-its own first raw step, `youtube_spaces`, as before. Bugs the measuring
-found, fixed: hashtags only at the end and starting with a letter ("Funk
-#49"; "Artist - #ВІЛЬНА_КАСА #shorts" keeps its title), no separator left by
-a junk phrase ("Secret Youth - Music Video"), only a quoted title unwrapped
-('Take The "A" Train'; Bowie's '"Heroes"' would lose its quotes), an HTML
-entity only with its ";" ("Kushi&#3"). The junk steps run once, not until
-nothing changes: on the catalog the two give the same result. A `review` step
+"ｚｂｉｇｎｉｅｗ\u3000ｓｔｏｎｏｇａ"; a video title's runs of spaces are made
+one by `build_metadata_from_item()` itself, a rule of splitting a video
+title, not a step. Bugs the measuring found, fixed: hashtags only at the end
+and starting with a letter ("Funk #49"; "Artist - #ВІЛЬНА_КАСА #shorts"
+keeps its title), no separator left by a junk phrase ("Secret Youth - Music
+Video"), only a quoted title unwrapped ('Take The "A" Train'; Bowie's
+'"Heroes"' would lose its quotes), an HTML entity only with its ";"
+("Kushi&#3"). The junk steps run once, not until nothing changes: on the
+catalog the two give the same result. A `review` step
 (`lookalike_letters`) is only proposed (`sanitize_changes()`), never applied
 by `sanitize_field()`. `feat_to_credits` (a "ft. X" moved into
-`metadata["feat_artists"]`) is a metadata step, for requests only: the
-imports keep the credit, or `find_existing_song()` would add "Song ft. X"
-again next to "Song". Splitting artist from title is not a step - it stays
+`metadata["feat_artists"]`, by `split_feat_credits()`) is a metadata step,
+since 2026-11-01 for the mp3 and YouTube imports as well as requests (owner:
+know what is what - how it is shown is our choice): `create_song_entry()`
+credits the names, `resolve_song()` credits them to a song it found when that
+song's title, without credits, is the entry's (not "Carry Me (Live)" for
+"Carry Me"), and a song chosen in the similar-song review. Matching had to
+follow: `find_existing_song()` also reads a stored title without its credits
+("Song (feat. X) (Remix)" is the entry "Song (Remix)") - only that side, an
+entry's own "ft." still tells a version apart - and, given the entry's
+`feat_artists`, first tries the songs crediting them, in their links or
+their own title (`_with_feats()`; `find_song_loosely()` and
+`LocalSongMatcher.match_exact()` do the same), so "No Scrubs" + Joanna Jones
+finds "No Scrubs ft. Joanna Jones (Cover)", not "No Scrubs". For the
+database it is a checkbox list in Clean names (`move_feat_credits()` ->
+`name_cleanup.feat_move_proposals()` / `apply_feat_moves()`): measured
+2026-11-01, 191 titles, 211 names, 54 of them artists the database has, no
+title meeting another song of its artist once bare; a name that looks like
+more than one ("Andriy Khlyvnyuk of Boombox", "David Bowie Holding out for a
+Hero" - an artist and title in one) unticked; the artists it creates go to
+the split review. Splitting artist from title is not a step - it stays
 with each source. Clean names' record-level repairs (Polish mojibake forced
 across a song's fields, by known words) are not steps yet.
 
-Settings → "Name cleanup" switches each step on or off per source
-(`set_step_sources()`; `sanitize_config.json` keeps only what differs from
-the defaults, so a later default change still reaches a step the owner
-left alone; read once per process - the app at its first cleanup, the
-request timer at each run). Not every source is offered: a raw step only
-for YouTube and file names, a review step only for the database,
-`artist_in_title` never for it (Clean names has no entry artist),
-`feat_to_credits` only for requests, "manual" never. Turning a step on for
-an import offers the database too: otherwise a new name and the same one
-stored differ. Clean names runs every step on for the database
-(`name_cleanup.stored_step_passes()`, split where "nfc" sits, since the
-Polish repair and composing letters come there), never emptying a name;
+**Step order (owner, 2026-11-01), also the order of Settings → "Name
+cleanup".** "Extract first, then remove": a step that keeps what a title
+says runs before any step that cuts text, or the cut takes it along ("Song
+(Official Video ft. X)" lost X while featured artists ran last).
+`sanitize.SWITCHES` (11, `constants.SANITIZE_SWITCH_LABELS` with their
+group, label and examples) each turns a few `STEPS` on or off; `FIELD_ORDER`
+follows them:
+1. Characters - HTML entities ("&amp;" -> "&", before anything reads an
+   "&"; the former `amp_entity` step folded in), incorrectly encoded
+   characters (Polish mojibake and NFC, one switch), file names in titles
+   (an extension, "_" between words of letters - first, so the words are
+   read: "Savana_feat_Darko_Rundek_Official_Video"), look-alike letters.
+2. What the title says, kept on the entry - featured artists (a field step
+   now, `_featured_artists()`, filling the caller's `feat_artists` list; with
+   no list it changes nothing, so a credit is never cut unkept; a guest's
+   name loses trailing junk, "Darko Rundek Official Video" -> "Darko
+   Rundek"), the year (`title_year` = `strip_title_year()`: a last bracket
+   with a year, not a version, and " - 1982" - out of the junk brackets;
+   run again after the junk, "Song (2020) (Official Video)"; `hints.year`,
+   offered in Years, never written unasked), the artist repeated in it.
+3. Removing - download-site names, junk (one switch: the four bracket /
+   phrase steps, "| Label", hashtags; a bracket naming a version stays),
+   quote marks around a title (its own switch: Bowie's '"Heroes"').
+4. Tidying - invisible characters and spaces (run at the start too) and a
+   separator left at the end.
+For a video title the raw steps (site names, "| Label", junk brackets,
+hashtags, extensions, then the dangling separator) still run on the whole
+title before the split ("Herr Mannelig (animation) - Żniwa - Polish
+version" splits right only so); a bracket holding both "ft." and junk there
+would still lose its guest - not seen on the catalog, not handled yet.
+Measured before and after on 42,517 names (the catalog read as each source,
+Clean names, the library's tags and file names): 6 differ, all better
+("Gdzie jest M? - feat. Spinache, Ment XXL" -> "Gdzie jest M?" + both guests,
+"Savana" + "Darko Rundek") but one file name ("Mistmorn - __ (Official
+Audio)" -> "Mistmorn -", read only without tags).
+
+Settings → "Name cleanup" turns each switch on or off for every source at
+once (`set_switch_on()`; `sanitize_config.json` keeps only a switch turned
+off - all are on by default; a file of an older version, which switched each
+step and once per source, reads as off where one of a switch's steps, or a
+former one in `_FORMER_STEPS`, was off; read once per process - the app at
+its first cleanup, the request timer at each run). Where a step runs is no
+choice but what it works on (`runs_for()`): a raw step where a whole text is
+split (a video title, a file name), a field step for mp3 tags, YouTube,
+requests and the database; never a name typed by hand. In the database a
+review step (look-alike letters, featured artists) only offers its change in
+a checkbox list; elsewhere it applies ("Вjörk" read from a tag is "Björk").
+Clean names runs every step that is on (`name_cleanup.stored_step_passes()`,
+split where "nfc" sits, since the Polish repair and composing letters come
+there), with the song's artist (`artist_in_title`), never emptying a name;
 the Polish repair itself always runs.
 
 The regexes the title rules shared, each spelt again in its own file (a
@@ -105,13 +169,37 @@ a checkbox review and `junk_phrases_any_bracket` on the unchecked songs'
 titles); the `nfc` step stands for `compose_decomposed_letters()`, which
 composes every column, and the Polish repair stays record-level. Each pass
 is skipped when its step is off. Song requests too: `SongRequestCase.metadata()`
-is `sanitize_metadata(..., "request")` (so far only `feat_to_credits`).
+is `sanitize_metadata(..., "request")`.
 `inbox_song_requests.song_key()` is deliberately not cleaned: it groups the
 requests, finds `rejected_song_requests` rows (stored as sent) and, as
 "song:<key>", is the id a decision is saved under, so turning a step on
 must not change it. Field corrections from Leina Radio are typed by a
 person - the "manual" source, which has no steps - and keep their own
 checks (`inbox_field_corrections.py`).
+
+**Where the code is (2026-11-01).** `utils/common/sanitize/` holds it all:
+`text.py` the functions a step applies (pure text - the download-site
+names, the Polish mojibake and the dangling separator came from
+`normalizer.py`, the junk phrases from `text_utils.py`), `pipeline.py` the
+registry, switches, order and runners, `settings.py` the file; the package
+re-exports both, so `from utils.common import sanitize` / `from
+utils.common.sanitize import sanitize_field` stay the entry points.
+`normalizer.py` keeps what comparison keys and the models need (`normalize()`,
+`name_key()`, `composed()`, `strip_format_characters()`, splitting "Artist -
+Title"); `script_utils.fix_mixed_script_words()` stays with the alphabet
+code. The credit functions, text only, are `utils/common/artist_credits.py`
+(joined names: `propose_artist_split()`; featured artists: `feat_credits()`,
+`split_feat_credits()`, `strip_feat_credits()`) - no longer in the database
+modules `artist_splitting.py` / `song_duplicates.py`, which import them.
+Moved without a change: the same 42,517 names give the same results. Left
+apart on purpose, as rules of comparing or querying rather than cleaning a
+stored name: `song_duplicates.duplicate_key()` / `clean_title()` (the
+duplicate review), Years' `_strip_guest_credit()` (is an album named after
+its song? - the shared `strip_feat_credits()` would miss "No Scrubs ft.
+Joanna Jones (Cover)" on "No Scrubs", 3 songs worse), `text_utils
+.truncate_at_word()` (album queries), the remaster bracket of
+`discoveries_manager` (album track keys), Wikipedia's `clean_album_title()`,
+the request parser's `_BRACKETED`.
 
 ## Matching across alphabets (`script_utils.py`)
 
@@ -389,7 +477,7 @@ the deleted song alive in the session the rest of the app holds.
 Old taggers wrote ID3 text in Windows-1250 while declaring Latin-1, so mutagen
 returns "Ma³pa i ja" for "Małpa i ja" (ł and ³ share byte 0xB3). It scored
 94% instead of matching. `read_file_metadata()` runs
-`normalizer.fix_cp1250_mojibake()`, which re-reads the whole text as
+`sanitize.text.fix_cp1250_mojibake()`, which re-reads the whole text as
 Windows-1250 only when it holds a character real text never has: "³", "¹",
 "¯" (Ż), a control character 0x80-0x9F (ś, ź, Ś, Ź), or "¿" inside a word (ż).
 It can't simply re-read everything: "ñ", "ê", "ó" are fine Latin-1 letters
@@ -413,10 +501,10 @@ Files from some download sites have `&amp;` (and the like) literally in their
 ID3 tags and names: "Major Lazer &amp; DJ Snake". `normalize()` would keep the
 "amp" as a word, so `read_file_metadata()` - shared by the mp3 import, the
 cover import, `files.db` and folder playlists - runs `html.unescape()` on the
-artist, title and album it returns (sanitize.py's `html_entities` step, "mp3"
+artist, title and album it returns (sanitize's `html_entities` step, "mp3"
 source); the folder playlist does the same for a
 file name used as the title. The same pass drops download-site names
-(`normalizer.strip_site_names()`: a word ending in a `SITE_NAME_TLDS` domain,
+(`sanitize.text.strip_site_names()`: a word ending in a `SITE_NAME_TLDS` domain,
 "y2meta.com - ...", "(greenmp3.com)", "- dscom.it"), the words listed in
 `src/config/file_name_junk.txt` (any site whose domain isn't in the list,
 "Y2Mate.is"; edit that file to add more - it's read once per run) and

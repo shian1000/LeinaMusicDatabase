@@ -31,8 +31,11 @@ this index is the map of everything else.
   columns or comma-separated ids),
   [ADR-0003](decisions/0003-phone-client-fills-gaps.md) (the MusicDatabaseApp phone client may
   fill missing data locally, MusicDatabase's values win, phone-found data will come back for
-  review), and [ADR-0004](decisions/0004-per-user-data.md) (per-user private data: one `user.db`
-  per user on the data drive, username + password, a review inbox planned for phone-found global data).
+  review), [ADR-0004](decisions/0004-per-user-data.md) (per-user private data: one `user.db`
+  per user on the data drive, username + password, a review inbox planned for phone-found global data),
+  and [ADR-0005](decisions/0005-one-name-cleanup.md) (names cleaned in one place - `sanitize/` -
+  by switches the same for every source, in one "extract first, then remove" order, what a title
+  says kept in an in-memory `SongEntry`, featured artists out of titles).
   Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records

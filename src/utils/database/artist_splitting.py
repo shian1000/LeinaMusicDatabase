@@ -9,129 +9,26 @@ can't tell "Sw@da & Maxim" from "Simon & Garfunkel".
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from config.constants import (
     ADDITIONAL_ARTIST_ROLE_FEAT,
     ADDITIONAL_ARTIST_ROLE_MAIN,
-    ARTIST_JOINING_WORDS,
     ARTIST_SPLIT_IGNORE_FILE,
 )
+from utils.common.artist_credits import (
+    JOINING_WORD_SEPARATOR,
+    UPPERCASE_X_SEPARATOR,
+    SplitProposal,
+    propose_artist_split,
+)
 from utils.common.normalizer import normalize
-from utils.common.title_patterns import FEAT_WORD
-from utils.common.text_utils import is_soundtrack_artist
 from utils.database.albums import link_songs, reassign_artist_albums
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import add_additional_artist
 
 _IGNORE_PATH = ARTIST_SPLIT_IGNORE_FILE
-
-# "A feat. B", "A ft. B", "A featuring B", "A (feat. B)" - everything after is a guest
-_FEAT = re.compile(r"\s*\(?\s*\b" + FEAT_WORD + r"\s+", re.IGNORECASE)
-# Between equal artists. " x " is lowercase-only on purpose: an uppercase X is
-# usually part of a name ("Final Fantasy X", "Malcolm X"). "and"/"i" are left
-# out - too many band names ("Hall and Oates" style) use them.
-_MAIN_SEPARATOR = re.compile(r",\s+|\s+&\s+|\s+x\s+|\s+/\s+|\s+\+\s+|\s+vs\.?\s+")
-# Strong enough to pre-select a proposal on its own; "&" and "," aren't
-# ("Simon & Garfunkel", "Earth, Wind & Fire").
-_CONFIDENT_SEPARATOR = re.compile(r"\s+x\s+")
-# The uppercase " X " left out above - accepted only when every part already
-# exists as an artist ("Coldplay X BTS" yes, "Final Fantasy X OST" no).
-_UPPERCASE_X_SEPARATOR = re.compile(r"\s+X\s+")
-# The "and"/"i" left out above - accepted only when some part already exists
-# as an artist (see ARTIST_JOINING_WORDS), and never pre-selected unless all do.
-_JOINING_WORD_SEPARATOR = re.compile(
-    r"\s+(?:" + "|".join(map(re.escape, ARTIST_JOINING_WORDS)) + r")\s+", re.IGNORECASE
-)
-# "Group (A, B, C)" - the bracket lists the lineup ("Męskie Granie Orkiestra
-# 2026 (Igor Herbut, Zalia, Vito Bambino)", "Inpatient (Ren x Chris Webby)").
-_LINEUP_BRACKET = re.compile(r"^(?P<group>[^()]+?)\s*\((?P<lineup>[^()]+)\)\s*$")
-
-
-@dataclass
-class SplitProposal:
-    original: str
-    main: list[str]
-    feat: list[str] = field(default_factory=list)
-    confident: bool = False
-
-    @property
-    def names(self) -> list[str]:
-        return [*self.main, *self.feat]
-
-
-def _split_slashes(part: str) -> list[str]:
-    """Spaceless "/" splits only when it can't be one name: "Ben Folds/Nick
-    Hornby" or "KLEKS/IGO/Mrozu" yes, "AC/DC" no."""
-    pieces = [p.strip() for p in part.split("/")]
-    if len(pieces) > 2 or any(" " in p for p in pieces):
-        return pieces
-    return [part]
-
-
-def _split_names(text: str) -> list[str]:
-    names = []
-    for part in _MAIN_SEPARATOR.split(text):
-        names.extend(_split_slashes(part.strip()))
-    return [n.strip(" )") for n in names if n.strip(" )")]
-
-
-def _has_unbalanced_brackets(text: str) -> bool:
-    return text.count("(") != text.count(")")
-
-
-def _propose_lineup_split(name: str) -> SplitProposal | None:
-    """"Group (A, B)" -> Group + A + B, all main. Only for a bracket of two
-    or more names - "Artist (PL)" is one artist - and never pre-selected:
-    whether the lineup is co-performers or guests is the user's call."""
-    match = _LINEUP_BRACKET.match(name)
-    if not match or _FEAT.search(match.group("lineup")):
-        return None
-    lineup = _split_names(match.group("lineup"))
-    if len(lineup) < 2:
-        return None
-    names = []
-    for n in [match.group("group").strip(), *lineup]:
-        if normalize(n) and normalize(n) not in {normalize(m) for m in names}:
-            names.append(n)
-    return SplitProposal(name, names, [], False) if len(names) >= 2 else None
-
-
-def propose_artist_split(name: str) -> SplitProposal | None:
-    """Parse a joined artist name, or None when it doesn't look like several
-    artists. Purely textual - the caller decides with the user."""
-    if not name or is_soundtrack_artist(name):
-        return None
-
-    lineup_proposal = _propose_lineup_split(name)
-    if lineup_proposal:
-        return lineup_proposal
-
-    feat_match = _FEAT.search(name)
-    main_text, feat_text = (name[:feat_match.start()], name[feat_match.end():]) if feat_match else (name, "")
-    main, feat = _split_names(main_text), _split_names(feat_text)
-
-    seen, unique_main, unique_feat = set(), [], []
-    for names, out in ((main, unique_main), (feat, unique_feat)):
-        for n in names:
-            key = normalize(n)
-            if key and key not in seen:
-                seen.add(key)
-                out.append(n)
-    if not unique_main or len(unique_main) + len(unique_feat) < 2:
-        return None
-    # A split through a bracket ("X (A" + "B)") would create broken names
-    if any(_has_unbalanced_brackets(n) for n in unique_main + unique_feat):
-        return None
-
-    confident = bool(feat_match or _CONFIDENT_SEPARATOR.search(main_text))
-    # "Big Brother & the Holding Company" - a "the ..." part is a band name;
-    # "Pezet - Małolat feat. Małpa" - a dash means the split is incomplete
-    if any(n.lower().startswith("the ") for n in unique_main[1:]) or any(" - " in n for n in unique_main + unique_feat):
-        confident = False
-    return SplitProposal(name, unique_main, unique_feat, confident)
-
 
 # ---- ignore list ------------------------------------------------------------
 
@@ -180,7 +77,7 @@ def _propose_split_on_existing_parts(
 ) -> SplitProposal | None:
     """A name joined by `separator`, as a split proposal only when its parts
     are already different artists in the DB - every part (`require_all`) or at
-    least one. See _UPPERCASE_X_SEPARATOR / _JOINING_WORD_SEPARATOR."""
+    least one. See UPPERCASE_X_SEPARATOR / JOINING_WORD_SEPARATOR."""
     if not separator.search(artist.name):
         return None
     proposal = propose_artist_split(separator.sub(" x ", artist.name))
@@ -213,8 +110,8 @@ def find_split_candidates(session, artists: list[Artist] | None = None) -> list[
             continue
         proposal = (
             propose_artist_split(artist.name)
-            or _propose_split_on_existing_parts(artist, by_name, _UPPERCASE_X_SEPARATOR, require_all=True)
-            or _propose_split_on_existing_parts(artist, by_name, _JOINING_WORD_SEPARATOR, require_all=False)
+            or _propose_split_on_existing_parts(artist, by_name, UPPERCASE_X_SEPARATOR, require_all=True)
+            or _propose_split_on_existing_parts(artist, by_name, JOINING_WORD_SEPARATOR, require_all=False)
         )
         if proposal is None:
             continue

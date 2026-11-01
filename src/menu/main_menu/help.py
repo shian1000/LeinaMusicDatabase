@@ -193,7 +193,7 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
   playlists, and the moods (global ones and each user's own). Accounts are created only here,
   in MusicDatabase.
 Statistics - how often each lookup module (albums, years) found something.
-Settings - lookup modules and their order, matching thresholds, which name clean-ups run where
+Settings - lookup modules and their order, matching thresholds, which name clean-ups run
   ("Name cleanup"), the start-up tasks, how much goes into debug.log ("Debug log": every step
   and call of an import from 1 up), and Server: the database folder, backups, this PC's folders
   and network, indexing the music library, sharing with Leina Radio, and the public copy on GitHub.
@@ -224,8 +224,11 @@ From Leina Radio - a song it played that MusicDatabase doesn't have is sent as a
 While making a playlist from a folder - Users -> Enter user database -> "Create playlist from
   folder" offers to add a file nothing matched as a new song.
 
-Afterwards: Manage database -> Fetch database data -> "Fill missing data" (albums, years, genres),
-"Import covers from mp3 tags", and Settings -> Server -> "Index music library" to link the files.
+Each of these (mp3 tags, a YouTube playlist, Leina Radio's requests) ends by asking which missing
+data to fill in for the imported songs - albums, then years (a year in a video's or file's title,
+'Song (1991)', is offered too). Later: Manage database -> Fetch database data -> "Fill missing data"
+(albums, years, genres for the whole catalog), "Import covers from mp3 tags", and Settings ->
+Server -> "Index music library" to link the files.
 """,
     "Keeping the catalog clean": """
 All in Enter database -> Manage database:
@@ -243,10 +246,11 @@ All in Enter database -> Manage database:
   - Spell check existing data: artist and title spelling against MusicBrainz.
   - Clean names: invisible characters, double spaces, broken encoding, accented letters stored in
     two parts, look-alike letters, junk like 'Official Video' in titles, the song's own artists
-    written into its title ('Artist / Title').
-Which clean-ups run - for the mp3 and YouTube imports, Leina Radio's requests and Clean names,
-each separately - is chosen in Settings -> "Name cleanup"; one turned on for an import should be
-turned on for the database too, or a new name and the same one already stored differ.
+    written into its title ('Artist / Title'), featured artists moved out of titles into the
+    songs' artists ('Song ft. X', in a list to tick).
+Which clean-ups run is chosen in Settings -> "Name cleanup", each one for everything at once - the
+mp3 and YouTube imports, Leina Radio's requests and Clean names - so a new name and the same one
+already stored are cleaned alike.
 MusicDatabase backs the databases up once a day when it starts (unless switched off in Settings ->
 "Start-up tasks") and always before a database upgrade; Settings -> Server -> "Back up database
 now" takes a snapshot before something big.
