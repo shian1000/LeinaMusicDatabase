@@ -29,9 +29,11 @@ from utils.common.normalizer import (
     NON_DECOMPOSING_LETTER_FOLDS,
     composed,
     fix_cp1250_mojibake,
+    has_site_name,
     is_site_name,
     strip_format_characters,
     strip_site_names,
+    trim_separators,
 )
 from utils.common.text_utils import strip_trailing_junk_suffix
 from utils.common import sanitize_settings
@@ -486,8 +488,12 @@ def unescape_entities(text: str) -> str:
 
 
 def _site_names(value: str, ctx: Context) -> str:
-    # A field that is nothing but a site name is emptied (the mp3 import then
-    # reads the file name); a whole file name is left as it is
+    # Only a name holding one changes - strip_site_names() alone also trims the
+    # separators of any name ("edge_separators"). A field that is nothing but
+    # a site name is emptied (the mp3 import then reads the file name); a
+    # whole file name is left as it is
+    if not has_site_name(value):
+        return value
     if ctx.stage == STAGE_FIELD and is_site_name(value):
         return ""
     return strip_site_names(value)
@@ -498,14 +504,27 @@ def _whitespace(value: str, ctx: Context) -> str:
     return re.sub(r" {2,}", " ", value.strip())
 
 
+# These change a name only when there is something to take out: the
+# functions also collapse every whitespace - the ideographic space of
+# "ｚｂｉｇｎｉｅｗ\u3000ｓｔｏｎｏｇａ", or the two spaces a file name
+# "Artist  Title" is split at. A whole video title gets its spaces collapsed
+# first ("youtube_spaces"), as it always did
 def _junk_brackets_anywhere(value: str, ctx: Context) -> str:
-    # A field (an mp3 tag, a stored title) only changes when a junk bracket is
-    # there: strip_junk_brackets_anywhere() also collapses every whitespace,
-    # the ideographic space of "ｚｂｉｇｎｉｅｗ\u3000ｓｔｏｎｏｇａ" too
-    if ctx.stage == STAGE_FIELD and not any(YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(m.group(1))
-                                            for m in ANY_BRACKET_RE.finditer(value)):
+    if not any(YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(m.group(1)) for m in ANY_BRACKET_RE.finditer(value)):
         return value
     return strip_junk_brackets_anywhere(value)
+
+
+def _pipe_suffix(value: str, ctx: Context) -> str:
+    return strip_pipe_suffix(value) if _PIPE_SUFFIX_RE.search(value) else value
+
+
+def _hashtags(value: str, ctx: Context) -> str:
+    return strip_hashtags(value) if _TRAILING_HASHTAGS_RE.search(value) else value
+
+
+def _media_extension(value: str, ctx: Context) -> str:
+    return strip_media_extension(value) if MEDIA_EXTENSION_RE.search(value) else value
 
 
 def _fix_lookalike_letters(value: str, ctx: Context) -> str:
@@ -519,43 +538,56 @@ def _step(name, stages, fields, sources, func, mode=MODE_AUTO, needs_artist=Fals
 
 _RAW = (STAGE_RAW,)
 _FIELD = (STAGE_FIELD,)
+_BOTH = (STAGE_RAW, STAGE_FIELD)
 # Where a new name comes in through a field (a file name only as a whole)
 _IMPORTS = frozenset({SOURCE_MP3, SOURCE_YOUTUBE, SOURCE_REQUEST})
 
+# Where a step is on: everywhere it can run (_EVERYWHERE), except where the
+# catalog showed it breaks real names (measured on music.db, 2026-11-01) -
+# then only YouTube, whose titles it was written for: the artist repeated in
+# a title ("White Queen" by Queen -> "White"), a last bracket with a marker
+# word ("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)"), file-name leftovers ("2_00")
+# - and the separators at a name's ends, only for mp3 tags and file names
+# (":/" -> "/")
+_EVERYWHERE = _IMPORTS | {SOURCE_STORED}
+# ... and a step that can also clean a whole file name before it's split
+_EVERYWHERE_RAW = _EVERYWHERE | {SOURCE_FILE_NAME}
+
 STEPS = {step.name: step for step in (
-    _step("amp_entity", _FIELD, _ALL_FIELDS, {SOURCE_STORED}, lambda v, ctx: v.replace("&amp;", "&")),
-    _step("html_entities", _FIELD, _ALL_FIELDS, {SOURCE_MP3}, lambda v, ctx: unescape_entities(v)),
-    _step("cp1250_mojibake", _FIELD, _ALL_FIELDS, {SOURCE_MP3}, lambda v, ctx: fix_cp1250_mojibake(v)),
-    _step("nfc", _FIELD, _ALL_FIELDS, _IMPORTS | {SOURCE_STORED}, lambda v, ctx: composed(v)),
-    _step("invisible_chars", _FIELD, _ALL_FIELDS, _IMPORTS | {SOURCE_STORED},
+    _step("amp_entity", _FIELD, _ALL_FIELDS, _EVERYWHERE, lambda v, ctx: v.replace("&amp;", "&")),
+    _step("html_entities", _FIELD, _ALL_FIELDS, _EVERYWHERE, lambda v, ctx: unescape_entities(v)),
+    _step("cp1250_mojibake", _FIELD, _ALL_FIELDS, _EVERYWHERE, lambda v, ctx: fix_cp1250_mojibake(v)),
+    _step("nfc", _FIELD, _ALL_FIELDS, _EVERYWHERE, lambda v, ctx: composed(v)),
+    _step("invisible_chars", _FIELD, _ALL_FIELDS, _EVERYWHERE,
           lambda v, ctx: strip_format_characters(v, keep_joiner=True)),
     _step("lookalike_letters", _FIELD, _ALL_FIELDS, {SOURCE_STORED}, _fix_lookalike_letters, MODE_REVIEW),
-    _step("site_names", (STAGE_RAW, STAGE_FIELD), _ALL_FIELDS, {SOURCE_MP3, SOURCE_FILE_NAME}, _site_names),
-    _step("pipe_suffix", _RAW, (), {SOURCE_YOUTUBE}, lambda v, ctx: strip_pipe_suffix(v)),
-    _step("junk_brackets_anywhere", (STAGE_RAW, STAGE_FIELD), {TITLE}, {SOURCE_YOUTUBE, SOURCE_MP3, SOURCE_STORED},
-          _junk_brackets_anywhere),
-    _step("hashtags", _RAW, (), {SOURCE_YOUTUBE}, lambda v, ctx: strip_hashtags(v)),
-    _step("media_extension", _RAW, (), {SOURCE_YOUTUBE}, lambda v, ctx: strip_media_extension(v)),
+    _step("site_names", _BOTH, _ALL_FIELDS, _EVERYWHERE_RAW, _site_names),
+    _step("edge_separators", _BOTH, _ALL_FIELDS, {SOURCE_MP3, SOURCE_FILE_NAME}, lambda v, ctx: trim_separators(v)),
+    _step("youtube_spaces", _RAW, (), {SOURCE_YOUTUBE}, lambda v, ctx: re.sub(r"\s+", " ", v).strip()),
+    _step("pipe_suffix", _BOTH, {TITLE}, _EVERYWHERE_RAW, _pipe_suffix),
+    _step("junk_brackets_anywhere", _BOTH, {TITLE}, _EVERYWHERE_RAW, _junk_brackets_anywhere),
+    _step("hashtags", _BOTH, {TITLE}, _EVERYWHERE_RAW, _hashtags),
+    _step("media_extension", _BOTH, {TITLE}, _EVERYWHERE_RAW, _media_extension),
     _step("artist_in_title", _FIELD, {TITLE}, {SOURCE_YOUTUBE},
           lambda v, ctx: strip_artist_from_title(v, ctx.artist), needs_artist=True),
     _step("junk_marker_brackets", _FIELD, {TITLE}, {SOURCE_YOUTUBE}, lambda v, ctx: strip_junk_suffix(v)),
     # A title that is nothing but junk is kept (it *is* the title: "HD")
-    _step("junk_phrases_any_bracket", _FIELD, {TITLE}, {SOURCE_STORED}, lambda v, ctx: strip_trailing_junk(v) or v),
-    _step("junk_phrases", _FIELD, {TITLE}, {SOURCE_YOUTUBE}, lambda v, ctx: strip_trailing_junk_suffix(v) or v),
-    _step("trailing_dash_year", _FIELD, {TITLE}, {SOURCE_YOUTUBE, SOURCE_MP3, SOURCE_STORED},
-          lambda v, ctx: strip_trailing_dash_year(v)),
-    _step("quote_marks", _FIELD, {TITLE}, {SOURCE_YOUTUBE}, lambda v, ctx: strip_quote_marks(v)),
+    _step("junk_phrases_any_bracket", _FIELD, {TITLE}, _EVERYWHERE, lambda v, ctx: strip_trailing_junk(v) or v),
+    _step("junk_phrases", _FIELD, {TITLE}, _EVERYWHERE, lambda v, ctx: strip_trailing_junk_suffix(v) or v),
+    _step("trailing_dash_year", _FIELD, {TITLE}, _EVERYWHERE, lambda v, ctx: strip_trailing_dash_year(v)),
+    _step("quote_marks", _FIELD, {TITLE}, _EVERYWHERE, lambda v, ctx: strip_quote_marks(v)),
     _step("file_name_artifacts", _FIELD, {TITLE, ARTIST}, {SOURCE_YOUTUBE}, lambda v, ctx: clean_file_name_title(v)),
-    _step("whitespace", _FIELD, _ALL_FIELDS, _IMPORTS | {SOURCE_STORED}, _whitespace),
+    _step("whitespace", _FIELD, _ALL_FIELDS, _EVERYWHERE, _whitespace),
 )}
 
 # The order steps run in. A step may be listed twice: the trailing-bracket
 # junk runs again once the plain junk phrases and the year are gone ("Song
 # (Official Video) Official Audio"), as the YouTube import always did
-RAW_ORDER = ("site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension")
+RAW_ORDER = ("youtube_spaces", "site_names", "edge_separators", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension")
 FIELD_ORDER = (
     "amp_entity", "html_entities", "cp1250_mojibake", "nfc", "invisible_chars", "whitespace", "lookalike_letters",
-    "site_names", "junk_brackets_anywhere", "artist_in_title",
+    "site_names", "edge_separators", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
+    "artist_in_title",
     "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "trailing_dash_year", "junk_marker_brackets",
     "quote_marks", "file_name_artifacts",
 )

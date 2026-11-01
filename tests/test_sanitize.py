@@ -179,9 +179,10 @@ def test_every_ordered_step_exists_and_every_step_is_ordered():
 
 def test_a_step_listed_twice_runs_twice():
     names = [step.name for step in s.enabled_steps(s.SOURCE_YOUTUBE, s.STAGE_FIELD, s.TITLE)]
-    assert names == ["nfc", "invisible_chars", "whitespace", "junk_brackets_anywhere", "artist_in_title",
-                     "junk_marker_brackets", "junk_phrases", "trailing_dash_year",
-                     "junk_marker_brackets", "quote_marks", "file_name_artifacts"]
+    assert names == ["amp_entity", "html_entities", "cp1250_mojibake", "nfc", "invisible_chars", "whitespace",
+                     "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
+                     "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases",
+                     "trailing_dash_year", "junk_marker_brackets", "quote_marks", "file_name_artifacts"]
 
 
 # --- Settings -> "Name cleanup" ---
@@ -202,6 +203,8 @@ def settings_file(tmp_path, monkeypatch):
 def test_a_step_switched_off_or_on_for_a_source(settings_file):
     tags = {"artist_name": "A &amp; B", "title": "Song (Official Video)", "album": None}
     s.set_step_sources("html_entities", set())
+    s.set_step_sources("amp_entity", set())
+    s.set_step_sources("junk_brackets_anywhere", set())
     s.set_step_sources("junk_marker_brackets", {s.SOURCE_MP3, s.SOURCE_YOUTUBE})
     assert s.sanitize_metadata(dict(tags), s.SOURCE_MP3) == {"artist_name": "A &amp; B", "title": "Song", "album": None}
     sanitize_settings.forget_cache()  # read back from the file
@@ -210,11 +213,13 @@ def test_a_step_switched_off_or_on_for_a_source(settings_file):
 
 def test_only_what_differs_from_the_defaults_is_stored(settings_file):
     import json
-    s.set_step_sources("junk_phrases", {s.SOURCE_YOUTUBE, s.SOURCE_MP3})
-    s.set_step_sources("hashtags", {s.SOURCE_YOUTUBE})
-    assert json.loads(settings_file.read_text()) == {"steps": {"junk_phrases": {"mp3": True}}}
+    s.set_step_sources("junk_marker_brackets", {s.SOURCE_YOUTUBE, s.SOURCE_MP3})
+    s.set_step_sources("hashtags", s.default_sources("hashtags"))
+    s.set_step_sources("quote_marks", s.default_sources("quote_marks") - {s.SOURCE_STORED})
+    assert json.loads(settings_file.read_text()) == {"steps": {"junk_marker_brackets": {"mp3": True},
+                                                               "quote_marks": {"stored": False}}}
     s.reset_step_sources()
-    assert s.step_sources("junk_phrases") == s.default_sources("junk_phrases")
+    assert s.step_sources("junk_marker_brackets") == s.default_sources("junk_marker_brackets")
 
 
 def test_unreadable_or_odd_settings_mean_the_defaults(settings_file):
@@ -236,7 +241,11 @@ def test_which_sources_a_step_can_be_switched_for():
         assert s.SOURCE_MANUAL not in allowed
         assert name in SANITIZE_STEP_LABELS
     assert s.configurable_sources("lookalike_letters") == (s.SOURCE_STORED,)
-    assert s.configurable_sources("pipe_suffix") == (s.SOURCE_FILE_NAME, s.SOURCE_YOUTUBE)
+    assert s.configurable_sources("youtube_spaces") == (s.SOURCE_FILE_NAME, s.SOURCE_YOUTUBE)
+    # Steps known to break real names stay where they were written for
+    for name in ("artist_in_title", "junk_marker_brackets", "file_name_artifacts"):
+        assert s.default_sources(name) == {s.SOURCE_YOUTUBE}
+    assert s.SOURCE_STORED not in s.default_sources("edge_separators")
     assert s.SOURCE_STORED not in s.configurable_sources("artist_in_title")  # Clean names has no entry artist
     assert s.configurable_sources(s.FEAT_TO_CREDITS) == (s.SOURCE_REQUEST,)
     assert set(SANITIZE_SOURCE_LABELS) == set(s.SOURCES) - {s.SOURCE_MANUAL}
@@ -244,13 +253,15 @@ def test_which_sources_a_step_can_be_switched_for():
 
 def test_clean_names_runs_every_step_turned_on_for_the_database(settings_file):
     from utils.database import name_cleanup
-    assert name_cleanup.stored_step_passes() == (["amp_entity"], ["invisible_chars", "whitespace",
-                                                                   "junk_brackets_anywhere", "trailing_dash_year"])
-    s.set_step_sources("quote_marks", {s.SOURCE_YOUTUBE, s.SOURCE_STORED})
-    s.set_step_sources("site_names", {s.SOURCE_MP3, s.SOURCE_FILE_NAME, s.SOURCE_STORED})
+    everything_after = ["invisible_chars", "whitespace", "site_names", "pipe_suffix", "junk_brackets_anywhere",
+                        "hashtags", "media_extension", "junk_phrases", "trailing_dash_year", "quote_marks"]
+    assert name_cleanup.stored_step_passes() == (["amp_entity", "html_entities", "cp1250_mojibake"], everything_after)
+    # Never the ones that break stored names, unless turned on
+    s.set_step_sources("junk_marker_brackets", {s.SOURCE_YOUTUBE, s.SOURCE_STORED})
     s.set_step_sources("trailing_dash_year", {s.SOURCE_YOUTUBE})
-    assert name_cleanup.stored_step_passes() == (["amp_entity"], ["invisible_chars", "whitespace", "site_names",
-                                                                   "junk_brackets_anywhere", "quote_marks"])
+    assert name_cleanup.stored_step_passes()[1] == [
+        "invisible_chars", "whitespace", "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+        "media_extension", "junk_marker_brackets", "junk_phrases", "junk_marker_brackets", "quote_marks"]
 
 
 def test_a_stored_name_is_never_cleaned_to_nothing():
@@ -276,14 +287,14 @@ def test_the_menu_offers_the_database_too(settings_file, monkeypatch):
     monkeypatch.setattr(menu.questionary, "checkbox", lambda *a, **kw: _Answer([s.SOURCE_YOUTUBE, s.SOURCE_MP3]))
     asked = []
     monkeypatch.setattr(menu, "ask_yes_no", lambda q: asked.append(q) or True)
-    menu._change_step("junk_phrases")
-    assert asked and s.step_sources("junk_phrases") == {s.SOURCE_YOUTUBE, s.SOURCE_MP3, s.SOURCE_STORED}
+    menu._change_step("junk_marker_brackets")
+    assert asked and s.step_sources("junk_marker_brackets") == {s.SOURCE_YOUTUBE, s.SOURCE_MP3, s.SOURCE_STORED}
 
     # Turned off only: nothing to ask
     asked.clear()
     monkeypatch.setattr(menu.questionary, "checkbox", lambda *a, **kw: _Answer([]))
-    menu._change_step("junk_phrases")
-    assert not asked and s.step_sources("junk_phrases") == frozenset()
+    menu._change_step("junk_marker_brackets")
+    assert not asked and s.step_sources("junk_marker_brackets") == frozenset()
 
 
 # --- the shared regex pieces (utils/common/title_patterns.py) ---

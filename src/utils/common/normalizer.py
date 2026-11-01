@@ -257,8 +257,31 @@ def _drop_junk(text: str) -> str:
     text = _SITE_NAME_RE.sub(" ", text)
     if (words := _junk_words_re()) is not None:
         text = words.sub(" ", text)
+    return _trim(text)
+
+
+def _trim(text: str) -> str:
     text = _DOUBLED_SEPARATOR_RE.sub(" - ", text)
     return _EDGE_SEPARATORS_RE.sub("", re.sub(r"\s{2,}", " ", text))
+
+
+def has_site_name(text: str) -> bool:
+    """Does `text` hold a download-site name, a FILE_NAME_JUNK_FILE word or
+    Y2Mate's suffix - what strip_site_names() takes out?"""
+    if not text:
+        return False
+    words = _junk_words_re()
+    return bool(_CONVERTER_SUFFIX_RE.search(text) or _SITE_NAME_RE.search(text) or (words and words.search(text)))
+
+
+def trim_separators(text: str) -> str:
+    """`text` without the separators at its ends and doubled in it ("A -  -
+    B", "Song_", "- Piano Solo -"), runs of spaces as one - what
+    strip_site_names() also does with a name holding no site; unchanged when
+    nothing would be left ("---"). Too much for a stored name: "-!-" -> "!"."""
+    if not text:
+        return text
+    return _trim(text) or text
 
 
 # Polish (Windows-1250) tags read as Latin-1 or Windows-1252: "Ma³pa" for

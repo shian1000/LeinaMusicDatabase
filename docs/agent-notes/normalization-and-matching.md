@@ -31,21 +31,29 @@ runs the steps whose `sources` hold it. Those defaults reproduce what each
 source did before the module existed, which
 `tests/test_name_cleanup_characterization.py` pins and `tests/test_sanitize.py`
 checks step by step - so a new default is a behaviour change to decide on,
-not a refactoring. Defaults changed on purpose on 2026-11-01, measured on
-the whole catalog first (6,373 songs; the owner chose from the list): spaces
-go from both ends, invisible characters and NFC for the imports too, junk
-brackets anywhere ("(Visualiser)", "(Remastered)", "(Lyric Video)") and a
-" - 2002" year for mp3 tags and Clean names too (titles only: a changed album
-text leaves its old album row behind). Turned down then: the trailing-bracket
-markers for mp3 / the database ("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)" and
-"(from “DuckTales”)" are titles), site names for the database (":/" -> "/"),
-quotes / hashtags / file-name leftovers beyond YouTube. Bugs found the same
-way and fixed: hashtags only at the end and starting with a letter ("Funk
-#49", "Artist - #ВІЛЬНА_КАСА #shorts" keeps its title), no separator left by
+not a refactoring. Defaults since 2026-11-01 (owner: "where a step can be
+on, it is on"): every step runs for every source it can, measured on the
+whole catalog first (6,373 songs). Only YouTube, which they were written
+for, keeps the three that broke real stored titles: `artist_in_title`
+("White Queen" by Queen -> "White", "Feng Suave EP" -> "EP", 48 hits),
+`junk_marker_brackets` ("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)") and
+`file_name_artifacts` ("2_00" -> "2 00"); and `edge_separators` - what
+`strip_site_names()` also did to any name, trimming separators at its ends -
+stays with mp3 tags and file names (":/" -> "/", "-!-" -> "!"). For that it
+was split off: `site_names` now changes only a name that holds a site
+(`normalizer.has_site_name()`), `edge_separators` is `trim_separators()`.
+The steps that take something out (`pipe_suffix`, `junk_brackets_anywhere`,
+`hashtags`, `media_extension`) leave a name alone when there is nothing to
+take out, since their functions collapse every whitespace - two spaces are
+where a file name "Artist  Title" is split, an ideographic space belongs to
+"ｚｂｉｇｎｉｅｗ\u3000ｓｔｏｎｏｇａ"; a video title's spaces are collapsed by
+its own first raw step, `youtube_spaces`, as before. Bugs the measuring
+found, fixed: hashtags only at the end and starting with a letter ("Funk
+#49"; "Artist - #ВІЛЬНА_КАСА #shorts" keeps its title), no separator left by
 a junk phrase ("Secret Youth - Music Video"), only a quoted title unwrapped
-('Take The "A" Train'), an HTML entity only with its ";" ("Kushi&#3"). The
-junk steps run once, not until nothing changes: on the catalog the two give
-the same result. A `review` step
+('Take The "A" Train'; Bowie's '"Heroes"' would lose its quotes), an HTML
+entity only with its ";" ("Kushi&#3"). The junk steps run once, not until
+nothing changes: on the catalog the two give the same result. A `review` step
 (`lookalike_letters`) is only proposed (`sanitize_changes()`), never applied
 by `sanitize_field()`. `feat_to_credits` (a "ft. X" moved into
 `metadata["feat_artists"]`) is a metadata step, for requests only: the
