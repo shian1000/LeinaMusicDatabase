@@ -18,6 +18,7 @@ from config.constants import (
     ARTIST_SPLIT_IGNORE_FILE,
 )
 from utils.common.normalizer import normalize
+from utils.common.title_patterns import FEAT_WORD
 from utils.common.text_utils import is_soundtrack_artist
 from utils.database.albums import link_songs, reassign_artist_albums
 from utils.database.datatables import Artist, Song
@@ -27,7 +28,7 @@ from utils.database.song_artists import add_additional_artist
 _IGNORE_PATH = ARTIST_SPLIT_IGNORE_FILE
 
 # "A feat. B", "A ft. B", "A featuring B", "A (feat. B)" - everything after is a guest
-_FEAT = re.compile(r"\s*\(?\s*\b(?:feat\.?|ft\.?|featuring)\s+", re.IGNORECASE)
+_FEAT = re.compile(r"\s*\(?\s*\b" + FEAT_WORD + r"\s+", re.IGNORECASE)
 # Between equal artists. " x " is lowercase-only on purpose: an uppercase X is
 # usually part of a name ("Final Fantasy X", "Malcolm X"). "and"/"i" are left
 # out - too many band names ("Hall and Oates" style) use them.

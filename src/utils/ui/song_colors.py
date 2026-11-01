@@ -8,6 +8,7 @@ a label is built as prompt_toolkit (style, text) tokens - usable directly as a
 questionary.Choice title - and turned into ANSI only for print()."""
 
 import re
+from utils.common.title_patterns import FEAT_OR_WITH_WORD, FEAT_WORD
 
 ARTIST_STYLE = "fg:ansibrightcyan"
 TITLE_STYLE = "fg:ansibrightyellow"
@@ -19,7 +20,7 @@ _RICH = {ARTIST_STYLE: "bright_cyan", TITLE_STYLE: "bright_yellow", DETAIL_STYLE
 
 # Where a title's featured-artist credit starts: a bracketed "(feat. " or a
 # bare " ft. " (the names themselves come from song_duplicates.feat_credits())
-_FEAT_START_RE = re.compile(r"[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s|(?:^|\s)(?:feat\.?|ft\.?|featuring)\s",
+_FEAT_START_RE = re.compile(r"[(\[]\s*" + FEAT_OR_WITH_WORD + r"\s|(?:^|\s)" + FEAT_WORD + r"\s",
                             re.IGNORECASE)
 
 

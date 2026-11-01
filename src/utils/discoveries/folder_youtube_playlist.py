@@ -13,7 +13,8 @@ its songs (utils/database/additional_videos.py)."""
 from dataclasses import dataclass
 
 from config.constants import SPELLING_CHECK_THRESHOLD
-from utils.common.normalizer import extract_unknown_data, name_key, normalize, strip_site_names
+from utils.common.normalizer import extract_unknown_data, name_key, normalize
+from utils.common.sanitize import SOURCE_FILE_NAME, sanitize_raw
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
 from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track
 from utils.discoveries.import_engine import LocalSongMatcher
@@ -85,7 +86,7 @@ def _readings(track: FolderTrack) -> list[tuple]:
     readings = [(track.artist, track.title)]
     if track.file is not None:
         artist, title = extract_unknown_data(track.file)
-        name = (artist, title) if title else (None, strip_site_names(track.file.stem).strip() or None)
+        name = (artist, title) if title else (None, sanitize_raw(track.file.stem, SOURCE_FILE_NAME).strip() or None)
         if name[1] and name not in readings:
             readings.append(name)
     return readings

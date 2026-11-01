@@ -1,9 +1,8 @@
-import html
 import re
 from pathlib import Path
 
 from utils.common.debug import mlog
-from utils.common.normalizer import fix_cp1250_mojibake, is_site_name, strip_site_names
+from utils.common.sanitize import SOURCE_FILE_NAME, SOURCE_MP3, sanitize_metadata, sanitize_raw, unescape_entities
 from utils.discoveries.mp3_utils import audio_duration, extract_metadata_with_fallback, extract_unknown_data
 from utils.discoveries.import_engine import run_import_batch
 
@@ -12,13 +11,9 @@ def _clean_fields(metadata: dict) -> dict:
     """Artist, title and album as characters ("Major Lazer &amp; DJ Snake",
     Polish tags read as Latin-1: "Ma³pa" -> "Małpa")
     and without download-site names ("y2meta.com", "(greenmp3.com)"); a
-    field that was nothing but one is empty, so the file name is read."""
-    for key in ("artist_name", "title", "album"):
-        value = metadata.get(key)
-        if isinstance(value, str):
-            value = fix_cp1250_mojibake(html.unescape(value))
-            metadata[key] = None if is_site_name(value) else strip_site_names(value)
-    return metadata
+    field that was nothing but one is empty, so the file name is read -
+    sanitize.py's "mp3" steps."""
+    return sanitize_metadata(metadata, SOURCE_MP3)
 
 
 def read_file_metadata(file: Path) -> dict:
@@ -45,7 +40,7 @@ def read_file_metadata(file: Path) -> dict:
             metadata["artist_name"] = artist
             metadata["title"] = title
             metadata = _clean_fields(metadata)
-    stem = strip_site_names(file.stem)
+    stem = sanitize_raw(file.stem, SOURCE_FILE_NAME)
     if metadata["artist_name"] and not re.search(r" [–—\-_] ", stem):
         artist, title = extract_unknown_data(file)
         split = _clean_fields({"artist_name": artist, "title": title})
@@ -54,7 +49,7 @@ def read_file_metadata(file: Path) -> dict:
             # in extract_metadata_with_fallback()) - only a guess, the whole name
             # may be the title ("Svefn-g-englar" by Sigur Rós), which
             # LocalSongMatcher tries too
-            metadata["unsplit_title"] = html.unescape(stem)
+            metadata["unsplit_title"] = unescape_entities(stem)
     # Tells a whole-album file from a track when matching (song_kinds.songs_for_entry())
     metadata["duration_s"] = audio_duration(file)
     return metadata

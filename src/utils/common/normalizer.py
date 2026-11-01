@@ -21,6 +21,13 @@ _SPECIAL_REPLACEMENTS = {
     "\u0111": "d",
 }
 
+# Letters that don't NFKD-decompose (see manage_youtube_playlists'
+# _fold_diacritics() for why NFKD alone can't fold these) but have one
+# unambiguous plain-Latin equivalent worth substituting directly. "\u00f8" too:
+# "\u00d8rganek" is the stylized name of Organek, whose uploads all spell it with
+# a plain "O".
+NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"\u0142": "l", "\u0141": "L", "\u00f8": "o", "\u00d8": "O"})
+
 # Every apostrophe-like character, for normalize() (dropped, or a space) and
 # normalize_apostrophes() (one canonical "'") alike
 APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵＇"
@@ -321,7 +328,10 @@ def is_site_name(text: str) -> bool:
 
 
 def extract_unknown_data(filepath: Path):
-    return split_artist_title(strip_site_names(filepath.stem))
+    """(artist, title) read off a file's name, cleaned by sanitize.py's
+    "file_name" steps first."""
+    from utils.common.sanitize import SOURCE_FILE_NAME, sanitize_raw  # sanitize imports this module
+    return split_artist_title(sanitize_raw(filepath.stem, SOURCE_FILE_NAME))
 
 def strip_brackets(title: str):
     """The title before its first " (" or " [", or None when it has none

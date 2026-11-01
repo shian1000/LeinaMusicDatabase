@@ -193,10 +193,10 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
   playlists, and the moods (global ones and each user's own). Accounts are created only here,
   in MusicDatabase.
 Statistics - how often each lookup module (albums, years) found something.
-Settings - lookup modules and their order, matching thresholds, the start-up tasks, how much goes
-  into debug.log ("Debug log": every step and call of an import from 1 up), and Server: the
-  database folder, backups, this PC's folders and network, indexing the music library, sharing
-  with Leina Radio, and the public copy on GitHub.
+Settings - lookup modules and their order, matching thresholds, which name clean-ups run where
+  ("Name cleanup"), the start-up tasks, how much goes into debug.log ("Debug log": every step
+  and call of an import from 1 up), and Server: the database folder, backups, this PC's folders
+  and network, indexing the music library, sharing with Leina Radio, and the public copy on GitHub.
 Help - this.
 
 On the day's first start MusicDatabase backs the databases up, indexes the music library,
@@ -244,6 +244,9 @@ All in Enter database -> Manage database:
   - Clean names: invisible characters, double spaces, broken encoding, accented letters stored in
     two parts, look-alike letters, junk like 'Official Video' in titles, the song's own artists
     written into its title ('Artist / Title').
+Which clean-ups run - for the mp3 and YouTube imports, Leina Radio's requests and Clean names,
+each separately - is chosen in Settings -> "Name cleanup"; one turned on for an import should be
+turned on for the database too, or a new name and the same one already stored differ.
 MusicDatabase backs the databases up once a day when it starts (unless switched off in Settings ->
 "Start-up tasks") and always before a database upgrade; Settings -> Server -> "Back up database
 now" takes a snapshot before something big.

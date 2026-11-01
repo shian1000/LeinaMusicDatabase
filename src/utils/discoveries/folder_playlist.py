@@ -9,7 +9,6 @@ a song (the user picks one for each file that didn't match), and
 mp3_utils.write_song_tags() / rename_to_song() can then copy the database's
 data into the files' tags and names."""
 
-import html
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from pathlib import Path
 from config.constants import FILE_BEST_GUESSES_MAX, FILE_TITLE_CANDIDATES_MAX
 
 from utils.common.debug import flog
+from utils.common.sanitize import unescape_entities
 from utils.database.datatables import Artist, Song
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
@@ -193,7 +193,7 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
         if not metadata.get("title"):
             # No title tag and no "Artist - Title" name: the name is the title,
             # as the user is shown it
-            metadata = {**metadata, "title": html.unescape(file.stem)}
+            metadata = {**metadata, "title": unescape_entities(file.stem)}
         track = FolderTrack(file=file, title=metadata["title"], artist=None)
         track.duration_s = metadata.get("duration_s") or audio_duration(file)
         # The length tells a whole-album file from a track (song_kinds.songs_for_entry())

@@ -509,13 +509,14 @@ def _clean_names_module(monkeypatch, session):
 
 
 def test_clean_names_holds_a_rename_onto_another_artists_name(session, ui, monkeypatch):
+    from utils.database import name_cleanup
     answers, _, _ = ui
     cn = _clean_names_module(monkeypatch, session)
     sting, spaced = _artist(session, "Sting"), _artist(session, " Sting")
     song = _song(session, "Fields of Gold", spaced)
     held = {}
 
-    cn.strip_leading_spaces([song], held)
+    name_cleanup.apply_step([song], "whitespace", held)
 
     assert spaced.name == " Sting"  # not two artists called "Sting"
     assert held == {spaced.id: (spaced, "Sting")}
@@ -526,12 +527,13 @@ def test_clean_names_holds_a_rename_onto_another_artists_name(session, ui, monke
 
 
 def test_clean_names_renames_when_no_other_artist_has_the_name(session, ui, monkeypatch):
+    from utils.database import name_cleanup
     cn = _clean_names_module(monkeypatch, session)
     spaced = _artist(session, " Sting")
     song = _song(session, "Fields of Gold", spaced)
     held = {}
 
-    cn.strip_leading_spaces([song], held)
+    name_cleanup.apply_step([song], "whitespace", held)
 
     assert spaced.name == "Sting" and held == {}
 

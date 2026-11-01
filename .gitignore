@@ -27,6 +27,7 @@ Thumbs.db
 /database_location_config.json
 /file_matching_config.json
 /fetch_data_config.json
+/sanitize_config.json
 /.agents/local.md
 # This machine's own ssh shortcuts (the committed one is MusicDatabase-Remote.sh, configured in .env)
 /MusicDatabase-Remote-LAN.sh

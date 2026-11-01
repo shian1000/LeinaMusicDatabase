@@ -43,6 +43,12 @@ debug.VERBOSITY_LEVEL, debug.DEBUG_ENABLED = 0, False
 from utils.common import spellcheck_cache  # noqa: E402
 
 spellcheck_cache._CACHE_PATH = _ISOLATED_DIR / "spellcheck_cache.json"
+
+# Settings -> "Name cleanup": the steps' defaults, never the owner's choice
+from utils.common import sanitize_settings  # noqa: E402
+
+sanitize_settings.CONFIG_PATH = _ISOLATED_DIR / "sanitize_config.json"
+sanitize_settings.forget_cache()
 _link_log = logging.getLogger("youtube_link_cache")
 _link_log.addHandler(logging.FileHandler(_ISOLATED_DIR / "youtube_link_cache.log", encoding="utf-8"))
 _link_log.setLevel(logging.INFO)

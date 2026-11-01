@@ -16,7 +16,8 @@ src/utils/{database,discoveries,youtube,ui}/     orchestration for one subsystem
   |
   v
 src/utils/common/                 shared, dependency-free infra:
-                                   normalizer, text_utils, debug,
+                                   normalizer, text_utils, sanitize,
+                                   title_patterns, debug,
                                    selenium_sessions, musicbrainz_client,
                                    spellcheck_cache, trace
   |

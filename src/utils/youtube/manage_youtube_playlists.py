@@ -22,7 +22,8 @@ from googleapiclient.errors import HttpError
 from utils.youtube.yt_cache import save_cache, song_key
 from utils.youtube.yt_cache import load_cache, init_cache, clear_cache, update_cache_songs
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
-from utils.common.normalizer import APOSTROPHES, normalize
+from utils.common.normalizer import APOSTROPHES, NON_DECOMPOSING_LETTER_FOLDS, normalize
+from utils.common.title_patterns import BRACKETED
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import LOG_BACKUP_COUNT, LOG_MAX_BYTES, flog
@@ -483,7 +484,7 @@ def _bracket_selector_hints(title: str) -> list[str]:
     keep what's stripped and check it separately in score_result() against
     the *candidate's* own (unstripped) title/tags — see _selector_tokens().
     """
-    return [m.strip() for m in re.findall(r"[\(\[]([^)\]]*)[)\]]", title) if m.strip()]
+    return [m.strip() for m in re.findall(BRACKETED, title) if m.strip()]
 
 
 def _selector_tokens(hint: str) -> set[str]:
@@ -545,13 +546,6 @@ def _collapse_repeated_letters(text: str) -> str:
     kind of minor, legitimate spelling variance.
     """
     return re.sub(r"(.)\1+", r"\1", text)
-
-
-# Letters that don't NFKD-decompose (see _fold_diacritics()'s docstring for
-# why NFKD alone can't fold these) but have one unambiguous plain-Latin
-# equivalent worth substituting directly. "ø" too: "Ørganek" is the stylized
-# name of Organek, whose uploads all spell it with a plain "O".
-NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"ł": "l", "Ł": "L", "ø": "o", "Ø": "O"})
 
 
 def _drop_punctuation(text: str) -> str:

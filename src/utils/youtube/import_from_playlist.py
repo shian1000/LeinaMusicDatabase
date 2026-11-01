@@ -1,7 +1,6 @@
 import json
 import re
 import subprocess
-import unicodedata
 
 import questionary
 from googleapiclient.errors import HttpError
@@ -16,15 +15,26 @@ from utils.youtube.manage_youtube_playlists import (
     _is_official_release,
     _log_ytdlp_errors,
     ytdlp_errors,
-    NON_DECOMPOSING_LETTER_FOLDS,
     run_ytdlp,
     video_durations_via_api,
 )
 from utils.common.normalizer import name_key, split_artist_title
+from utils.common.title_patterns import FEAT_WORD
 from utils.discoveries.import_engine import find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
-from utils.common.text_utils import strip_trailing_junk_suffix
+# The title cleanup itself lives in sanitize.py (its "youtube" steps)
+from utils.common.sanitize import (
+    ANY_BRACKET_RE,
+    ARTIST,
+    SOURCE_YOUTUBE,
+    TITLE,
+    YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE,
+    fold_char,
+    sanitize_field,
+    sanitize_raw,
+    strip_hashtags,
+)
 from config.constants import YTDLP_PLAYLIST_LANG
 from utils.common.debug import flog, mlog
 from utils.common import trace
@@ -41,196 +51,6 @@ def is_placeholder_title(title: str | None) -> bool:
     --flat-playlist "[Private video]"."""
     return (title or "").strip().strip("[]") in PLACEHOLDER_TITLES
 
-# Trailing "(...)"/"[...]" annotations that don't identify a genuinely
-# different version of the song - just upload metadata - so they're stripped
-# from the imported title entirely (e.g. "Mr. Vain (Original Radio Edit)" ->
-# "Mr. Vain"). Deliberately NOT included: anything that marks a real
-# alternate version worth keeping distinguishable in the library - "Remix",
-# "Live", "Acoustic", "Cover", "Extended", "Club Edit", a named remixer, or a
-# "feat./ft." credit. Add new junk phrases here as they come up; matching is
-# case-insensitive and only against the title's trailing bracket (see
-# strip_junk_suffix()), so this never touches a bracket earlier in the title.
-YOUTUBE_TITLE_JUNK_PHRASES = [
-    "Official Video",
-    "Official Audio",
-    "Official Music Video",
-    "Official Lyric Video",
-    "Lyric Video",
-    "Lyrics",
-    "HD",
-    "HQ",
-    "Videoclip",
-    "MusicVideo",
-    "Video Clip",
-    "Original Radio Edit",
-    "Radio Edit",
-    "Radio Version",
-    "Album Version",
-    "Original Mix",
-    "Explicit",
-    "Clean Version",
-    "Edit",
-]
-_YOUTUBE_TITLE_JUNK_PHRASES_LOWER = {p.lower() for p in YOUTUBE_TITLE_JUNK_PHRASES}
-
-# Unlike YOUTUBE_TITLE_JUNK_PHRASES above (which requires the bracket's
-# *entire* content to match one known phrase exactly), these are single
-# words that condemn the whole trailing bracket just by appearing in it
-# anywhere, since the rest of the bracket is typically source-specific and
-# not worth trying to enumerate - e.g. "(Pes 2009 Soundtrack)" doesn't match
-# any whole phrase above, but the bracket as a whole still just says what
-# the recording was used for, not a version of the song. Add new marker
-# words here as they come up; matched as a whole word, case-insensitive.
-YOUTUBE_TITLE_JUNK_MARKER_WORDS = [
-    "Soundtrack",
-    "Audio",
-    "From",
-    "Video",
-    # Says who uploaded it again, not which version (real case:
-    # "DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")
-    "Reupload",
-    "Re-upload",
-]
-_YOUTUBE_TITLE_JUNK_MARKER_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS) + r")\b",
-    re.IGNORECASE,
-)
-
-# Same trailing-only scope as YOUTUBE_TITLE_JUNK_MARKER_WORDS above, but for
-# a release/recording year instead of a fixed word list - any bare 4-digit
-# number condemns the whole trailing bracket (e.g. "Sierpień (2022)" ->
-# "Sierpień"), since a year annotation is upload metadata, not part of the
-# song's identity.
-_YOUTUBE_TITLE_YEAR_RE = re.compile(r"\b\d{4}\b")
-
-# Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) at the
-# very end of the string, plus any trailing whitespace. "【】" is the CJK
-# "lenticular bracket" pair, used the same way "[...]" is in Western titles
-# (e.g. a trailing "【Kan/Rom/Eng Lyrics】" annotation). The fullwidth
-# "（）"/"［］" pairs come from CJK input methods (real case: "Fujii Kaze -
-# Workin’ Hard（Official Video）") and are treated exactly like "()"/"[]".
-_TRAILING_BRACKET_RE = re.compile(r"\s*[\(\[【（［]([^()\[\]【】（）［］]*)[\)\]】）］]\s*$")
-
-# Straight and curly double-quote characters, plus the CJK "corner bracket"
-# pair "『』" (used to set off a work's title, the way Western titles use
-# double quotes - e.g. '『Cinderella by Cidergirl』'). Only double-quote-like
-# characters are stripped (never single quotes/apostrophes, which routinely
-# appear inside a title itself - e.g. "Rock 'n' Roll", "Don't Stop") -
-# uploaders wrap the song name in them fairly often (e.g. 'Night Club -
-# "Need You Tonight" (INXS cover)'), and that's never meaningful punctuation
-# worth keeping in the stored title.
-_DOUBLE_QUOTE_RE = re.compile(r'["“”„‟『』]')
-
-
-def strip_quote_marks(title: str) -> str:
-    """Drop any double-quote-like character from `title` and collapse the
-    whitespace that removing them can leave behind.
-    """
-    title = _DOUBLE_QUOTE_RE.sub("", title or "")
-    return re.sub(r"\s+", " ", title).strip()
-
-
-# Unlike YOUTUBE_TITLE_JUNK_MARKER_WORDS above (only checked against the
-# *trailing* bracket, to avoid nuking a genuine subtitle earlier in the
-# title), these condemn a "(...)"/"[...]" group no matter where it sits -
-# e.g. "Herr Mannelig (animation) - Żniwa - Polish version" has real title
-# text (" - Żniwa - Polish version") after the junk bracket, so it would
-# never be reached by the trailing-only check. Only add a word here when
-# it's safe to assume it never appears inside a real subtitle.
-YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
-    "Animation",
-    "Official",
-    "Lyrics",
-    "Lyric",
-    "Visualiser",
-    "Video",
-    "Clip",
-    "Officiel",
-    "Oryginał",
-    "Subtitles",
-    "4K",
-    "Remaster",
-    "Remastered",
-    "Oficial",
-    # Bollywood label uploads (real case: "T-Series - Criminal (Full Song)
-    # Ra.One") - the whole track, as opposed to a teaser/promo cut.
-    "Full Song",
-]
-_YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE) + r")\b",
-    re.IGNORECASE,
-)
-
-# Matches one "(...)"/"[...]"/"【...】" group (no nested brackets) anywhere
-# in the string, plus any whitespace right before it.
-_ANY_BRACKET_RE = re.compile(r"\s*[\(\[【（［]([^()\[\]【】（）［］]*)[\)\]】）］]")
-
-
-def strip_junk_brackets_anywhere(title: str) -> str:
-    """Drop any "(...)"/"[...]" group whose content contains one of
-    YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE, wherever in `title` it sits.
-    """
-    def _replace(match: re.Match) -> str:
-        if _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(match.group(1)):
-            return ""
-        return match.group(0)
-
-    title = _ANY_BRACKET_RE.sub(_replace, title or "")
-    return re.sub(r"\s+", " ", title).strip()
-
-
-# A "|" in a YouTube title is routinely used to tack on channel/label
-# branding after the actual song info (e.g. "OMNIMAR - The Matrix (Official
-# Video) | darkTunes Music Group") - never part of the song title itself, so
-# everything from the first one onward is dropped. Doing this before
-# strip_junk_suffix() also lets a junk bracket that only *looks* trailing
-# once the branding is gone (like "(Official Video)" above) get caught by
-# the existing trailing-bracket check.
-# Look-alikes of "|" count too (real case: "Dizzko Bizkit aka Mejsi - Bál ⎮
-# 2017", U+23AE): fullwidth "｜", box-drawing "│", broken bar "¦".
-_PIPE_SUFFIX_RE = re.compile(r"\s*[|⎮｜│¦].*$")
-
-
-def strip_pipe_suffix(title: str) -> str:
-    """Drop a trailing "| ..." branding suffix from `title`, if present."""
-    return _PIPE_SUFFIX_RE.sub("", title or "").strip()
-
-
-# Uploaders routinely tack promo hashtags onto the end of a title (e.g.
-# "Nocą (Official Audio) #Zostańwdomu #KulturalnaStrefa") - never part of the
-# song title itself, so every "#word" token is dropped wherever it appears.
-_HASHTAG_RE = re.compile(r"#\S+")
-
-
-def strip_hashtags(title: str) -> str:
-    """Drop every "#word" hashtag token from `title`."""
-    title = _HASHTAG_RE.sub("", title or "")
-    return re.sub(r"\s+", " ", title).strip()
-
-
-# A title that is really an uploaded file name (real case: "Justyna
-# Steczkowska - pejzaz_bez_ciebie.mpg"): a trailing media extension is
-# dropped, and an underscore-joined name is turned back into words.
-_MEDIA_EXTENSION_RE = re.compile(
-    r"\.(?:mpg|mpeg|mp4|m4v|avi|wmv|flv|mkv|webm|mov|3gp|mp3|wav|flac|ogg|m4a|wma)\s*$",
-    re.IGNORECASE,
-)
-
-
-def clean_file_name_title(text: str) -> str:
-    """Undo file-name artefacts in `text`: drop a trailing media extension,
-    and if the rest is words joined by "_" with no spaces, split them back
-    apart - capitalising each word when it was written all lowercase
-    ("pejzaz_bez_ciebie.mpg" -> "Pejzaz Bez Ciebie")."""
-    text = _MEDIA_EXTENSION_RE.sub("", (text or "").strip()).strip()
-    if "_" in text and " " not in text:
-        words = [w for w in text.split("_") if w]
-        if text.islower():
-            words = [w[:1].upper() + w[1:] for w in words]
-        text = " ".join(words)
-    return text
-
-
 # Japanese uploads credit a song as "<Artist>「<Title>」" with no " - " at
 # all (real case, channel "GOKUMON(UchikubiGokumonDoukoukai)": "打首獄門同好会
 # 「なつのうた」" - artist 打首獄門同好会, title なつのうた). Only "「」" - "『』"
@@ -246,20 +66,9 @@ def split_corner_bracket_credit(title: str) -> tuple | None:
     if not match:
         return None
     artist, song_title = match.group(1).strip(), match.group(2).strip()
-    if not (artist and song_title) or _YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(song_title):
+    if not (artist and song_title) or YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE.search(song_title):
         return None
     return artist, song_title
-
-
-# A bare year tacked on after a dash, outside any bracket (real case, channel
-# "VHS-Goldie": "Hank Williams Jr. - Mr. Weatherman - 1982"). Bracketed years
-# are already handled by _YOUTUBE_TITLE_YEAR_RE in strip_junk_suffix().
-_TRAILING_DASH_YEAR_RE = re.compile(r"\s+[-–—]\s+(?:19|20)\d{2}\s*$")
-
-
-def strip_trailing_dash_year(title: str) -> str:
-    """Drop a trailing " - 1982"-style year, unless it's the whole title."""
-    return _TRAILING_DASH_YEAR_RE.sub("", title or "").strip() or (title or "")
 
 
 # A quoted song title first, its performers in a "ft." bracket and the
@@ -269,7 +78,7 @@ def strip_trailing_dash_year(title: str) -> str:
 # left side the artist.
 _QUOTED_TITLE_FEAT_CREDIT_RE = re.compile(
     r"""^\s*['"“‘„](?P<title>[^'"“”‘’„]+)['"”’]\s*"""
-    r"""\([^()]*?\b(?:ft\.?|feat\.?|featuring)\s+(?P<artists>[^()]+)\)"""
+    r"""\([^()]*?\b""" + FEAT_WORD + r"""\s+(?P<artists>[^()]+)\)"""
     r"""(?:\s+[-–—]\s+.*)?$""",
     re.IGNORECASE,
 )
@@ -291,7 +100,7 @@ def is_junk_only_title(text: str | None) -> bool:
     """Whether `text` (a video title's side) is only an upload annotation -
     "Lyric Video (English / French)", "Official Video", "Visualizer" - with
     no song title in it."""
-    words = strip_hashtags(_ANY_BRACKET_RE.sub(" ", text or "")).lower().split()
+    words = strip_hashtags(ANY_BRACKET_RE.sub(" ", text or "")).lower().split()
     if not words or any(w not in _JUNK_ONLY_WORDS for w in words):
         return False
     return len(words) > 1 or words[0] in _JUNK_ONLY_SINGLE_WORDS
@@ -305,109 +114,6 @@ def split_quoted_title_feat_credit(title: str) -> tuple | None:
     if not match:
         return None
     return match.group("artists").strip(), match.group("title").strip()
-
-
-def strip_junk_suffix(title: str) -> str:
-    """Repeatedly strip a trailing bracket group from `title` as long as it's
-    junk - either its content matches YOUTUBE_TITLE_JUNK_PHRASES exactly, it
-    contains one of YOUTUBE_TITLE_JUNK_MARKER_WORDS anywhere, or it contains a
-    bare 4-digit year - handles a title decorated with more than one such
-    annotation (e.g. "Song (Official Video) (HD)"). Only ever touches the
-    trailing bracket, never one earlier in the title (e.g. a genuine subtitle
-    like "Sad Story (Out of Luck)" is left alone).
-    """
-    title = (title or "").strip()
-    while True:
-        match = _TRAILING_BRACKET_RE.search(title)
-        if not match:
-            break
-        content = match.group(1).strip()
-        is_exact_junk = content.lower() in _YOUTUBE_TITLE_JUNK_PHRASES_LOWER
-        has_marker_word = bool(_YOUTUBE_TITLE_JUNK_MARKER_RE.search(content))
-        has_year = bool(_YOUTUBE_TITLE_YEAR_RE.search(content))
-        if not (is_exact_junk or has_marker_word or has_year):
-            break
-        title = title[:match.start()].strip()
-    return title
-
-
-# Opening->closing bracket characters that strip_artist_from_title() will
-# drop along with an artist-name match they wrap entirely (e.g. the "【】" in
-# "Ado - 【Ado】 unravel 歌いました" exist only to enclose the artist name, so
-# leaving them behind after the name is removed would strand an empty
-# "【】" in the title).
-_ARTIST_WRAPPING_BRACKETS = {"(": ")", "[": "]", "【": "】", "（": "）", "［": "］"}
-
-
-def _fold_char(ch: str) -> str:
-    """Strip accents off a single character via NFKD decomposition, falling
-    back to the original character when decomposition doesn't yield exactly
-    one base character - keeps a 1:1 length correspondence with the input,
-    which strip_artist_from_title() relies on to map a match back to
-    original-string positions. "ł" / "ø", which have no decomposition, are
-    folded with the same table as the search's _fold_diacritics(), so "Łona"
-    is "Lona" here too.
-    """
-    decomposed = unicodedata.normalize("NFKD", ch)
-    base = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return (base if len(base) == 1 else ch).translate(NON_DECOMPOSING_LETTER_FOLDS)
-
-
-def strip_artist_from_title(title: str, artist: str) -> str:
-    """If the song title itself repeats the artist's name, drop that
-    occurrence - real case found testing this: channel "SIAMES", video
-    titled 'SIAMÉS "Summer Nights" [Official Animated Video]' (the bare
-    video title already includes the artist name, redundant once it's
-    already stored separately as the song's artist).
-
-    Diacritic-insensitive on both sides (via _fold_char - same technique as
-    manage_youtube_playlists.py's _fold_diacritics, done per-character here
-    to keep a position mapping back to the original title) since the
-    channel name and the same name embedded in a title aren't always spelled
-    identically, as in the SIAMES/SIAMÉS case above. Only removes a whole
-    word/phrase match (not a substring of some other word), and leaves the
-    title untouched entirely if that would empty it out.
-    """
-    if not title or not artist:
-        return title
-
-    folded_title = "".join(_fold_char(c) for c in title)
-    folded_artist = "".join(_fold_char(c) for c in artist).strip()
-    if not folded_artist:
-        return title
-
-    match = re.search(r"\b" + re.escape(folded_artist) + r"\b", folded_title, re.IGNORECASE)
-    if not match:
-        return title
-
-    start, end = match.start(), match.end()
-    if (
-        start > 0
-        and title[start - 1] in _ARTIST_WRAPPING_BRACKETS
-        and end < len(title)
-        and title[end] == _ARTIST_WRAPPING_BRACKETS[title[start - 1]]
-    ):
-        start -= 1
-        end += 1
-
-    remainder = (title[:start] + title[end:]).strip()
-
-    # If the artist name was itself quoted (real case: 'SIAMÉS "Summer
-    # Nights" [...]' - the quotes wrap the title, not the artist), removing
-    # just the name leaves one quote character orphaned at the front with
-    # its matching partner stranded mid-string rather than at an edge a
-    # plain edge-trim would catch. Unwrap that pair specifically instead.
-    if remainder[:1] in ('"', "'"):
-        quote_char = remainder[0]
-        closing = remainder.find(quote_char, 1)
-        if closing != -1:
-            remainder = remainder[1:closing] + remainder[closing + 1:]
-
-    # Clean up whatever else was only there to connect the artist name to
-    # the rest of the title - a leading "-"/":"/"–" and surrounding spaces.
-    remainder = re.sub(r'^[\s\-:–—]+', "", remainder)
-    remainder = re.sub(r'[\s\-:–—]+$', "", remainder)
-    return remainder.strip() or title
 
 
 def extract_playlist_id(raw: str) -> str | None:
@@ -583,7 +289,7 @@ def _is_special_description_channel(channel: str) -> bool:
 
 
 # Words marking a genuinely different performance/version of a song - see
-# YOUTUBE_TITLE_JUNK_PHRASES above for why these are deliberately never
+# sanitize.YOUTUBE_TITLE_JUNK_PHRASES for why these are deliberately never
 # treated as junk. _find_official_match_via_search() skips its search
 # entirely when one of these appears in the video's own title, since
 # blindly trusting a same-named studio release there would silently swap
@@ -595,10 +301,10 @@ _VERSION_MARKER_RE = re.compile(
 
 def _contains_whole_word(folded_haystack: str, needle: str) -> bool:
     """Diacritic/case-insensitive whole-word containment check - same
-    approach as strip_artist_from_title() above, reused here to confirm a
+    approach as sanitize.strip_artist_from_title(), reused here to confirm a
     search result's own artist/track genuinely appear in the source title
     rather than being an unrelated same-named release."""
-    folded_needle = "".join(_fold_char(c) for c in needle).strip()
+    folded_needle = "".join(fold_char(c) for c in needle).strip()
     if not folded_needle:
         return False
     return bool(re.search(r"\b" + re.escape(folded_needle) + r"\b", folded_haystack, re.IGNORECASE))
@@ -633,7 +339,7 @@ def _find_official_match_via_search(raw_title: str, max_results: int = 5) -> tup
     if not result.stdout.strip():
         return None
 
-    folded_raw_title = "".join(_fold_char(c) for c in raw_title)
+    folded_raw_title = "".join(fold_char(c) for c in raw_title)
 
     for line in result.stdout.strip().splitlines():
         try:
@@ -708,7 +414,7 @@ def _parse_music_description_line(description: str) -> tuple | None:
 # video's own title rather than its description (real case, "aesthetic
 # waves": 'Umbrella Academy Season 4 Episode 1 - OST: "Santa Baby" by Eartha
 # Kitt' -> title "Santa Baby", artist "Eartha Kitt"). Reuses
-# _DOUBLE_QUOTE_RE's character class so curly/CJK quote variants match too.
+# sanitize._DOUBLE_QUOTE_RE's character class so curly/CJK quote variants match too.
 # Not anchored to the start of the string, since these channels routinely
 # prefix the quoted credit with an episode/segment label. The artist is
 # taken as the rest of the string after " by ", so this only fires on the
@@ -875,10 +581,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         artist, song_title = artist_title_override
         how = "special channel"
     else:
-        parse_title = strip_pipe_suffix(title)
-        parse_title = strip_junk_brackets_anywhere(parse_title)
-        parse_title = strip_hashtags(parse_title)
-        parse_title = _MEDIA_EXTENSION_RE.sub("", parse_title).strip()
+        parse_title = sanitize_raw(title, SOURCE_YOUTUBE)
 
         if _is_generic_topic_channel(channel):
             # Channel name isn't an artist - left empty for the description
@@ -911,21 +614,11 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
                     song_title = parse_title.strip()
                     how = "no separator, channel as artist"
 
-    if song_title and artist:
-        song_title = strip_artist_from_title(song_title, artist)
-
-    if song_title:
-        song_title = strip_junk_suffix(song_title)
-        # Unbracketed trailing junk too (real case: '“Golden” Official Lyric
-        # Video | KPop Demon Hunters | Sony Animation'), unless that would
-        # leave nothing - then the phrase *is* the title.
-        song_title = strip_trailing_junk_suffix(song_title) or song_title
-        song_title = strip_trailing_dash_year(song_title)
-        song_title = strip_junk_suffix(song_title)
-        song_title = strip_quote_marks(song_title)
-        song_title = clean_file_name_title(song_title)
-    if artist:
-        artist = clean_file_name_title(artist)
+    # The title with the artist as parsed, then the artist (sanitize.py's
+    # "youtube" steps: junk brackets and phrases, a " - 1982" year, quotes,
+    # file-name artefacts, the artist repeated in the title)
+    song_title = sanitize_field(song_title, TITLE, SOURCE_YOUTUBE, artist=artist)
+    artist = sanitize_field(artist, ARTIST, SOURCE_YOUTUBE)
 
     mlog(f"[Parse] {item.get('video_id')} \"{title}\" (channel \"{channel}\", {item.get('duration')}s) -> "
          f"\"{artist}\" - \"{song_title}\" [{how}]", trace.TRACE)

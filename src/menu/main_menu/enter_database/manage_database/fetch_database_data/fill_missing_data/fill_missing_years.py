@@ -1,6 +1,7 @@
 import re
 import random
 from collections import defaultdict
+from utils.common.title_patterns import FEAT_WORD
 from datetime import date
 import questionary
 from utils.common.output import RESET, YELLOW, error, review_header
@@ -165,7 +166,7 @@ def _sample_titles(label: str, songs) -> str:
 
 # Only a guest credit - unlike truncate_at_word(), which also cuts at a comma
 # ("Dziękuję, że jesteś" isn't a single from the album "Dziękuję")
-_GUEST_CREDIT = re.compile(r"\s*[(\[]?\s*\b(?:feat\.?|ft\.?|featuring)\s.*$", re.IGNORECASE)
+_GUEST_CREDIT = re.compile(r"\s*[(\[]?\s*\b" + FEAT_WORD + r"\s.*$", re.IGNORECASE)
 
 
 def _strip_guest_credit(title: str) -> str:

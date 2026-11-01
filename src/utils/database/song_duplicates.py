@@ -19,6 +19,7 @@ offered again until another song joins them."""
 import json
 import re
 from collections import defaultdict
+from utils.common.title_patterns import BRACKETED, FEAT_OR_WITH_WORD, FEAT_WORD
 
 from config.constants import (
     ADDITIONAL_VIDEO_SONG_MERGE,
@@ -46,8 +47,8 @@ from utils.database.song_references import record_song_merge
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
                   "track_number", "disc_number")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
-_BRACKET_RE = re.compile(r"\s*[(\[]([^)\]]*)[)\]]")
-_FEAT_WORD_RE = re.compile(r"^\s*(?:feat\.?|ft\.?|featuring|with)\s", re.IGNORECASE)
+_BRACKET_RE = re.compile(r"\s*" + BRACKETED)
+_FEAT_WORD_RE = re.compile(r"^\s*" + FEAT_OR_WITH_WORD + r"\s", re.IGNORECASE)
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 
 
@@ -72,7 +73,7 @@ def clean_title(title: str) -> str:
     return cleaned or title
 
 
-_FEAT_CREDIT_RE = re.compile(r"(?:^|\s)(?:feat\.?|ft\.?|featuring)\s+(.+)$", re.IGNORECASE)
+_FEAT_CREDIT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+(.+)$", re.IGNORECASE)
 
 
 def feat_credits(title: str) -> list[str]:
@@ -94,7 +95,7 @@ def feat_credits(title: str) -> list[str]:
 
 
 # An unbracketed credit up to the next bracket: "(Remix)" after it stays
-_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)(?:feat\.?|ft\.?|featuring)\s+[^()\[\]]+", re.IGNORECASE)
+_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+[^()\[\]]+", re.IGNORECASE)
 
 
 def split_feat_credits(title: str) -> tuple[str, list[str]]:

@@ -87,7 +87,7 @@ from utils.database.inbox_requests import (
     parse_time,
     save_decision,
 )
-from utils.database.song_duplicates import split_feat_credits
+from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata
 
 # Settled statuses of their own
 ALREADY_IN_DATABASE = "already in the database"
@@ -115,6 +115,10 @@ SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a fi
 
 
 def song_key(artist: str | None, title: str | None) -> str:
+    # A comparison key of the names as sent, never sanitize()d: it groups the
+    # requests, finds rejected_song_requests rows (stored as sent) and, as
+    # "song:<key>", is the case id decisions are saved under - a cleanup
+    # step turned on later must not change it
     return f"{normalize(artist or '')}|{normalize(title or '')}"
 
 
@@ -174,19 +178,18 @@ class SongRequestCase:
         `title` as the owner corrected them, else the request's. A
         featured-artist credit leaves the title for `feat_artists`, which the
         import credits on the new song ("Billionaire ft. Bruno Mars" ->
-        "Billionaire", Bruno Mars as feat)."""
-        title, feat_artists = split_feat_credits(title if title is not None else self.latest.title or "")
-        return {
+        "Billionaire", Bruno Mars as feat) - sanitize.py's "request" steps
+        (its feat_to_credits)."""
+        return sanitize_metadata({
             "artist_name": artist if artist is not None else self.latest.artist,
-            "title": title or None,
-            "feat_artists": feat_artists,
+            "title": title if title is not None else self.latest.title or "",
             "album": self._first("album"),
             "year": self._first("year"),
             "language": "Unknown",
             "origin": None,
             "youtube_video_id": self.youtube_video_ids[0] if self.youtube_video_ids else None,
             "duration_s": self._first("duration_s"),
-        }
+        }, SOURCE_REQUEST)
 
 
 def _rejected_rows(session) -> tuple[set, set, set]:

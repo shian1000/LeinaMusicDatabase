@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,980 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~2,200 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -416,6 +416,35 @@ non-trivial work in that area.
   `docs/runbooks/database.md`. `docs/agent-notes/discovery-modules.md` (fetcher
   loading, result validation, shared browser, scraping failure modes) and
   `docs/agent-notes/import-pipeline.md` (why import is slow, the shared engine).
+- `src/utils/common/sanitize.py` — the one place for cleaning names before they're stored: each
+  cleanup a named step (`STEPS`, run in `RAW_ORDER` / `FIELD_ORDER`), each source (`mp3`,
+  `youtube`, `request`, `stored`, ...) running its own (`sanitize_raw()`, `sanitize_field()`,
+  `sanitize_metadata()`, `sanitize_changes()`). Holds the YouTube title cleanup (the
+  `YOUTUBE_TITLE_JUNK_*` lists, `strip_junk_suffix()`, `strip_artist_from_title()`, ...) and Clean
+  names' `strip_trailing_junk()`. The defaults did exactly what each source did before
+  (`tests/test_name_cleanup_characterization.py`); a default changed since is marked "Changed:" there,
+  measured on the catalog first (normalization note). The YouTube import (`build_metadata_from_item()`) and the mp3 import
+  (`read_file_metadata()`, `extract_unknown_data()`, folder playlists' file names) run through it;
+  so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
+  (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
+  is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
+  switches each step per source (`set_step_sources()`, `configurable_sources()`), saved in
+  `sanitize_config.json` (`sanitize_settings.py`, only what differs from a step's defaults, read once
+  per process); Clean names runs every step on for the database (`name_cleanup.stored_step_passes()`)
+  and never empties a stored name. A new step needs a label in `constants.SANITIZE_STEP_LABELS`
+  (a test checks). A new cleanup goes in as a step
+  here, not into a caller. Comparison keys (`normalize()`, `name_key()`, `_title_core()`) are not
+  steps. `docs/agent-notes/normalization-and-matching.md` → "Cleaning before storing".
+- `src/utils/common/title_patterns.py` — regex pieces the title rules share, one spelling each:
+  `FEAT_WORD` ("feat." / "ft" / "featuring"; `FEAT_OR_WITH_WORD` inside a bracket), `BRACKETED`
+  ("(...)" / "[...]"), `YOUTUBE_BRACKETED` / `YOUTUBE_BRACKET_PAIRS` (with "【】", "（）", "［］"),
+  `YEAR`. A new pattern of that kind is built from these, never respelt. No app imports.
+- `src/utils/database/name_cleanup.py` — Clean names' work on the stored catalog, no UI:
+  `apply_step()` runs one sanitize step over songs' title / artist name / album text, holding an
+  artist rename onto another artist's name (`hold_artist_rename()`, the artist row's own session),
+  plus the record-level repairs that aren't steps (`repair_polish_mojibake()`,
+  `compose_decomposed_letters()` for every column) and a review step's proposals
+  (`review_step_proposals()` / `apply_proposals()`). The menu only prints and asks.
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
   write a second one. `composed()` is the NFC form every stored name is kept in: the models'
   `@validates` (`datatables.COMPOSED_FIELDS`) compose each ORM write, Clean names the older rows
@@ -521,9 +550,10 @@ non-trivial work in that area.
   in it) must `importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")`
   instead (see `tests/test_resolve_duplicates.py`, `tests/test_review_screens.py`).
 - `src/menu/main_menu/enter_database/manage_database/clean_names.py` (Manage database → "Clean names") — per-field song
-  cleanup rules all go through `_apply_field_cleanup(...)`. Add rules via that helper, not another
-  per-field loop. `seek_nonsense_names()` first auto-strips a known trailing junk annotation off the
-  title via `strip_trailing_junk()` (plain suffix and bracket-wrapped, e.g. "Song Music Video" or
+  cleanup rules are sanitize steps run by `name_cleanup.apply_step()` (each one skipped when its
+  step is off for the "stored" source). Add a rule as a step there, not another per-field loop.
+  `seek_nonsense_names()` first auto-strips a known trailing junk annotation off the
+  title via `name_cleanup.junk_title_fix()` (plain suffix and bracket-wrapped, e.g. "Song Music Video" or
   "Song 《Official Music Video》" -> "Song" — any bracket pair, since uploaders also use CJK ones)
   with no confirmation, then queues whatever's still blacklisted (album/title) and asks about it in
   one batch at the end (see the Coding conventions entry above). Its exact-phrase list,
@@ -773,13 +803,14 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,980 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,200 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
   with "unable to open database file". It also sends `debug.log`, `youtube_link_cache.log` and the
-  spell-check cache (written at exit) to that temp folder. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  spell-check cache (written at exit) to that temp folder, and Settings → "Name cleanup"'s file
+  (`sanitize_settings.CONFIG_PATH`), so tests run the steps' defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
   path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
   default bound at import would keep pointing at the real `.env`.
 - The Selenium fetchers are tested through `tests/fake_browser.FakeBrowser` (pages as HTML by URL,
@@ -877,7 +908,7 @@ non-trivial work in that area.
   `--flat-playlist` (without it, a large playlist blows past the subprocess timeout and looks like
   a hang), the Topic-channel/channel-name artist-detection fallback, the three extensible title
   cleanup word lists (`YOUTUBE_TITLE_JUNK_PHRASES`, `YOUTUBE_TITLE_JUNK_MARKER_WORDS`,
-  `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`) and diacritic-insensitive `strip_artist_from_title()`,
+  `YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE`, now in `sanitize.py`) and diacritic-insensitive `strip_artist_from_title()`,
   why album-name scraping was investigated but not implemented, `SPECIAL_DESCRIPTION_CHANNELS`'
   reverse-search resolution (`resolve_special_channel_metadata()`) for channels whose titles carry
   no "Artist - Title" structure at all, and a since-fixed debug video limiter. **Search matching**

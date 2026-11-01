@@ -1,5 +1,6 @@
 import re
 import time
+from utils.common.title_patterns import YEAR
 
 from utils.database.datatables import Song, Artist
 from utils.database.database_sessions import open_and_set_global_database_sessions
@@ -427,7 +428,7 @@ _TITLE_BY_ARTIST = re.compile(r"^(.+)\s+by\s+(.+?)$", re.IGNORECASE)
 
 
 # A release year left at the end of a file's title ("... [Full Length] 2006")
-_TRAILING_YEAR = re.compile(r"\s+(?:19|20)\d{2}\s*$")
+_TRAILING_YEAR = re.compile(r"\s+" + YEAR + r"\s*$")
 
 
 def _title_core(title: str, drop_feat: bool = True) -> str:

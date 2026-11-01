@@ -8,6 +8,7 @@ sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
 from utils.youtube import import_from_playlist as m
+from utils.common import sanitize
 
 
 def _fake_artist(name, synonyms=None):
@@ -210,19 +211,19 @@ def test_resolve_special_channel_metadata_returns_none_when_nothing_matches(monk
 # ---------------------------------------------------------
 
 def test_strip_junk_brackets_anywhere_strips_new_marker_words():
-    assert m.strip_junk_brackets_anywhere("Song (Visualiser)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Clip officiel)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Officiel)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Wersja oryginał)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Lyric Video) - Artist") == "Song - Artist"
-    assert m.strip_junk_brackets_anywhere("Song (English Subtitles)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (4K)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Remaster)") == "Song"
-    assert m.strip_junk_brackets_anywhere("Song (Remastered 2023)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Visualiser)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Clip officiel)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Officiel)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Wersja oryginał)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Lyric Video) - Artist") == "Song - Artist"
+    assert sanitize.strip_junk_brackets_anywhere("Song (English Subtitles)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (4K)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Remaster)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("Song (Remastered 2023)") == "Song"
 
 
 def test_strip_junk_brackets_anywhere_keeps_non_junk_bracket():
-    assert m.strip_junk_brackets_anywhere("Sad Story (Out of Luck)") == "Sad Story (Out of Luck)"
+    assert sanitize.strip_junk_brackets_anywhere("Sad Story (Out of Luck)") == "Sad Story (Out of Luck)"
 
 
 # ---------------------------------------------------------
@@ -236,13 +237,13 @@ def _build(title, channel="Some Channel"):
 def test_fullwidth_brackets_are_stripped_like_ascii_ones():
     metadata = _build("Fujii Kaze - Workin’ Hard（Official Video）")
     assert (metadata["artist_name"], metadata["title"]) == ("Fujii Kaze", "Workin’ Hard")
-    assert m.strip_junk_suffix("Song［HD］") == "Song"
+    assert sanitize.strip_junk_suffix("Song［HD］") == "Song"
 
 
 def test_pipe_look_alike_suffix_is_stripped():
     metadata = _build("Dizzko Bizkit aka Mejsi - Bál ⎮ 2017")
     assert metadata["title"] == "Bál"
-    assert m.strip_pipe_suffix("Song ｜ Label") == "Song"
+    assert sanitize.strip_pipe_suffix("Song ｜ Label") == "Song"
 
 
 def test_full_song_bracket_is_stripped():
@@ -255,9 +256,9 @@ def test_file_name_title_is_turned_into_words():
 
 
 def test_clean_file_name_title_keeps_existing_capitalisation_and_plain_titles():
-    assert m.clean_file_name_title("Pejzaz_Bez_CIEBIE.mp4") == "Pejzaz Bez CIEBIE"
-    assert m.clean_file_name_title("Rock_n Roll") == "Rock_n Roll"
-    assert m.clean_file_name_title("Mr. Vain") == "Mr. Vain"
+    assert sanitize.clean_file_name_title("Pejzaz_Bez_CIEBIE.mp4") == "Pejzaz Bez CIEBIE"
+    assert sanitize.clean_file_name_title("Rock_n Roll") == "Rock_n Roll"
+    assert sanitize.clean_file_name_title("Mr. Vain") == "Mr. Vain"
 
 
 def test_corner_bracket_credit_splits_artist_from_title():
@@ -460,7 +461,7 @@ def test_trailing_dash_year_is_stripped():
 
 
 def test_dash_year_is_kept_when_it_is_the_whole_title_or_not_a_year():
-    assert m.strip_trailing_dash_year("1982") == "1982"
+    assert sanitize.strip_trailing_dash_year("1982") == "1982"
     assert _build("Artist - Song - 5000")["title"] == "Song - 5000"
 
 
@@ -555,7 +556,7 @@ def test_official_match_survives_an_unavailable_hit_in_the_search(monkeypatch):
 
 def test_artist_in_the_title_is_found_across_letters_without_a_decomposition():
     # YT-32: "ł" / "ø" have no NFKD decomposition - the search folded them, the title clean-up didn't
-    from utils.youtube.import_from_playlist import strip_artist_from_title
+    from utils.common.sanitize import strip_artist_from_title
     assert strip_artist_from_title('Łona "Rozmowy" (Official Video)', "Lona") == "Rozmowy (Official Video)"
     assert strip_artist_from_title("Ørganek - Głupi ja", "Organek") == "Głupi ja"
     assert strip_artist_from_title("Ołów", "Olowek") == "Ołów"  # whole words only, still

@@ -6,6 +6,7 @@ import pyperclip
 import base64
 import sys
 from utils.common.normalizer import normalize
+from utils.common.title_patterns import BRACKETED, FEAT_WORD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import mb_get, MBStats
 from config.constants import (
@@ -289,7 +290,7 @@ def has_singles_marker(artist_name: str, title: str) -> bool:
     return _contains_marker_word(title, SINGLES_MARKER) or _contains_marker_word(artist_name, SINGLES_MARKER)
 
 def remove_brackets(text):
-    return re.sub(r'\s*[\(\[]([^)\]]*)[)\]]', '', text).strip()
+    return re.sub(r"\s*" + BRACKETED, '', text).strip()
 
 
 def similarity(a: str, b: str) -> float:
@@ -303,7 +304,7 @@ def similarity(a: str, b: str) -> float:
 
 # A featured artist credited at the end of a title without brackets:
 # "Шкідлива звичка feat. YanGo" - artist information, like "(feat. YanGo)"
-_TRAILING_FEAT_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s+.*$", re.IGNORECASE)
+_TRAILING_FEAT_RE = re.compile(r"\s+" + FEAT_WORD + r"\s+.*$", re.IGNORECASE)
 
 
 def strip_trailing_feat(title: str) -> str:
@@ -401,14 +402,19 @@ def strip_track_number_prefix(title: str) -> str:
     return _TRACK_NUMBER_PREFIX_RE.sub("", title, count=1).strip() or title
 
 
+_DANGLING_SEPARATOR_RE = re.compile(r"\s*[-–—:|]+$")
+
+
 def strip_trailing_junk_suffix(title: str) -> str:
     """Repeatedly strip a trailing phrase from TITLE_JUNK_SUFFIXES off the
     end of `title`, handling more than one stacked suffix (e.g. "Song Music
     Video Official Audio"). Returns `title` unchanged if nothing matches.
+    A separator the phrase leaves dangling goes with it ("Secret Youth -
+    Music Video" -> "Secret Youth").
     """
     title = (title or "").strip()
     while True:
         new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
         if new_title == title:
             return title
-        title = new_title
+        title = _DANGLING_SEPARATOR_RE.sub("", new_title)

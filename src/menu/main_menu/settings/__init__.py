@@ -57,6 +57,7 @@ from config.constants import DEBUG_VERBOSITY_LABELS
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
+from menu.main_menu.settings.name_cleanup import name_cleanup_menu
 from utils.common.output import BOLD, RED, RESET, YELLOW, error, warn
 
 
@@ -68,6 +69,7 @@ def settings_menu():
         "Auto-accept similar artist names": set_auto_accept_artist_similarity,
         "Closest songs: minimum score": set_best_guess_min_score,
         "Closest songs: auto-accept score": set_closest_auto_accept_score,
+        "Name cleanup": name_cleanup_menu,
         "Reset statistics records": reset_statistics_records,
         "Start-up tasks": startup_tasks_menu,
         "Debug log": debug_log_menu,

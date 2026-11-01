@@ -154,8 +154,13 @@ it (ID3 `artist`/`title` fields are already separate).
 
 ### Title cleanup: independently-extensible word lists (plus a year check), applied in a fixed order
 
+The functions and word lists below live in `utils/common/sanitize.py` since 2026-11 (each one a
+named step there, see `docs/agent-notes/normalization-and-matching.md` → "Cleaning before storing:
+`sanitize.py`"); `build_metadata_from_item()` runs them as the `youtube` source's steps
+(`sanitize_raw()` before the split, `sanitize_field()` after), in the order below.
+
 `build_metadata_from_item()` first runs `strip_pipe_suffix()` -> `strip_junk_brackets_anywhere()`
--> `strip_hashtags()` -> media-extension strip (`_MEDIA_EXTENSION_RE`) over the *raw* video title
+-> `strip_hashtags()` -> media-extension strip (`strip_media_extension()`) over the *raw* video title
 (before any artist/title split), then later runs `strip_artist_from_title()` -> `strip_junk_suffix()`
 -> `text_utils.strip_trailing_junk_suffix()` (unbracketed trailing phrases from `constants.py`'s
 `TITLE_JUNK_SUFFIXES`, shared with Clean names - real case: `'“Golden” Official Lyric
@@ -1120,8 +1125,8 @@ Same non-decomposing-letter shape already documented above for Belarusian "і" (
 — Polish "ł" (U+0142) is a genuinely separate base letter in Unicode, not a base letter plus a
 combining mark, so NFKD folding leaves it untouched. Unlike the Belarusian case, though, there's no
 cross-script ambiguity here: an ASCII-typed DB title dropping "ł" always means plain "l" was
-intended, so a direct substitution table (`NON_DECOMPOSING_LETTER_FOLDS`, applied inside
-`_fold_diacritics()` after the NFKD pass, and by `import_from_playlist._fold_char()` too, so the
+intended, so a direct substitution table (`NON_DECOMPOSING_LETTER_FOLDS` in `normalizer.py`, applied inside
+`_fold_diacritics()` after the NFKD pass, and by `sanitize.fold_char()` too, so the
 title clean-up's `strip_artist_from_title()` folds "Łona" the same way) closes this gap safely, the same "only ever adds a way to
 match" guarantee the rest of this diacritic-tolerance machinery already relies on.
 
