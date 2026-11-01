@@ -278,6 +278,17 @@ tells you immediately whether it's cache misses (genuinely new data), 503s (rate
 limit — is another client running?), or `other_errors` + high
 `total_request_seconds` (MusicBrainz dropping connections).
 
+The summary only gives totals. For *which* entry or step asked what, set
+Settings → "Debug log" to 2 (only into the file) and read `debug.log`:
+`utils/common/trace.py` logs each `[Phase]` of the YouTube playlist import with
+its time and call counts (SQL, yt-dlp, YouTube API, MusicBrainz, spell-check
+cache), every external call with its time (`[yt-dlp]`, `[YouTube API]`,
+`[MusicBrainz]`), one `[Parse]` line per video and one `[Entry n/N]` line per
+entry, and at 2 also the reasons (`[Artist]`, `[Song]`, `[Spell check]`, slow
+`[SQL]`). Phases that ask the user include the waiting time. A new external call
+in this path must be counted too: yt-dlp only via `run_ytdlp()`, a Data API
+request via `trace.api_call()`.
+
 ## User-Agent
 
 MusicBrainz wants a real application/version/contact. `constants.py` sets

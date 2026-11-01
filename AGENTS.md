@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~1,890 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~1,980 tests, under a minute, fully mocked (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -463,9 +463,19 @@ non-trivial work in that area.
   test that fills it must leave `_CACHE_PATH` where `conftest.py` put it. `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/debug.py` — diagnostics, never messages for the user (those go through
   `utils/common/output.py`, see Coding conventions → "Output"). `slog(var)` / `mlog(message)` are
-  for debugging: console output is gated by a `.debug` file (`verbosity = N`) at the repo root,
-  and so is what reaches `debug.log` (gitignored): without `.debug`, only `slog(..., priority=3)`
-  gets there. `flog(message)` is for anything that must be diagnosable afterwards - *why a lookup
+  for debugging: both reach `debug.log` (gitignored, timestamped) when `priority >= 3 - verbosity`,
+  and the console too only with `console = on`. Both come from the `.debug` file at the repo root
+  (`verbosity = N`, `console = on|off`; a file without the console line prints, as it always did),
+  which Settings → "Debug log" writes and applies at once (`save_debug_settings()`); without it
+  only `slog(..., priority=3)` gets there. `conftest.py` points `DEBUG_FILE` away and resets both,
+  so the owner's setting never reaches the tests. `utils/common/trace.py` is the import's trace:
+  it counts yt-dlp runs (`run_ytdlp()`), YouTube Data API requests (wrap every `.execute()` in
+  `trace.api_call()`), SQL statements of every engine and MusicBrainz's `MBStats`, and
+  `trace.phase()` logs a step with what it called. Levels: 1 (`trace.TRACE`) = phases, every
+  external call with its time, one `[Parse]` line per video and one `[Entry]` line per imported
+  entry; 2 (`trace.DETAIL`) = why (cache hits, matches, slow SQL); 3 = every `slog()`. A log
+  message is built even when nothing is logged, so it must not assume more than the code
+  around it does (tests pass fakes). `flog(message)` is for anything that must be diagnosable afterwards - *why a lookup
   came up empty* (a fetcher returning nothing, a result the manager discarded, a yt-dlp ERROR
   line, a Spotify page that didn't load, which is then saved to `debug_spotify.html`) and *why an
   operation failed where the user may not see it* (backup, sharing, a migration, a caught
@@ -763,7 +773,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,890 tests, under a minute, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~1,980 tests, under a minute, all
   mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

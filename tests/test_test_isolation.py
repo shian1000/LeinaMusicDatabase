@@ -40,6 +40,7 @@ def test_logs_are_kept_out_of_the_repo():
     from utils.youtube import manage_youtube_playlists  # noqa: F401 - attaches its log at import
 
     assert REPO_ROOT not in debug.DEBUG_LOG_FILE.parents
+    assert REPO_ROOT not in debug.DEBUG_FILE.parents
     files = [Path(h.baseFilename) for h in logging.getLogger("youtube_link_cache").handlers
              if isinstance(h, logging.FileHandler)]
     assert files and all(REPO_ROOT not in f.parents for f in files)

@@ -26,6 +26,7 @@ from utils.common.normalizer import APOSTROPHES, normalize
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
 from utils.common.debug import LOG_BACKUP_COUNT, LOG_MAX_BYTES, flog
+from utils.common import trace
 from settings import Settings
 from config.constants import FULL_ALBUM_MIN_DURATION_S, NO_VIDEO_SENTINEL, PROJECT_ROOT, YOUTUBE_REGION
 from utils.database.song_kinds import strip_full_album_marker
@@ -351,7 +352,25 @@ def run_ytdlp(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     venv_bin = Path(sys.prefix) / "bin"
     if venv_bin.is_dir():
         env["PATH"] = os.pathsep.join(filter(None, [str(venv_bin), env.get("PATH")]))
-    return subprocess.run([*ytdlp_command(), *args], env=env, **kwargs)
+    started = time.monotonic()
+    outcome = "failed"
+    try:
+        result = subprocess.run([*ytdlp_command(), *args], env=env, **kwargs)
+        stdout = getattr(result, "stdout", None)
+        errors = ytdlp_errors(result) if isinstance(getattr(result, "stderr", None), str) else ""
+        outcome = (f"exit {getattr(result, 'returncode', '?')}, "
+                   f"{len(stdout.splitlines()) if isinstance(stdout, str) else '?'} line(s)"
+                   + (f", {trace.short(errors)}" if errors else ""))
+        return result
+    except subprocess.TimeoutExpired:
+        outcome = f"timed out after {kwargs.get('timeout')}s"
+        raise
+    finally:
+        # Every run, from verbosity 1 (Settings -> Debug log): which ones an import repeats
+        elapsed = time.monotonic() - started
+        trace.Calls.ytdlp_runs += 1
+        trace.Calls.ytdlp_seconds += elapsed
+        trace.mlog(f"[yt-dlp] {elapsed:.2f}s {outcome}: {trace.short(' '.join(args))}", trace.TRACE)
 
 
 # ---------------------------------------------------------
@@ -435,10 +454,10 @@ def create_playlist(youtube, title: str, description: str = "") -> str:
         "status": {"privacyStatus": "private"}
     }
 
-    response = youtube.playlists().insert(
+    response = trace.api_call(youtube.playlists().insert(
         part="snippet,status",
         body=request_body
-    ).execute()
+    ), f"playlists.insert {title!r}")
 
     playlist_id = response["id"]
     print(f"Created playlist with ID: {playlist_id}")
@@ -1403,14 +1422,14 @@ def _search_video_api_once(
     print(f"  Searching API for: {query}")
 
     try:
-        response = youtube.search().list(
+        response = trace.api_call(youtube.search().list(
             part="snippet",
             q=query,
             type="video",
             maxResults=8,
             videoCategoryId="10",  # Music category
             safeSearch="none",
-        ).execute()
+        ), f"search.list {query!r}")
 
     except HttpError as e:
         if is_quota_exceeded(e):
@@ -1585,8 +1604,9 @@ def videos_exist_via_api(video_ids) -> dict | None:
     try:
         for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
             chunk = ids[start:start + _API_VIDEOS_PER_CALL]
-            response = service.videos().list(
-                part="status,contentDetails", id=",".join(chunk), maxResults=50).execute()
+            response = trace.api_call(service.videos().list(
+                part="status,contentDetails", id=",".join(chunk), maxResults=50),
+                f"videos.list status of {len(chunk)} video(s)")
             listed = {item["id"]: item for item in response.get("items", [])}
             for video_id in chunk:
                 item = listed.get(video_id)
@@ -1623,7 +1643,8 @@ def video_durations_via_api(video_ids, on_found=None) -> dict | None:
     try:
         for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
             chunk = ids[start:start + _API_VIDEOS_PER_CALL]
-            response = service.videos().list(part="contentDetails", id=",".join(chunk), maxResults=50).execute()
+            response = trace.api_call(service.videos().list(part="contentDetails", id=",".join(chunk), maxResults=50),
+                                      f"videos.list lengths of {len(chunk)} video(s)")
             batch = {}
             for item in response.get("items", []):
                 match = _ISO_DURATION.match(item.get("contentDetails", {}).get("duration") or "")
@@ -1797,10 +1818,10 @@ def add_video_to_playlist(youtube, playlist_id: str, video_id: str) -> bool:
 
     for attempt in range(3):
         try:
-            youtube.playlistItems().insert(
+            trace.api_call(youtube.playlistItems().insert(
                 part="snippet",
                 body=body
-            ).execute()
+            ), f"playlistItems.insert {video_id}")
 
             print("  ➕ Added to playlist")
             time.sleep(0.3)  # Give API breathing room

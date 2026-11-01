@@ -21,7 +21,7 @@ from typing import Optional
 
 import requests
 
-from utils.common.debug import slog
+from utils.common.debug import mlog, slog
 from config.constants import (
     MUSICBRAINZ_API_USER_AGENT,
     MUSICBRAINZ_API_TIMEOUT,
@@ -81,9 +81,9 @@ class MBStats:
         ])
 
 
-def _throttle() -> None:
+def _throttle() -> float:
     """Block until at least ``MUSICBRAINZ_API_MIN_INTERVAL`` seconds have passed
-    since the previous request started (process-wide)."""
+    since the previous request started (process-wide); returns the wait."""
     global _last_request_ts
     with _rate_lock:
         wait = MUSICBRAINZ_API_MIN_INTERVAL - (time.monotonic() - _last_request_ts)
@@ -91,6 +91,15 @@ def _throttle() -> None:
             MBStats.total_wait_seconds += wait
             time.sleep(wait)
         _last_request_ts = time.monotonic()
+        return max(wait, 0.0)
+
+
+def _log_request(url: str, params: dict, attempt: int, waited: float, started: float, outcome) -> None:
+    """One line per request (verbosity 1, utils.common.trace's TRACE): the
+    query, how long it waited for the rate limit and took."""
+    query = params.get("query") if isinstance(params, dict) else None
+    mlog(f"[MusicBrainz] {time.monotonic() - started:.2f}s (+{waited:.2f}s waiting) attempt {attempt} "
+         f"-> {outcome}: {url.rsplit('/', 1)[-1]} {query if query is not None else params}", 2)
 
 
 def mb_get(url: str, params: dict, retries: int = 2, backoff: float = 5.0) -> Optional[requests.Response]:
@@ -104,12 +113,13 @@ def mb_get(url: str, params: dict, retries: int = 2, backoff: float = 5.0) -> Op
     """
     net_backoff = 2.0
     for attempt in range(1, retries + 1):
-        _throttle()
+        waited = _throttle()
         started = time.monotonic()
         try:
             resp = _session.get(url, params=params, timeout=MUSICBRAINZ_API_TIMEOUT)
             MBStats.requests_made += 1
             MBStats.total_request_seconds += time.monotonic() - started
+            _log_request(url, params, attempt, waited, started, f"HTTP {resp.status_code}")
             resp.raise_for_status()
             return resp
 
@@ -135,6 +145,7 @@ def mb_get(url: str, params: dict, retries: int = 2, backoff: float = 5.0) -> Op
         except requests.exceptions.RequestException as e:
             MBStats.other_errors += 1
             MBStats.total_request_seconds += time.monotonic() - started
+            _log_request(url, params, attempt, waited, started, type(e).__name__)
             slog(f"[MB] request failed on attempt {attempt}/{retries}: {e}")
             if attempt < retries:
                 MBStats.total_wait_seconds += net_backoff

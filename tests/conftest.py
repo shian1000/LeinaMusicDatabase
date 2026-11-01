@@ -34,6 +34,10 @@ import logging  # noqa: E402
 from utils.common import debug  # noqa: E402
 
 debug.DEBUG_LOG_FILE = _ISOLATED_DIR / "debug.log"
+# Whatever the owner set in Settings -> Debug log, tests log only failures
+# and never print diagnostics; Settings writes this .debug, not the real one
+debug.DEBUG_FILE = _ISOLATED_DIR / ".debug"
+debug.VERBOSITY_LEVEL, debug.DEBUG_ENABLED = 0, False
 
 # check_spelling() answers: saved every 20 and when the process exits
 from utils.common import spellcheck_cache  # noqa: E402

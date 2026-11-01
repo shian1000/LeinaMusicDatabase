@@ -18,7 +18,7 @@ src/utils/{database,discoveries,youtube,ui}/     orchestration for one subsystem
 src/utils/common/                 shared, dependency-free infra:
                                    normalizer, text_utils, debug,
                                    selenium_sessions, musicbrainz_client,
-                                   spellcheck_cache
+                                   spellcheck_cache, trace
   |
   v
 src/config/constants.py, src/settings.py         constants + env config, no inward dependencies

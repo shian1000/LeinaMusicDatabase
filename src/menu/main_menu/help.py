@@ -193,8 +193,9 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
   playlists, and the moods (global ones and each user's own). Accounts are created only here,
   in MusicDatabase.
 Statistics - how often each lookup module (albums, years) found something.
-Settings - lookup modules and their order, matching thresholds, the start-up tasks, and Server:
-  the database folder, backups, this PC's folders and network, indexing the music library, sharing
+Settings - lookup modules and their order, matching thresholds, the start-up tasks, how much goes
+  into debug.log ("Debug log": every step and call of an import from 1 up), and Server: the
+  database folder, backups, this PC's folders and network, indexing the music library, sharing
   with Leina Radio, and the public copy on GitHub.
 Help - this.
 

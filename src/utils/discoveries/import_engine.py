@@ -5,6 +5,7 @@ from utils.database.datatables import Song, Artist
 from utils.database.database_sessions import open_and_set_global_database_sessions
 
 from utils.common.debug import slog, mlog
+from utils.common import trace
 from utils.database.database_getter import ArtistPool, get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
@@ -134,10 +135,12 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
         sim_percent = similarity(new_title_core, remove_brackets(ex_son.title))
 
         if sim_percent > SPELLING_CHECK_THRESHOLD:
-            slog(f"      [LOCAL MATCH] Similar song found, deferring decision to caller", priority=1)
+            mlog(f"[Song] \"{new_title}\" resembles {ex_son.title!r} (id {ex_son.id}, {sim_percent:.2f}) locally",
+                 trace.DETAIL)
             return ex_son
 
-    slog(f"      [NO LOCAL MATCH] No similar songs found in database, trying API spell check", priority=1)
+    mlog(f"[Song] \"{new_artist_name}\" - \"{new_title}\": nothing similar among the artist's "
+         f"{len(existing_artists_songs)} song(s), spell check on MusicBrainz", trace.DETAIL)
 
     # OPTIMIZATION STEP 2: Only call expensive API if no local match found
     cache_key = (new_artist_name, new_title)
@@ -306,9 +309,12 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
     existing_artist, had_local_candidates = _match_artist_locally(new_artist_name)
 
     if existing_artist:
+        mlog(f"[Artist] \"{new_artist_name}\" is {existing_artist.name!r} (id {existing_artist.id}), found locally",
+             trace.DETAIL)
         show(f"Found existing artist match for {styled(existing_artist.name, 'blue')}")
     elif not had_local_candidates:
         # No local candidates at all - try spell check
+        mlog(f"[Artist] \"{new_artist_name}\": no local candidate, spell check on MusicBrainz", trace.DETAIL)
         similar_artists = find_similar_artist(metadata)
 
         if similar_artists:
@@ -321,6 +327,9 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
             })
             artist_cache[normalized_name] = _PENDING_ARTIST
             return None, True
+
+    else:
+        mlog(f"[Artist] \"{new_artist_name}\": local candidates, none similar enough - a new artist", trace.DETAIL)
 
     new_artist_obj = None
     if not existing_artist:
@@ -918,15 +927,26 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
     entry_timings = {}
 
     def process_entry(metadata: dict, idx: int, total: int) -> None:
-        nonlocal added_count
+        calls_before = trace.snapshot()
+        linked_before = len(_LINKED_IN_BATCH)
         entry_start = time.time()
         label = _entry_label(metadata)
         mlog(f"\n[{idx}/{total}] Processing: {label}")
+        outcome = _process_entry(metadata, label)
+        if len(_LINKED_IN_BATCH) > linked_before:
+            outcome += ", YouTube link filled in"
+        # One line per entry (verbosity 1): what it became and what it cost
+        mlog(f"[Entry {idx}/{total}] \"{label}\" -> \"{metadata.get('artist_name')}\" - \"{metadata.get('title')}\": "
+             f"{outcome} - {time.time() - entry_start:.2f}s, {trace.describe(calls_before)}", trace.TRACE)
+
+    def _process_entry(metadata: dict, label: str) -> str:
+        nonlocal added_count
+        entry_start = time.time()
 
         if not metadata.get("artist_name") or not metadata.get("title"):
             skipped_songs.append(label)
             reason_for_skipping.append("Missing artist or title")
-            return
+            return "skipped, no artist or title"
 
         print(f"{metadata['artist_name']} - {metadata['title']}")
 
@@ -941,7 +961,9 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             entry_timings[label] = {'total': time.time() - entry_start, 'artist': artist_time, 'song': 0.0}
             print("##########")
             print()
-            return
+            return f"artist deferred (similar artist, asked later), artist {artist_time:.2f}s"
+        artist_outcome = (f"new artist id {new_artist_obj.id}" if new_artist_obj.id > max_artist_id_before
+                          else f"artist id {new_artist_obj.id}")
 
         song_start = time.time()
         new_song_obj, is_pending = resolve_song(metadata, new_artist_obj, pending_song_conflicts)
@@ -950,31 +972,41 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
 
         if is_pending:
             mlog(f"  └─ Song resolution deferred: similar song needs review")
+            similar = pending_song_conflicts[-1]["existing_song"]
+            song_outcome = f"song deferred (similar to id {similar.id} {similar.title!r}, asked later)"
         elif new_song_obj:
             added_count += 1
             added_songs.append(new_song_obj)
+            song_outcome = f"new song id {new_song_obj.id}"
         else:
             skipped_songs.append(label)
             reason_for_skipping.append("Song already exists")
+            song_outcome = "song exists"
 
         entry_timings[label] = {'total': time.time() - entry_start, 'artist': artist_time, 'song': song_time}
         mlog(f"  ⏱️  TOTAL for this entry: {entry_timings[label]['total']:.3f}s")
 
         print("##########")
         print()
+        return f"{artist_outcome}, {song_outcome} (artist {artist_time:.2f}s, song {song_time:.2f}s)"
 
-    for idx, metadata in enumerate(metadata_list, 1):
-        process_entry(metadata, idx, len(metadata_list))
-        music_session.commit()
+    with trace.phase(f"Import {len(metadata_list)} entry(ies)"):
+        for idx, metadata in enumerate(metadata_list, 1):
+            process_entry(metadata, idx, len(metadata_list))
+            music_session.commit()
 
     if late_entries:
         extra_metadata_list, extra_skipped = late_entries()
         for label, reason in extra_skipped or []:
             skipped_songs.append(label)
             reason_for_skipping.append(reason)
-        for idx, metadata in enumerate(extra_metadata_list or [], 1):
-            process_entry(metadata, idx, len(extra_metadata_list))
-            music_session.commit()
+        with trace.phase(f"Import {len(extra_metadata_list or [])} held-back entry(ies)"):
+            for idx, metadata in enumerate(extra_metadata_list or [], 1):
+                process_entry(metadata, idx, len(extra_metadata_list))
+                music_session.commit()
+
+    # The reviews below wait for answers: their phases include that time
+    reviews = trace.start_phase("Reviews after the import (includes waiting for answers)")
 
     # Now that every entry has been processed, go through the ambiguous-artist
     # matches that were queued along the way and ask about each one in a
@@ -1044,11 +1076,16 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
 
     new_artists = music_session.query(Artist).filter(Artist.id > max_artist_id_before).all()
     if new_artists:
-        review_artist_splits(new_artists)
+        with trace.phase(f"Split joined names of {len(new_artists)} new artist(s)"):
+            review_artist_splits(new_artists)
 
     # A new song whose album title another artist already uses was left
     # without an album row (utils/database/albums.py) - settle those now
-    offer_album_resolution(added_songs)
+    with trace.phase("Albums shared with other artists"):
+        offer_album_resolution(added_songs)
+    reviews.end()
+    mlog(f"[Import] done: {added_count} added, {len(_LINKED_IN_BATCH)} linked to a video, "
+         f"{len(skipped_songs)} skipped; {MBStats.format_summary()}".replace("\n", " |"), trace.TRACE)
 
     # Print timing summary
     review_header("PERFORMANCE SUMMARY")

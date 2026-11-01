@@ -4,6 +4,7 @@ from datetime import datetime
 
 import questionary
 from utils.ui.prompts import ask_yes_no
+from utils.common import debug
 from utils.common.debug import flog
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
@@ -52,6 +53,7 @@ from utils.discoveries.file_matching_settings import (
     save_best_guess_min_score,
     save_closest_auto_accept_score,
 )
+from config.constants import DEBUG_VERBOSITY_LABELS
 from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
 from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
@@ -68,8 +70,35 @@ def settings_menu():
         "Closest songs: auto-accept score": set_closest_auto_accept_score,
         "Reset statistics records": reset_statistics_records,
         "Start-up tasks": startup_tasks_menu,
+        "Debug log": debug_log_menu,
     }
     execute_menu_item("Settings", action_map, exit_label="Back")
+
+
+def debug_log_menu():
+    """How much goes into debug.log (the .debug file's verbosity) and
+    whether it's printed on the screen too. Used right away, no restart."""
+    verbosity, console = debug.read_debug_settings()
+    print(f"What goes into {debug.DEBUG_LOG_FILE} - failures always do. For looking into what an import")
+    print("(e.g. Import data from YouTube playlist) asked and how long it took, 2 is enough; 3 is very large.")
+    print(f"Now: verbosity {verbosity}, {'also' if console else 'not'} on the screen.\n")
+    choices = [questionary.Choice(title=label, value=level) for level, label in DEBUG_VERBOSITY_LABELS.items()]
+    level = questionary.select("Verbosity:", choices=choices, default=choices[verbosity]).ask()
+    if level is None:
+        print("Cancelled, nothing changed.")
+        return
+    screen = False
+    if level > 0:
+        only_file = ask_yes_no("Only into debug.log, not on the screen? (No = printed on the screen too)")
+        if only_file is None:
+            print("Cancelled, nothing changed.")
+            return
+        screen = not only_file
+    debug.save_debug_settings(level, screen)
+    print(f"Debug log verbosity {level}{', also on the screen' if screen else ''} - used from now on.")
+    if level >= 2:
+        print(f"The log is rotated at {debug.LOG_MAX_BYTES // (1024 * 1024)} MB ({debug.LOG_BACKUP_COUNT} older "
+              f"files kept): set it back to 0 when you're done.")
 
 
 _GITHUB_PUBLISH = "__github__"

@@ -1,5 +1,5 @@
 import re
-from utils.common.debug import slog
+from utils.common.debug import mlog, slog
 from difflib import SequenceMatcher
 from settings import settings
 import pyperclip
@@ -128,9 +128,10 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     cached = spellcheck_cache.get(artist, title)
     if cached is not None:
         MBStats.cache_hits += 1
-        slog(f"[SPELLCHECK CACHE HIT] Artist: '{artist}' | Title: '{title}'")
+        mlog(f"[Spell check] cache hit: '{artist}' - '{title}' -> {_spellcheck_outcome(cached)}", 1)
         return _cached_for_input(cached, artist, title, threshold)
     MBStats.cache_misses += 1
+    mlog(f"[Spell check] cache miss, asking MusicBrainz: '{artist}' - '{title}'", 1)
 
     def normalized_similarity(a, b):
         # Use centralized normalization for consistent comparison
@@ -188,6 +189,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
             "found": False,
         }
         spellcheck_cache.put(artist, title, not_found)
+        mlog(f"[Spell check] '{artist}' - '{title}' -> {_spellcheck_outcome(not_found)}", 1)
         return not_found
 
     best = recordings[0]
@@ -230,7 +232,16 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     
     slog(f"[SPELLCHECK END] Corrected: {is_corrected} | Artist sim: {artist_sim:.2f} | Title sim: {title_sim:.2f}")
     spellcheck_cache.put(artist, title, result)
+    mlog(f"[Spell check] '{artist}' - '{title}' -> {_spellcheck_outcome(result)}", 1)
     return result
+
+
+def _spellcheck_outcome(result: dict) -> str:
+    """check_spelling()'s answer in a few words, for the debug log."""
+    if not result.get("found"):
+        return "not on MusicBrainz"
+    return (f"'{result.get('corrected_artist')}' - '{result.get('corrected_title')}' "
+            f"(score {result.get('mb_score')}, {'corrected' if result.get('corrected') else 'unchanged'})")
 
 
 def is_blacklisted_album(title: str, artist: str | None = None) -> bool:

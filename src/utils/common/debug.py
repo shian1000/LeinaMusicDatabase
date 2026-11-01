@@ -1,7 +1,8 @@
 """Debug utilities for logging and exception handling.
 
 This module provides debugging functions that can log to console and/or file.
-Debug output can be controlled via a `.debug` file in the project root.
+Debug output is controlled by a `.debug` file in the project root, which
+Settings -> "Debug log" writes (read_debug_settings() / save_debug_settings()).
 """
 
 from typing import Any, Optional
@@ -9,6 +10,7 @@ import inspect
 from pathlib import Path
 import linecache
 import ast
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -17,18 +19,56 @@ from types import TracebackType
 from config.constants import PROJECT_ROOT
 
 
-DEBUG_ENABLED: bool = (PROJECT_ROOT / ".debug").exists()
+# "verbosity = N" (0-3) and "console = on|off"; written by Settings -> Debug log
+DEBUG_FILE: Path = PROJECT_ROOT / ".debug"
+MAX_VERBOSITY: int = 3
 
-# slog()/mlog() pass a message on when priority >= 3 - VERBOSITY_LEVEL: with
-# verbosity 0 (no .debug, or one without a "verbosity = N" line) only
-# priority 3 gets through, with verbosity 3 everything does
-VERBOSITY_LEVEL: int = 0
-if DEBUG_ENABLED:
-    import re
-    _debug_text = (PROJECT_ROOT / ".debug").read_text()
-    _match = re.search(r"^\s*verbosity\s*=\s*(\d+)", _debug_text, re.MULTILINE)
-    if _match:
-        VERBOSITY_LEVEL = int(_match.group(1))
+
+def read_debug_settings(path: Optional[Path] = None) -> tuple[int, bool]:
+    """(verbosity, console) from the .debug file: (0, False) without one. A
+    file without a "console" line prints to the console - what a bare .debug
+    always did."""
+    path = path or DEBUG_FILE
+    try:
+        text = path.read_text()
+    except OSError:
+        return 0, False
+    verbosity = re.search(r"^\s*verbosity\s*=\s*(\d+)", text, re.MULTILINE)
+    console = re.search(r"^\s*console\s*=\s*(\w+)", text, re.MULTILINE)
+    level = min(int(verbosity.group(1)), MAX_VERBOSITY) if verbosity else 0
+    return level, not (console and console.group(1).lower() in ("off", "no", "false", "0"))
+
+
+# DEBUG_ENABLED: diagnostics are printed on the console too. slog()/mlog()
+# pass a message on when priority >= 3 - VERBOSITY_LEVEL: with verbosity 0
+# (no .debug, or one without a "verbosity = N" line) only priority 3 gets
+# through, with verbosity 3 everything does
+VERBOSITY_LEVEL, DEBUG_ENABLED = read_debug_settings()
+
+
+def save_debug_settings(verbosity: int, console: bool, path: Optional[Path] = None) -> None:
+    """Write the .debug file (removed for verbosity 0 without the console)
+    and use the settings in this process right away; another process (the
+    inbox timer) reads them when it starts."""
+    global VERBOSITY_LEVEL, DEBUG_ENABLED
+    if not 0 <= verbosity <= MAX_VERBOSITY:
+        raise ValueError(f"verbosity must be 0-{MAX_VERBOSITY}")
+    path = path or DEBUG_FILE
+    if verbosity == 0 and not console:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(f"verbosity = {verbosity}\nconsole = {'on' if console else 'off'}\n")
+    VERBOSITY_LEVEL, DEBUG_ENABLED = verbosity, console
+
+
+def debug_on(priority: int) -> bool:
+    """Would slog()/mlog() at `priority` log anything? For a message that
+    costs something to build."""
+    return priority >= 3 - VERBOSITY_LEVEL
+
+
+def _stamp() -> str:
+    return f"{datetime.now():%Y-%m-%d %H:%M:%S.%f}"[:-3]
 
 DEBUG_TO_FILE_ENABLED: bool = True
 DEBUG_LOG_FILE: Path = PROJECT_ROOT / "debug.log"
@@ -121,7 +161,7 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     Smart logging function that automatically extracts the variable name
     from the calling code and includes file/line information. A message
     that passes the verbosity check goes to debug.log, and to the console
-    too when a .debug file exists.
+    too when .debug says so (DEBUG_ENABLED).
     
     Args:
         var: Variable to log (can be any type)
@@ -138,8 +178,7 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     if not DEBUG_ENABLED and not DEBUG_TO_FILE_ENABLED:
         return
 
-    threshold = 3 - VERBOSITY_LEVEL
-    if not priority >= threshold:
+    if not debug_on(priority):
         return
 
     file_info: str = "unknown:0"
@@ -172,7 +211,7 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     if name is None:
         name = "<unknown>"
 
-    message = f"***Debug*** [{file_info}] {name} ({type(var).__name__}): {repr(var)}"
+    message = f"***Debug*** [{_stamp()}] [{file_info}] {name} ({type(var).__name__}): {repr(var)}"
 
     if DEBUG_ENABLED:
         print(message)
@@ -185,8 +224,10 @@ def mlog(message: str, priority: int = 0) -> None:
     """
     Log a simple message string.
     
-    Logs a plain text message to the console only (never to debug.log), and
-    only when a .debug file exists.
+    A message that passes the verbosity check goes to debug.log with a
+    timestamp, and to the console too when .debug says so (DEBUG_ENABLED).
+    The import's trace (utils.common.trace: phases, every yt-dlp / YouTube
+    API / MusicBrainz call) goes through here.
     
     Args:
         message: Message text to log
@@ -196,14 +237,13 @@ def mlog(message: str, priority: int = 0) -> None:
     Example:
         >>> mlog("Application started")  # Logs if debug enabled
     """
-    if not DEBUG_ENABLED:
+    if not debug_on(priority):
         return
-    
-    threshold = 3 - VERBOSITY_LEVEL
-    if not priority >= threshold:
-        return
-    
-    print(f"***Debug*** {message}")
+    line = f"***Debug*** [{_stamp()}] {message.strip(chr(10))}"
+    if DEBUG_ENABLED:
+        print(line)
+    if DEBUG_TO_FILE_ENABLED:
+        _write_to_log(line)
 
 
 def flog(message: str) -> None:
@@ -213,7 +253,7 @@ def flog(message: str) -> None:
     caught exception the app carries on after).
 
     Unlike slog()/mlog() this ignores verbosity: it's always appended to
-    debug.log with a timestamp (and printed only when a .debug file exists),
+    debug.log with a timestamp (and printed only when .debug says so),
     so an intermittent failure - a page that didn't load in time, a yt-dlp
     error - can still be diagnosed later. slog() is for looking at values
     while debugging, mlog() for progress notes; neither is for the user."""

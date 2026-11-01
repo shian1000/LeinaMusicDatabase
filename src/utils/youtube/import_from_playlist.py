@@ -26,7 +26,8 @@ from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
 from utils.common.text_utils import strip_trailing_junk_suffix
 from config.constants import YTDLP_PLAYLIST_LANG
-from utils.common.debug import flog
+from utils.common.debug import flog, mlog
+from utils.common import trace
 
 # What YouTube reports as the title for a playlist entry that's no longer
 # reachable (removed by the uploader, or made private) - these carry no
@@ -497,12 +498,12 @@ def _fetch_playlist_items_api(playlist_id: str) -> list:
     page_token = None
 
     while True:
-        response = youtube.playlistItems().list(
+        response = trace.api_call(youtube.playlistItems().list(
             part="snippet",
             playlistId=playlist_id,
             maxResults=50,
             pageToken=page_token,
-        ).execute()
+        ), f"playlistItems.list {playlist_id} page {page_token or 1}")
 
         for entry in response.get("items", []):
             snippet = entry.get("snippet", {})
@@ -768,6 +769,7 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
     build_metadata_from_item()'s normal channel/title-based parsing.
     """
     title = item.get("title") or ""
+    mlog(f"[Special channel] {item.get('channel')!r}: looking up \"{title}\"", trace.DETAIL)
     found = _find_official_match_via_search(title)
     if found:
         show(f"{styled(item.get('channel'), 'green')} special case: matched official release {styled(f'{found[0]} - {found[1]}', 'blue')} for \"{styled(title, 'yellow')}\"")
@@ -871,6 +873,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
 
     if artist_title_override:
         artist, song_title = artist_title_override
+        how = "special channel"
     else:
         parse_title = strip_pipe_suffix(title)
         parse_title = strip_junk_brackets_anywhere(parse_title)
@@ -882,24 +885,31 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
             # lookup / _review_missing_artists() to fill in.
             artist = None
             song_title = parse_title.strip()
+            how = "generic Topic channel, artist from the description"
         elif channel and _is_topic_channel(channel):
             artist = re.sub(r"\s*-\s*topic$", "", channel, flags=re.IGNORECASE).strip()
             song_title = parse_title.strip()
+            how = "Topic channel"
         elif quoted_credit := split_quoted_title_feat_credit(parse_title):
             artist, song_title = quoted_credit
+            how = "quoted title with ft. credit"
         else:
             artist, song_title = split_artist_title(parse_title)
+            how = "split Artist - Title"
             if (channel.strip() and artist and is_junk_only_title(song_title)
                     and name_key(artist) != name_key(channel)):
                 # "Glow - Lyric Video": the title on the left, the artist only the channel
                 artist, song_title = channel.strip(), artist
+                how = "junk-only right side, channel as artist"
             elif not artist or not song_title:
                 corner_credit = split_corner_bracket_credit(parse_title)
                 if corner_credit:
                     artist, song_title = corner_credit
+                    how = "Artist「Title」"
                 elif channel:
                     artist = channel.strip()
                     song_title = parse_title.strip()
+                    how = "no separator, channel as artist"
 
     if song_title and artist:
         song_title = strip_artist_from_title(song_title, artist)
@@ -917,6 +927,8 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     if artist:
         artist = clean_file_name_title(artist)
 
+    mlog(f"[Parse] {item.get('video_id')} \"{title}\" (channel \"{channel}\", {item.get('duration')}s) -> "
+         f"\"{artist}\" - \"{song_title}\" [{how}]", trace.TRACE)
     return {
         "artist_name": artist,
         "title": song_title,
@@ -966,6 +978,8 @@ def _find_possible_artist_title_swaps(metadata_list: list) -> list:
             continue
         matched_artist = find_matching_artist(title)
         if matched_artist:
+            mlog(f"[Swap?] \"{artist_name}\" - \"{title}\": the title is the artist {matched_artist.name!r}, "
+                 f"asked after the import", trace.DETAIL)
             flagged.append((metadata, matched_artist))
     return flagged
 
@@ -1052,6 +1066,7 @@ def _resolve_artist_synonyms(metadata_list: list) -> None:
             continue
         canonical_name = synonym_to_canonical.get(artist_name.strip().lower())
         if canonical_name and canonical_name != artist_name:
+            mlog(f"[Synonym] \"{artist_name}\" -> \"{canonical_name}\"", trace.DETAIL)
             show(f"Artist synonym match: {styled(artist_name, 'yellow')} is known as {styled(canonical_name, 'blue')}")
             metadata["artist_name"] = canonical_name
 
@@ -1102,14 +1117,19 @@ def playlist_item_metadata(item: dict) -> dict:
 
 
 def import_data_from_youtube_playlist(playlist_input: str) -> list:
-    items = get_playlist_items(playlist_input)
+    # Each step's time and calls go to debug.log (Settings -> Debug log, verbosity 1+)
+    with trace.phase("Fetch the playlist"):
+        items = get_playlist_items(playlist_input)
+    mlog(f"[Import] YouTube playlist {playlist_input!r}: {len(items)} video(s)", trace.TRACE)
     if not items:
         print("No videos found in this playlist.")
         return []
 
-    metadata_list = [playlist_item_metadata(item) for item in items]
+    with trace.phase(f"Read artist and title of {len(items)} video(s)"):
+        metadata_list = [playlist_item_metadata(item) for item in items]
 
-    _resolve_artist_synonyms(metadata_list)
+    with trace.phase("Artist synonyms"):
+        _resolve_artist_synonyms(metadata_list)
 
     # Entries that need the user (no artist at all, or a possible
     # artist/title swap) are held back and only asked about once
@@ -1117,16 +1137,20 @@ def import_data_from_youtube_playlist(playlist_input: str) -> list:
     # so the user isn't kept waiting for the import to start.
     missing_artist = [m for m in metadata_list if not (m.get("artist_name") or "").strip()]
     rest = [m for m in metadata_list if (m.get("artist_name") or "").strip()]
-    flagged = _find_possible_artist_title_swaps(rest)
+    with trace.phase(f"Look for swapped artist/title in {len(rest)} entry(ies)"):
+        flagged = _find_possible_artist_title_swaps(rest)
     flagged_ids = {id(metadata) for metadata, _ in flagged}
     rest = [m for m in rest if id(m) not in flagged_ids]
+    mlog(f"[Import] {len(rest)} entry(ies) imported first, held back: {len(missing_artist)} without an artist, "
+         f"{len(flagged)} possibly swapped", trace.TRACE)
 
     def review_held_back_entries() -> tuple:
-        filled_in, missing_skipped = _review_missing_artists(missing_artist)
-        _resolve_artist_synonyms(filled_in)
-        swapped, swap_skipped = _review_artist_title_swaps(flagged)
-        # A swapped title, or an artist typed by hand, can be a synonym too
-        _resolve_artist_synonyms(swapped)
+        with trace.phase("Ask about held-back entries (includes waiting for answers)"):
+            filled_in, missing_skipped = _review_missing_artists(missing_artist)
+            _resolve_artist_synonyms(filled_in)
+            swapped, swap_skipped = _review_artist_title_swaps(flagged)
+            # A swapped title, or an artist typed by hand, can be a synonym too
+            _resolve_artist_synonyms(swapped)
         return filled_in + swapped, missing_skipped + swap_skipped
 
     return run_import_batch(rest, late_entries=review_held_back_entries)

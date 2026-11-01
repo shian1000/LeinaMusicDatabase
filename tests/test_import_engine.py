@@ -6,7 +6,8 @@ for a song that had none, entries without an artist or title skipped, one new
 artist per name in a batch, similar songs and MusicBrainz-corrected artists
 asked about only after the whole batch (once per artist name), late entries,
 full albums kept apart from tracks, and only the batch's new artists offered
-for splitting. MusicBrainz, the split and album reviews are faked."""
+for splitting, and the trace in debug.log (one [Entry] line per entry, the
+phases). MusicBrainz, the split and album reviews are faked."""
 
 import sys
 from pathlib import Path
@@ -346,3 +347,33 @@ def test_the_summary_counts_filled_in_links_and_names_an_artist_once(env, capsys
     assert "Done! Added 0, updated 1 (a YouTube link filled in)." in out
     assert "Skipped 2 songs:" in out
     assert out.count("Found existing artist") == 1
+
+
+# ==================== the trace in debug.log (Settings -> Debug log) ====================
+
+def test_each_entry_and_phase_is_logged_from_verbosity_1(env, tmp_path, monkeypatch):
+    from utils.common import debug
+
+    log = tmp_path / "debug.log"
+    monkeypatch.setattr(debug, "DEBUG_LOG_FILE", log)
+    monkeypatch.setattr(debug, "VERBOSITY_LEVEL", 1)
+    monkeypatch.setattr(debug, "DEBUG_ENABLED", False)
+    rammstein = _artist(env["session"], "Rammstein", "Engel")
+
+    ie.run_import_batch([_entry("Rammstein", "Engel", youtube_video_id="x2rQzv8OWEY", _label="Engel (video)"),
+                         _entry("Rammstein", "Sonne"),
+                         _entry("", "No artist")])
+
+    lines = log.read_text().splitlines()
+    entries = [line.split("] ", 1)[1] for line in lines if "[Entry " in line]
+    assert entries[0].startswith(f'[Entry 1/3] "Engel (video)" -> "Rammstein" - "Engel": artist id {rammstein.id}, '
+                                 "song exists")
+    assert ", YouTube link filled in - " in entries[0] and "SQL " in entries[0]
+    sonne = env["session"].query(Song).filter(Song.title == "Sonne").one()
+    assert f"artist id {rammstein.id}, new song id {sonne.id}" in entries[1]
+    assert "skipped, no artist or title" in entries[2]
+    phases = [line.split("[Phase] ", 1)[1] for line in lines if "[Phase] " in line]
+    assert "Import 3 entry(ies) - start" in phases
+    assert any(p.startswith("Reviews after the import (includes waiting for answers) - ") for p in phases)
+    assert any("[Import] done: 1 added, 1 linked to a video, 2 skipped; MusicBrainz request stats:" in line
+               for line in lines)

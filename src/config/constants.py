@@ -440,6 +440,17 @@ MUSICBRAINZ_API_MIN_INTERVAL = 1.1
 # It roughly doubles the request count for every miss; set to False to trade a
 # little recall for speed.
 MUSICBRAINZ_SPELLCHECK_USE_FALLBACK = True
+# Settings -> "Debug log": what each verbosity adds to debug.log
+# (utils.common.debug / utils.common.trace; the priorities passed to
+# slog() / mlog() are 3 - the verbosity they first show at)
+DEBUG_VERBOSITY_LABELS = {
+    0: "0 - only failures and crashes (default)",
+    1: "1 - + each step of an import, every yt-dlp / YouTube API / MusicBrainz call with its time, one line per imported song",
+    2: "2 - + why: cache hits, matches found, deferred questions, slow database queries",
+    3: "3 - everything, also every value the code looks at (large)",
+}
+# A SQL statement at least this slow (seconds) is logged from verbosity 2
+DEBUG_SLOW_SQL_SECONDS = 0.05
 # Disk-backed cache of check_spelling() results, path relative to the project
 # root. Delete this file to force fresh lookups of everything.
 SPELLCHECK_CACHE_FILE = PROJECT_ROOT / "data/spellcheck_cache.json"
