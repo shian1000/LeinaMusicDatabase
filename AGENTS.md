@@ -771,7 +771,8 @@ non-trivial work in that area.
   (cyan) / title (yellow) labels that way, the featured artists a title credits in the artist
   colour (`title_tokens()`, names from `artist_credits.feat_credits()`, "(feat. " / ")" plain),
   and turns them into ANSI (`as_ansi()`) or rich markup (`as_rich_markup()`) only for `print()` -
-  don't hand-write the colours in markup.
+  don't hand-write the colours in markup. A `Choice(..., value=None)` returns its *title*, not
+  None (questionary falls back to the title): a "Back" entry needs a sentinel value of its own.
 - Output: a message for the user goes through `utils/common/output.py` - `say()` (plain, taken
   literally), `ok()` / `warn()` / `error()` (green / yellow / red), `show()` for a line of rich
   markup with every name in it escaped (`styled(text, style)` or `escape()`; an unescaped

@@ -12,6 +12,7 @@ from utils.ui.prompts import ask_yes_no
 from utils.common.output import error, warn
 
 _TYPE_PATH = "Type a path"
+_BACK = "Back"  # questionary takes a Choice's title as its value when value is None
 _RECENT_LIMIT = 10
 
 
@@ -28,8 +29,10 @@ def _pick_package() -> Path | None:
     recent = _recent_zips()
     if recent:
         choices = [questionary.Choice(title=p.name, value=p) for p in recent]
-        choices += [questionary.Choice(title=_TYPE_PATH, value=_TYPE_PATH), questionary.Choice(title="Back", value=None)]
+        choices += [questionary.Choice(title=_TYPE_PATH, value=_TYPE_PATH), questionary.Choice(title=_BACK, value=_BACK)]
         picked = questionary.select("Request package (newest in Downloads first):", choices=choices).ask()
+        if picked is None or picked == _BACK:
+            return None
         if picked != _TYPE_PATH:
             return picked
     typed = questionary.path("Path of the .zip:", default=str(Path.home()) + "/").ask()
