@@ -171,6 +171,14 @@ _SELECTOR_STOPWORDS = {
     for word in phrase.split()
 } | {"remix", "mix", "edit", "extended", "radio", "club", "vip", "feat", "ft", "featuring", "prod", "the", "and", "of", "with", "by"}
 SELECTOR_MATCH_BONUS = 3
+# Words naming which cut of a song a bracket asks for. A DB title asking for
+# one ("(DJ Koze radio edit)") against a candidate naming another ("(DJ Koze's
+# Disco Edit)") is a different recording even with the same remixer, so the
+# candidate is scored like an alternate version (see _version_conflict()).
+# Real case: Låpsley - Operator, the disco edit (official-release metadata,
+# selector bonus for "Koze") beat the radio edit on those bonuses alone.
+VERSION_KIND_WORDS = frozenset({"radio", "disco", "club", "extended", "original", "vip", "dub", "instrumental",
+                                "acoustic", "unplugged", "short", "dance", "piano"})
 # Quality bonus per featured artist (additional_song_artists role 'feat')
 # whose name shows up in a candidate's title/tags/channel. Only a tiebreak,
 # never required: uploads routinely drop the "(feat. X)" credit entirely.
@@ -499,6 +507,20 @@ def _selector_tokens(hint: str) -> set[str]:
     """
     words = re.findall(r"\w+", hint.lower())
     return {w for w in words if w not in _SELECTOR_STOPWORDS and len(w) > 2}
+
+
+def _version_conflict(title: str, artist: str, candidate_title: str) -> bool:
+    """Whether the DB title's brackets name a kind of version
+    (VERSION_KIND_WORDS) that the candidate lacks while naming another one.
+    Words of the bare title and of the artist don't count on the candidate's
+    side: "Radio Ga Ga (Extended)" isn't contradicted by "Radio Ga Ga"."""
+    wanted = {w for hint in _bracket_selector_hints(title)
+              for w in re.findall(r"\w+", hint.lower()) if w in VERSION_KIND_WORDS}
+    if not wanted:
+        return False
+    own = set(re.findall(r"\w+", f"{remove_brackets(title)} {artist}".lower()))
+    named = {w for w in re.findall(r"\w+", candidate_title.lower()) if w in VERSION_KIND_WORDS} - own
+    return bool(named - wanted) and not wanted <= named
 
 
 def _relevance_text(text: str) -> str:
@@ -1081,6 +1103,11 @@ def score_result(
         return [kw for kw in hits if not any(kw != other and kw in other for other in hits)]
 
     lq_hits = _non_overlapping_hits(LQ_KEYWORDS, title_lower)
+    # Another cut than the one asked for counts like an LQ hit: no HQ /
+    # official bonus, -1, and no selector bonus for the shared remixer
+    other_version = _version_conflict(title, artist, candidate_title)
+    if other_version:
+        lq_hits.append("other version")
     # STRONG_LQ_KEYWORDS deliberately still scans tags too — that's the
     # entire reason it exists (OBERSCHLESIEN's live festival tag ("na żywo")
     # wasn't in the title at all), and "live"/"na żywo"/"woodstock" are
@@ -1118,7 +1145,7 @@ def score_result(
     if _is_official_release(channel, track) and not lq_hits and not strong_lq_hits:
         quality += 2
     quality += HIGH_TRUST_BONUS * len([kw for kw in HIGH_TRUST_KEYWORDS if _keyword_present(kw, title_lower)])
-    for hint in _bracket_selector_hints(title):
+    for hint in [] if other_version else _bracket_selector_hints(title):
         tokens = _selector_tokens(hint)
         if tokens and all(re.search(r"\b" + re.escape(tok) + r"\b", keyword_text) for tok in tokens):
             quality += SELECTOR_MATCH_BONUS

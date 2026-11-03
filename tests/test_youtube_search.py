@@ -714,6 +714,31 @@ def test_search_video_ytdlp_prefers_original_mix_over_official_club_edit(monkeyp
     assert video_id == "Dnum8gOlrME"
 
 
+def test_search_video_ytdlp_prefers_asked_radio_edit_over_official_disco_edit(monkeypatch):
+    # Real case: "Låpsley - Operator (DJ Koze radio edit)". Both uploads name
+    # DJ Koze (selector bonus for each), but the "Disco Edit" carries
+    # official-release `track` metadata, so it won 7.46 to 6.74 although it's
+    # another cut. A bracket asking for one version kind against a candidate
+    # naming another counts as an alternate version (_version_conflict()).
+    title = "Operator (DJ Koze radio edit)"
+    radio = {"id": "PDsVVkIqbWE", "title": "Låpsley - Operator (DJ Koze Radio Edit)", "channel": "Låpsley",
+             "view_count": 5437150}
+    disco = {"id": "lsrTyxNbJ8Q", "title": "Operator (DJ Koze's Disco Edit)", "channel": "Låpsley",
+             "view_count": 286539, "track": "Operator (DJ Koze's Disco Edit)"}
+    _mock_ytdlp_search(monkeypatch, [disco, radio])
+
+    assert m.search_video_ytdlp("Låpsley", title) == "PDsVVkIqbWE"
+
+
+def test_version_conflict_ignores_kind_words_of_the_title_and_unlabelled_uploads():
+    assert m._version_conflict("Operator (DJ Koze radio edit)", "Låpsley", "Operator (DJ Koze's Disco Edit)")
+    assert not m._version_conflict("Operator (DJ Koze radio edit)", "Låpsley", "Operator (DJ Koze Radio Edit)")
+    assert not m._version_conflict("Operator (DJ Koze radio edit)", "Låpsley", "Låpsley - Operator")
+    # "Radio" belongs to the title here, not to a version the upload names
+    assert not m._version_conflict("Radio Ga Ga (Extended)", "Queen", "Queen - Radio Ga Ga")
+    assert not m._version_conflict("Operator", "Låpsley", "Operator (DJ Koze's Disco Edit)")
+
+
 def test_search_video_ytdlp_prefers_official_audio_over_when_in_rome_concert_film(monkeypatch):
     # Real case: "Genesis - Firth Of Fifth". Genesis' "When in Rome 2007" is a
     # specific, named live concert film/DVD whose own title carries no "live"

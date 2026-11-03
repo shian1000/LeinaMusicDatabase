@@ -743,6 +743,16 @@ reduces to the actual names (`{"lorin", "rymbu", "denis", "rynda"}`). Also note 
 those *words*, not the whole bracket phrase verbatim — the real matching candidate's title says
 just "Remix", not "Remix Extended", so a naive whole-phrase containment check would have missed it.
 
+The flip side of dropping version words from the tokens: two cuts by the same remixer tie on the
+selector. `"Låpsley - Operator (DJ Koze radio edit)"` reduced to `{"koze"}`, so the radio edit and
+`"Operator (DJ Koze's Disco Edit)"` both got `+3`, and the disco edit's official-release `track`
+metadata (`+2`) won it. `_version_conflict()` covers that: when the DB title's brackets name a
+version kind (`VERSION_KIND_WORDS`: radio, disco, club, extended, original, ...) and the candidate
+names another one without the asked one, it counts as an LQ hit (`-1`, no HQ / official bonus) and
+gets no selector bonus. Kind words of the bare title or the artist don't count on the candidate's
+side ("Radio Ga Ga (Extended)" vs "Radio Ga Ga"), and an upload naming no kind at all isn't
+punished — uploads often leave the version out.
+
 ## `"official"` is a trust signal independent of the audio/video format preference
 
 `VIDEO_KEYWORDS`' format penalty and "is this genuinely the official upload" used to be conflated —
