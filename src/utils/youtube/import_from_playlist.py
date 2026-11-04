@@ -670,22 +670,28 @@ def _find_possible_artist_title_swaps(metadata_list: list) -> list:
     plausible, so it's not worth asking the user about a swap.
 
     Pure lookup - does NOT ask the user or modify metadata_list. Returns a
-    list of (metadata, matched_artist) pairs for the caller to act on.
+    list of (metadata, matched_artist) pairs for the caller to act on. The
+    folder + YouTube playlist asks the same of its videos without a file
+    (menu.main_menu.users._review_unpaired_videos()).
     """
     flagged = []
     for metadata in map(as_entry, metadata_list):
-        title = metadata.title
-        if not title:
-            continue
-        artist_name = metadata.artist
-        if artist_name and find_matching_artist(artist_name):
-            continue
-        matched_artist = find_matching_artist(title)
+        matched_artist = possible_swap_artist(metadata)
         if matched_artist:
-            mlog(f"[Swap?] \"{artist_name}\" - \"{title}\": the title is the artist {matched_artist.name!r}, "
-                 f"asked after the import", trace.DETAIL)
+            mlog(f"[Swap?] \"{metadata.artist}\" - \"{metadata.title}\": the title is the artist "
+                 f"{matched_artist.name!r}, asked after the import", trace.DETAIL)
             flagged.append((metadata, matched_artist))
     return flagged
+
+
+def possible_swap_artist(metadata: dict, session=None):
+    """The existing artist `metadata`'s parsed title names, when its parsed
+    artist isn't one (see _find_possible_artist_title_swaps()), else None.
+    Looks in `session`, default the global music session."""
+    metadata = as_entry(metadata)
+    if not metadata.title or (metadata.artist and find_matching_artist(metadata.artist, session)):
+        return None
+    return find_matching_artist(metadata.title, session)
 
 
 def _review_artist_title_swaps(flagged: list) -> tuple:

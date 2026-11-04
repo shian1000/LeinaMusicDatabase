@@ -928,6 +928,46 @@ def test_folder_compared_with_youtube_playlist(users_env, tmp_path, music_sessio
     ]
 
 
+def test_video_without_a_file_offered_swapping_artist_and_title(users_env, tmp_path, music_session, monkeypatch, capsys):
+    # Real case: "RED HANDS - Walk off the Earth", the artist known, read backwards
+    items = [
+        {"video_id": "vid1", "title": "Karma", "channel": "Hey - Topic"},
+        {"video_id": "ytKnown", "title": "Pay Your Respect - Afina", "channel": "Some channel"},  # its song exists
+        {"video_id": "ytNew", "title": "Red Hands - Afina", "channel": "Some channel"},           # it doesn't
+        {"video_id": "ytKept", "title": "Blue Hands - Afina", "channel": "Some channel"},         # kept as read
+        {"video_id": "ytPlain", "title": "Afina - Green Hands", "channel": "Some channel"},       # read right
+        {"video_id": "ytOther", "title": "Nobody Known - Yellow Hands", "channel": "Some channel"},  # no artist known
+    ]
+    offered = {}
+
+    def select(message, choices):
+        menu = __import__("importlib").import_module("menu.main_menu.users")
+        if message.startswith("No file is this video"):
+            video = len(offered)
+            offered[video] = menu._VIDEO_SWAP in choices
+            # The cursor stays on adding it as read: Enter never swaps
+            assert choices[0] == menu._VIDEO_ADD
+            return menu._VIDEO_SWAP if video < 2 else menu._VIDEO_ADD
+        if message.startswith("What should happen"):
+            return menu._UNMATCHED_KEEP
+        raise AssertionError(message)
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
+    monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    assert offered == {0: True, 1: True, 2: True, 3: False, 4: False}
+    assert capsys.readouterr().out.count("The title looks swapped with the artist: Afina is in the database.") == 3
+    pay = music_session.query(Song).filter(Song.title == "Pay Your Respect").one().id
+    assert [(title, song_id, video) for title, song_id, video, _ in _saved_tracks("ania")][1:] == [
+        ("Pay Your Respect", pay, "ytKnown"),
+        ("Red Hands", None, "ytNew"),
+        ("Afina", None, "ytKept"),
+        ("Green Hands", None, "ytPlain"),
+        ("Yellow Hands", None, "ytOther"),
+    ]
+
+
 def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, tmp_path, music_session, monkeypatch):
     from utils.discoveries import folder_youtube_playlist as fyp
     from utils.discoveries.import_engine import LocalSongMatcher

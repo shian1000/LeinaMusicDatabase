@@ -171,6 +171,14 @@ def search_entries(entries: list, query: str) -> list:
     return [e for e in entries if all(w in normalize(f"{e.label} {e.channel or ''}") for w in words)]
 
 
+def swap_artist_and_title(matcher: LocalSongMatcher, entry: YouTubeEntry) -> None:
+    """The user said `entry`'s video was read backwards ("RED HANDS - Walk
+    off the Earth"): read it the other way, and match its song again."""
+    entry.metadata = entry.metadata.copy_with(artist=entry.metadata.title, title=entry.metadata.artist,
+                                              unsplit_title=None)
+    entry.song = matcher.match_exact(entry.metadata)
+
+
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,
                        min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1,
                        auto_accept_score: float = 1.1) -> FolderTrack:

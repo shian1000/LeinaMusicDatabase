@@ -38,6 +38,7 @@ from utils.discoveries.folder_youtube_playlist import (
     rank_entries_for,
     search_entries,
     set_tracks,
+    swap_artist_and_title,
     video_links,
     youtube_entries,
     youtube_only_track,
@@ -56,7 +57,7 @@ from utils.ui.file_batch import apply_to_files, report_failures
 from utils.ui.menu_utils import clear_screen, execute_menu_item, open_file_browser_terminal, search_and_pick_db_object
 from utils.ui.user_picker import pick_user, show_error, usernames_or_explain
 from utils.ui.video_link_review import review_video_links
-from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items
+from utils.youtube.import_from_playlist import extract_playlist_id, get_playlist_items, possible_swap_artist
 
 
 
@@ -398,6 +399,7 @@ _PAIR_SEARCH = "Search the videos by title..."
 _PAIR_LEAVE_OUT = "Leave it out of the playlist"
 _PAIR_STOP = "Stop (don't save the playlist)"
 _VIDEO_ADD = "Add it to the playlist without a file"
+_VIDEO_SWAP = "Swap title with artist and add it without a file"
 _VIDEO_LEAVE_OUT = "Leave it out of the playlist"
 
 
@@ -454,21 +456,31 @@ def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | Non
     return pairs, left_out
 
 
-def _review_unpaired_videos(entries: list) -> list | None:
-    """Each video no file was paired with: add it as a track of its own or
-    leave it out. Returns the videos to add, None on Stop."""
+def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: list) -> list | None:
+    """Each video no file was paired with: add it as a track of its own,
+    read the other way round when its title is a known artist and its artist
+    isn't (offered, never done unasked), or leave it out. Returns the videos
+    to add, None on Stop."""
     added = []
     for i, entry in enumerate(entries, 1):
         print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
         print(f"  {_video_url(entry.video_id)}")
         print(f"  Read as: {colored_song(entry.metadata.get('artist_name'), entry.metadata.get('title'))}")
+        swap_artist = possible_swap_artist(entry.metadata, music_session) if entry.song is None else None
+        if swap_artist is not None:
+            print(f"  The title looks swapped with the artist: {swap_artist.name} is in the database.")
         choice = questionary.select("No file is this video - what should happen with it?",
-                                    choices=[_VIDEO_ADD, _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
+                                    choices=[_VIDEO_ADD, *([_VIDEO_SWAP] if swap_artist is not None else []),
+                                             _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
         if choice is None or choice == _PAIR_STOP:
             return None
         if choice == _VIDEO_ADD:
             added.append(entry)
             print("  -> added without a file")
+        elif choice == _VIDEO_SWAP:
+            swap_artist_and_title(matcher, entry)
+            added.append(entry)
+            print(f"  -> added without a file as {colored_song(entry.metadata.artist, entry.metadata.title)}")
         else:
             print("  -> left out of the playlist")
     return added
@@ -536,7 +548,7 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     added = []
     if unpaired_entries:
         print(f"\n{len(unpaired_entries)} video(s) of the YouTube playlist without a file:")
-        added = _review_unpaired_videos(unpaired_entries)
+        added = _review_unpaired_videos(music_session, matcher, unpaired_entries)
         if added is None:
             print("Playlist not saved.")
             return

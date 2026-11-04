@@ -360,7 +360,7 @@ def test_held_back_entries_are_only_asked_about_after_the_main_batch(monkeypatch
     monkeypatch.setattr(m, "get_playlist_items", lambda _: items)
     monkeypatch.setattr(m, "get_artists_from_db_session", lambda: [])
     monkeypatch.setattr(m, "_fetch_video_description", lambda video_id: None)
-    monkeypatch.setattr(m, "find_matching_artist", lambda name: _fake_artist("Genesis") if name == "Genesis" else None)
+    monkeypatch.setattr(m, "find_matching_artist", lambda name, session=None: _fake_artist("Genesis") if name == "Genesis" else None)
 
     events = []
     monkeypatch.setattr(m, "_review_missing_artists", lambda entries: (events.append(("missing", entries)) or ([], [])))

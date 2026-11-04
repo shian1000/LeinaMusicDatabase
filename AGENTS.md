@@ -413,7 +413,9 @@ non-trivial work in that area.
   by resembling names not): a song without a link gets the video as its own, one with a link (or
   "N/A") as an additional video (`utils/database/additional_videos.py`, below). A saved playlist's
   "Save its YouTube videos on the songs" offers the same, none ticked. A video
-  without a file can be a track with `file` None. Deleted / private videos and those giving neither
+  without a file can be a track with `file` None; one whose title is a known artist and whose artist
+  is not gets the import's swap check (`possible_swap_artist()`) and a choice to read it the other way
+  round, never unasked. Deleted / private videos and those giving neither
   an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
   their source.
