@@ -240,7 +240,7 @@ def test_clean_names_runs_every_step_that_is_on(settings_file):
     before, after = name_cleanup.stored_step_passes()
     assert before == ["html_entities", "cp1250_mojibake"]
     assert after == ["media_extension", "file_name_artifacts", "invisible_chars", "whitespace", "title_year",
-                     "artist_in_title", "site_names", "topic_channel", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+                     "artist_in_title", "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
                      "junk_marker_brackets", "junk_phrases", "title_year", "junk_marker_brackets", "quote_marks",
                      "whitespace", "edge_separators"]
     s.set_switch_on("artist_in_title", False)
@@ -272,6 +272,36 @@ def test_topic_channel_goes_only_from_an_artist_and_has_its_switch(settings_file
     assert s.sanitize_field("Hot - Topic", s.ALBUM, s.SOURCE_MP3) == "Hot - Topic"
     s.set_switch_on("topic_channels", False)
     assert s.sanitize_field("Igo - Topic", s.ARTIST, s.SOURCE_MP3) == "Igo - Topic"
+
+
+@pytest.mark.parametrize("artist, expected", [
+    ("Zespół Hurt", "Hurt"),
+    ("Zespol Hurt", "Hurt"),
+    ("ZESPÓŁ HURT", "HURT"),
+    ("zespół Czerwone Gitary", "Czerwone Gitary"),
+    # The word is the name, or part of it
+    ("Zespół", "Zespół"),
+    ("Zespół ", "Zespół "),
+    ("Zespół Pieśni i Tańca Śląsk", "Zespół Pieśni i Tańca Śląsk"),
+    ("ZESPOL PIESNI I TANCA SLASK", "ZESPOL PIESNI I TANCA SLASK"),
+    ("Zespół Wokalny Alla Polacca", "Zespół Wokalny Alla Polacca"),
+    # Only the whole word, only at the start
+    ("Zespółka Y", "Zespółka Y"),
+    ("Hurt Zespół", "Hurt Zespół"),
+    ("Grupa Operacyjna", "Grupa Operacyjna"),
+])
+def test_strip_band_word(artist, expected):
+    assert s.strip_band_word(artist) == expected
+
+
+def test_band_word_goes_only_from_an_artist_and_has_its_switch(settings_file):
+    assert s.sanitize_field("Zespół Hurt", s.ARTIST, s.SOURCE_YOUTUBE) == "Hurt"
+    assert s.sanitize_field("Zespół Hurt", s.ARTIST, s.SOURCE_MP3) == "Hurt"
+    assert s.sanitize_field("Zespół Hurt", s.ARTIST, s.SOURCE_MANUAL) == "Zespół Hurt"  # typed by hand
+    assert s.sanitize_field("Zespół Hurt", s.TITLE, s.SOURCE_MP3) == "Zespół Hurt"
+    assert s.sanitize_field("Zespół Hurt", s.ALBUM, s.SOURCE_MP3) == "Zespół Hurt"
+    s.set_switch_on("band_word", False)
+    assert s.sanitize_field("Zespół Hurt", s.ARTIST, s.SOURCE_YOUTUBE) == "Zespół Hurt"
 
 
 def test_clean_names_takes_the_artist_out_of_a_title_it_starts_with():

@@ -611,6 +611,14 @@ SANITIZE_CONFIG_FILE = PROJECT_ROOT / "sanitize_config.json"
 # case-insensitively against the channel name minus " - Topic".
 GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
 
+# "Zespół <Name>" is a channel's way of saying the band <Name> ("Zespół Hurt"),
+# but the first word after it can make "Zespół" part of the name: "Zespół
+# Pieśni i Tańca Śląsk". Matched case-insensitively.
+BAND_WORD_NAME_CONTINUATIONS = {
+    "pieśni", "piesni", "tańca", "tanca", "muzyki", "wokalny", "instrumentalny", "kameralny",
+    "ludowy", "regionalny", "folklorystyczny", "reprezentacyjny",
+}
+
 # Settings -> "Name cleanup": switch -> (group, menu label, what it does), in
 # the order the steps run and are shown (sanitize.SWITCHES)
 SANITIZE_SWITCH_LABELS = {
@@ -639,6 +647,8 @@ SANITIZE_SWITCH_LABELS = {
     "topic_channels": ("Removing", "YouTube's ' - Topic' after an artist",
                        "'Igo - Topic' -> 'Igo' (a channel's name in a downloaded file's tags); "
                        "'Release - Topic' stays, 'Release' being no artist."),
+    "band_word": ("Removing", "'Zespół' before an artist",
+                  "'Zespół Hurt' -> 'Hurt' (a YouTube channel's name); 'Zespół Pieśni i Tańca Śląsk' stays."),
     "junk_in_titles": ("Removing", "Junk in titles",
                        "'(Official Video)', '(Visualiser)', '(Remastered)', 'Lyric Video', 'HD', '| Label', "
                        "'#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),

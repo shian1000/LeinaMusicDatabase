@@ -7,7 +7,13 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
-from config.constants import FILE_NAME_JUNK_FILE, GENERIC_TOPIC_CHANNELS, SITE_NAME_TLDS, TITLE_JUNK_SUFFIXES
+from config.constants import (
+    BAND_WORD_NAME_CONTINUATIONS,
+    FILE_NAME_JUNK_FILE,
+    GENERIC_TOPIC_CHANNELS,
+    SITE_NAME_TLDS,
+    TITLE_JUNK_SUFFIXES,
+)
 from utils.common.normalizer import NON_DECOMPOSING_LETTER_FOLDS
 from utils.common.title_patterns import YEAR, YOUTUBE_BRACKET_PAIRS, YOUTUBE_BRACKETED
 
@@ -156,6 +162,20 @@ def strip_topic_channel(artist: str) -> str:
     wouldn't be an artist. Spaces around the dash required: "Hot-Topic"."""
     base = _TOPIC_CHANNEL_RE.sub("", artist)
     return base if base.strip() and base.strip().lower() not in GENERIC_TOPIC_CHANNELS else artist
+
+
+_BAND_WORD_RE = re.compile(r"\s*zesp[óo][łl]\s+(?=\S)", re.IGNORECASE)
+
+
+def strip_band_word(artist: str) -> str:
+    """An artist named "band <Name>" by their channel, "Zespół Hurt" -> "Hurt".
+    Stays when the word is part of the name ("Zespół Pieśni i Tańca Śląsk") or
+    the whole of it ("Zespół")."""
+    start = _BAND_WORD_RE.match(artist)
+    if not start:
+        return artist
+    rest = artist[start.end():]
+    return artist if rest.split()[0].casefold() in BAND_WORD_NAME_CONTINUATIONS else rest
 
 
 # ==================== Junk phrases at the end ====================

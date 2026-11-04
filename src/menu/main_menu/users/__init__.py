@@ -33,6 +33,7 @@ from menu.main_menu.users.moods import moods_menu, permissions_menu
 from utils.database.song_artists import song_artist_label
 from utils.discoveries.folder_playlist import add_song_for_file, assign_song, build_folder_playlist, song_for_file_plan
 from utils.discoveries.folder_youtube_playlist import (
+    closest_songs,
     link_track,
     pair_automatically,
     rank_entries_for,
@@ -456,11 +457,13 @@ def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | Non
     return pairs, left_out
 
 
-def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: list) -> list | None:
+def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: list,
+                            best_guess_min_score: float = 1.1) -> list | None:
     """Each video no file was paired with: add it as a track of its own,
     read the other way round when its title is a known artist and its artist
-    isn't (offered, never done unasked), or leave it out. Returns the videos
-    to add, None on Stop."""
+    isn't (offered, never done unasked), or leave it out. The closest songs
+    are only listed here: the review after this one asks about them. Returns
+    the videos to add, None on Stop."""
     added = []
     for i, entry in enumerate(entries, 1):
         print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
@@ -469,6 +472,11 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
         swap_artist = possible_swap_artist(entry.metadata, music_session) if entry.song is None else None
         if swap_artist is not None:
             print(f"  The title looks swapped with the artist: {swap_artist.name} is in the database.")
+        closest = closest_songs(matcher, entry, best_guess_min_score)
+        if closest:
+            print("  Closest songs in the database (add it to pick one of them next):")
+            for song, score in closest:
+                print(f"    {as_ansi(_song_tokens(song, score))}")
         choice = questionary.select("No file is this video - what should happen with it?",
                                     choices=[_VIDEO_ADD, *([_VIDEO_SWAP] if swap_artist is not None else []),
                                              _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
@@ -548,7 +556,7 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     added = []
     if unpaired_entries:
         print(f"\n{len(unpaired_entries)} video(s) of the YouTube playlist without a file:")
-        added = _review_unpaired_videos(music_session, matcher, unpaired_entries)
+        added = _review_unpaired_videos(music_session, matcher, unpaired_entries, min_score)
         if added is None:
             print("Playlist not saved.")
             return

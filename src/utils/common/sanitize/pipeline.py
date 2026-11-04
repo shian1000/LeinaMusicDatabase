@@ -22,6 +22,7 @@ from utils.common.sanitize.text import (
     has_site_name,
     is_site_name,
     strip_artist_from_title,
+    strip_band_word,
     strip_hashtags,
     strip_junk_brackets_anywhere,
     strip_junk_suffix,
@@ -163,7 +164,7 @@ _BOTH = (STAGE_RAW, STAGE_FIELD)
 SWITCHES = (
     "html_entities", "encoding", "file_names_in_titles", "lookalike_letters",
     "featured_artists", "year_in_title", "artist_in_title",
-    "site_names", "topic_channels", "junk_in_titles", "quote_marks",
+    "site_names", "topic_channels", "band_word", "junk_in_titles", "quote_marks",
     "spaces",
 )
 
@@ -185,6 +186,7 @@ STEPS = {step.name: step for step in (
     _step("artist_in_title", "artist_in_title", _FIELD, {TITLE}, lambda v, ctx: strip_artist_from_title(v, ctx.artist)),
     _step("site_names", "site_names", _BOTH, _ALL_FIELDS, _site_names),
     _step("topic_channel", "topic_channels", _FIELD, {ARTIST}, lambda v, ctx: strip_topic_channel(v)),
+    _step("band_word", "band_word", _FIELD, {ARTIST}, lambda v, ctx: strip_band_word(v)),
     _step("pipe_suffix", "junk_in_titles", _BOTH, {TITLE}, _pipe_suffix),
     _step("junk_brackets_anywhere", "junk_in_titles", _BOTH, {TITLE}, _junk_brackets_anywhere),
     _step("hashtags", "junk_in_titles", _BOTH, {TITLE}, _hashtags),
@@ -208,7 +210,7 @@ FIELD_ORDER = (
     "html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
     "invisible_chars", "whitespace", "lookalike_letters",
     FEAT_TO_CREDITS, "title_year", "artist_in_title",
-    "site_names", "topic_channel", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+    "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
     "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", "junk_marker_brackets",
     "quote_marks",
     "whitespace", "edge_separators",
@@ -306,7 +308,7 @@ def _run(value, source, stage, field, artist, review, feat_artists=None) -> list
 # what they cut is kept (SongEntry.removed) - a year, a "(from “Chess”)", an
 # "(Official Video)" say something about the song
 CUTTING_STEPS = frozenset({
-    "site_names", "topic_channel", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
+    "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
     "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", FEAT_TO_CREDITS,
 })
 

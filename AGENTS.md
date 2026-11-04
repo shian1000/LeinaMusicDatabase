@@ -416,7 +416,8 @@ non-trivial work in that area.
   "Save its YouTube videos on the songs" offers the same, none ticked. A video
   without a file can be a track with `file` None; one whose title is a known artist and whose artist
   is not gets the import's swap check (`possible_swap_artist()`) and a choice to read it the other way
-  round, never unasked. Deleted / private videos and those giving neither
+  round, never unasked. That screen only lists the closest songs (`closest_songs()`): picking one
+  stays on the review that follows adding the video, or a rejected guess would be asked about twice. Deleted / private videos and those giving neither
   an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
   their source.
@@ -444,7 +445,7 @@ non-trivial work in that area.
   so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
   (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
   is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
-  turns each of its 12 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
+  turns each of its 13 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
   (`set_switch_on()`; where a step runs follows from
   what it works on, `runs_for()`, owner's choice 2026-11-01: the same everywhere, so every step must be
   safe for every name - measure on the catalog before adding or loosening one), saved in

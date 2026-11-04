@@ -968,6 +968,58 @@ def test_video_without_a_file_offered_swapping_artist_and_title(users_env, tmp_p
     ]
 
 
+def test_video_from_a_band_word_channel_is_matched_exactly(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+    from utils.youtube.import_from_playlist import build_metadata_from_item
+
+    # Real case: "Zaloga G" on the channel "Zespół Hurt" only ever got a suggestion
+    song = Song(title="Załoga G", artist=Artist(name="Hurt"))
+    music_session.add(song)
+    music_session.commit()
+
+    entry = build_metadata_from_item({"video_id": "v", "title": "Zaloga G", "channel": "Zespół Hurt"})
+    assert (entry.artist, entry.title) == ("Hurt", "Zaloga G")
+    assert LocalSongMatcher(music_session).match_exact(entry) is song
+
+
+def test_video_without_a_file_lists_the_closest_songs_before_asking(users_env, tmp_path, music_session, monkeypatch,
+                                                                    capsys):
+    music_session.add_all([Song(title="Karma", artist=Artist(name="Hey")),
+                           Song(title="Załoga G", artist=Artist(name="Hurt"))])
+    music_session.commit()
+    items = [
+        {"video_id": "vid1", "title": "Karma", "channel": "Hey - Topic"},
+        {"video_id": "ytClose", "title": "Zaloga G", "channel": "Hurt Official"},  # a channel no step knows
+        {"video_id": "ytExact", "title": "Hurt - Zaloga G", "channel": "Some channel"},  # its song is found
+        {"video_id": "ytNone", "title": "Nobody Known - Something Else", "channel": "Some channel"},
+    ]
+    on_screen = {}
+
+    def select(message, choices):
+        if message.startswith("No file is this video"):
+            on_screen[len(on_screen)] = capsys.readouterr().out
+            return menu._VIDEO_ADD
+        if message.startswith("What should happen"):
+            return menu._UNMATCHED_KEEP
+        # Adding the video leads to the review offering the song
+        return next(c.value for c in choices if isinstance(c, menu.questionary.Choice))
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
+    monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
+    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 1.0)
+    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 1.1)
+    monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    close, exact, none = on_screen[0], on_screen[1], on_screen[2]
+    assert "Closest songs in the database" in close and "Załoga G" in close and "%)" in close
+    assert "Closest songs in the database" not in exact
+    assert "Closest songs in the database" not in none
+    song = music_session.query(Song).filter(Song.title == "Załoga G").one().id
+    assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [
+        ("ytClose", song), ("ytExact", song), ("ytNone", None)]
+
+
 def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, tmp_path, music_session, monkeypatch):
     from utils.discoveries import folder_youtube_playlist as fyp
     from utils.discoveries.import_engine import LocalSongMatcher
@@ -1427,7 +1479,7 @@ def test_pairing_by_hand_lists_the_closest_videos_and_searches_the_rest(users_en
             return "Leave it out of the playlist"
         if message.startswith("What should happen with this file"):  # not in the database
             return "Keep it in the playlist without a song"
-        videos = [c.value for c in choices if isinstance(c, questionary.Choice)]
+        videos = [c.value for c in choices if isinstance(c, menu.questionary.Choice)]
         seen.append((len(videos), "Search the videos by title..." in choices))
         if len(seen) == 1:
             return "Search the videos by title..."

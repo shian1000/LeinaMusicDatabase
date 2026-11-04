@@ -102,6 +102,12 @@ MP3_CASES = [
      {"artist_name": "Igo", "title": "Better Be Alive", "album": None}),
     ({"artist_name": "Release - Topic", "title": "Mind Me", "album": None},
      {"artist_name": "Release - Topic", "title": "Mind Me", "album": None}),
+    # Changed 2026-11-04: "Zespół" goes from before an artist (a YouTube channel's
+    # "Zespół Hurt"; no artist of the catalog had one), unless it's part of the name
+    ({"artist_name": "Zespół Hurt", "title": "Załoga G", "album": None},
+     {"artist_name": "Hurt", "title": "Załoga G", "album": None}),
+    ({"artist_name": "Zespół Pieśni i Tańca Śląsk", "title": "Song", "album": None},
+     {"artist_name": "Zespół Pieśni i Tańca Śląsk", "title": "Song", "album": None}),
     # Changed 2026-11-01: a junk bracket goes from mp3 tags too
     # ("junk_brackets_anywhere"), it used to stay
     ({"artist_name": " Artist ", "title": "Song  Title (Official Video)", "album": None},

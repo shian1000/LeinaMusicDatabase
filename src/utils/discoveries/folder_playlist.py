@@ -111,6 +111,16 @@ def folder_mp3_files(folder: Path) -> list[Path]:
     return sorted(folder.rglob("*.mp3"), key=lambda f: str(f.relative_to(folder)).casefold())
 
 
+def song_suggestions(matcher: LocalSongMatcher, metadata: dict, best_guess_min_score: float = 1.1) -> tuple:
+    """What to suggest for tags with no exact song, the first kind that finds
+    any: (the similar song, the songs with its title, the closest songs with
+    their scores)."""
+    similar = matcher.match_similar(metadata)
+    candidates = [] if similar else matcher.title_candidates(metadata, FILE_TITLE_CANDIDATES_MAX)
+    guesses = [] if similar or candidates else matcher.best_guesses(metadata, FILE_BEST_GUESSES_MAX, best_guess_min_score)
+    return similar, candidates, guesses
+
+
 def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: FolderTrack, metadata: dict,
                 min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1,
                 auto_accept_score: float = 1.1) -> None:
@@ -133,11 +143,8 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         playlist.auto_accepted.append((track, metadata.artist))
     else:
         track.title, track.artist = metadata.title, metadata.artist
-        track.similar_song = matcher.match_similar(metadata)
-        if track.similar_song is None:
-            track.title_candidates = matcher.title_candidates(metadata, FILE_TITLE_CANDIDATES_MAX)
-        if track.similar_song is None and not track.title_candidates:
-            track.best_guesses = matcher.best_guesses(metadata, FILE_BEST_GUESSES_MAX, best_guess_min_score)
+        track.similar_song, track.title_candidates, track.best_guesses = song_suggestions(
+            matcher, metadata, best_guess_min_score)
         suggested = [track.similar_song, *track.title_candidates, *(song for song, _ in track.best_guesses)]
         track.scores = {song.id: matcher.match_score(metadata, song) for song in suggested if song is not None}
         # A file with no artist in the tags is scored on its title alone (the

@@ -17,7 +17,7 @@ from utils.common.normalizer import extract_unknown_data, name_key, normalize
 from utils.common.sanitize import SOURCE_FILE_NAME, sanitize_raw
 from utils.common.song_entry import as_entry
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
-from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track
+from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track, song_suggestions
 from utils.discoveries.import_engine import LocalSongMatcher
 from utils.youtube.import_from_playlist import is_placeholder_title, playlist_item_metadata
 
@@ -177,6 +177,17 @@ def swap_artist_and_title(matcher: LocalSongMatcher, entry: YouTubeEntry) -> Non
     entry.metadata = entry.metadata.copy_with(artist=entry.metadata.title, title=entry.metadata.artist,
                                               unsplit_title=None)
     entry.song = matcher.match_exact(entry.metadata)
+
+
+def closest_songs(matcher: LocalSongMatcher, entry: YouTubeEntry, best_guess_min_score: float) -> list[tuple]:
+    """(song, score) the review of a video added without a file will offer,
+    to show while the user decides whether to add it."""
+    metadata = entry.metadata
+    if entry.song is not None or not metadata.title:
+        return []
+    similar, candidates, guesses = song_suggestions(matcher, metadata, best_guess_min_score)
+    return [(song, matcher.match_score(metadata, song))
+            for song in ([similar] if similar else candidates or [song for song, _ in guesses])]
 
 
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,
