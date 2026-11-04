@@ -33,9 +33,12 @@ this index is the map of everything else.
   fill missing data locally, MusicDatabase's values win, phone-found data will come back for
   review), [ADR-0004](decisions/0004-per-user-data.md) (per-user private data: one `user.db`
   per user on the data drive, username + password, a review inbox planned for phone-found global data),
-  and [ADR-0005](decisions/0005-one-name-cleanup.md) (names cleaned in one place - `sanitize/` -
+  [ADR-0005](decisions/0005-one-name-cleanup.md) (names cleaned in one place - `sanitize/` -
   by switches the same for every source, in one "extract first, then remove" order, what a title
-  says kept in an in-memory `SongEntry`, featured artists out of titles).
+  says kept in an in-memory `SongEntry`, featured artists out of titles),
+  and [ADR-0006](decisions/0006-lite-sharing-server.md) (proposed, not built: MusicDatabase Lite,
+  a standalone FastAPI sharing server on a shared standard-library core, the same API as today's
+  server, every imported library approved by the owner and enforced by an allow-list test).
   Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records
