@@ -460,7 +460,8 @@ non-trivial work in that area.
   what, show it as we like): the imports credit them to the song created or found (`find_existing_song()`
   reads a stored title without its credit and tries the songs crediting the entry's guests first, so a
   "ft. X" version isn't taken for the plain song); Clean names moves the catalog's in a checkbox list
-  (`name_cleanup.feat_move_proposals()`). `docs/agent-notes/normalization-and-matching.md` → "Cleaning
+  (`name_cleanup.feat_move_proposals()`). Code that keeps only an entry's cleaned title must carry its
+  `feat_artists` along, or the names are lost for good (`FolderTrack.feat_artists`). `docs/agent-notes/normalization-and-matching.md` → "Cleaning
   before storing".
 - `src/utils/common/artist_credits.py` — who a name or title credits, as text only: a joined artist
   name read as several (`propose_artist_split()`, `SplitProposal`; `utils/database/artist_splitting.py`

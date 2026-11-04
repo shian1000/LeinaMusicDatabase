@@ -545,6 +545,44 @@ def test_file_added_to_the_database_as_a_new_song(users_env, tmp_path, music_ses
     assert EasyID3(new)["artist"] == ["Final Fantasy OST"]
 
 
+def test_file_added_as_a_new_song_credits_the_featured_artists_of_its_title(
+        users_env, tmp_path, music_session, monkeypatch, capsys):
+    from utils.database.song_artists import additional_artists
+    from utils.discoveries.import_data_from_mp3_tags import read_file_metadata
+
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Gorillaz - Hollywood feat. Hey & Jamie Principle.mp3")
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, {}, ["Add it to the database as a new song"])
+    # The real reading: the cleanup is what moves the names out of the title
+    monkeypatch.setattr(fp, "read_file_metadata", read_file_metadata)
+
+    menu._create_playlist_from_folder("ania")
+
+    song = music_session.query(Song).filter(Song.title == "Hollywood").one()
+    assert song.artist.name == "Gorillaz"
+    assert {a.name for a in additional_artists(song)} == {"Hey", "Jamie Principle"}
+    assert music_session.query(Artist).filter(Artist.name == "Hey").count() == 1
+    assert "Featuring: Hey, Jamie Principle" in capsys.readouterr().out
+
+
+def test_video_without_a_file_keeps_the_featured_artists_for_a_new_song(music_session):
+    from utils.database.song_artists import additional_artists
+    from utils.discoveries.folder_youtube_playlist import youtube_entries, youtube_only_track
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    matcher = LocalSongMatcher(music_session)
+    (entry,) = youtube_entries(matcher, [
+        {"video_id": "ytH", "title": "Gorillaz - Hollywood ft. Hey", "channel": "Gorillaz"}])
+    track = youtube_only_track(fp.FolderPlaylist(folder=Path("music")), matcher, entry)
+    assert (track.title, track.feat_artists) == ("Hollywood", ["Hey"])
+
+    song = fp.add_song_for_file(music_session, track.artist, track.title, feat_artists=track.feat_artists)
+    music_session.flush()
+    assert [a.name for a in additional_artists(song)] == ["Hey"]
+
+
 def test_adding_a_song_reuses_the_artist_and_an_existing_song(users_env, tmp_path, music_session, monkeypatch):
     from utils.discoveries.folder_playlist import add_song_for_file, song_for_file_plan
 

@@ -196,7 +196,8 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     """A track for a video no file was paired with, matched to the
     database like a file (folder_playlist.match_track())."""
     track = FolderTrack(file=None, title=entry.metadata.title or entry.label,
-                        artist=entry.metadata.artist, duration_s=entry.duration_s)
+                        artist=entry.metadata.artist, duration_s=entry.duration_s,
+                        feat_artists=list(entry.metadata.feat_artists or []))
     track.youtube_link = track.youtube_video_id = entry.video_id
     track.link_song_id = entry.song.id if entry.song is not None else None
     if entry.song is not None:
