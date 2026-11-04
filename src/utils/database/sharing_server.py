@@ -38,6 +38,11 @@ with every path passed on the command line.
   exactly that address, same wait-and-retry loop (the interface may come up
   later). 0.0.0.0 only when given there - the owner's explicit choice.
 - Never binds to 0.0.0.0 on its own, and never to an address other than those.
+- Host header (2026-11-03): only an IP address, "localhost", this machine's
+  host name or its Tailscale MagicDNS name (read at run time) - anything
+  else is a 421 before any handler runs. A web page that points its own
+  domain at this server (DNS rebinding) sends that domain, so a browser on
+  the home network or the tailnet can't be used to read or write here.
 - If MOUNT (the external drive holding DIR) isn't mounted, requests for the
   databases get a 503 instead of the server exiting, so the phone shows an
   error and simply retries the next day. Without --mount (DIR on the system
@@ -139,6 +144,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import stat
 import subprocess
@@ -388,7 +394,10 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
                  users_dir: str | None = None, limiter: LoginLimiter | None = None,
                  max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES, mood_changes_dir: str | None = None,
-                 library_dir: str | None = None):
+                 library_dir: str | None = None, host_names: set[str] | None = None):
+    # Names the Host header may carry besides an IP address; main() adds the
+    # MagicDNS name once a socket is up, so it's read on every request
+    host_names = host_names if host_names is not None else set()
     # One lock for "is there room / is the name free" + the write, so two
     # uploads at once can't both squeeze past the limit or take one name.
     inbox_lock = threading.Lock()
@@ -426,6 +435,16 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                         self._reply(HTTPStatus.INTERNAL_SERVER_ERROR)
                     except OSError:
                         pass
+
+        def parse_request(self):
+            if not super().parse_request():
+                return False
+            if host_allowed(self.headers.get("Host"), host_names):
+                return True
+            print(f"{self.client_address[0]} {self.command} rejected: Host {self.headers.get('Host')!r}", flush=True)
+            self.close_connection = True
+            self._reply(HTTPStatus.MISDIRECTED_REQUEST, "unknown host name")
+            return False
 
         def do_HEAD(self):
             self._serve(send_body=False)
@@ -1295,6 +1314,44 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
     return ShareHandler
 
 
+def host_allowed(host: str | None, names: set[str]) -> bool:
+    """
+    Whether a Host header is one this server answers: any IP address (DNS
+    rebinding needs a domain name, and the sockets only take their own
+    addresses anyway), "localhost", or one of `names` (lowercase), with or
+    without a port. No header at all (an HTTP/1.0 client) passes too - a
+    browser always sends one.
+    """
+    if host is None:
+        return True
+    if not host:
+        return False
+    try:
+        hostname = urlsplit(f"//{host}").hostname
+    except ValueError:
+        return False
+    if not hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    return hostname == "localhost" or hostname in names
+
+
+def tailscale_dns_name() -> str | None:
+    """This machine's Tailscale MagicDNS name ("host.tailnet.ts.net"), or None."""
+    try:
+        out = subprocess.run(
+            ["tailscale", "status", "--json", "--peers=false"], capture_output=True, text=True, timeout=10
+        ).stdout
+        name = json.loads(out)["Self"]["DNSName"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+    return name.rstrip(".").lower() if isinstance(name, str) and name else None
+
+
 def tailscale_ipv4() -> str | None:
     """This machine's Tailscale IPv4 address, or None if Tailscale has none (yet)."""
     try:
@@ -1412,12 +1469,18 @@ def main(argv=None) -> int:
     parser.add_argument("--library", help="serve the music library files indexed in --dir/files.db from this folder")
     args = parser.parse_args(argv)
 
+    host_names = {socket.gethostname().lower()}
     handler = make_handler(args.dir, args.mount, args.inbox, args.max_request_bytes, args.inbox_limit_bytes,
                            users_dir=args.users, max_playlist_bytes=args.max_playlist_bytes,
-                           mood_changes_dir=args.mood_changes, library_dir=args.library)
+                           mood_changes_dir=args.mood_changes, library_dir=args.library, host_names=host_names)
 
     def bind_and_serve(label, get_address):
         server = bind_when_ready(handler, args.port, get_address, label)
+        # Tailscale has a name by the time it has an address; asked by every
+        # socket, since a VPN interface may be Tailscale's too
+        dns_name = tailscale_dns_name()
+        if dns_name:
+            host_names.add(dns_name)
         host, port = server.server_address[:2]
         inbox = f", requests into {args.inbox}" if args.inbox else ""
         inbox += f", logins, playlists, moods, folders, saved songs and links, listens and covers for {args.users}" if args.users else ""

@@ -333,6 +333,78 @@ def test_second_socket_on_same_port_serves_the_same_files(serve, share_dir):
     assert _request(f"{second}/secret.txt")[0] == 404
 
 
+# ==================== Host header (DNS rebinding) ====================
+
+@pytest.mark.parametrize("host, allowed", [
+    (None, True),  # an HTTP/1.0 client sends none; a browser always does
+    ("192.0.2.10:8002", True), ("100.64.0.10:8002", True), ("192.0.2.10", True), ("[::1]:8002", True),
+    ("localhost:8002", True), ("pc:8002", True), ("PC.Tailnet.ts.net:8002", True), ("pc.tailnet.ts.net", True),
+    ("", False), ("evil.example:8002", False), ("pc.evil.example:8002", False),
+    ("192-0-2-10.nip.io:8002", False), ("192.0.2.10.nip.io", False), ("[bad", False), (":8002", False),
+])
+def test_host_allowed_takes_ip_addresses_and_known_names_only(host, allowed):
+    assert sharing_server.host_allowed(host, {"pc", "pc.tailnet.ts.net"}) is allowed
+
+
+def _get_with_host(url: str, host: str):
+    return _request_with(urllib.request.Request(url, headers={"Host": host}))
+
+
+def _request_with(req):
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+
+
+def test_server_answers_421_to_an_unknown_host_name_before_any_handler(serve, share_dir):
+    base = serve(share_dir, "/")
+    port = base.rsplit(":", 1)[1]
+
+    status, body = _get_with_host(f"{base}/music.db", f"evil.example:{port}")
+
+    assert status == 421
+    assert SQLITE_HEADER not in body
+    assert _get_with_host(f"{base}/users/ola_k/playlists", f"evil.example:{port}")[0] == 421
+    # The same request under the address itself is served
+    assert _get_with_host(f"{base}/music.db", f"127.0.0.1:{port}")[1] == (share_dir / "music.db").read_bytes()
+
+
+def test_a_host_name_added_after_start_is_served(serve, share_dir):
+    # main() adds the MagicDNS name once a socket is up, after the handler is made
+    names = {"pc"}
+    base = serve(share_dir, "/", handler=sharing_server.make_handler(str(share_dir), "/", host_names=names))
+    port = base.rsplit(":", 1)[1]
+    assert _get_with_host(f"{base}/music.db", f"pc:{port}")[0] == 200
+    assert _get_with_host(f"{base}/music.db", f"pc.tailnet.ts.net:{port}")[0] == 421
+
+    names.add("pc.tailnet.ts.net")
+
+    assert _get_with_host(f"{base}/music.db", f"pc.tailnet.ts.net:{port}")[0] == 200
+
+
+@pytest.mark.parametrize("stdout, expected", [
+    ('{"Self": {"DNSName": "PC.tailnet.ts.net."}}', "pc.tailnet.ts.net"),
+    ('{"Self": {"DNSName": ""}}', None),
+    ('{"Self": {}}', None),
+    ('{"Self": null}', None),
+    ("not json", None),
+    ("", None),
+])
+def test_tailscale_dns_name_reads_status_json(monkeypatch, stdout, expected):
+    monkeypatch.setattr(sharing_server.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=stdout, stderr=""))
+    assert sharing_server.tailscale_dns_name() == expected
+
+
+def test_tailscale_dns_name_without_tailscale_is_none(monkeypatch):
+    def missing(*a, **k):
+        raise FileNotFoundError("tailscale")
+    monkeypatch.setattr(sharing_server.subprocess, "run", missing)
+    assert sharing_server.tailscale_dns_name() is None
+
+
 # ==================== inbox uploads ====================
 
 REQUEST_NAME = "2026-10-12_23-44-05_001.db"
@@ -1182,7 +1254,7 @@ def test_a_body_cut_short_gets_no_answer_and_stores_nothing(playlist_server):
     parts = urlsplit(start())
     body = json.dumps(_body()).encode()
     with socket.create_connection((parts.hostname, parts.port), timeout=10) as sock:
-        sock.sendall(f"PUT /users/ola_k/playlists/{UID} HTTP/1.1\r\nHost: x\r\n"
+        sock.sendall(f"PUT /users/ola_k/playlists/{UID} HTTP/1.1\r\nHost: {parts.netloc}\r\n"
                      f"Authorization: Bearer {tokens['ola_k']}\r\nContent-Type: application/json\r\n"
                      f"Content-Length: {len(body)}\r\n\r\n".encode() + body[:-5])
         sock.shutdown(socket.SHUT_WR)

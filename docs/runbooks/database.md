@@ -200,6 +200,15 @@ what would be written now) and lingering, and a summary with the phone's address
     different one, local access quietly stops working; the fix is a DHCP reservation on the router.
   - `ufw` is installed but disabled (`ENABLED=no`). If it is ever enabled, open 8002 to
     the home LAN's subnet only.
+- Host header (2026-11-03, DNS rebinding): a request is answered only when its Host is an IP
+  address, `localhost`, the machine's host name (`socket.gethostname()`) or its Tailscale
+  MagicDNS name (`tailscale status --json`, asked each time a socket comes up, so a name Tailscale
+  gets later is added then); with no Host at all (HTTP/1.0) too. Anything else gets
+  `421 Misdirected Request` before any handler runs, and one line in the journal. Why: a web page
+  can point its own domain at this server's address, and a browser on the home network or the
+  tailnet would then send its requests here with that domain as Host. Leina Radio uses the
+  address, so it's unaffected; a client using another name (a DNS entry on the router, say) needs
+  that name added in `main()`.
 - If the data drive is unmounted it keeps running and answers 503, so the phone retries the next day.
 - `Restart=always`, not `on-failure`: on 2026-10-10 a stray SIGTERM (something killing whatever
   was on port 8002) stopped it for good, because `on-failure` treats a clean SIGTERM as success.
@@ -649,7 +658,7 @@ contract, is [`docs/handoffs/saved-songs-for-musicdatabaseapp.md`](../handoffs/s
 
 Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
 (200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `http://<lan-address>:8002/`, and
-`ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and the LAN address.
+`curl -I -H 'Host: evil.example' …/music.db` (421), `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and the LAN address.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
 

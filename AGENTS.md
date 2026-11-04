@@ -125,7 +125,10 @@ non-trivial work in that area.
   (empty / `tailscale` = the Tailscale IP, `off`, or any provider's interface by name → `--vpn-interface`)
   and the exact `SHARING_ADDRESSES`. It never binds to `0.0.0.0` unless
   that's one of them, and the interface is chosen by
-  name because docker bridges also have private IPs. The app depends on that contract, so don't change
+  name because docker bridges also have private IPs. A request whose Host header isn't an IP
+  address, `localhost`, the machine's host name or its Tailscale MagicDNS name (read at run time,
+  `tailscale_dns_name()`) gets 421 before any handler runs (`host_allowed()`, DNS rebinding); a new
+  way of reaching the server by name must add that name there. The app depends on that contract, so don't change
   the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports (an answer reaches
