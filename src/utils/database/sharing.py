@@ -33,9 +33,9 @@ from config.constants import (
     INBOX_AUTO_STARTUP_DELAY,
     PHONE_INBOX_LIMIT_BYTES,
     PHONE_REQUEST_MAX_BYTES,
-    SHARING_HTTP_PORT,
     SHARING_SERVICE_NAME,
     SHARING_STARTUP_DELAY,
+    SHARING_TLS_DIR,
 )
 from settings import VPN_OFF, VPN_TAILSCALE, Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import flog, mlog
@@ -158,7 +158,7 @@ def _service_unit(python: str) -> str:
     # No --mount: SHARING_DIR is on the system disk
     if SHARING_DRIVE_MOUNT is not None:
         command += f" --mount {_arg(SHARING_DRIVE_MOUNT)}"
-    command += f" --port {SHARING_HTTP_PORT}"
+    command += f" --port {Settings.sharing_port}"
     if SHARING_LAN_INTERFACE:
         command += f" --lan-interface {_arg(SHARING_LAN_INTERFACE)}"
     # Nothing added for Tailscale (the server script's own default), so a
@@ -176,6 +176,8 @@ def _service_unit(python: str) -> str:
     library = local_library_path()
     if library is not None:
         command += f" --library {_arg(library)}"
+    if Settings.sharing_tls:
+        command += f" --tls-dir {_arg(SHARING_TLS_DIR)}"
     return f"""[Unit]
 Description=MusicDatabase - serve music.db/tag.db/files.db and the music library's files to the mobile app, log it in and take its requests, over VPN and the LAN
 

@@ -5,6 +5,7 @@ step, running again, the restart after a change). Every .env is a temp file;
 prompts, systemd, loginctl and the network are faked. Nothing in the
 checks is done without a yes, and a no is listed as not done."""
 import os
+import ssl
 import urllib.error
 
 import pytest
@@ -545,13 +546,19 @@ def test_declined_lingering_is_listed_with_the_command(monkeypatch):
 
 def test_the_summary_lists_what_wasnt_done(env, monkeypatch, capsys):
     monkeypatch.setattr(setup, "listening_plan", lambda env_file: [("home network (enp2s0)", "192.0.2.10")])
-    monkeypatch.setattr(setup, "server_answer", lambda address: setup.NOT_ANSWERING)
+    asked = []
+    monkeypatch.setattr(setup, "server_answer",
+                        lambda address, port, scheme: asked.append((address, port, scheme)) or setup.NOT_ANSWERING)
+    monkeypatch.setattr(setup, "certificate_code", lambda: "ABCD-EFGH-IJKL")
     report = wiz.Report()
     report.skip("the sharing server (Settings -> Server -> Setup this PC for database sharing)")
     wiz._summary(env, report)
     out = capsys.readouterr().out
     assert "Not done:" in out and "the sharing server" in out
-    assert "Adres serwera (sieć lokalna): http://192.0.2.10:8002/" in out
+    # HTTPS by default (SHARING_TLS empty), the code to compare in Leina Radio
+    assert asked == [("192.0.2.10", 8002, "https")]
+    assert "Adres serwera (sieć lokalna): https://192.0.2.10:8002/" in out
+    assert "ABCD-EFGH-IJKL" in out
     assert "Tailscale" not in out
 
 
@@ -589,3 +596,33 @@ def test_setup_without_the_wizard_restarts_on_a_yes(monkeypatch):
     monkeypatch.setattr(settings_menu, "install_sharing_service", lambda: pytest.fail("installed on old settings"))
     settings_menu.setup_database_sharing()
     assert restarted == [True]
+
+
+def test_the_summary_follows_the_port_and_plain_http_settings(env, monkeypatch, capsys):
+    save_env_value("SHARING_PORT", "29999", env)
+    save_env_value("SHARING_TLS", "off", env)
+    monkeypatch.setattr(setup, "listening_plan", lambda env_file: [("home network (enp2s0)", "192.0.2.10")])
+    monkeypatch.setattr(setup, "server_answer", lambda address, port, scheme: setup.SERVING)
+    monkeypatch.setattr(setup, "certificate_code", lambda: pytest.fail("no certificate over plain HTTP"))
+    wiz._summary(env, wiz.Report())
+    assert "Adres serwera (sieć lokalna): http://192.0.2.10:29999/" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("name", "value", "warned"), [
+    ("SHARING_PORT", "28443", False), ("SHARING_PORT", "80", True), ("SHARING_PORT", "x", True),
+    ("SHARING_TLS", "on", False), ("SHARING_TLS", "off", False), ("SHARING_TLS", "maybe", True),
+])
+def test_port_and_https_values_are_checked(env, name, value, warned):
+    assert (setup.value_warning(name, value, env) is not None) is warned
+
+
+def test_server_answer_over_https_skips_the_certificate_check():
+    seen = []
+
+    def opener(request, timeout, context=None):
+        seen.append((request.full_url, context))
+        raise urllib.error.URLError("refused")
+
+    assert setup.server_answer("192.0.2.10", 28443, opener=opener, scheme="https") == setup.NOT_ANSWERING
+    assert seen[0][0] == "https://192.0.2.10:28443/music.db"
+    assert seen[0][1] is not None and seen[0][1].verify_mode == ssl.CERT_NONE

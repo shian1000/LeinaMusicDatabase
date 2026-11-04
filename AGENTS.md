@@ -121,7 +121,7 @@ non-trivial work in that area.
   (`GET`/`HEAD /library/<id>`, looked up in the shared `files.db`, path checked to stay inside
   the library, byte ranges for the player, no token), and takes the phone's requests (`PUT /inbox/<name>.db` → `Settings.phone_inbox_dir`/`new/`, signed with a login token when the name carries a user,
   at most 1 MiB each, nothing while `new/` holds 100 MiB), syncs a logged-in user's playlists
-  (`/users/<name>/playlists`, below), port 8002, only on the named LAN interface from `Settings.sharing_lan_interface`, the VPN of `SHARING_VPN`
+  (`/users/<name>/playlists`, below), on one port (`SHARING_PORT`, default 8002) and, unless `SHARING_TLS=off`, over HTTPS with a certificate it makes for itself (`--tls-dir` = `constants.SHARING_TLS_DIR` under `.secrets/`; Leina Radio pins it after the owner compares its code, `certificate_code()` - keep it the same as the app's `codeOfDigest()`; runbook → "Sharing with the mobile app"), only on the named LAN interface from `Settings.sharing_lan_interface`, the VPN of `SHARING_VPN`
   (empty / `tailscale` = the Tailscale IP, `off`, or any provider's interface by name → `--vpn-interface`)
   and the exact `SHARING_ADDRESSES`. It never binds to `0.0.0.0` unless
   that's one of them, and the interface is chosen by

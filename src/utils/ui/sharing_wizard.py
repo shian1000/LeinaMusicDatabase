@@ -19,7 +19,7 @@ from pathlib import Path
 
 import questionary
 
-from config.constants import INBOX_AUTO_SERVICE_NAME, SHARING_HTTP_PORT, SHARING_SERVICE_NAME
+from config.constants import INBOX_AUTO_SERVICE_NAME, SHARING_SERVICE_NAME
 from settings import listen_addresses
 from utils.common import sharing_setup as setup
 from utils.common.env_file import read_env_value, save_env_value
@@ -199,7 +199,7 @@ def _print_listening(env_file: Path) -> list:
         _say("With these settings the server has no address to listen on: set the home network "
              "interface or an address to listen on - Leina Radio must be able to reach one of them.", RED)
         return plan
-    print(f"The server will listen on (port {SHARING_HTTP_PORT}):")
+    print(f"The server will listen on (port {setup.served_port(env_file)}, {setup.served_scheme(env_file).upper()}):")
     for what, address in plan:
         shown = "every address of this PC" if address == "0.0.0.0" else (address or "no address right now")
         print(f"  {what}: {shown}")
@@ -273,7 +273,7 @@ def _check_service(env_file: Path, report: Report) -> None:
     )
 
     print(f"\n{BOLD}The sharing server (systemd user service {SHARING_SERVICE_NAME}){RESET} - REQUIRED")
-    _say(f"It serves the sharing folder on port {SHARING_HTTP_PORT}, starts by itself shortly after "
+    _say(f"It serves the sharing folder on port {setup.served_port(env_file)}, starts by itself shortly after "
          f"this user's session starts, and {INBOX_AUTO_SERVICE_NAME} settles Leina Radio's requests in the background.")
     current = service_unit_current()
     if current and setup.service_active(SHARING_SERVICE_NAME):
@@ -348,7 +348,8 @@ def _summary(env_file: Path, report: Report) -> None:
     plan = setup.listening_plan(env_file)
     for what, address in plan:
         if address and address != "0.0.0.0":
-            answer = setup.server_answer(address)
+            answer = setup.server_answer(address, setup.served_port(env_file),
+                                         scheme=setup.served_scheme(env_file))
             colour = GREEN if answer == setup.SERVING else YELLOW
             print(f"  The server on {address} ({what}): {colour}{answer}{RESET}")
     if not plan:
@@ -357,7 +358,7 @@ def _summary(env_file: Path, report: Report) -> None:
         print(f"\n{YELLOW}Not done:{RESET}")
         for item in report.not_done:
             print(f"  - {item}")
-    addresses = setup.phone_addresses(plan)
+    addresses = setup.phone_addresses(plan, setup.served_port(env_file), setup.served_scheme(env_file))
     if addresses:
         print(f"\n{BOLD}In Leina Radio{RESET}: Ustawienia -> Serwer, an address it can reach:")
         for field, address in addresses:
@@ -365,8 +366,16 @@ def _summary(env_file: Path, report: Report) -> None:
         _say('"Sieć lokalna" is used on the Wi-Fi picked under "Wi-Fi sieci lokalnej" ("Użyj bieżącego '
              'połączenia"), "połączenie zdalne" everywhere else. Then "Zapisz adresy i pobierz bazę", and log '
              "in under Ustawienia -> Konto with a user from the main menu -> Users.")
+        code = setup.certificate_code() if setup.served_scheme(env_file) == "https" else None
+        if code:
+            _say(f'Leina Radio asks "Czy to Twój serwer?" with a code the first time: it must be {code}. '
+                 "Another code means another server answered - don't confirm it.")
+        elif setup.served_scheme(env_file) == "https":
+            _say("Leina Radio asks \"Czy to Twój serwer?\" with a code the first time: compare it with the "
+                 "one the server prints when it starts (journalctl --user -u "
+                 f"{SHARING_SERVICE_NAME}), or run this setup again once it's running.")
         _say(f"If Leina Radio can't connect, a firewall on this PC (e.g. ufw) must allow TCP port "
-             f"{SHARING_HTTP_PORT} from where it connects.")
+             f"{setup.served_port(env_file)} from where it connects.")
     print("\nRun this setup again any time: Settings -> Server -> Setup this PC for database sharing.")
 
 

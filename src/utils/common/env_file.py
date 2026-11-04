@@ -29,6 +29,8 @@ MACHINE_KEYS = [
     MachineKey("SHARING_LAN_INTERFACE", "LAN interface", False),
     MachineKey("SHARING_VPN", "VPN to listen on too (tailscale / off / an interface, empty = none)", False),
     MachineKey("SHARING_ADDRESSES", "Other addresses to listen on (comma-separated)", False),
+    MachineKey("SHARING_PORT", "Port to listen on (empty = 8002)", False),
+    MachineKey("SHARING_TLS", "HTTPS with the server's own certificate (on / off, empty = on)", False),
 ]
 
 

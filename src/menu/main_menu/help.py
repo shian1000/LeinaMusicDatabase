@@ -112,7 +112,9 @@ musicdatabase-share.service + musicdatabase-share.timer - the server for Leina R
   The timer starts the service a minute after your user's systemd starts (at login, or at boot
   with lingering on). It serves only music.db, tag.db and files.db from the sharing folder, your
   music library's files, logging in, syncing users' playlists, moods and saved songs, and takes
-  requests from Leina Radio into the sharing folder's Inbox/. It listens on port 8002 only on the
+  requests from Leina Radio into the sharing folder's Inbox/. It listens on one port (8002 unless
+  you chose another) and, unless you turned it off, serves HTTPS with a certificate it makes for
+  itself on its first start - Leina Radio compares its code once. It listens only on the
   addresses you chose: the home network interface, the VPN's (any provider's interface you
   picked, or Tailscale's address; none unless you chose one) and any other address you added -
   never on all of them unless you added 0.0.0.0 yourself.

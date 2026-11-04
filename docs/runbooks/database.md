@@ -92,12 +92,12 @@ deliberately, not a script). To restore an archived snapshot:
 
 The MusicDatabaseApp phone client (separate Flutter repo, `../MusicDatabaseApp`, its
 `docs/decisions/0002-database-download.md`) downloads the databases once a day over VPN.
-The user enters a **folder URL** (`http://<tailscale ip>:8002/`) and the app fetches exactly
+The user enters a **folder URL** (`https://<address>:<port>/`) and the app fetches exactly
 `<url>/music.db` and `<url>/tag.db` (and, from 2026-10-12, `<url>/files.db` — the music library
 index; the app side is being told). It rejects anything that doesn't start with the
 `SQLite format 3` header (keeping its previous copy) and swaps the two files as a pair. That
-contract (port `SHARING_HTTP_PORT` = 8002, both file names) is relied on by the app, so agree any
-change with the app side first. Port 8001 is taken by the APK share.
+contract (the port — `SHARING_PORT`, default `SHARING_HTTP_PORT` = 8002 — and both file names) is
+relied on by the app, so agree any change with the app side first. Port 8001 is taken by the APK share.
 
 The app also reads the files' contents directly: the `songs` / `artists` /
 `additional_song_artists` tables and `songs.youtube_video_id` (video id = linked, `"N/A"` =
@@ -171,7 +171,8 @@ what would be written now) and lingering, and a summary with the phone's address
     its id when the file's contents change.
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
-- It listens on the addresses below, one socket each, with the same handler and port 8002:
+- It listens on the addresses below, one socket each, with the same handler and port
+  (`SHARING_PORT` in `.env`, default 8002, passed as `--port`):
   - **VPN** (`SHARING_VPN`, 2026-10-22, any provider): `tailscale` — the address from
     `tailscale ip -4` (the owner's setup; the unit gets no flag, so units from before the key stay
     the same; without Tailscale installed its socket just keeps waiting); empty or `off` —
@@ -198,8 +199,24 @@ what would be written now) and lingering, and a summary with the phone's address
   - It never binds to `0.0.0.0` unless the owner puts it in `SHARING_ADDRESSES` (the setup warns).
   - The phone has the LAN address typed in (the server's address on that interface, from DHCP). If the router hands out a
     different one, local access quietly stops working; the fix is a DHCP reservation on the router.
-  - `ufw` is installed but disabled (`ENABLED=no`). If it is ever enabled, open 8002 to
-    the home LAN's subnet only.
+  - A firewall on the PC (e.g. `ufw`) must let the port in from where the phones connect; the
+    setup says so.
+- HTTPS (2026-11-04, `SHARING_TLS`, empty = on; `off` = plain HTTP as before): every socket
+  serves TLS (`--tls-dir`, `constants.SHARING_TLS_DIR` = `.secrets/sharing-tls/`, never
+  committed). On its first start the server makes its own certificate with `openssl` (EC
+  P-256, 10 years; the key and folder this user's only) and prints its **code** in the journal:
+  the certificate's SHA-256 in base32, first 12 characters, `XXXX-XXXX-XXXX`
+  (`certificate_code()`). The setup and Settings -> Server -> Setup show the same code
+  (`sharing_setup.certificate_code()`). Leina Radio shows the code the first time it meets the
+  server ("Czy to Twój serwer?"), the owner compares and confirms, and the app pins that
+  certificate (the app's ADR 0015). Why not a public certificate: the server has no public name
+  on the home network. Why at all: logins, tokens and users' playlists went in the clear on the
+  home Wi-Fi. Each handshake runs in the connection's own thread with a 15 s limit
+  (`SharingServer`), so a client that never finishes it holds nothing else up, and a failed one
+  (a plain-HTTP client) is dropped quietly. **A new certificate** (the folder deleted) means every
+  phone must forget the old one (Leina Radio: Ustawienia › Serwer › Zapomnij) and confirm the new
+  code. An older Leina Radio, without pinning, can't connect over HTTPS: update the app with the
+  server.
 - Host header (2026-11-03, DNS rebinding): a request is answered only when its Host is an IP
   address, `localhost`, the machine's host name (`socket.gethostname()`) or its Tailscale
   MagicDNS name (`tailscale status --json`, asked each time a socket comes up, so a name Tailscale
@@ -656,9 +673,10 @@ contract, is [`docs/handoffs/saved-songs-for-musicdatabaseapp.md`](../handoffs/s
 - The rules live in `utils/database/saved_sync.py` (standard-library, built on `playlist_sync.py`).
   Private, no review, no permission. MusicDatabase's menu doesn't show them.
 
-Check: `systemctl --user status musicdatabase-share`, `curl -I http://$(tailscale ip -4):8002/music.db`
-(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `http://<lan-address>:8002/`, and
-`curl -I -H 'Host: evil.example' …/music.db` (421), `ss -ltnp 'sport = :8002'`, which should list exactly two addresses: Tailscale and the LAN address.
+Check (with HTTPS `curl -k` and `https://`; `<port>` = `SHARING_PORT`): `systemctl --user status musicdatabase-share`,
+`journalctl --user -u musicdatabase-share | grep 'certificate code'`, `curl -kI https://$(tailscale ip -4):<port>/music.db`
+(200), `/` and any other path (404), `curl -X POST -d '{"username":"x","password":"y"}' …/login` (401), `curl …/users/<name>/playlists`, `…/moods`, `…/folders`, `…/listens`, `…/saved-songs` and `…/later-links` (401 without a token), the same for `https://<lan-address>:<port>/`, and
+`curl -kI -H 'Host: evil.example' …/music.db` (421), `ss -ltnp 'sport = :<port>'`, which should list exactly two addresses: Tailscale and the LAN address.
 Disable: `systemctl --user disable --now musicdatabase-share.timer musicdatabase-share.service`,
 then delete the two unit files and run `systemctl --user daemon-reload`.
 

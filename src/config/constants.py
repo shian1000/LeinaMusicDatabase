@@ -65,7 +65,11 @@ MIN_AUTO_ACCEPT_ARTIST_SIMILARITY = 0.8
 # downloads <folder URL>/music.db and <folder URL>/tag.db from this port over
 # Tailscale; 8001 is already taken by the APK share. Changing the port or the
 # file names breaks the app's contract - agree it with the app side first.
+# The default only: a machine picks its own with SHARING_PORT (.env).
 SHARING_HTTP_PORT = 8002
+# The sharing server's own HTTPS certificate and key (sharing_server.py
+# --tls-dir, made on its first start; SHARING_TLS). Under .secrets/: never committed.
+SHARING_TLS_DIR = PROJECT_ROOT / ".secrets" / "sharing-tls"
 SHARING_SERVICE_NAME = "musicdatabase-share"
 # Delay after the user's systemd manager starts (= after login, without linger)
 # before the sharing server is started.

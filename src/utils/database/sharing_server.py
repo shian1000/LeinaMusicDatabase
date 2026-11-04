@@ -18,7 +18,7 @@ with every path passed on the command line.
 
     python3 sharing_server.py --dir DIR [--mount MOUNT] --port 8002 [--lan-interface enp2s0] [--no-tailscale]
                               [--vpn-interface wg0] [--address ADDR ...] [--inbox DIR] [--users DIR]
-                              [--mood-changes DIR] [--library DIR]
+                              [--mood-changes DIR] [--library DIR] [--tls-dir DIR]
 
 - Tailscale: waits (retrying forever) until `tailscale ip -4` returns an
   address and it can bind to it - right after boot Tailscale may not have
@@ -38,6 +38,16 @@ with every path passed on the command line.
   exactly that address, same wait-and-retry loop (the interface may come up
   later). 0.0.0.0 only when given there - the owner's explicit choice.
 - Never binds to 0.0.0.0 on its own, and never to an address other than those.
+- HTTPS (--tls-dir, 2026-11-04): every socket serves TLS with one
+  certificate the server makes for itself on first start (openssl, EC P-256,
+  10 years; cert.pem + key.pem in that folder, the key readable by this user
+  only). It's signed by no one: Leina Radio shows its code (certificate_code(),
+  printed at start) for the owner to compare once and then pins it. The code
+  is the SHA-256 of the certificate (DER) in base32, the first 12 characters
+  as XXXX-XXXX-XXXX - the app works it out the same way, keep the two alike.
+  The handshake runs in the connection's own thread, with a time limit, so a
+  client that never finishes it holds nothing else up. Without --tls-dir the
+  sockets serve plain HTTP, as before.
 - Host header (2026-11-03): only an IP address, "localhost", this machine's
   host name or its Tailscale MagicDNS name (read at run time) - anything
   else is a 421 before any handler runs. A web page that points its own
@@ -139,6 +149,8 @@ with every path passed on the command line.
 """
 
 import argparse
+import base64
+import hashlib
 import ipaddress
 import json
 import os
@@ -146,6 +158,7 @@ import re
 import shutil
 import socket
 import sqlite3
+import ssl
 import stat
 import subprocess
 import sys
@@ -175,6 +188,11 @@ except ImportError:
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
+TLS_CERT_FILE = "cert.pem"
+TLS_KEY_FILE = "key.pem"
+TLS_CERT_DAYS = 3650
+# A client that connects and never finishes the TLS handshake gives up its thread after this
+TLS_HANDSHAKE_TIMEOUT = 15
 TAILSCALE_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
 # [<user>_]<YYYY-MM-DD>_<HH-MM-SS>_<number>.db - the phone's request file names.
@@ -1414,7 +1432,70 @@ def _interface_addresses(interface: str) -> list:
     return found
 
 
-def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscale") -> ThreadingHTTPServer:
+def certificate_code(der: bytes) -> str:
+    """The short code the owner compares in Leina Radio: the certificate's
+    SHA-256 in base32, first 12 characters, "XXXX-XXXX-XXXX"."""
+    code = base64.b32encode(hashlib.sha256(der).digest()).decode()[:12]
+    return f"{code[:4]}-{code[4:8]}-{code[8:]}"
+
+
+def tls_certificate_code(tls_dir: str) -> str | None:
+    """certificate_code() of the certificate in tls_dir, None when there's none (yet)."""
+    try:
+        with open(os.path.join(tls_dir, TLS_CERT_FILE), encoding="ascii") as file:
+            return certificate_code(ssl.PEM_cert_to_DER_cert(file.read()))
+    except (OSError, ValueError):
+        return None
+
+
+def ensure_tls_certificate(tls_dir: str, run=subprocess.run) -> None:
+    """Makes the server's own certificate and key in tls_dir unless both are
+    there. The folder and the key are this user's only."""
+    cert = os.path.join(tls_dir, TLS_CERT_FILE)
+    key = os.path.join(tls_dir, TLS_KEY_FILE)
+    if os.path.exists(cert) and os.path.exists(key):
+        return
+    os.makedirs(tls_dir, mode=0o700, exist_ok=True)
+    old_umask = os.umask(0o077)
+    try:
+        run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+             "-nodes", "-days", str(TLS_CERT_DAYS), "-subj", "/CN=MusicDatabase sharing server",
+             "-keyout", key, "-out", cert], check=True, capture_output=True, timeout=60)
+    finally:
+        os.umask(old_umask)
+
+
+def tls_context(tls_dir: str) -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(os.path.join(tls_dir, TLS_CERT_FILE), os.path.join(tls_dir, TLS_KEY_FILE))
+    return context
+
+
+class SharingServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that, with a TLS context, does each handshake in the
+    connection's own thread (accepting stays quick) and doesn't print a
+    traceback for a client that fails it - a plain-HTTP or impatient client."""
+
+    def __init__(self, address, handler, tls: ssl.SSLContext | None = None):
+        super().__init__(address, handler)
+        self.tls = tls
+        if tls is not None:
+            self.socket = tls.wrap_socket(self.socket, server_side=True, do_handshake_on_connect=False)
+
+    def finish_request(self, request, client_address):
+        if isinstance(request, ssl.SSLSocket):
+            request.settimeout(TLS_HANDSHAKE_TIMEOUT)
+            try:
+                request.do_handshake()
+            except (ssl.SSLError, OSError):
+                return
+            request.settimeout(None)
+        super().finish_request(request, client_address)
+
+
+def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscale",
+                    tls: ssl.SSLContext | None = None) -> ThreadingHTTPServer:
     get_address = get_address or tailscale_ipv4
     while True:
         address = get_address()
@@ -1422,6 +1503,8 @@ def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscal
             print(f"No {label} address yet, retrying in {RETRY_SECONDS}s", flush=True)
         else:
             try:
+                if tls is not None:
+                    return SharingServer((address, port), handler, tls)
                 return ThreadingHTTPServer((address, port), handler)
             except OSError as exc:
                 print(f"Can't bind {address}:{port} ({exc}), retrying in {RETRY_SECONDS}s", flush=True)
@@ -1467,7 +1550,19 @@ def main(argv=None) -> int:
     parser.add_argument("--mood-changes", help="with --users: record permitted users' changes to global moods "
                                                "in this folder (on --mount)")
     parser.add_argument("--library", help="serve the music library files indexed in --dir/files.db from this folder")
+    parser.add_argument("--tls-dir", help="serve HTTPS with the certificate in this folder, made there on first start")
     args = parser.parse_args(argv)
+
+    tls = None
+    if args.tls_dir:
+        try:
+            ensure_tls_certificate(args.tls_dir)
+            tls = tls_context(args.tls_dir)
+        except (OSError, subprocess.SubprocessError, ssl.SSLError) as exc:
+            print(f"Can't use the HTTPS certificate in {args.tls_dir}: {exc}", file=sys.stderr, flush=True)
+            return 2
+        print(f"HTTPS certificate code (compare it in Leina Radio): {tls_certificate_code(args.tls_dir)}", flush=True)
+    scheme = "https" if tls else "http"
 
     host_names = {socket.gethostname().lower()}
     handler = make_handler(args.dir, args.mount, args.inbox, args.max_request_bytes, args.inbox_limit_bytes,
@@ -1475,7 +1570,7 @@ def main(argv=None) -> int:
                            mood_changes_dir=args.mood_changes, library_dir=args.library, host_names=host_names)
 
     def bind_and_serve(label, get_address):
-        server = bind_when_ready(handler, args.port, get_address, label)
+        server = bind_when_ready(handler, args.port, get_address, label, tls)
         # Tailscale has a name by the time it has an address; asked by every
         # socket, since a VPN interface may be Tailscale's too
         dns_name = tailscale_dns_name()
@@ -1486,7 +1581,7 @@ def main(argv=None) -> int:
         inbox += f", logins, playlists, moods, folders, saved songs and links, listens and covers for {args.users}" if args.users else ""
         inbox += f", global mood changes into {args.mood_changes}" if args.users and args.mood_changes else ""
         inbox += f", library files from {args.library}" if args.library else ""
-        print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on http://{host}:{port}/ ({label})", flush=True)
+        print(f"Serving {', '.join(SHARED_FILES)} from {args.dir}{inbox} on {scheme}://{host}:{port}/ ({label})", flush=True)
         server.serve_forever()
 
     sources = address_sources(args.lan_interface, tailscale=not args.no_tailscale, addresses=args.address,

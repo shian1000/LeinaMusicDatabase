@@ -24,6 +24,7 @@ from utils.common.sharing_setup import (
     lan_interfaces,
     listening_plan,
     address_candidates,
+    certificate_code,
     phone_addresses,
     restart_needed,
     value_warning,
@@ -54,7 +55,7 @@ from utils.discoveries.file_matching_settings import (
     save_closest_auto_accept_score,
 )
 from config.constants import DEBUG_VERBOSITY_LABELS
-from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, SHARING_HTTP_PORT
+from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCORE_RANGE, MIN_AUTO_ACCEPT_ARTIST_SIMILARITY
 from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
 from menu.main_menu.settings.name_cleanup import name_cleanup_menu
@@ -350,7 +351,7 @@ def setup_database_sharing():
               f"or an address to listen on (Settings -> Server -> Folders and network).{RESET}")
         return
     print("This installs a systemd user service that serves only music.db, tag.db and files.db")
-    print(f"from {settings.sharing_dir}, port {SHARING_HTTP_PORT}, on:")
+    print(f"from {settings.sharing_dir}, port {settings.sharing_port} ({'HTTPS' if settings.sharing_tls else 'HTTP'}), on:")
     for what, address in plan:
         print(f"  {what}: {'every address of this PC' if address == '0.0.0.0' else address or 'no address right now'}")
     print("Leina Radio must be able to reach one of them.\n")
@@ -371,8 +372,11 @@ def setup_database_sharing():
     for step in steps:
         print(f"  {step}")
     print("\nLeina Radio -> Ustawienia -> Serwer, an address it can reach:")
-    for field, address in phone_addresses(plan):
+    for field, address in phone_addresses(plan, settings.sharing_port, "https" if settings.sharing_tls else "http"):
         print(f"  {field}: {address}")
+    if settings.sharing_tls:
+        print("The first time, Leina Radio shows the server's certificate code to compare: "
+              f"{certificate_code() or 'printed by the server when it starts (it makes the certificate then)'}.")
     print("To turn it off:")
     print(sharing_service_disable_hint())
     # A fresh setup has nothing to serve until the first copy
@@ -537,6 +541,10 @@ def _change_machine_key(key) -> None:
             value for value in ("tailscale", "off") if value != current.lower()]
     elif key.name == "SHARING_ADDRESSES":
         methods = ["Add an address of this PC", "Type them manually (comma-separated)"]
+    elif key.name == "SHARING_PORT":
+        methods = ["Type the port"]
+    elif key.name == "SHARING_TLS":
+        methods = [value for value in ("on", "off") if value != current.lower()]
     else:
         methods = ["Pick a network interface", "Type the name manually"]
     if current:
@@ -550,7 +558,7 @@ def _change_machine_key(key) -> None:
         value = str(picked) if picked else None
     elif method == "Pick a network interface":
         value = _pick_lan_interface()
-    elif method in ("tailscale", "off"):
+    elif method in ("tailscale", "off", "on"):
         value = method
     elif method == "Pick a VPN interface":
         value = _pick_vpn_interface()

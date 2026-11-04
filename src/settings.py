@@ -4,6 +4,7 @@ from upath import UPath
 from dotenv import load_dotenv
 import os
 
+from config.constants import SHARING_HTTP_PORT
 from utils.common.env_file import ENV_FILE
 from utils.database.database_location import load_database_dir_override
 
@@ -45,6 +46,20 @@ def vpn_choice(value: str) -> str:
 
 def listen_addresses(value: str) -> list[str]:
     return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def port_choice(value: str) -> int | None:
+    """SHARING_PORT as a port number: None when empty or not one."""
+    value = (value or "").strip()
+    if value.isascii() and value.isdigit() and 1 <= int(value) <= 65535:
+        return int(value)
+    return None
+
+
+def tls_choice(value: str) -> bool:
+    """SHARING_TLS: HTTPS unless "off" (empty = on - the owner's rule since
+    the server takes logins and users' data on the home network)."""
+    return (value or "").strip().lower() not in ("off", "no", "false", "0")
 
 
 @dataclass
@@ -97,6 +112,11 @@ class Settings:
     # comma-separated, 0.0.0.0 only when the owner chooses it).
     sharing_vpn: str = vpn_choice(os.getenv("SHARING_VPN", ""))
     sharing_addresses: tuple = tuple(listen_addresses(os.getenv("SHARING_ADDRESSES", "")))
+    # The port it listens on (SHARING_PORT, empty = SHARING_HTTP_PORT) and
+    # whether it serves HTTPS with its own certificate (SHARING_TLS, empty =
+    # on; the certificate in constants.SHARING_TLS_DIR).
+    sharing_port: int = port_choice(os.getenv("SHARING_PORT", "")) or SHARING_HTTP_PORT
+    sharing_tls: bool = tls_choice(os.getenv("SHARING_TLS", ""))
     # The public copy of the catalog (utils/database/public_database.py):
     # "owner/repo" whose GitHub Release it goes to, and a fine-grained token
     # with Contents: read and write on that repo only. Never print or log it.

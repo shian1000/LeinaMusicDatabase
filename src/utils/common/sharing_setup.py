@@ -10,16 +10,17 @@ as an argument, so tests never reach this machine's real .env or systemd."""
 import getpass
 import ipaddress
 import os
+import ssl
 import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from config.constants import SHARING_HTTP_PORT
-from settings import VPN_OFF, VPN_TAILSCALE, listen_addresses, vpn_choice
+from config.constants import SHARING_HTTP_PORT, SHARING_TLS_DIR
+from settings import VPN_OFF, VPN_TAILSCALE, listen_addresses, port_choice, tls_choice, vpn_choice
 from utils.common.env_file import read_env_value
-from utils.database.sharing_server import interface_ipv4, tailscale_ipv4, vpn_interface_ipv4
+from utils.database.sharing_server import interface_ipv4, tailscale_ipv4, tls_certificate_code, vpn_interface_ipv4
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,22 @@ SETTING_STEPS = [
         "only the addresses of the steps before.",
     ),
     SettingStep(
+        "SHARING_PORT", "Port", False,
+        f"The TCP port the server listens on, 1024-65535. Pick one nobody else on this PC uses; a "
+        f"less common number than the default is found less easily by someone scanning a network. "
+        f"Leina Radio's addresses carry it (https://<address>:<port>/).",
+        f"port {SHARING_HTTP_PORT}.",
+    ),
+    SettingStep(
+        "SHARING_TLS", "HTTPS", False,
+        "\"on\" or \"off\": whether the server serves HTTPS with a certificate it makes for itself on "
+        "its first start. Logins and users' playlists then travel encrypted on the home network too. "
+        "Leina Radio shows the certificate's code once to compare with the one this setup shows, "
+        "and trusts only that certificate from then on. \"off\" is plain HTTP - for an older "
+        "Leina Radio, or when something else in front of the server already encrypts.",
+        "on (HTTPS).",
+    ),
+    SettingStep(
         "MUSIC_LIBRARY_DIR", "Your music library", False,
         "The folder with your own mp3 files (other formats aren't indexed). It's indexed into files.db, so Leina "
         "Radio can play a song's file from this PC (the source \"Serwer\"). An smb://server/share/path/ "
@@ -95,6 +112,17 @@ def value_warning(name: str, value: str, env_file: Path | None = None, local_add
         return _vpn_warning(value, env_file)
     if name == "SHARING_ADDRESSES":
         return _addresses_warning(value, local_addresses)
+    if name == "SHARING_PORT":
+        port = port_choice(value)
+        if port is None:
+            return f"{value} isn't a port number (1-65535)."
+        if port < 1024:
+            return f"Port {port} is below 1024: a user's service can't listen on it."
+        return None
+    if name == "SHARING_TLS":
+        if value.strip().lower() not in ("on", "off"):
+            return "Write on or off."
+        return None
     if "://" in value and not value.startswith("file://"):
         if name == "MUSIC_LIBRARY_DIR":
             return None
@@ -323,10 +351,28 @@ def service_active(name: str, run=subprocess.run) -> bool:
 SERVING, NO_COPY, DATA_MISSING, NOT_ANSWERING = "serving", "no copy yet", "folder unavailable", "not answering"
 
 
-def server_answer(address: str, port: int = SHARING_HTTP_PORT, opener=urllib.request.urlopen) -> str:
-    request = urllib.request.Request(f"http://{address}:{port}/music.db", method="HEAD")
+def served_port(env_file: Path | None = None) -> int:
+    """The port the server will listen on with the settings in env_file."""
+    return port_choice(read_env_value("SHARING_PORT", env_file)) or SHARING_HTTP_PORT
+
+
+def served_scheme(env_file: Path | None = None) -> str:
+    return "https" if tls_choice(read_env_value("SHARING_TLS", env_file)) else "http"
+
+
+def certificate_code(tls_dir: Path = SHARING_TLS_DIR) -> str | None:
+    """The code of the server's HTTPS certificate, for comparing in Leina
+    Radio; None until the server has made it (on its first start)."""
+    return tls_certificate_code(str(tls_dir))
+
+
+def server_answer(address: str, port: int = SHARING_HTTP_PORT, opener=urllib.request.urlopen,
+                  scheme: str = "http") -> str:
+    request = urllib.request.Request(f"{scheme}://{address}:{port}/music.db", method="HEAD")
+    # Only whether this PC's own server answers: its certificate is signed by no one
+    extra = {"context": ssl._create_unverified_context()} if scheme == "https" else {}
     try:
-        with opener(request, timeout=5):
+        with opener(request, timeout=5, **extra):
             return SERVING
     except urllib.error.HTTPError as exc:
         return {404: NO_COPY, 503: DATA_MISSING}.get(exc.code, f"HTTP {exc.code}")
@@ -334,7 +380,8 @@ def server_answer(address: str, port: int = SHARING_HTTP_PORT, opener=urllib.req
         return NOT_ANSWERING
 
 
-def phone_addresses(plan: list[tuple[str, str | None]], port: int = SHARING_HTTP_PORT) -> list[tuple[str, str]]:
+def phone_addresses(plan: list[tuple[str, str | None]], port: int = SHARING_HTTP_PORT,
+                    scheme: str = "http") -> list[tuple[str, str]]:
     """What may go into Leina Radio -> Ustawienia -> Serwer: (field, address).
     The home network's address is for "sieć lokalna"; any other one the phone
     can reach from elsewhere is a candidate for "połączenie zdalne"."""
@@ -343,5 +390,5 @@ def phone_addresses(plan: list[tuple[str, str | None]], port: int = SHARING_HTTP
         if not address or address == "0.0.0.0":
             continue
         field = "Adres serwera (sieć lokalna)" if what.startswith("home network") else "Adres serwera (połączenie zdalne)"
-        lines.append((field, f"http://{address}:{port}/"))
+        lines.append((field, f"{scheme}://{address}:{port}/"))
     return lines

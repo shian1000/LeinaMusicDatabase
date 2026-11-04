@@ -1,6 +1,9 @@
 import hashlib
 import json
+import shutil
+import socket
 import sqlite3
+import ssl
 import subprocess
 import sys
 import threading
@@ -331,6 +334,113 @@ def test_second_socket_on_same_port_serves_the_same_files(serve, share_dir):
         assert _request(f"{first}/{name}")[2] == _request(f"{second}/{name}")[2] == (share_dir / name).read_bytes()
     assert _request(f"{second}/")[0] == 404
     assert _request(f"{second}/secret.txt")[0] == 404
+
+
+# ==================== HTTPS (--tls-dir) ====================
+
+needs_openssl = pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl not installed")
+
+
+def test_certificate_code_is_base32_of_the_sha256_in_groups():
+    # Leina Player's codeOfDigest() gives the same for the same bytes - the owner compares the two
+    assert sharing_server.certificate_code(b"x") == "FVYR-MQVX-E2YE"
+
+
+@needs_openssl
+def test_the_server_makes_its_certificate_once_with_a_private_key(tmp_path):
+    tls_dir = tmp_path / "tls"
+    sharing_server.ensure_tls_certificate(str(tls_dir))
+    cert = (tls_dir / sharing_server.TLS_CERT_FILE).read_bytes()
+    assert (tls_dir / sharing_server.TLS_KEY_FILE).stat().st_mode & 0o077 == 0
+    assert tls_dir.stat().st_mode & 0o077 == 0
+    code = sharing_server.tls_certificate_code(str(tls_dir))
+    assert code == sharing_server.certificate_code(ssl.PEM_cert_to_DER_cert(cert.decode()))
+
+    sharing_server.ensure_tls_certificate(str(tls_dir))
+    assert (tls_dir / sharing_server.TLS_CERT_FILE).read_bytes() == cert
+    assert sharing_server.tls_certificate_code(str(tmp_path / "none")) is None
+
+
+@pytest.fixture
+def serve_tls(tmp_path):
+    servers = []
+    tls_dir = tmp_path / "tls"
+
+    def start(share_dir: Path):
+        sharing_server.ensure_tls_certificate(str(tls_dir))
+        handler = sharing_server.make_handler(str(share_dir), "/")
+        server = sharing_server.SharingServer(("127.0.0.1", 0), handler, sharing_server.tls_context(str(tls_dir)))
+        server.RequestHandlerClass.log_message = lambda *a: None
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+        servers.append(server)
+        # Trusts exactly that certificate, as Leina Player does once its code is confirmed
+        client = ssl.create_default_context(cafile=str(tls_dir / sharing_server.TLS_CERT_FILE))
+        client.check_hostname = False
+        return server.server_address[1], client
+
+    yield start
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+@needs_openssl
+def test_tls_server_serves_the_shared_files_over_https(serve_tls, share_dir):
+    port, client = serve_tls(share_dir)
+    with urllib.request.urlopen(f"https://127.0.0.1:{port}/music.db", context=client) as resp:
+        assert resp.status == 200
+        assert resp.read() == (share_dir / "music.db").read_bytes()
+
+
+@needs_openssl
+def test_tls_server_refuses_plain_http_and_keeps_serving(serve_tls, share_dir):
+    port, client = serve_tls(share_dir)
+    with pytest.raises((urllib.error.URLError, ConnectionError, OSError)):
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/music.db", timeout=5).read()
+    # A client that connects and says nothing doesn't block the next one
+    idle = socket.create_connection(("127.0.0.1", port))
+    try:
+        with urllib.request.urlopen(f"https://127.0.0.1:{port}/tag.db", context=client, timeout=5) as resp:
+            assert resp.status == 200
+    finally:
+        idle.close()
+
+
+@needs_openssl
+def test_tls_server_is_refused_by_a_client_that_does_not_trust_its_certificate(serve_tls, share_dir):
+    port, _ = serve_tls(share_dir)
+    with pytest.raises(urllib.error.URLError) as caught:
+        urllib.request.urlopen(f"https://127.0.0.1:{port}/music.db", timeout=5)
+    assert isinstance(caught.value.reason, ssl.SSLCertVerificationError)
+
+
+def test_main_with_tls_dir_serves_https_and_prints_the_code(monkeypatch, capsys, tmp_path):
+    made = []
+    monkeypatch.setattr(sharing_server, "ensure_tls_certificate", lambda d: made.append(d))
+    monkeypatch.setattr(sharing_server, "tls_context", lambda d: "context")
+    monkeypatch.setattr(sharing_server, "tls_certificate_code", lambda d: "ABCD-EFGH-IJKL")
+    contexts = []
+
+    def fake_bind(handler, port, get_address, label, tls=None):
+        contexts.append(tls)
+        return _FakeServer("100.64.0.10", port)
+
+    monkeypatch.setattr(sharing_server, "bind_when_ready", fake_bind)
+    sharing_server.main(["--dir", "/d", "--port", "8002", "--tls-dir", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert made == [str(tmp_path)]
+    assert contexts == ["context"]
+    assert "ABCD-EFGH-IJKL" in out
+    assert "https://100.64.0.10:8002/" in out
+
+
+def test_main_stops_when_the_certificate_cannot_be_made(monkeypatch, tmp_path):
+    def failing(directory):
+        raise subprocess.CalledProcessError(1, "openssl")
+
+    monkeypatch.setattr(sharing_server, "ensure_tls_certificate", failing)
+    monkeypatch.setattr(sharing_server, "bind_when_ready", lambda *a, **k: pytest.fail("bound without a certificate"))
+    assert sharing_server.main(["--dir", "/d", "--port", "8002", "--tls-dir", str(tmp_path)]) == 2
 
 
 # ==================== Host header (DNS rebinding) ====================
@@ -843,7 +953,7 @@ def _run_main(monkeypatch, extra_args):
     bound = []
     addresses = {"Tailscale": "100.64.0.10", "LAN enp2s0": "192.0.2.10"}
 
-    def fake_bind(handler, port, get_address, label):
+    def fake_bind(handler, port, get_address, label, tls=None):
         bound.append(label)
         return _FakeServer(addresses[label], port)
 
@@ -868,7 +978,7 @@ def test_lan_interface_adds_a_second_socket(monkeypatch, capsys):
 def test_without_tailscale_only_the_chosen_addresses_are_served(monkeypatch, capsys):
     bound = []
 
-    def fake_bind(handler, port, get_address, label):
+    def fake_bind(handler, port, get_address, label, tls=None):
         bound.append((label, get_address()))
         return _FakeServer(get_address(), port)
 
@@ -884,7 +994,7 @@ def test_without_tailscale_only_the_chosen_addresses_are_served(monkeypatch, cap
 def test_a_vpn_interface_of_any_provider_is_served(monkeypatch):
     bound = []
 
-    def fake_bind(handler, port, get_address, label):
+    def fake_bind(handler, port, get_address, label, tls=None):
         bound.append((label, get_address()))
         return _FakeServer(get_address(), port)
 
@@ -1027,7 +1137,9 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert [name for name, _ in second] == ["musicdatabase-inbox.service", "musicdatabase-inbox.timer",
                                            "musicdatabase-share.service", "musicdatabase-share.timer"]
     inbox_service, inbox_timer, service, timer = (text for _, text in second)
-    assert f"--port {sharing.SHARING_HTTP_PORT}" in service
+    assert f"--port {sharing.Settings.sharing_port}" in service
+    # HTTPS unless SHARING_TLS=off (conftest's empty .env: on)
+    assert f"--tls-dir {sharing.SHARING_TLS_DIR}" in service
     assert f"--dir {sharing.SHARING_DIR}" in service
     assert f"--inbox {sharing.PHONE_INBOX_DIR}" in service
     assert f"--users {sharing.USERS_DIR}" in service
@@ -2121,3 +2233,24 @@ def test_install_refuses_without_a_sharing_folder(tmp_path, monkeypatch):
         sharing.install_sharing_service()
 
     assert not (tmp_path / "systemd").exists()
+
+
+def test_the_unit_takes_the_port_and_https_from_the_settings(monkeypatch, tmp_path):
+    monkeypatch.setattr(sharing, "SHARING_DIR", tmp_path / "share")
+    monkeypatch.setattr(sharing, "SHARING_DRIVE_MOUNT", None)
+    monkeypatch.setattr(sharing.Settings, "sharing_port", 29999)
+    monkeypatch.setattr(sharing.Settings, "sharing_tls", False)
+    unit = sharing._service_unit("/usr/bin/python3")
+    assert "--port 29999" in unit
+    assert "--tls-dir" not in unit
+
+
+@pytest.mark.parametrize(("value", "port"), [("", None), ("28443", 28443), ("0", None), ("70000", None),
+                                             ("８０", None), ("abc", None)])
+def test_sharing_port_setting(value, port):
+    assert sharing_settings.port_choice(value) == port
+
+
+@pytest.mark.parametrize(("value", "on"), [("", True), ("on", True), ("off", False), ("OFF", False), ("no", False)])
+def test_sharing_tls_setting(value, on):
+    assert sharing_settings.tls_choice(value) is on
