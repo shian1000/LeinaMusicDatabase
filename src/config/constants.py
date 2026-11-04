@@ -604,6 +604,13 @@ TITLE_JUNK_SUFFIXES = [
 # from the steps' defaults is stored (utils/common/sanitize/settings.py)
 SANITIZE_CONFIG_FILE = PROJECT_ROOT / "sanitize_config.json"
 
+# "<Name> - Topic" channels whose name is NOT an artist: YouTube files an
+# auto-generated upload under one of these when it couldn't attach the
+# track to a real artist channel (real case: "Release - Topic" carrying
+# "Mind Me" by Oordaya and "Slide" by Frankie Cosmos). Matched
+# case-insensitively against the channel name minus " - Topic".
+GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
+
 # Settings -> "Name cleanup": switch -> (group, menu label, what it does), in
 # the order the steps run and are shown (sanitize.SWITCHES)
 SANITIZE_SWITCH_LABELS = {
@@ -629,6 +636,9 @@ SANITIZE_SWITCH_LABELS = {
                         "only at the start or in a bracket, never 'White Queen'."),
     "site_names": ("Removing", "Download-site names",
                    "'y2meta.com - ', '(greenmp3.com)', 'Y2Mate.is', Y2Mate's '-<id>-160k-<time>'."),
+    "topic_channels": ("Removing", "YouTube's ' - Topic' after an artist",
+                       "'Igo - Topic' -> 'Igo' (a channel's name in a downloaded file's tags); "
+                       "'Release - Topic' stays, 'Release' being no artist."),
     "junk_in_titles": ("Removing", "Junk in titles",
                        "'(Official Video)', '(Visualiser)', '(Remastered)', 'Lyric Video', 'HD', '| Label', "
                        "'#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),

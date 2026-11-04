@@ -1142,6 +1142,20 @@ def test_surely_joined_artist_is_scored_as_its_main_artists(music_session):
     assert matcher.match_score({"artist_name": "Hasiok x Maleńczuk", "title": "Yugopolis"}, yugopolis) == 1.0
 
 
+def test_file_tagged_with_a_topic_channel_is_matched_without_asking(music_session):
+    from utils.discoveries.import_data_from_mp3_tags import _clean_fields
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # Real case: "Igo - Topic" in a downloaded file's tags only ever got a
+    # suggestion, the file never matching exactly
+    song = Song(title="Better be alive", artist=Artist(name="Igo"))
+    music_session.add(song)
+    music_session.commit()
+
+    tags = _clean_fields({"artist_name": "Igo - Topic", "title": "Better Be Alive", "album": None})
+    assert LocalSongMatcher(music_session).match_exact(tags) is song
+
+
 def test_unsure_joined_artist_is_not_scored_as_its_parts(music_session):
     from utils.discoveries.import_engine import LocalSongMatcher
 

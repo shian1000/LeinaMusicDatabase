@@ -444,7 +444,7 @@ non-trivial work in that area.
   so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
   (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
   is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
-  turns each of its 11 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
+  turns each of its 12 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
   (`set_switch_on()`; where a step runs follows from
   what it works on, `runs_for()`, owner's choice 2026-11-01: the same everywhere, so every step must be
   safe for every name - measure on the catalog before adding or loosening one), saved in

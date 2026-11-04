@@ -72,6 +72,7 @@ from functools import cache
 
 from config.constants import (
     ARTIST_JOINING_WORDS,
+    GENERIC_TOPIC_CHANNELS,
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
     SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS,
     SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
@@ -366,7 +367,6 @@ _credits_by_video: dict = {}
 def is_generic_channel_artist(artist: str | None) -> bool:
     """Whether a request's artist is a generic Topic channel ("Release",
     "Release - Topic"), not an artist."""
-    from utils.youtube.import_from_playlist import GENERIC_TOPIC_CHANNELS
     base = re.sub(r"\s*-\s*topic$", "", artist or "", flags=re.IGNORECASE).strip().lower()
     return base in GENERIC_TOPIC_CHANNELS
 

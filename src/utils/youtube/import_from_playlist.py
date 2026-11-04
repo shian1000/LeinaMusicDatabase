@@ -36,7 +36,7 @@ from utils.common.sanitize import (
     strip_hashtags,
 )
 from utils.common.song_entry import SongEntry, as_entry, describe_cuts
-from config.constants import YTDLP_PLAYLIST_LANG
+from config.constants import GENERIC_TOPIC_CHANNELS, YTDLP_PLAYLIST_LANG
 from utils.common.debug import flog, mlog
 from utils.common import trace
 
@@ -494,16 +494,9 @@ def resolve_special_channel_metadata(item: dict) -> tuple | None:
     return found
 
 
-# "<Name> - Topic" channels whose name is NOT an artist: YouTube files an
-# auto-generated upload under one of these when it couldn't attach the
-# track to a real artist channel (real case: "Release - Topic" carrying
-# "Mind Me" by Oordaya and "Slide" by Frankie Cosmos). The video title is
-# still the bare song title, but the channel name is useless as the artist,
-# so _artist_from_topic_description() reads it off the description instead.
-# Matched case-insensitively against the channel name minus " - Topic".
-GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
-
-
+# On a GENERIC_TOPIC_CHANNELS channel the video title is still the bare song
+# title, but the channel name is useless as the artist, so
+# _artist_from_topic_description() reads it off the description instead.
 def _is_generic_topic_channel(channel: str) -> bool:
     if not (channel and _is_topic_channel(channel)):
         return False

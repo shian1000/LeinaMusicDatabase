@@ -240,11 +240,38 @@ def test_clean_names_runs_every_step_that_is_on(settings_file):
     before, after = name_cleanup.stored_step_passes()
     assert before == ["html_entities", "cp1250_mojibake"]
     assert after == ["media_extension", "file_name_artifacts", "invisible_chars", "whitespace", "title_year",
-                     "artist_in_title", "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+                     "artist_in_title", "site_names", "topic_channel", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
                      "junk_marker_brackets", "junk_phrases", "title_year", "junk_marker_brackets", "quote_marks",
                      "whitespace", "edge_separators"]
     s.set_switch_on("artist_in_title", False)
     assert "artist_in_title" not in name_cleanup.stored_step_passes()[1]
+
+
+@pytest.mark.parametrize("artist, expected", [
+    ("Igo - Topic", "Igo"),
+    ("WALK THE MOON - TOPIC", "WALK THE MOON"),
+    # A generic channel is no artist, once its " - Topic" is gone either
+    ("Release - Topic", "Release - Topic"),
+    ("various artists - topic", "various artists - topic"),
+    # Only the channel's own ending
+    ("Hot-Topic", "Hot-Topic"),
+    ("Hot Topic", "Hot Topic"),
+    ("Topic", "Topic"),
+    ("Le Tigre - Hot Topic", "Le Tigre - Hot Topic"),
+    (" - Topic", " - Topic"),
+])
+def test_strip_topic_channel(artist, expected):
+    assert s.strip_topic_channel(artist) == expected
+
+
+def test_topic_channel_goes_only_from_an_artist_and_has_its_switch(settings_file):
+    assert s.sanitize_field("Igo - Topic", s.ARTIST, s.SOURCE_MP3) == "Igo"
+    assert s.sanitize_field("Igo - Topic", s.ARTIST, s.SOURCE_REQUEST) == "Igo"
+    assert s.sanitize_field("Igo - Topic", s.ARTIST, s.SOURCE_MANUAL) == "Igo - Topic"  # typed by hand
+    assert s.sanitize_field("Hot - Topic", s.TITLE, s.SOURCE_MP3) == "Hot - Topic"
+    assert s.sanitize_field("Hot - Topic", s.ALBUM, s.SOURCE_MP3) == "Hot - Topic"
+    s.set_switch_on("topic_channels", False)
+    assert s.sanitize_field("Igo - Topic", s.ARTIST, s.SOURCE_MP3) == "Igo - Topic"
 
 
 def test_clean_names_takes_the_artist_out_of_a_title_it_starts_with():

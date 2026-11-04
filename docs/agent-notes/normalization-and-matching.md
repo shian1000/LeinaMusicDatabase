@@ -92,7 +92,7 @@ across a song's fields, by known words) are not steps yet.
 cleanup".** "Extract first, then remove": a step that keeps what a title
 says runs before any step that cuts text, or the cut takes it along ("Song
 (Official Video ft. X)" lost X while featured artists ran last).
-`sanitize.SWITCHES` (11, `constants.SANITIZE_SWITCH_LABELS` with their
+`sanitize.SWITCHES` (12, `constants.SANITIZE_SWITCH_LABELS` with their
 group, label and examples) each turns a few `STEPS` on or off; `FIELD_ORDER`
 follows them:
 1. Characters - HTML entities ("&amp;" -> "&", before anything reads an
@@ -108,7 +108,10 @@ follows them:
    with a year, not a version, and " - 1982" - out of the junk brackets;
    run again after the junk, "Song (2020) (Official Video)"; `hints.year`,
    offered in Years, never written unasked), the artist repeated in it.
-3. Removing - download-site names, junk (one switch: the four bracket /
+3. Removing - download-site names, YouTube's " - Topic" after an artist
+   (`strip_topic_channel()`: a downloaded file's tag "Igo - Topic" never
+   matched "Igo" exactly; no artist of the catalog had one, 2026-11-04; a
+   `GENERIC_TOPIC_CHANNELS` name stays, "Release" being no artist), junk (one switch: the four bracket /
    phrase steps, "| Label", hashtags; a bracket naming a version stays),
    quote marks around a title (its own switch: Bowie's '"Heroes"').
 4. Tidying - invisible characters and spaces (run at the start too) and a

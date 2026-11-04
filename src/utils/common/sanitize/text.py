@@ -7,7 +7,7 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
-from config.constants import FILE_NAME_JUNK_FILE, SITE_NAME_TLDS, TITLE_JUNK_SUFFIXES
+from config.constants import FILE_NAME_JUNK_FILE, GENERIC_TOPIC_CHANNELS, SITE_NAME_TLDS, TITLE_JUNK_SUFFIXES
 from utils.common.normalizer import NON_DECOMPOSING_LETTER_FOLDS
 from utils.common.title_patterns import YEAR, YOUTUBE_BRACKET_PAIRS, YOUTUBE_BRACKETED
 
@@ -145,6 +145,17 @@ def strip_site_names(text: str) -> str:
 def is_site_name(text: str) -> bool:
     """Is `text` nothing but download-site names ("y2meta.com")?"""
     return bool(text) and not _drop_junk(text).strip()
+
+
+_TOPIC_CHANNEL_RE = re.compile(r"\s+-\s+topic\s*$", re.IGNORECASE)
+
+
+def strip_topic_channel(artist: str) -> str:
+    """An artist named after their auto-generated YouTube channel, "Igo -
+    Topic" -> "Igo". A generic channel ("Release - Topic") stays: what's left
+    wouldn't be an artist. Spaces around the dash required: "Hot-Topic"."""
+    base = _TOPIC_CHANNEL_RE.sub("", artist)
+    return base if base.strip() and base.strip().lower() not in GENERIC_TOPIC_CHANNELS else artist
 
 
 # ==================== Junk phrases at the end ====================

@@ -96,6 +96,12 @@ MP3_CASES = [
      {"artist_name": None, "title": "David Dean Burkhart Playlist", "album": "Album"}),
     ({"artist_name": "Artist", "title": "Song (greenmp3.com)", "album": ""},
      {"artist_name": "Artist", "title": "Song", "album": ""}),
+    # Changed 2026-11-04: a YouTube channel's " - Topic" goes from an artist
+    # (no artist of the catalog had one), a generic channel's name stays
+    ({"artist_name": "Igo - Topic", "title": "Better Be Alive", "album": None},
+     {"artist_name": "Igo", "title": "Better Be Alive", "album": None}),
+    ({"artist_name": "Release - Topic", "title": "Mind Me", "album": None},
+     {"artist_name": "Release - Topic", "title": "Mind Me", "album": None}),
     # Changed 2026-11-01: a junk bracket goes from mp3 tags too
     # ("junk_brackets_anywhere"), it used to stay
     ({"artist_name": " Artist ", "title": "Song  Title (Official Video)", "album": None},
