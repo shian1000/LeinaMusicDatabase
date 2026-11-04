@@ -371,6 +371,9 @@ def read_request_file(path: Path) -> RequestFile:
     try:
         # immutable: no locks, journal or -shm next to a file we only read
         conn = sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)
+        # Someone else's file: its views and triggers may not call functions
+        # with side effects
+        conn.execute("PRAGMA trusted_schema=OFF")
     except sqlite3.Error as exc:
         request.error = f"can't open: {exc}"
         return request

@@ -468,3 +468,28 @@ def test_the_inbox_doesnt_load_the_youtube_module_for_the_no_video_value():
     from config.constants import NO_VIDEO_SENTINEL
     from utils.youtube import manage_youtube_playlists
     assert manage_youtube_playlists.NO_VIDEO_SENTINEL == NO_VIDEO_SENTINEL == "N/A"
+
+
+def test_request_files_are_read_with_an_untrusted_schema(tmp_path, monkeypatch):
+    """A phone's file may carry views and triggers: they must not call
+    functions with side effects (PRAGMA trusted_schema=OFF, first thing)."""
+    path = tmp_path / "2026-10-12_23-44-05_001.db"
+    sqlite3.connect(path).close()
+    real_connect = sqlite3.connect
+    statements = []
+
+    class Recording:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, *args):
+            statements.append(sql)
+            return self._conn.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(pr.sqlite3, "connect", lambda *a, **k: Recording(real_connect(*a, **k)))
+    pr.read_request_file(path)
+
+    assert statements[0] == "PRAGMA trusted_schema=OFF"

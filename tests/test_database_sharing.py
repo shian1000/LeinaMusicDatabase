@@ -632,15 +632,16 @@ def test_full_inbox_refuses_new_requests_until_one_is_processed(inbox_server, tm
     start, inbox = inbox_server
     first, second = _sqlite_bytes(tmp_path, 1), _sqlite_bytes(tmp_path, 2)
     base = start(inbox_limit_bytes=len(first) + len(second) - 1)
-    other = "2026-10-12_23-45-00_002.db"
+    # Signed names (accepted as such without --users): unsigned ones have only half the room
+    name, other = f"ola-2_{REQUEST_NAME}", "ola-2_2026-10-12_23-45-00_002.db"
 
-    assert _put(f"{base}/inbox/{REQUEST_NAME}", first)[0] == 201
+    assert _put(f"{base}/inbox/{name}", first)[0] == 201
     assert _put(f"{base}/inbox/{other}", second)[0] == 507
     assert not (inbox / "new" / other).exists()
 
     # Processing moves it out of new/, which frees the room
     (inbox / "processed").mkdir()
-    (inbox / "new" / REQUEST_NAME).rename(inbox / "processed" / REQUEST_NAME)
+    (inbox / "new" / name).rename(inbox / "processed" / name)
     assert _put(f"{base}/inbox/{other}", second)[0] == 201
 
 
@@ -678,6 +679,51 @@ def test_inbox_files_are_never_downloadable(inbox_server, tmp_path):
     _put(f"{base}/inbox/{REQUEST_NAME}", _sqlite_bytes(tmp_path))
 
     assert _request(f"{base}/inbox/{REQUEST_NAME}")[0] == 404
+
+
+def test_unsigned_uploads_are_limited_per_address(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    base = start(upload_limiter=sharing_server.UploadLimiter(limit=2))
+    names = [f"2026-10-12_23-44-0{i}_001.db" for i in range(3)]
+
+    assert [_put(f"{base}/inbox/{name}", _sqlite_bytes(tmp_path, i + 1))[0]
+            for i, name in enumerate(names[:2])] == [201, 201]
+    req = urllib.request.Request(f"{base}/inbox/{names[2]}", data=_sqlite_bytes(tmp_path, 3), method="PUT")
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(req)
+    assert err.value.code == 429
+    assert 0 < int(err.value.headers["Retry-After"]) <= sharing_server.ANONYMOUS_UPLOAD_WINDOW_SECONDS
+    assert not (inbox / "new" / names[2]).exists()
+    # A signed name isn't counted
+    assert _put(f"{base}/inbox/ola-2_{names[2]}", _sqlite_bytes(tmp_path, 3))[0] == 201
+
+
+def test_upload_limiter_counts_per_address_within_the_window():
+    now = [0.0]
+    limiter = sharing_server.UploadLimiter(limit=2, window=3600, clock=lambda: now[0])
+
+    assert [limiter.take("192.0.2.10"), limiter.take("192.0.2.10")] == [0, 0]
+    assert limiter.take("192.0.2.10") == 3600
+    assert limiter.take("192.0.2.11") == 0
+    now[0] = 1800
+    assert limiter.take("192.0.2.10") == 1800
+    now[0] = 3600
+    assert limiter.take("192.0.2.10") == 0
+    # Old uploads of every address are forgotten, so the dict doesn't grow forever
+    assert list(limiter._uploads) == ["192.0.2.10"]
+
+
+def test_unsigned_requests_fill_at_most_half_the_inbox(inbox_server, tmp_path):
+    start, inbox = inbox_server
+    first, second = _sqlite_bytes(tmp_path, 1), _sqlite_bytes(tmp_path, 2)
+    base = start(inbox_limit_bytes=2 * (len(first) + len(second)) - 1)
+    other = "2026-10-12_23-45-00_002.db"
+
+    assert _put(f"{base}/inbox/{REQUEST_NAME}", first)[0] == 201
+    assert _put(f"{base}/inbox/{other}", second)[0] == 507
+    assert not (inbox / "new" / other).exists()
+    # The other half stays for logged-in users
+    assert _put(f"{base}/inbox/ola-2_{other}", second)[0] == 201
 
 
 # ==================== login and signed uploads ====================
@@ -871,7 +917,7 @@ def test_bind_waits_for_tailscale_address_and_never_falls_back(monkeypatch):
     bound = []
     monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: next(addresses))
     monkeypatch.setattr(sharing_server.time, "sleep", sleeps.append)
-    monkeypatch.setattr(sharing_server, "ThreadingHTTPServer", lambda addr, handler: bound.append(addr) or addr)
+    monkeypatch.setattr(sharing_server, "CappedHTTPServer", lambda addr, handler: bound.append(addr) or addr)
 
     result = sharing_server.bind_when_ready(object, 8002)
 
@@ -891,7 +937,7 @@ def test_bind_retries_when_address_not_bindable_yet(monkeypatch):
 
     monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: "100.64.0.10")
     monkeypatch.setattr(sharing_server.time, "sleep", lambda s: None)
-    monkeypatch.setattr(sharing_server, "ThreadingHTTPServer", fake_server)
+    monkeypatch.setattr(sharing_server, "CappedHTTPServer", fake_server)
 
     sharing_server.bind_when_ready(object, 8002)
 
@@ -936,7 +982,7 @@ def test_interface_ipv4_without_ip_command(monkeypatch):
 
 def test_bind_uses_the_given_address_getter(monkeypatch):
     monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: pytest.fail("Tailscale queried for the LAN socket"))
-    monkeypatch.setattr(sharing_server, "ThreadingHTTPServer", lambda addr, handler: addr)
+    monkeypatch.setattr(sharing_server, "CappedHTTPServer", lambda addr, handler: addr)
 
     assert sharing_server.bind_when_ready(object, 8002, lambda: "192.0.2.10", "LAN") == ("192.0.2.10", 8002)
 
@@ -1043,7 +1089,7 @@ def test_lan_bind_waits_independently_of_tailscale(monkeypatch):
             tailscale_bound.set()
         return _FakeServer(*addr)
 
-    monkeypatch.setattr(sharing_server, "ThreadingHTTPServer", fake_server)
+    monkeypatch.setattr(sharing_server, "CappedHTTPServer", fake_server)
     runner = threading.Thread(
         target=sharing_server.main,
         args=(["--dir", "/d", "--mount", "/m", "--port", "8002", "--lan-interface", "enp2s0"],),
@@ -1473,6 +1519,7 @@ def test_bad_playlist_parameters_and_bodies(playlist_server):
     host, port = base.removeprefix("http://").split(":")
     conn = http.client.HTTPConnection(host, int(port))
     conn.putrequest("PUT", f"/users/ola_k/playlists/{UID}")
+    conn.putheader("Authorization", f"Bearer {token}")
     conn.putheader("Transfer-Encoding", "chunked")
     conn.endheaders()
     assert conn.getresponse().status == 411
@@ -1860,6 +1907,7 @@ def test_bad_or_unavailable_listen_requests(playlist_server, tmp_path):
     host, port = base.removeprefix("http://").split(":")
     conn = http.client.HTTPConnection(host, int(port))
     conn.putrequest("POST", "/users/ola_k/listens")
+    conn.putheader("Authorization", f"Bearer {token}")
     conn.putheader("Transfer-Encoding", "chunked")
     conn.endheaders()
     assert conn.getresponse().status == 411
@@ -1922,6 +1970,7 @@ def test_bad_cover_blobs(playlist_server, tmp_path):
     host, port = base.removeprefix("http://").split(":")
     conn = http.client.HTTPConnection(host, int(port))
     conn.putrequest("PUT", f"/users/ola_k/covers/{COVER_SHA}")
+    conn.putheader("Authorization", f"Bearer {token}")
     conn.putheader("Content-Type", "image/png")
     conn.putheader("Content-Length", str(4 * 1024 * 1024 + 1))
     conn.endheaders()
@@ -1982,6 +2031,119 @@ def test_global_mood_covers(mood_server):
     assert _call("DELETE", f"{url}/1", token)[0] == 405
     assert _call("GET", url, tokens["bob"])[0] == 403
     assert _call("GET", f"{base}/users/bob/global-mood-covers", tokens["bob"])[0] == 503  # no user.db
+
+
+# ==================== tokens before bodies, idle and too many connections ====================
+
+def _answer_to_a_body_never_sent(url, method, headers=None):
+    """(status, "Connection: close" sent) for a request announcing a body it
+    never sends. The server must answer on the headers alone and close: if it
+    waited for the body, the recv here would time out."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    head = f"{method} {parts.path} HTTP/1.1\r\nHost: {parts.netloc}\r\nContent-Length: 1000\r\n"
+    head += "".join(f"{key}: {value}\r\n" for key, value in (headers or {}).items())
+    with socket.create_connection((parts.hostname, parts.port), timeout=5) as sock:
+        sock.sendall(f"{head}\r\n".encode())
+        answer = b""
+        while chunk := sock.recv(4096):
+            answer += chunk
+    status_and_headers = answer.split(b"\r\n\r\n", 1)[0].decode()
+    return int(status_and_headers.split()[1]), "\r\nConnection: close" in status_and_headers
+
+
+@pytest.mark.parametrize("method, path", [
+    ("PUT", f"/users/ola_k/playlists/{UID}"),
+    ("PUT", f"/users/ola_k/moods/{UID}"),
+    ("PUT", f"/users/ola_k/folders/{UID}"),
+    ("PUT", f"/users/ola_k/saved-songs/{UID}"),
+    ("POST", "/users/ola_k/listens"),
+    ("PUT", "/users/ola_k/covers/" + "a" * 64),
+    ("PUT", "/users/ola_k/global-mood-covers/1"),
+])
+@pytest.mark.parametrize("token_of, status", [(None, 401), ("nobody", 401), ("bob", 403)])
+def test_a_user_route_checks_the_token_before_reading_the_body(playlist_server, method, path, token_of, status):
+    start, _, tokens = playlist_server
+    headers = {"Authorization": f"Bearer {tokens.get(token_of, 'not-a-token')}"} if token_of else {}
+
+    assert _answer_to_a_body_never_sent(f"{start()}{path}", method, headers) == (status, True)
+
+
+def test_a_signed_upload_checks_the_token_before_reading_the_body(login_server):
+    start, _, inbox = login_server
+    url = f"{start()}/inbox/ola_k_{REQUEST_NAME}"
+
+    assert _answer_to_a_body_never_sent(url, "PUT") == (401, True)
+    assert _answer_to_a_body_never_sent(url, "PUT", {"Authorization": "Bearer not-a-token"}) == (401, True)
+    assert not inbox.exists()
+
+
+def test_an_idle_connection_gives_its_thread_back(serve, share_dir):
+    from urllib.parse import urlsplit
+    handler = sharing_server.make_handler(str(share_dir), "/")
+    assert handler.timeout == sharing_server.REQUEST_SOCKET_TIMEOUT
+    handler.timeout = 0.2
+    base = serve(share_dir, "/", handler=handler)
+    parts = urlsplit(base)
+
+    with socket.create_connection((parts.hostname, parts.port), timeout=5) as sock:
+        assert sock.recv(1) == b""  # closed by the server, long before this socket's own 5 s
+    assert _request(f"{base}/music.db")[0] == 200
+
+
+def test_an_idle_https_connection_gives_its_thread_back(serve_tls, share_dir, monkeypatch):
+    monkeypatch.setattr(sharing_server, "REQUEST_SOCKET_TIMEOUT", 0.2)
+    port, client = serve_tls(share_dir)
+
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+        with client.wrap_socket(raw, server_hostname="127.0.0.1") as sock:
+            assert sock.recv(1) == b""
+
+
+def _wait_until(condition, seconds=5.0):
+    import time
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.01)
+
+
+def test_connections_over_the_cap_are_closed_at_once(share_dir, capsys):
+    handler = sharing_server.make_handler(str(share_dir), "/")
+    handler.log_message = lambda *a: None
+    slots = threading.BoundedSemaphore(2)
+    server = sharing_server.CappedHTTPServer(("127.0.0.1", 0), handler, slots)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+    port = server.server_address[1]
+    idle = [socket.create_connection(("127.0.0.1", port), timeout=5) for _ in range(2)]
+    try:
+        _wait_until(lambda: slots._value == 0)
+        for _ in range(2):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as over:
+                assert over.recv(1) == b""  # not waiting for its idle timeout
+        assert capsys.readouterr().out.count("Too many connections") == 1  # once, not per connection
+
+        # A connection that ends gives its slot back
+        idle.pop().close()
+        _wait_until(lambda: slots._value == 1)
+        assert _request(f"http://127.0.0.1:{port}/music.db")[0] == 200
+        _wait_until(lambda: slots._value == 1)
+    finally:
+        for sock in idle:
+            sock.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_every_socket_shares_one_connection_cap(monkeypatch):
+    monkeypatch.setattr(sharing_server, "tailscale_ipv4", lambda: "127.0.0.1")
+    servers = [sharing_server.bind_when_ready(sharing_server.make_handler("/d", None), 0) for _ in range(2)]
+    try:
+        assert servers[0].slots is servers[1].slots is sharing_server.CONNECTION_SLOTS
+        assert sharing_server.CONNECTION_SLOTS._initial_value == sharing_server.MAX_CONNECTIONS == 64
+    finally:
+        for server in servers:
+            server.server_close()
 
 
 # ==================== library files ====================

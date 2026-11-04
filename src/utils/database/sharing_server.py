@@ -50,7 +50,11 @@ with every path passed on the command line.
   sockets serve plain HTTP, as before.
 - Host header (2026-11-03): only an IP address, "localhost", this machine's
   host name or its Tailscale MagicDNS name (read at run time) - anything
-  else is a 421 before any handler runs. A web page that points its own
+  else is a 421 before any handler runs.
+- Connections (2026-11-04): one that sends no request within
+  REQUEST_SOCKET_TIMEOUT is closed, and at most MAX_CONNECTIONS are served at
+  once over every socket together (CappedHTTPServer) - one more is closed
+  at once, without a thread. A web page that points its own
   domain at this server (DNS rebinding) sends that domain, so a browser on
   the home network or the tailnet can't be used to read or write here.
 - If MOUNT (the external drive holding DIR) isn't mounted, requests for the
@@ -63,10 +67,13 @@ with every path passed on the command line.
   (left to the owner by the app's automatic pass) hold --inbox-limit-bytes -
   settling a request moves it to processed/ and frees the space. Never
   overwrites: the same file sent again is a 200, another file under a taken
-  name a 409. Answers:
+  name a 409. A name without a user (unsigned) is limited to
+  ANONYMOUS_UPLOADS_PER_WINDOW per client address an hour (UploadLimiter,
+  in memory), and such files may fill at most ANONYMOUS_INBOX_SHARE of the
+  limit, so logged-in users always have room. Answers:
   201 stored, 200 already here (new/, review/ or processed/), 400 bad name or not
-  SQLite, 409 name taken, 411 no Content-Length, 413 too big, 507 inbox
-  full, 503 drive not mounted.
+  SQLite, 409 name taken, 411 no Content-Length, 413 too big, 429 too many
+  unsigned uploads (Retry-After), 507 inbox full, 503 drive not mounted.
 - Logging in (only with --users; password and token checks in
   account_auth.py, the one module shared with the app): POST /login with
   JSON {"username", "password"} -> 200 {"username": <normalized>, "token"},
@@ -78,6 +85,8 @@ with every path passed on the command line.
   is always a verified sender. A name with one needs that user's token (none
   or unknown/revoked -> 401, the phone logs in again; another user's -> 403);
   a name without one is accepted with or without a token, like before login.
+  The token is checked before the body is read, here and on every route
+  below: a 401 / 403 comes on the headers alone and closes the connection.
 - Playlists (only with --users; the rules in playlist_sync.py, shared with
   the app): GET /users/<name>/playlists?since=<revision>,
   PUT /users/<name>/playlists/<uid> (JSON body, base_revision),
@@ -193,6 +202,11 @@ TLS_KEY_FILE = "key.pem"
 TLS_CERT_DAYS = 3650
 # A client that connects and never finishes the TLS handshake gives up its thread after this
 TLS_HANDSHAKE_TIMEOUT = 15
+# ... and one that sends no request (or stops mid-headers) after this
+REQUEST_SOCKET_TIMEOUT = 60
+# Connections served at once, over every socket of the process: one more is
+# closed unanswered before it gets a thread
+MAX_CONNECTIONS = 64
 TAILSCALE_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
 # [<user>_]<YYYY-MM-DD>_<HH-MM-SS>_<number>.db - the phone's request file names.
@@ -220,6 +234,12 @@ LOGIN_MAX_BODY_BYTES = 4096
 LOGIN_MAX_FAILURES = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_LOCKOUT_SECONDS = 5 * 60
+# Unsigned uploads (no user in the request name) per client address, then 429
+ANONYMOUS_UPLOADS_PER_WINDOW = 30
+ANONYMOUS_UPLOAD_WINDOW_SECONDS = 60 * 60
+# Unsigned files may fill at most this share of --inbox-limit-bytes, so
+# logged-in users always have room
+ANONYMOUS_INBOX_SHARE = 0.5
 # A playlist may have up to 5000 tracks (the app's limit)
 DEFAULT_MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
 # /users/<name>/playlists[/<uid>]
@@ -337,6 +357,47 @@ class LoginLimiter:
             del self._locked_until[key]
 
 
+class UploadLimiter:
+    """Unsigned inbox uploads per client address: ANONYMOUS_UPLOADS_PER_WINDOW
+    within the window, then none until the oldest leaves it. In memory only."""
+
+    def __init__(self, limit: int = ANONYMOUS_UPLOADS_PER_WINDOW,
+                 window: float = ANONYMOUS_UPLOAD_WINDOW_SECONDS, clock=time.monotonic):
+        self._limit, self._window, self._clock = limit, window, clock
+        self._lock = threading.Lock()
+        self._uploads: dict[str, list[float]] = {}
+
+    def take(self, key: str) -> int:
+        """0 after counting an upload from `key`; else the seconds until it may send one."""
+        now = self._clock()
+        with self._lock:
+            # Every address's old uploads go, so the dict can't grow for as long as the server runs
+            for k in list(self._uploads):
+                recent = [t for t in self._uploads[k] if now - t < self._window]
+                if recent:
+                    self._uploads[k] = recent
+                else:
+                    del self._uploads[k]
+            recent = self._uploads.setdefault(key, [])
+            if len(recent) >= self._limit:
+                return max(1, int(recent[0] + self._window - now + 0.999))
+            recent.append(now)
+            return 0
+
+
+def _unsigned_size(path: str) -> int:
+    """Bytes of the request files in `path` whose name carries no user."""
+    total = 0
+    if not os.path.isdir(path):
+        return 0
+    with os.scandir(path) as entries:
+        for entry in entries:
+            match = REQUEST_NAME_RE.match(entry.name)
+            if match and match.group("user") is None and entry.is_file(follow_symlinks=False):
+                total += entry.stat(follow_symlinks=False).st_size
+    return total
+
+
 def _dir_size(path: str) -> int:
     total = 0
     if not os.path.isdir(path):
@@ -412,7 +473,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
                  users_dir: str | None = None, limiter: LoginLimiter | None = None,
                  max_playlist_bytes: int = DEFAULT_MAX_PLAYLIST_BYTES, mood_changes_dir: str | None = None,
-                 library_dir: str | None = None, host_names: set[str] | None = None):
+                 library_dir: str | None = None, host_names: set[str] | None = None,
+                 upload_limiter: UploadLimiter | None = None):
     # Names the Host header may carry besides an IP address; main() adds the
     # MagicDNS name once a socket is up, so it's read on every request
     host_names = host_names if host_names is not None else set()
@@ -424,6 +486,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
     # the check and the commit
     covers_lock = threading.Lock()
     limiter = limiter or LoginLimiter()
+    upload_limiter = upload_limiter or UploadLimiter()
 
     def data_available() -> bool:
         # On an external drive (--mount): only while it's mounted. Without
@@ -433,6 +496,10 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
     class ShareHandler(BaseHTTPRequestHandler):
         server_version = "MusicDatabaseShare"
         sys_version = ""
+        # Set on the socket in setup(): a client that connects and sends
+        # nothing gives its thread back. Downloads, streaming and uploads set
+        # their own (equal) timeouts later.
+        timeout = REQUEST_SOCKET_TIMEOUT
 
         def send_response(self, code, message=None):
             self._responded = True
@@ -442,6 +509,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             # Whatever a handler didn't expect gets an answer (500) and the
             # traceback in the log - not a connection dropped without one
             self._responded = False
+            self._body_read = False
             try:
                 super().handle_one_request()
             except Exception:
@@ -749,6 +817,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if data is None or len(data) != length:
                 self.close_connection = True
                 return None
+            self._body_read = True
             return data
 
         def _read_json_body(self, limit: int):
@@ -768,13 +837,14 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
+            # The token before the body: a stranger's upload is never read
+            if not self._authorize(username, "another user's playlists"):
+                return
             body = None
             if method == "PUT":
                 body = self._read_json_body(max_playlist_bytes)
                 if body is None:
                     return
-            if not self._authorize(username, "another user's playlists"):
-                return
             if uid is not None and not playlist_sync.UID_RE.match(uid):
                 self._reply(HTTPStatus.BAD_REQUEST, "not a playlist uid")
                 return
@@ -838,13 +908,14 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
+            # The token before the body: a stranger's upload is never read
+            if not self._authorize(username, "another user's moods"):
+                return
             body = None
             if method == "PUT":
                 body = self._read_json_body(max_playlist_bytes)
                 if body is None:
                     return
-            if not self._authorize(username, "another user's moods"):
-                return
             if uid is not None and not playlist_sync.UID_RE.match(uid):
                 self._reply(HTTPStatus.BAD_REQUEST, "not a mood uid")
                 return
@@ -911,13 +982,14 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
+            # The token before the body: a stranger's upload is never read
+            if not self._authorize(username, "another user's folders"):
+                return
             body = None
             if method == "PUT":
                 body = self._read_json_body(FOLDER_MAX_BODY_BYTES)
                 if body is None:
                     return
-            if not self._authorize(username, "another user's folders"):
-                return
             if uid is not None and not folder_sync.UID_RE.match(uid):
                 self._reply(HTTPStatus.BAD_REQUEST, "not a folder uid")
                 return
@@ -968,13 +1040,14 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
+            # The token before the body: a stranger's upload is never read
+            if not self._authorize(username, f"another user's {collection.path}"):
+                return
             body = None
             if method == "PUT":
                 body = self._read_json_body(SAVED_MAX_BODY_BYTES)
                 if body is None:
                     return
-            if not self._authorize(username, f"another user's {collection.path}"):
-                return
             if uid is not None and not saved_sync.UID_RE.match(uid):
                 self._reply(HTTPStatus.BAD_REQUEST, "not an item uid")
                 return
@@ -1022,13 +1095,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         def _listens(self, method: str, match: re.Match):
             url = urlsplit(self.path)
             username = match.group("user")
+            if not self._authorize(username, "another user's listens"):
+                return
             body = None
             if method == "POST":
                 body = self._read_json_body(LISTEN_MAX_BODY_BYTES)
                 if body is None:
                     return
-            if not self._authorize(username, "another user's listens"):
-                return
             query = parse_qs(url.query)
             try:
                 if method == "GET":
@@ -1081,13 +1154,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
 
         def _cover_blob(self, method: str, match: re.Match):
             username, sha = match.group("user"), match.group("sha")
+            if not self._authorize(username, "another user's covers"):
+                return
             data = None
             if method == "PUT":
                 data = self._read_body(covers.MAX_COVER_BYTES)
                 if data is None:
                     return
-            if not self._authorize(username, "another user's covers"):
-                return
             if not covers.is_sha256(sha):
                 self._reply(HTTPStatus.BAD_REQUEST, "expected the lowercase hex sha256 of the picture")
                 return
@@ -1132,13 +1205,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if (method == "GET") != (mood_id is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
+            if not self._authorize(username, "another user's covers"):
+                return
             body = None
             if method == "PUT":
                 body = self._read_json_body(GLOBAL_MOOD_COVER_MAX_BODY_BYTES)
                 if body is None:
                     return
-            if not self._authorize(username, "another user's covers"):
-                return
             try:
                 if method == "GET":
                     since = self._query_int(parse_qs(url.query), "since", default=0)
@@ -1255,22 +1328,31 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if not match:
                 self._reply(HTTPStatus.BAD_REQUEST, "not a request file name")
                 return
+            if not data_available():
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            # After the mount check: tokens live on the drive too, and a
+            # missing drive mustn't look like "log in again". Before the
+            # body: a bad token's upload is never read.
+            if not self._check_sender(match.group("user")):
+                return
+            unsigned = match.group("user") is None
+            if unsigned:
+                wait = upload_limiter.take(self.client_address[0])
+                if wait:
+                    print(f"{self.client_address[0]}: too many unsigned requests", flush=True)
+                    self._reply(HTTPStatus.TOO_MANY_REQUESTS, "too many requests without logging in",
+                                headers={"Retry-After": str(wait)})
+                    return
             data = self._read_body(max_request_bytes)
             if data is None:
                 return
             if not data.startswith(SQLITE_HEADER):
                 self._reply(HTTPStatus.BAD_REQUEST, "not an SQLite file")
                 return
-            if not data_available():
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                return
-            # After the mount check: tokens live on the drive too, and a
-            # missing drive mustn't look like "log in again"
-            if not self._check_sender(match.group("user")):
-                return
-            self._store(name, data)
+            self._store(name, data, unsigned)
 
-        def _store(self, name: str, data: bytes):
+        def _store(self, name: str, data: bytes, unsigned: bool = False):
             new_dir = os.path.join(inbox_dir, INBOX_NEW)
             target = os.path.join(new_dir, name)
             with inbox_lock:
@@ -1285,9 +1367,14 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                             else:
                                 self._reply(HTTPStatus.CONFLICT, "another request has this name")
                             return
-                    waiting = _dir_size(new_dir) + _dir_size(os.path.join(inbox_dir, INBOX_REVIEW))
+                    review_dir = os.path.join(inbox_dir, INBOX_REVIEW)
+                    waiting = _dir_size(new_dir) + _dir_size(review_dir)
                     if waiting + len(data) > inbox_limit_bytes:
                         self._reply(HTTPStatus.INSUFFICIENT_STORAGE, "inbox full")
+                        return
+                    if unsigned and (_unsigned_size(new_dir) + _unsigned_size(review_dir) + len(data)
+                                     > inbox_limit_bytes * ANONYMOUS_INBOX_SHARE):
+                        self._reply(HTTPStatus.INSUFFICIENT_STORAGE, "inbox full for requests without logging in")
                         return
                     part = os.path.join(new_dir, f"{_PART_PREFIX}{name}{_PART_SUFFIX}")
                     try:
@@ -1316,8 +1403,20 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         def _reply_json(self, status: HTTPStatus, payload):
             self._send(status, json.dumps(payload).encode(), "application/json", None)
 
+        def _body_left_unread(self) -> bool:
+            headers = getattr(self, "headers", None)
+            if self._body_read or headers is None:
+                return False
+            length = headers.get("Content-Length")
+            return (length is not None and length.strip() != "0") or "Transfer-Encoding" in headers
+
         def _send(self, status: HTTPStatus, body: bytes, content_type: str | None, headers: dict | None):
             self.send_response(status)
+            if self._body_left_unread():
+                # Answered without reading the body (a bad token, too big):
+                # the connection can't serve another request, and nothing
+                # waits for the rest of it
+                self.send_header("Connection", "close")
             if content_type:
                 self.send_header("Content-Type", content_type)
             if status != HTTPStatus.NO_CONTENT:
@@ -1472,13 +1571,49 @@ def tls_context(tls_dir: str) -> ssl.SSLContext:
     return context
 
 
-class SharingServer(ThreadingHTTPServer):
-    """ThreadingHTTPServer that, with a TLS context, does each handshake in the
+# Shared by every socket main() serves on, so MAX_CONNECTIONS is per process
+CONNECTION_SLOTS = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+
+class CappedHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer serving at most MAX_CONNECTIONS connections at
+    once (`slots`): one more is closed right away, without a thread - idle or
+    slow clients can't use up the machine's threads."""
+
+    def __init__(self, address, handler, slots: threading.BoundedSemaphore | None = None):
+        super().__init__(address, handler)
+        self.slots = slots if slots is not None else CONNECTION_SLOTS
+        self._refusing = False
+
+    def process_request(self, request, client_address):
+        if not self.slots.acquire(blocking=False):
+            if not self._refusing:  # once per run of refusals, not per connection
+                print(f"Too many connections, closing new ones (first from {client_address[0]})", flush=True)
+            self._refusing = True
+            self.shutdown_request(request)
+            return
+        self._refusing = False
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.slots.release()  # the thread never started
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
+
+
+class SharingServer(CappedHTTPServer):
+    """CappedHTTPServer that, with a TLS context, does each handshake in the
     connection's own thread (accepting stays quick) and doesn't print a
     traceback for a client that fails it - a plain-HTTP or impatient client."""
 
-    def __init__(self, address, handler, tls: ssl.SSLContext | None = None):
-        super().__init__(address, handler)
+    def __init__(self, address, handler, tls: ssl.SSLContext | None = None,
+                 slots: threading.BoundedSemaphore | None = None):
+        super().__init__(address, handler, slots)
         self.tls = tls
         if tls is not None:
             self.socket = tls.wrap_socket(self.socket, server_side=True, do_handshake_on_connect=False)
@@ -1495,7 +1630,7 @@ class SharingServer(ThreadingHTTPServer):
 
 
 def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscale",
-                    tls: ssl.SSLContext | None = None) -> ThreadingHTTPServer:
+                    tls: ssl.SSLContext | None = None) -> CappedHTTPServer:
     get_address = get_address or tailscale_ipv4
     while True:
         address = get_address()
@@ -1505,7 +1640,7 @@ def bind_when_ready(handler, port: int, get_address=None, label: str = "Tailscal
             try:
                 if tls is not None:
                     return SharingServer((address, port), handler, tls)
-                return ThreadingHTTPServer((address, port), handler)
+                return CappedHTTPServer((address, port), handler)
             except OSError as exc:
                 print(f"Can't bind {address}:{port} ({exc}), retrying in {RETRY_SECONDS}s", flush=True)
         time.sleep(RETRY_SECONDS)

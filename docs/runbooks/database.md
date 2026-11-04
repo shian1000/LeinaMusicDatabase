@@ -226,6 +226,18 @@ what would be written now) and lingering, and a summary with the phone's address
   tailnet would then send its requests here with that domain as Host. Leina Radio uses the
   address, so it's unaffected; a client using another name (a DNS entry on the router, say) needs
   that name added in `main()`.
+- Connections (2026-11-04): a client that connects and sends no request (or stops mid-headers)
+  is dropped after 60 s (`REQUEST_SOCKET_TIMEOUT`, the handler's `timeout`, set on the socket when
+  the connection starts; downloads, streaming and uploads keep their own 60 s). At most 64
+  connections are served at once over all sockets together (`MAX_CONNECTIONS`, one
+  `BoundedSemaphore` in `CappedHTTPServer`, which `SharingServer` extends); one more is closed at
+  once, before it gets a thread, with one journal line per run of refusals. Why: before, 50 idle
+  sockets held 50 threads for ever.
+- Tokens before bodies (2026-11-04): every `--users` route and a signed inbox upload check the
+  token (after the mount check, so an unmounted drive is still 503) before reading the body, so a
+  stranger's 8 MiB never gets read: 401 / 403 come on the headers alone, with `Connection: close`
+  (a body left unread can't be followed by another request). The order of answers for a valid
+  token is unchanged (411 / 413 / 400).
 - If the data drive is unmounted it keeps running and answers 503, so the phone retries the next day.
 - `Restart=always`, not `on-failure`: on 2026-10-10 a stray SIGTERM (something killing whatever
   was on port 8002) stopped it for good, because `on-failure` treats a clean SIGTERM as success.
@@ -249,11 +261,23 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   in. It never overwrites and never serves inbox files back (a GET is a 404). Answers: 201 stored,
   200 the same file is already in `new/`, `review/` or `processed/` (a resend), 409 another file under that
   name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
-  (1 MiB), 507 inbox full, 503 data drive not mounted (nothing is created then).
+  (1 MiB), 429 too many requests without logging in (below), 507 inbox full, 503 data drive not
+  mounted (nothing is created then). Checked in this order: name, drive, token, the unsigned
+  rate limit, then the body (length, SQLite header) and the room.
 - **Inbox limit:** while the files in `new/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
   the owner's choice) nothing more is taken; the phone keeps the request and retries later. Settling
   a file moves it to `processed/`, which frees the room; `processed/` doesn't count. A resend of a
   file in any of the three folders is a 200.
+- **Unsigned requests (2026-11-04, owner's decision to keep them):** a name without a user part
+  is limited to 30 uploads per hour per client address (`ANONYMOUS_UPLOADS_PER_WINDOW`,
+  `UploadLimiter`, in memory like the login lockout: 429 + `Retry-After`; every try counts, a
+  resend too), and such files may fill at most half the inbox limit (`ANONYMOUS_INBOX_SHARE`,
+  counted by name in `new/` + `review/`; 507 "inbox full for requests without logging in"), so a
+  logged-in user always has room.
+- Reading a request file (`inbox_requests.read_request_file()`): `mode=ro&immutable=1` and
+  `PRAGMA trusted_schema=OFF`, so a file's own views and triggers can't call functions with side
+  effects. That's the only place a phone's SQLite file is opened; `request_packages.py` only
+  checks the header before putting a file in `new/`.
 - Anyone on the home network can send a request, the same trust as downloading. That's why the
   name, size and header checks are there, and why a request only ever reaches the database through
   the review below, or through the automatic pass in the narrow cases it may settle.
