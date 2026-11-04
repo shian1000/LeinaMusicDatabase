@@ -384,7 +384,8 @@ non-trivial work in that area.
   (`joined_title()`, for a split name once written back into the file; never auto-accepted)), which the user confirms.
   When none of those fits, up to 3 closest songs by `LocalSongMatcher.best_guesses()` /
   `match_score()` are offered (title, and the artist when the file has one, the tags also read with
-  artist and title swapped, and a title "X By Y" as X by Y when the database knows an artist Y,
+  artist and title swapped, a surely joined artist as its main artists ("A feat. B" as A), and a
+  title "X By Y" as X by Y when the database knows an artist Y,
   `by_artist()`; the title alone must
   reach Settings → "Closest songs: minimum score", default 0.6, kept with the auto-accept setting in
   `file_matching_settings.py`), the cursor on "None of these". Every suggestion shows its score; the

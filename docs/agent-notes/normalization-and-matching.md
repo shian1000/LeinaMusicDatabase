@@ -421,7 +421,10 @@ written order showed it at ~20% next to a 100% match. A title "X By Y"
 is also read as X by Y, split at the last " by " (`by_artist()`), but only
 when the database knows an artist Y - otherwise "Stand By Me" would offer
 every song titled "Stand" at 0.65+ - and such a file is auto-accepted like
-one with an artist, the artist being real. Two choices that aren't obvious:
+one with an artist, the artist being real. A surely joined tag artist is also
+read as each of its main artists (`propose_artist_split()`, only `confident`):
+"2Cresky Feat. Łukasz Lach" against "2Cresky" scored 0.45 as a whole, showing
+the right song at 76% instead of 96%. Two choices that aren't obvious:
 
 - The **title alone** must reach the minimum score, not just the weighted
   sum. Otherwise a perfect artist (0.35) needs a title of only ~0.38 to pass

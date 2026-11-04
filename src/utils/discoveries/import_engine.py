@@ -708,11 +708,17 @@ class LocalSongMatcher:
         are there, and a file name split on a bare hyphen read whole as the
         title ("Svefn-g-englar"), or else (`joined`) an unknown artist read
         with the title as one (joined_title()), and a title "X by Y" read as
-        title X by artist Y when the database knows an artist Y (by_artist())."""
+        title X by artist Y when the database knows an artist Y (by_artist()),
+        and a surely joined artist ("A feat. B") read as each of its main
+        artists - only a sure one: the auto-accept trusts these scores, and
+        "Earth, Wind & Fire" isn't "Earth"."""
         metadata = as_entry(metadata)
         readings = [self._wanted(metadata)]
         if metadata.artist and metadata.title:
             readings.append(self._wanted({"title": metadata.artist, "artist_name": metadata.title}))
+            split = propose_artist_split(metadata.artist)
+            if split and split.confident:
+                readings += [self._wanted({"title": metadata.title, "artist_name": main}) for main in split.main]
         if by := self.by_artist(metadata.title):
             readings.append(self._wanted({"title": by[0], "artist_name": by[1]}))
         if whole := metadata.unsplit_title or (joined and self.joined_title(metadata)):

@@ -1125,6 +1125,35 @@ def test_title_by_artist_is_scored_with_that_artist(music_session):
     assert matcher.best_guesses({"artist_name": None, "title": "Stand By Me"}, 3, 0.6)[0] == (stand, 1.0)
 
 
+def test_surely_joined_artist_is_scored_as_its_main_artists(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    strip_me = Song(title="Stip Me feat. Lukasz Lach", artist=Artist(name="2Cresky"))
+    yugopolis = Song(title="Yugopolis", artist=Artist(name="Maleńczuk"))
+    music_session.add_all([strip_me, yugopolis])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+
+    tags = {"artist_name": "2Cresky Feat. Łukasz Lach", "title": "Strip Me"}
+    # 0.65 * title 0.93 + 0.35 * artist 1, not the 0.76 of the whole name against "2Cresky"
+    assert matcher.match_score(tags, strip_me) == pytest.approx(0.957, abs=0.001)
+    assert matcher.best_guesses(tags, 3, 0.6) == [(strip_me, matcher.match_score(tags, strip_me))]
+    # Every main artist counts, not only the first one
+    assert matcher.match_score({"artist_name": "Hasiok x Maleńczuk", "title": "Yugopolis"}, yugopolis) == 1.0
+
+
+def test_unsure_joined_artist_is_not_scored_as_its_parts(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # The auto-accept trusts the score: a band's name must not reach it through one word
+    september = Song(title="September", artist=Artist(name="Earth"))
+    music_session.add(september)
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+
+    assert matcher.match_score({"artist_name": "Earth, Wind & Fire", "title": "September"}, september) < 0.9
+
+
 def test_title_by_artist_file_is_auto_accepted(tmp_path, music_session, monkeypatch):
     chase = Song(title="Baseball Furies Chase", artist=Artist(name="Barry De Vorzon"))
     music_session.add_all([chase, Song(title="Intro", artist=Artist(name="Moby"))])
