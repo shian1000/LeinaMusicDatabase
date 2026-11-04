@@ -76,7 +76,9 @@ with every path passed on the command line.
   unsigned uploads (Retry-After), 507 inbox full, 503 drive not mounted.
 - Logging in (only with --users; password and token checks in
   account_auth.py, the one module shared with the app): POST /login with
-  JSON {"username", "password"} -> 200 {"username": <normalized>, "token"},
+  JSON {"username", "password"} and optionally "device" (the phone's model
+  name, stored with the token - account_auth.clean_device_name(); a
+  non-string is ignored) -> 200 {"username": <normalized>, "token"},
   401 wrong username or password (never says which), 429 locked out (5 failed
   logins within 15 minutes from one address or for one username lock both
   for 5 minutes - in memory, a restart clears it), 503 drive not mounted.
@@ -716,12 +718,15 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
             limiter.succeeded(keys[1:])
             try:
-                token = account_auth.issue_token(users_dir, name)
+                # Optional, so old phones log in as before; a bad value is just left out
+                device = account_auth.clean_device_name(body.get("device"))
+                token = account_auth.issue_token(users_dir, name, device)
             except OSError as exc:
                 print(f"Storing a token for {name} failed: {exc}", flush=True)
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
-            print(f"User {name} logged in from {self.client_address[0]}", flush=True)
+            on_device = f" ({device})" if device else ""
+            print(f"User {name} logged in from {self.client_address[0]}{on_device}", flush=True)
             self._reply_json(HTTPStatus.OK, {"username": name, "token": token,
                                              "permissions": account_auth.user_permissions(users_dir, name)})
 

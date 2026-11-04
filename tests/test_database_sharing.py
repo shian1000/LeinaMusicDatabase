@@ -780,6 +780,56 @@ def test_login_returns_normalized_username_and_a_token_stored_only_as_a_hash(log
     assert hashlib.sha256(answer["token"].encode()).hexdigest() in stored
 
 
+@pytest.mark.parametrize("device, stored", [
+    ("Pixel 7a", "Pixel 7a"),
+    ("  Pixel 7a \n", "Pixel 7a"),
+    ("Pixel\x00 7a\u202e\x1b", "Pixel 7a"),
+    ("x" * 100, "x" * 64),
+    ("\t \x07", None),
+    (42, None),
+    (["Pixel 7a"], None),
+    (None, None),
+])
+def test_login_stores_the_cleaned_device_name_with_the_token(login_server, device, stored):
+    start, users_dir, _ = login_server
+    status, _, body = _post(f"{start()}/login", {"username": "ola_k", "password": "secret1", "device": device})
+
+    assert status == 200
+    assert set(json.loads(body)) == {"username", "token", "permissions"}
+    entry, = json.loads((users_dir / "ola_k" / "tokens.json").read_text())["tokens"]
+    assert entry.get("device") == stored
+    assert ("device" in entry) == (stored is not None)
+
+
+def test_login_without_a_device_works_as_before_and_old_entries_stay_valid(login_server):
+    start, users_dir, _ = login_server
+    base = start()
+    token = json.loads(_login(base)[2])["token"]
+    _post(f"{base}/login", {"username": "ola_k", "password": "secret1", "device": "Pixel 7a"})
+
+    entries = json.loads((users_dir / "ola_k" / "tokens.json").read_text())["tokens"]
+    assert ["device" in e for e in entries] == [False, True]
+    from utils.database import account_auth
+    assert account_auth.token_user(str(users_dir), token) == "ola_k"
+
+
+def test_a_token_entry_removed_from_the_file_is_refused_at_once(login_server):
+    """What an outside tool (the owner's server manager) relies on to revoke
+    one device: the server re-reads tokens.json per request."""
+    start, users_dir, _ = login_server
+    base = start()
+    token = json.loads(_post(f"{base}/login", {"username": "ola_k", "password": "secret1",
+                                               "device": "Pixel 7a"})[2])["token"]
+    other = json.loads(_login(base)[2])["token"]
+    path = users_dir / "ola_k" / "tokens.json"
+    assert _call("GET", f"{base}/users/ola_k", token)[0] == 200
+    data = json.loads(path.read_text())
+    data["tokens"] = [t for t in data["tokens"] if t.get("device") != "Pixel 7a"]
+    path.write_text(json.dumps(data))
+    assert _call("GET", f"{base}/users/ola_k", token)[0] == 401
+    assert _call("GET", f"{base}/users/ola_k", other)[0] == 200
+
+
 @pytest.mark.parametrize("username, password", [("ola_k", "wrong"), ("nobody", "secret1"), ("../ola_k", "secret1")])
 def test_wrong_login_is_401(login_server, username, password):
     start, users_dir, _ = login_server

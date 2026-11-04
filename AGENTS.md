@@ -246,7 +246,9 @@ non-trivial work in that area.
   (`revoke_all_tokens()`). A request file name's user part is always a verified sender. Details:
   `docs/runbooks/database.md` → "Logging in from the phone". Both the server and the app rewrite
   `tokens.json`, so every read-modify-write holds an flock on `.tokens.lock` next to it
-  (`account_auth._tokens_locked()`), not just a thread lock. Permissions the owner grants
+  (`account_auth._tokens_locked()`), not just a thread lock. Each entry may carry the phone's model name (`device`,
+  sent with `POST /login`, `clean_device_name()`), so the owner's separate server manager can revoke
+  one phone by removing its entry - the server re-reads the file per request, no cache (runbook). Permissions the owner grants
   (Users → Permissions, `users.set_permissions()`) live in `account.json`, not `user.db`; a new one
   goes into `account_auth.PERMISSIONS` + `constants.PERMISSION_LABELS`. Leina Radio ignores names it
   doesn't know, so adding one needs no app change; renaming or removing one does. The server reads them per

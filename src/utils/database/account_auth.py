@@ -4,7 +4,12 @@ in a user's folder (Users/<username>/, see users.py):
 
     account.json  username + salted scrypt password hash, and the
                   permissions the owner granted (written by users.py)
-    tokens.json   {"tokens": [{"hash": <sha256 hex>, "created_at": ...}]}
+    tokens.json   {"tokens": [{"hash": <sha256 hex>, "created_at": ...,
+                               "device": "Pixel 7a"}]}
+                  "device" is the model name the phone sent with POST /login
+                  (clean_device_name(); absent for older phones and older
+                  entries), so a token can be told apart from another user's
+                  phone's and revoked on its own
 
 Standard-library only and free of the app's config, because the sharing
 server (sharing_server.py, run on the system python3) imports it too, for
@@ -21,6 +26,17 @@ A token is 32 random bytes the phone keeps instead of the password. Only its
 SHA-256 is stored, so tokens.json leaks nothing usable. Tokens never expire;
 one is revoked by /logout, and all of a user's are dropped when the password
 is changed, the user renamed or deleted (users.py).
+
+For a tool outside this repo that revokes tokens by editing tokens.json
+(docs/runbooks/database.md -> "Logging in from the phone"): the file is
+Users/<username>/tokens.json under the users folder the server runs with
+(--users). Nothing caches it - every request that carries a token reads the
+file again, so an entry removed is refused from the next request on, with no
+restart. Write it like _write_tokens() does, while holding an exclusive flock
+on Users/<username>/.tokens.lock (create it if missing) for the whole
+read-modify-write: write the new content to .tokens.json.tmp in the same
+folder, then os.replace() it over tokens.json (or delete tokens.json when no
+token is left). Keep every other entry and its unknown keys as they are.
 """
 
 import fcntl
@@ -31,6 +47,7 @@ import os
 import re
 import secrets
 import threading
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +58,7 @@ ACCOUNT_FILENAME = "account.json"
 TOKENS_FILENAME = "tokens.json"
 TOKENS_LOCK_FILENAME = ".tokens.lock"
 TOKEN_BYTES = 32
+DEVICE_NAME_MAX_LENGTH = 64
 # Every permission there is (also config.constants.PERMISSION_LABELS); the
 # names are part of the phone contract
 PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
@@ -118,6 +136,17 @@ def user_permissions(users_dir, username: str) -> list[str]:
     return sorted(p for p in set(granted) if p in PERMISSIONS)
 
 
+def clean_device_name(value) -> str | None:
+    """The device name a login may store: control and format characters
+    dropped, trimmed, at most DEVICE_NAME_MAX_LENGTH characters. None for
+    anything that isn't a string or leaves nothing."""
+    if not isinstance(value, str):
+        return None
+    text = "".join(c for c in value if unicodedata.category(c) not in ("Cc", "Cf"))
+    text = text.strip()[:DEVICE_NAME_MAX_LENGTH].rstrip()
+    return text or None
+
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -149,14 +178,19 @@ def _user_folders(users_dir) -> list[Path]:
             if p.is_dir() and not p.name.startswith(".") and (p / ACCOUNT_FILENAME).exists()]
 
 
-def issue_token(users_dir, username: str) -> str:
-    """A new token for an existing user (call check_login() first)."""
+def issue_token(users_dir, username: str, device=None) -> str:
+    """A new token for an existing user (call check_login() first), stored
+    with the device name when one is given (cleaned by clean_device_name())."""
     token = secrets.token_urlsafe(TOKEN_BYTES)
     folder = Path(users_dir) / username
+    entry = {"hash": _token_hash(token),
+             "created_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+    device = clean_device_name(device)
+    if device is not None:
+        entry["device"] = device
     with _tokens_locked(folder):
         tokens = _read_tokens(folder)
-        tokens.append({"hash": _token_hash(token),
-                       "created_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+        tokens.append(entry)
         _write_tokens(folder, tokens)
     return token
 

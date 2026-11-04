@@ -452,7 +452,11 @@ user (main menu → Users) and keeps a token, never the password. The service ru
 `Settings.users_dir`; the checks are in `utils/database/account_auth.py`, standard-library only
 because the server imports it too (as a sibling module), and `users.py` uses it as well.
 
-- `POST /login`, JSON `{"username", "password"}` (username as typed; trimmed and lowercased) →
+- `POST /login`, JSON `{"username", "password"}` (username as typed; trimmed and lowercased),
+  optionally `"device"`: the phone's model name ("Pixel 7a", 2026-11-04), stored with the token so
+  one phone's token can be told apart and revoked. Cleaned by `account_auth.clean_device_name()`
+  (control / format characters dropped, trimmed, at most 64 characters; empty → left out); a
+  non-string is ignored, never a 400, and older phones simply don't send it →
   200 `{"username": <normalized>, "token"}`, 401 wrong username or password (never says which; an
   unknown user costs the same scrypt time), 400 malformed body, 503 data drive not mounted (hashes and
   tokens only live there — decided not to cache them elsewhere).
@@ -460,6 +464,16 @@ because the server imports it too (as a sibling module), and `users.py` uses it 
   `user.db`, which may be sent to the phone one day). No expiry. `POST /logout` with
   `Authorization: Bearer <token>` revokes one (always 204). `change_password()`, `rename_user()`
   and `delete_user()` drop all of a user's tokens (a renamed user's file names change too).
+- `tokens.json` for a tool outside the repo (e.g. one that revokes a single phone's token): the file
+  is `Users/<name>/tokens.json` in the folder the server runs with (`--users`, `Settings.users_dir`
+  under the sharing folder), shaped `{"tokens": [{"hash", "created_at", "device"?}]}` — `device`
+  missing on entries from older phones. The server caches nothing: every request with a token reads
+  the file again, so a removed entry is refused (401, the phone logs in again) from the next request
+  on, no restart. To write it: hold an exclusive `flock` on `Users/<name>/.tokens.lock` (create it if
+  missing) for the whole read-modify-write — the server and the app take the same lock — write the
+  new JSON to `.tokens.json.tmp` in that folder and `os.replace()` it over `tokens.json` (or delete
+  `tokens.json` when no entry is left); keep the other entries and any key you don't know as they
+  are. Never edit it in place: a reader may see half a file.
 - Lockout: 5 failed logins within 15 minutes from one client address *or* for one username lock
   that address/username out for 5 minutes (429 + `Retry-After`). In memory only.
 - Signed uploads: the user part of a request file name is always a verified sender, so "Resolve
