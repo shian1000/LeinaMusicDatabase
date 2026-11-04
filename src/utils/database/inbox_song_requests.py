@@ -37,7 +37,11 @@ knows by exactly that name, joined by "і" / "&" / "x" / ... ("фан Тіна
 "Безодня") suggests that split too; an artist the database doesn't know
 counts only when the channel's name holds it (here "Тіна Кароль"), and at
 least one must be known - where an unknown name ends is a guess otherwise.
-The review offers it first, and the "already in the database" check uses it
+A request with no artist at all (a file on the phone whose tags have none,
+named "Title Artist") whose title ends with an artist the database knows by
+exactly that name ("Arriving somewhere but not here Porcupine Tree") suggests
+that split as well - only then, since a channel's own name is the likelier
+artist. The review offers it first, and the "already in the database" check uses it
 too.
 
 A YouTube request whose artist is a generic Topic channel ("Release" - YouTube
@@ -220,7 +224,9 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     knows it. A title with no artist in it keeps the title, with the artist
     as the database spells it when `artist` is one of its other names
     ("familyboombox" / "Ангела" -> ("Бумбокс", "Ангела")), unless it starts
-    with known artists (_artists_at_start()). None otherwise - a
+    with known artists (_artists_at_start()), or - asked with no artist at
+    all, a file on the phone named "Title Artist" - ends with one
+    (_artist_at_end()). None otherwise - a
     known artist's channel uploading another artist's song is left as
     asked."""
     parts = _split_title(title or "")
@@ -228,6 +234,9 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
         at_start = _artists_at_start(artist, title or "", matcher)
         if at_start is not None:
             return at_start
+        at_end = None if artist else _artist_at_end(title or "", matcher)
+        if at_end is not None:
+            return at_end
         known = _known_by_other_name(artist, matcher)
         return (known.name, title) if known is not None and title else None
     in_title = matcher.artist(parts[0])
@@ -281,6 +290,25 @@ def _artists_at_start(artist: str | None, title: str, matcher) -> tuple | None:
     if not _BRACKETED.sub("", rest).strip():
         return None
     return " & ".join(names), rest
+
+
+def _artist_at_end(title: str, matcher) -> tuple | None:
+    """(artist, title) when a title with no separator ends with an artist the
+    database knows by exactly that name: "Arriving somewhere but not here
+    Porcupine Tree" -> ("Porcupine Tree", "Arriving somewhere but not here").
+    The longest such run of words, leaving a word for the title; None for a
+    short lone name ("Air") or nothing but a bracket left."""
+    words = list(_TITLE_WORD.finditer(title))
+    for i in range(max(1, len(words) - SONG_REQUEST_TITLE_ARTIST_MAX_WORDS), len(words)):
+        span = title[words[i].start():]
+        db_artist = _known_exactly(span, matcher)
+        if db_artist is None or len(name_key(span)) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
+            continue
+        rest = title[:words[i].start()].strip().rstrip(",").strip()
+        if not _BRACKETED.sub("", rest).strip():
+            return None
+        return db_artist.name, rest
+    return None
 
 
 def _artist_words(words: list, i: int, title: str, channel: str | None, matcher) -> tuple | None:

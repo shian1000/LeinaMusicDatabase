@@ -369,7 +369,11 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   `SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS` ("Air" starts too many titles), and a title left as
   only a bracket is no split (Leina Radio's swapped "I Follow Rivers" / "Lykke Li (La Vie
   d'Adèle)"). Checked against every real request in the inbox (2026-10-27): only correct new
-  suggestions. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
+  suggestions. A request with no artist at all (a file on Leina Radio's phone without an artist
+  tag, named "Title Artist") is also split when its title *ends* with one artist music.db knows by
+  exactly that name, same length rules ("Arriving somewhere but not here Porcupine Tree" ->
+  Porcupine Tree / "Arriving somewhere but not here", then settled as already in the database);
+  with a channel as the artist it isn't, the channel being the likelier artist. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
   The review offers it first, and the "already
   in the database" / "rejected before" checks use it too.
   A YouTube request whose artist is a generic Topic channel (`GENERIC_TOPIC_CHANNELS`: "Release",

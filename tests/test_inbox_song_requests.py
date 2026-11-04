@@ -233,6 +233,36 @@ def test_a_title_without_a_separator_starting_with_known_artists_suggests_them(e
     assert case.suggested == expected
 
 
+@pytest.mark.parametrize("channel, title, expected", [
+    (None, "Безодня Бумбокс", ("Бумбокс", "Безодня")),
+    (None, "Безодня BoomBox", ("Бумбокс", "Безодня")),                 # a synonym
+    (None, "Безодня (Live) Okean Elzy", ("Okean Elzy", "Безодня (Live)")),
+    (None, "Безодня, Бумбокс", ("Бумбокс", "Безодня")),
+    ("Some Uploads", "Безодня Бумбокс", None),  # a channel is the likelier artist
+    (None, "Бумбокс", None),                    # nothing left for the title
+    (None, "(Live) Бумбокс", None),
+    (None, "Безодня Air", None),                # a short lone name ends many titles
+    (None, "Безодня Бумбоксы", None),           # not exactly the name
+])
+def test_a_title_with_no_artist_ending_with_a_known_artist_suggests_it(env, channel, title, expected):
+    env["matcher"].artists.append(Artist(id=40, name="Air"))
+    _request(env["inbox"], "2026-11-02_00-06-09_071.db", [{"title": title, "artist": channel, "source": "file"}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested == expected
+
+
+def test_a_title_ending_with_its_artist_finds_the_song_in_the_database(env):
+    _request(env["inbox"], "2026-11-02_00-06-09_071.db",
+             [{"title": "Вахтёрам Бумбокс", "artist": None, "source": "file"}])
+
+    _, [case] = _cases(env)
+
+    assert case.status == sr.ALREADY_IN_DATABASE
+    assert case.existing.id == 2
+
+
 def test_a_feat_credit_leaves_the_title_for_the_imports_feat_artists(env):
     _request(env["inbox"], "2026-10-21_19-26-51_001.db",
              [{"title": "Travie McCoy: Billionaire ft. Bruno Mars", "artist": "Fueled By Ramen"}])
