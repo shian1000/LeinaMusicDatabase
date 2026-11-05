@@ -125,6 +125,22 @@ have no album at all and that every fetcher has already missed. Same last-resort
 as the soundtrack fallback. Cases for both fallbacks are pinned in
 `tests/test_album_discovery_queries.py` (`ALBUM_EMPTY_FETCHERS_CASES`).
 
+## A song with its artist and title swapped
+
+Stored as "Dobro Te Čuvaju" - "Džoni Midnajt Trio" (a YouTube title in "Title - Artist" order), a song
+is searched for under an artist nobody knows, so every module comes up empty. When `discover_album()`
+finds nothing, `fill_missing_albums.py` asks `artist_identity.may_be_swapped()`: an artist with another
+song in the database counts as known and is not tried, nor is a multi-artist song or one named like
+its artist. Otherwise `discover_album_after_swap()` asks each module the other way round, with the
+usual `_validate_result()` and counted in the statistics, but without the last-resort fallbacks, which
+say nothing about the order of the names.
+
+A find changes nothing yet. `utils/ui/album_swap_review.py` lists them in one checkbox list at the end,
+before the manual fill-in, none ticked, since a real song may read the other way round too ("Rain -
+Madonna"). A ticked song gets `swap_song_names()` (a row named like its title takes it, else its own
+row is renamed) and then the album; an unticked one stays as it was and goes on to the manual prompt.
+The extra lookups cost up to one more pass over the modules per missed song with a one-song artist.
+
 ## Why the manager validates results itself instead of trusting modules
 
 Each fetcher scrapes/searches its own source and, historically, did its own match verification

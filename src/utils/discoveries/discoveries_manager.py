@@ -531,6 +531,29 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     return None
 
 
+def discover_album_after_swap(song, modules) -> AlbumMatch | None:
+    """The album the modules know for the song read the other way round: its
+    title as the artist and its artist as the title ("Dobro Te Čuvaju" - "Džoni
+    Midnajt Trio"). Only for a song discover_album() found nothing for; finding
+    one is a guess the owner confirms, see utils/ui/album_swap_review.py. No
+    fallbacks here: a YouTube link or a "cover" in a name says nothing about
+    which way round the names are."""
+    def clean(name: str) -> str:
+        return name.split("(")[0].strip()
+
+    # As in discover_album(): the truncated names first, then whole ones
+    queries = dict.fromkeys([(clean(truncate_at_word(song.title)), clean(truncate_at_word(song.artist.name))),
+                             (clean(song.title), clean(song.artist.name))])
+    for module_id, module_name, module in modules:
+        print(f"Looking in {module_name} module with the artist and title swapped")
+        for artist, title in queries:
+            match = _call_module_match(module, module_id, module_name, artist, title)
+            if match:
+                return match
+    flog(f"No module found an album for '{song.artist.name} - {song.title}' with the names swapped either")
+    return None
+
+
 def album_from_stored_youtube_link(song, credited_artists: list[str] | None = None) -> str | None:
     """Album read off the song's own YouTube link (Song.youtube_video_id) when
     no fetcher found one - an official "Provided to YouTube" upload names it

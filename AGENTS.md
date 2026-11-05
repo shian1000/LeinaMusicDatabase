@@ -806,7 +806,7 @@ non-trivial work in that area.
   Help, the sharing wizard, `sharing_setup.py` and Settings for "phone(s)".
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Eight places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Nine places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
@@ -819,7 +819,9 @@ non-trivial work in that area.
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
   `needs_review`, e.g. YouTube upload dates, or an imported title named - `fill_missing_years(songs,
-  entries)`; all ticked, the ticked ones saved), and
+  entries)`; all ticked, the ticked ones saved), and `review_swapped_albums()`
+  (`utils/ui/album_swap_review.py`, end of Fill missing data → Albums: songs whose album was found
+  only with artist and title swapped, none ticked, see `docs/agent-notes/discovery-modules.md`), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha

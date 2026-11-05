@@ -2,10 +2,17 @@ from utils.database.database_getter import get_songs_with_empty_category
 from utils.database.database_management import edit_db_entry
 from utils.ui.prompts import ask_yes_no
 from menu.song_actions import edit_songs_menu
-from utils.database.database_sessions import submit_global_database_session
+from utils.database.artist_identity import may_be_swapped
+from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.common.selenium_sessions import open_global_driver, close_global_driver, ChromeDriverLaunchError
-from utils.discoveries.discoveries_manager import AlbumTrackCache, discover_album, load_discovery_modules
+from utils.discoveries.discoveries_manager import (
+    AlbumTrackCache,
+    discover_album,
+    discover_album_after_swap,
+    load_discovery_modules,
+)
 from utils.common.text_utils import copy_to_clipboard
+from utils.ui.album_swap_review import review_swapped_albums
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM
 from utils.common.output import RESET, YELLOW, error, warn
@@ -43,7 +50,9 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     songs_list = []
     # The place on the album found with each song's album, same order as songs_list
     matches = []
-    
+    # (song, AlbumMatch) found only with the song's artist and title swapped
+    swapped_finds = []
+
     print("Preparing fetch modules . . . ")
     try:
         open_global_driver()
@@ -65,6 +74,13 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
                 new_album = match.album if match else None
                 if new_album is None:
                     print(f"Couldn't find album for {YELLOW}{song.artist.name} - {song.title}{RESET}")
+                    session, _ = require_global_database_sessions()
+                    if may_be_swapped(session, song):
+                        swapped_match = discover_album_after_swap(song, discovery_modules)
+                        if swapped_match:
+                            print(f"Found album {YELLOW}{swapped_match.album}{RESET} with the artist and title swapped, "
+                                  "asking about it at the end")
+                            swapped_finds.append((song, swapped_match))
                 else:
                     if new_album == SINGLES_ALBUM:
                         warn(f"{song.artist.name} - {song.title}{RESET} is a single. Added to {YELLOW}{new_album}")
@@ -86,6 +102,11 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
             edit_db_entry(songs_objects[i], "album", new_album)
             _set_track_position(songs_objects[i], matches[i])
 
+    for song, match in review_swapped_albums(swapped_finds):
+        edit_db_entry(song, "album", match.album)
+        _set_track_position(song, match)
+        i = songs_objects.index(song)
+        songs_list[i] = (song.artist.name, song.title, match.album)
 
     no_albums_count = sum(1 for art, son, alb in songs_list if alb is None)
 

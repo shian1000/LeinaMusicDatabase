@@ -13,10 +13,11 @@ from config.constants import SAME_ARTIST_SIMILARITY_THRESHOLD
 from utils.common.normalizer import name_key, normalize
 from utils.common.script_utils import scripts_in
 from utils.common.text_utils import resembles_across_scripts, similarity
-from utils.database.artist_reassignment import move_swapped_song
+from utils.database.artist_reassignment import artists_named, move_swapped_song, swap_names_of_artist
 from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
 from utils.database.latin_names import artist_match_synonyms
+from utils.database.song_artists import count_artist_songs, song_all_artists
 
 # Cyrillic letters drawn like Latin ones, for a name typed with one of them by
 # mistake ("Вjörk" - Cyrillic В - is "Bjork"). Only applied to a name mixing
@@ -135,6 +136,27 @@ def find_swapped_songs(songs: list[Song]) -> list[tuple[Song, Artist]]:
             flagged.append((song, artist))
             break
     return flagged
+
+
+def may_be_swapped(session, song: Song) -> bool:
+    """Could this song's artist really be its title? Not when the artist has
+    another song in the database, which makes it a known artist, nor for a
+    song crediting several artists or one named like its artist."""
+    return (count_artist_songs(session, song.artist_id) == 1
+            and len(song_all_artists(song)) == 1
+            and normalize(song.title) != normalize(song.artist.name))
+
+
+def swap_song_names(session, song: Song) -> None:
+    """Swap the title and artist name of a song may_be_swapped() let through,
+    so its artist row has no other song: credited to the artist named like its
+    title when there is one, else the row is simply renamed. Caller commits."""
+    twins = artists_named(session, song.title, exclude=song.artist)
+    if twins:
+        move_swapped_song(session, song, max(twins, key=lambda twin: count_artist_songs(session, twin.id)))
+    else:
+        swap_names_of_artist(song)
+    session.flush()
 
 
 def fix_swapped_song(session, song: Song, artist: Artist) -> Artist | None:
