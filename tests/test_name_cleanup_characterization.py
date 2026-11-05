@@ -47,6 +47,8 @@ YOUTUBE_CASES = [
     ("Some Channel", "DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)", ("DISCO BANIA", "BRUNETKI I BLONDYNKI")),
     ("Sony Animation", "“Golden” Official Lyric Video | KPop Demon Hunters | Sony Animation",
      ("Sony Animation", "Golden")),
+    # Changed 2026-11-05: a "|" before the only " - " lists the artists, no suffix to cut
+    ("FDGREC", "MIUOSH | SMOLIK | NOSPR - Wizje feat. Piotr Rogucki", ("MIUOSH | SMOLIK | NOSPR", "Wizje")),
     ("Some Channel", "Artist - Song (Official Video) (HD)", ("Artist", "Song")),
     ("Some Channel", "Artist - Song (Official Video) Official Audio", ("Artist", "Song")),
     ("Some Channel", "Artist - Song (Remix)", ("Artist", "Song (Remix)")),

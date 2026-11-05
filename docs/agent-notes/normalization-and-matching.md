@@ -124,7 +124,12 @@ For a video title the raw steps (site names, "| Label", junk brackets,
 hashtags, extensions, then the dangling separator) still run on the whole
 title before the split ("Herr Mannelig (animation) - Żniwa - Polish
 version" splits right only so); a bracket holding both "ft." and junk there
-would still lose its guest - not seen on the catalog, not handled yet.
+would still lose its guest - not seen on the catalog, not handled yet. The
+"| Label" step leaves a whole title alone when its only " - " comes after the
+first "|" (`lists_artists_with_pipes()`, "MIUOSH | SMOLIK | NOSPR - Wizje"):
+cutting it left "MIUOSH", which the channel fallback read as a title by
+"FDGREC". Of the 23 titles with a "|" in the logs (2026-11-05) only that form
+changes. A title with no " - " at all ("Golan | Strong Faith") is still cut.
 Measured before and after on 42,517 names (the catalog read as each source,
 Clean names, the library's tags and file names): 6 differ, all better
 ("Gdzie jest M? - feat. Spinache, Ment XXL" -> "Gdzie jest M?" + both guests,

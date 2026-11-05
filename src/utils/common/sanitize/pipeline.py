@@ -21,6 +21,7 @@ from utils.common.sanitize.text import (
     fix_cp1250_mojibake,
     has_site_name,
     is_site_name,
+    lists_artists_with_pipes,
     strip_artist_from_title,
     strip_band_word,
     strip_hashtags,
@@ -112,6 +113,10 @@ def _junk_brackets_anywhere(value: str, ctx: Context) -> str:
 
 
 def _pipe_suffix(value: str, ctx: Context) -> str:
+    # A stored or tagged title has no artists left to list: only a whole text
+    # still to be split can hold them
+    if ctx.stage == STAGE_RAW and lists_artists_with_pipes(value):
+        return value
     return strip_pipe_suffix(value) if _PIPE_SUFFIX_RE.search(value) else value
 
 

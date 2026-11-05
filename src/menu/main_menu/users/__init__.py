@@ -249,14 +249,27 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
                 break
 
 
+_ADD_AS_TYPED = "As typed"
+_ADD_SWAPPED = "Swap title with artist"
+
+
 def _add_song_for_file(music_session, track):
-    """Ask for the new song's artist and title (the tags' as defaults), show
+    """Ask for the new song's artist and title (the tags' as defaults), offer
+    swapping them when the title is a known artist and the artist isn't, show
     whether the artist / song is already there, and add it once confirmed."""
     artist_name = (questionary.text("Artist:", default=track.artist or "").ask() or "").strip()
     title = (questionary.text("Title:", default=_default_title(track)).ask() or "").strip()
     if not artist_name or not title:
         print("An artist and a title are both needed - nothing added.")
         return None
+    swap_artist = possible_swap_artist({"artist_name": artist_name, "title": title}, music_session)
+    if swap_artist is not None:
+        print(f"  The title looks swapped with the artist: {swap_artist.name} is in the database.")
+        choice = questionary.select("Which way round is this song?", choices=[_ADD_AS_TYPED, _ADD_SWAPPED]).ask()
+        if choice is None:
+            return None
+        if choice == _ADD_SWAPPED:
+            artist_name, title = title, artist_name
     artist, existing = song_for_file_plan(music_session, artist_name, title)
     if existing is not None:
         print(f"  Already in the database: {_song_choice_label(existing)}")

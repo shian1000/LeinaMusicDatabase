@@ -630,6 +630,76 @@ def test_adding_a_song_reuses_the_artist_and_an_existing_song(users_env, tmp_pat
     assert music_session.query(Artist).filter(Artist.name == "Hey").count() == 1
 
 
+def _add_with_answers(music_session, monkeypatch, artist, title, choice):
+    """_add_song_for_file() for a track read as artist - title; returns the
+    song and the select questions it asked."""
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    asked = []
+
+    def select(message, choices):
+        asked.append((message, choices))
+        return _Answer(choice)
+
+    monkeypatch.setattr(menu.questionary, "select", select)
+    monkeypatch.setattr(menu.questionary, "text", lambda message, default="": _Answer(default))
+    monkeypatch.setattr(menu, "ask_yes_no", lambda message: True)
+    monkeypatch.setattr(menu, "submit_global_database_session", music_session.commit)
+    track = fp.FolderTrack(file=None, title=title, artist=artist)
+    return menu._add_song_for_file(music_session, track), asked
+
+
+def test_adding_a_song_offers_swapping_a_title_that_is_a_known_artist(users_env, music_session, monkeypatch, capsys):
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+
+    song, asked = _add_with_answers(music_session, monkeypatch, "Red Hands", "Afina", menu._ADD_SWAPPED)
+
+    assert (song.artist.name, song.title) == ("Afina", "Red Hands")
+    assert music_session.query(Artist).filter(Artist.name == "Red Hands").count() == 0
+    # The cursor stays on the names as typed: Enter never swaps
+    assert [choices for _, choices in asked] == [[menu._ADD_AS_TYPED, menu._ADD_SWAPPED]]
+    assert "The title looks swapped with the artist: Afina is in the database." in capsys.readouterr().out
+
+
+def test_adding_a_song_kept_as_typed_though_the_title_is_a_known_artist(users_env, music_session, monkeypatch):
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+
+    song, asked = _add_with_answers(music_session, monkeypatch, "Red Hands", "Afina", menu._ADD_AS_TYPED)
+
+    assert (song.artist.name, song.title) == ("Red Hands", "Afina")
+    assert len(asked) == 1
+
+
+def test_adding_a_song_cancelled_at_the_swap_question_adds_nothing(users_env, music_session, monkeypatch):
+    song, asked = _add_with_answers(music_session, monkeypatch, "Red Hands", "Afina", None)
+
+    assert song is None and len(asked) == 1
+    assert music_session.query(Artist).filter(Artist.name == "Red Hands").count() == 0
+    assert music_session.query(Song).filter(Song.title == "Afina").count() == 0
+
+
+def test_adding_a_song_asks_no_swap_when_the_artist_is_known_or_the_title_is_not(users_env, music_session, monkeypatch):
+    # "Hey - Afina": the artist is known, so the reading is plausible
+    song, asked = _add_with_answers(music_session, monkeypatch, "Hey", "Afina", None)
+    assert (song.artist.name, song.title, asked) == ("Hey", "Afina", [])
+    song, asked = _add_with_answers(music_session, monkeypatch, "Red Hands", "Green Hands", None)
+    assert (song.artist.name, song.title, asked) == ("Red Hands", "Green Hands", [])
+
+
+def test_video_listing_artists_with_pipes_finds_the_song_of_the_first(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+    from utils.youtube.import_from_playlist import build_metadata_from_item
+
+    # Real case: added as "FDGREC - MIUOSH" beside Miuosh's own "Wizje"
+    song = Song(title="Wizje", artist=Artist(name="Miuosh"))
+    music_session.add(song)
+    music_session.commit()
+    metadata = build_metadata_from_item({"video_id": "AeqybTnRY-w", "channel": "FDGREC",
+                                         "title": "MIUOSH | SMOLIK | NOSPR - Wizje feat. Piotr Rogucki"})
+
+    assert metadata.feat_artists == ["Piotr Rogucki"]
+    assert LocalSongMatcher(music_session).match_exact(metadata) is song
+
+
 def test_and_in_tag_title_matches_ampersand_in_database(music_session):
     from utils.discoveries.import_engine import LocalSongMatcher, find_existing_song
 

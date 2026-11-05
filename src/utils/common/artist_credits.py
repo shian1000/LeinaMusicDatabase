@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from config.constants import ARTIST_JOINING_WORDS
 from utils.common.normalizer import normalize
 from utils.common.text_utils import is_soundtrack_artist
-from utils.common.title_patterns import BRACKETED, FEAT_OR_WITH_WORD, FEAT_WORD
+from utils.common.title_patterns import BRACKETED, FEAT_OR_WITH_WORD, FEAT_WORD, PIPE
 
 # One "(...)" / "[...]" group with the whitespace before it
 BRACKET_RE = re.compile(r"\s*" + BRACKETED)
@@ -25,8 +25,10 @@ FEAT_WORD_RE = re.compile(r"^\s*" + FEAT_OR_WITH_WORD + r"\s", re.IGNORECASE)
 _FEAT = re.compile(r"\s*\(?\s*\b" + FEAT_WORD + r"\s+", re.IGNORECASE)
 # Between equal artists. " x " is lowercase-only on purpose: an uppercase X is
 # usually part of a name ("Final Fantasy X", "Malcolm X"). "and"/"i" are left
-# out - too many band names ("Hall and Oates" style) use them.
-_MAIN_SEPARATOR = re.compile(r",\s+|\s+&\s+|\s+x\s+|\s+/\s+|\s+\+\s+|\s+vs\.?\s+")
+# out - too many band names ("Hall and Oates" style) use them. "|" lists a
+# video's artists ("MIUOSH | SMOLIK | NOSPR"), but also one name's spellings
+# ("Ленинград | Leningrad"), so it pre-selects nothing below.
+_MAIN_SEPARATOR = re.compile(r",\s+|\s+&\s+|\s+x\s+|\s+/\s+|\s+\+\s+|\s+vs\.?\s+|\s*" + PIPE + r"+\s*")
 # Strong enough to pre-select a proposal on its own; "&" and "," aren't
 # ("Simon & Garfunkel", "Earth, Wind & Fire").
 _CONFIDENT_SEPARATOR = re.compile(r"\s+x\s+")

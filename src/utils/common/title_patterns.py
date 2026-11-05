@@ -21,5 +21,9 @@ _CLOSING = "".join(YOUTUBE_BRACKET_PAIRS.values())
 # One group in any of those pairs, no nesting, its content captured
 YOUTUBE_BRACKETED = f"[{re.escape(_OPENING)}]([^{re.escape(_OPENING + _CLOSING)}]*)[{re.escape(_CLOSING)}]"
 
+# "|" and its look-alikes (real case: "Dizzko Bizkit aka Mejsi - Bál ⎮ 2017",
+# U+23AE): fullwidth "｜", box-drawing "│", broken bar "¦"
+PIPE = r"[|⎮｜│¦]"
+
 # A release year
 YEAR = r"(?:19|20)\d{2}"

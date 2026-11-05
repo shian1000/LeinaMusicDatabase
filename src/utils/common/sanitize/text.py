@@ -15,7 +15,7 @@ from config.constants import (
     TITLE_JUNK_SUFFIXES,
 )
 from utils.common.normalizer import NON_DECOMPOSING_LETTER_FOLDS
-from utils.common.title_patterns import YEAR, YOUTUBE_BRACKET_PAIRS, YOUTUBE_BRACKETED
+from utils.common.title_patterns import PIPE, YEAR, YOUTUBE_BRACKET_PAIRS, YOUTUBE_BRACKETED
 
 
 # ==================== Download-site names, separators, encodings ====================
@@ -373,14 +373,25 @@ def strip_junk_brackets_anywhere(title: str) -> str:
 # strip_junk_suffix() also lets a junk bracket that only *looks* trailing
 # once the branding is gone (like "(Official Video)" above) get caught by
 # the existing trailing-bracket check.
-# Look-alikes of "|" count too (real case: "Dizzko Bizkit aka Mejsi - Bál ⎮
-# 2017", U+23AE): fullwidth "｜", box-drawing "│", broken bar "¦".
-_PIPE_SUFFIX_RE = re.compile(r"\s*[|⎮｜│¦].*$")
+_PIPE_RE = re.compile(PIPE)
+_PIPE_SUFFIX_RE = re.compile(r"\s*" + PIPE + r".*$")
+# The separator split_artist_title() looks for first
+_SPACED_SEPARATOR_RE = re.compile(r" [–—\-_] ")
 
 
 def strip_pipe_suffix(title: str) -> str:
     """Drop a trailing "| ..." branding suffix from `title`, if present."""
     return _PIPE_SUFFIX_RE.sub("", title or "").strip()
+
+
+def lists_artists_with_pipes(text: str) -> bool:
+    """A whole video title whose only " - " comes after its first "|": the
+    "|" lists the artists rather than starting a suffix, the song is behind
+    the dash ("MIUOSH | SMOLIK | NOSPR - Wizje", which used to leave "MIUOSH",
+    read as a title of the channel)."""
+    pipe = _PIPE_RE.search(text)
+    return bool(pipe and not _SPACED_SEPARATOR_RE.search(text[:pipe.start()])
+                and _SPACED_SEPARATOR_RE.search(text, pipe.end()))
 
 
 # Uploaders routinely tack promo hashtags onto the end of a title (e.g.

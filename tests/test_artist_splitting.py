@@ -32,6 +32,10 @@ PARSE_CASES = [
     ("Big Brother & the Holding Company", ["Big Brother", "the Holding Company"], [], False),
     ("Pezet - Małolat feat. Małpa", ["Pezet - Małolat"], ["Małpa"], False),
     ("Lisa Gerrard, Hans Zimmer, Lisa Gerrard", ["Lisa Gerrard", "Hans Zimmer"], [], False),
+    # "|" lists a video's artists, but can be one name's spellings: never pre-selected
+    ("MIUOSH | SMOLIK | NOSPR", ["MIUOSH", "SMOLIK", "NOSPR"], [], False),
+    ("NAVIBAND || VOLNY CHOR", ["NAVIBAND", "VOLNY CHOR"], [], False),
+    ("Ленинград | Leningrad", ["Ленинград", "Leningrad"], [], False),
     # "Group (lineup)": the group plus its members, never pre-selected
     ("Męskie Granie Orkiestra 2026 (Igor Herbut, Zalia, Vito Bambino)",
      ["Męskie Granie Orkiestra 2026", "Igor Herbut", "Zalia", "Vito Bambino"], [], False),

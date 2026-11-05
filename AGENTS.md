@@ -365,7 +365,7 @@ non-trivial work in that area.
   isn't final: the user confirms it or switches to the manual search. They can also search the
   database (`search_and_pick_db_object()`; one file per cleared screen, the previous file's
   decision on top, a key press first when auto-accepted files were listed), add it as a new song (`folder_playlist.add_song_for_file()`,
-  the existing artist/song reused), keep it in the playlist without a song (a track with
+  the existing artist/song reused, a title that is a known artist offered swapping, `possible_swap_artist()`), keep it in the playlist without a song (a track with
   `song_id` NULL), or leave it out of the playlist (the file itself is never touched). Only "Stop"
   leaves the playlist unsaved. A file whose tag artist the artist search can't find (a typo: "Liiquid tension
   experiment" — the search is substring-based, so it gets no candidates at all) gets
@@ -483,7 +483,7 @@ non-trivial work in that area.
 - `src/utils/common/title_patterns.py` — regex pieces the title rules share, one spelling each:
   `FEAT_WORD` ("feat." / "ft" / "featuring"; `FEAT_OR_WITH_WORD` inside a bracket), `BRACKETED`
   ("(...)" / "[...]"), `YOUTUBE_BRACKETED` / `YOUTUBE_BRACKET_PAIRS` (with "【】", "（）", "［］"),
-  `YEAR`. A new pattern of that kind is built from these, never respelt. No app imports.
+  `PIPE` ("|" and its look-alikes), `YEAR`. A new pattern of that kind is built from these, never respelt. No app imports.
 - `src/utils/database/name_cleanup.py` — Clean names' work on the stored catalog, no UI:
   `apply_step()` runs one sanitize step over songs' title / artist name / album text, holding an
   artist rename onto another artist's name (`hold_artist_rename()`, the artist row's own session),

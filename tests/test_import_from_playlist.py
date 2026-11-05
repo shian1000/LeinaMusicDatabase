@@ -247,6 +247,27 @@ def test_pipe_look_alike_suffix_is_stripped():
     assert sanitize.strip_pipe_suffix("Song ｜ Label") == "Song"
 
 
+@pytest.mark.parametrize("title, artist, song", [
+    # Real case: cut to "MIUOSH", which the channel fallback read as a title by "FDGREC"
+    ("MIUOSH | SMOLIK | NOSPR - Wizje feat. Piotr Rogucki", "MIUOSH | SMOLIK | NOSPR", "Wizje"),
+    ("NAVIBAND || VOLNY CHOR - Pad Dubam", "NAVIBAND || VOLNY CHOR", "Pad Dubam"),
+    ("Hey ⎮ Afina - Karma", "Hey ⎮ Afina", "Karma"),
+    # A " - " before the "|": what follows is a suffix, even with a dash of its own
+    ("Hey - Karma | Label - Records", "Hey", "Karma"),
+    ("kamanių šilelis – eiti | 1Mikrofonas", "kamanių šilelis", "eiti"),
+    # No " - " at all: still cut, the channel is the artist
+    ("Golan | Strong Faith", "FDGREC", "Golan"),
+])
+def test_pipe_before_the_only_dash_lists_the_artists(title, artist, song):
+    metadata = _build(title, channel="FDGREC")
+    assert (metadata["artist_name"], metadata["title"]) == (artist, song)
+
+
+def test_pipes_listing_artists_are_only_for_a_title_still_to_be_split():
+    # A stored or tagged title has no artists in it, so its "| ..." stays a suffix
+    assert sanitize.sanitize_field("Song | Label - Records", sanitize.TITLE, sanitize.SOURCE_YOUTUBE) == "Song"
+
+
 def test_full_song_bracket_is_stripped():
     assert _build("T-Series - Criminal (Full Song) Ra.One")["title"] == "Criminal Ra.One"
 
