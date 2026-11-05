@@ -172,9 +172,9 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
     if(similarity_percent > SPELLING_CHECK_THRESHOLD):
         # Search DB again with corrected spelling - the same title, not one
         # merely containing it (a corrected "Low" isn't "Lowlands")
-        corrected_core = _title_core(corrected_spelling)
+        corrected_core = _title_core(corrected_spelling, drop_the=False)
         for ex_son in existing_artists_songs:
-            if corrected_core and _title_core(ex_son.title) == corrected_core:
+            if corrected_core and _title_core(ex_son.title, drop_the=False) == corrected_core:
                 slog(f"      [SPELLCHECK MATCH] Similar song found, deferring decision to caller", priority=1)
                 return ex_son
 
@@ -468,10 +468,11 @@ _TITLE_BY_ARTIST = re.compile(r"^(.+)\s+by\s+(.+?)$", re.IGNORECASE)
 _TRAILING_YEAR = re.compile(r"\s+" + YEAR + r"\s*$")
 
 
-def _title_core(title: str, drop_feat: bool = True) -> str:
+def _title_core(title: str, drop_feat: bool = True, drop_the: bool = True) -> str:
     """A title without brackets, trailing junk ("Official Video", "HD"), a
     trailing "feat. X" (unless not `drop_feat`), a trailing year ("... 2006";
-    "1979" alone stays) or a leading track number ("T03: "), normalized:
+    "1979" alone stays), a leading track number ("T03: ") or a leading "The"
+    (unless not `drop_the`; "The" alone stays), normalized:
     "Pay Your Respect (Official Lyric Video)" -> "pay your respect". Words
     standing for "&" are dropped too, since normalize() drops the "&" itself.
     Both sides lose the year, so "Party Like It's 1999" still meets itself."""
@@ -481,7 +482,8 @@ def _title_core(title: str, drop_feat: bool = True) -> str:
     title = strip_trailing_junk_suffix(title)
     title = _TRAILING_YEAR.sub("", title) or title
     core = normalize(strip_track_number_prefix(title))
-    return " ".join(w for w in core.split() if w not in TITLE_AMPERSAND_WORDS) or core
+    core = " ".join(w for w in core.split() if w not in TITLE_AMPERSAND_WORDS) or core
+    return core.removeprefix("the ") if drop_the else core
 
 
 def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = None,
@@ -490,17 +492,20 @@ def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = N
     brackets, trailing junk or a track number on either side - first keeping
     a trailing "feat. X", then without it: "No Scrubs (Official Video)" is
     "No Scrubs", not the "No Scrubs ft. Joanna Jones (Cover)" beside it, but
-    "Шкідлива звичка" still finds "Шкідлива звичка feat. YanGo". With
-    `feat_artists`, all that among the songs crediting them first."""
+    "Шкідлива звичка" still finds "Шкідлива звичка feat. YanGo". Only then
+    without a leading "The": "The Time Is Running Out" finds "Time Is Running
+    Out", but "The Man (Official Video)" is "The Man" when "Man" is beside it.
+    With `feat_artists`, all that among the songs crediting them first."""
     if credited := _with_feats(artist_songs, feat_artists):
         if (song := find_song_loosely(title, credited, duration_s)) is not None:
             return song
     song = find_existing_song(title, artist_songs, duration_s)
     artist_songs = songs_for_entry(artist_songs, title, duration_s)
-    for drop_feat in (False, True):
-        if song is None and (core := _title_core(title, drop_feat)):
-            song = next((s for s in artist_songs
-                         if core in (_title_core(t, drop_feat) for t in song_titles(s))), None)
+    for drop_the in (False, True):
+        for drop_feat in (False, True):
+            if song is None and (core := _title_core(title, drop_feat, drop_the)):
+                song = next((s for s in artist_songs
+                             if core in (_title_core(t, drop_feat, drop_the) for t in song_titles(s))), None)
     return song
 
 

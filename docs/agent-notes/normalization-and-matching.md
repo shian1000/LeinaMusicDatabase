@@ -416,6 +416,14 @@ Death & the Codeine Scene" never met "... And The Codeine Scene". This lives in
 would shift every search and cache key in the app. When added, no two songs of
 one artist in the real database collapsed into the same core.
 
+A leading "The" goes from title cores too (owner's choice, 2026-11-05: "The Time
+Is Running Out" is Muse's "Time Is Running Out", found without asking). Only one
+pair of one artist's titles in the catalog differed by it, itself a likely
+duplicate ("The Salmon Dance" / "Salmon Dance"). `find_song_loosely()` tries the
+core with "The" first, so "The Man (Official Video)" stays "The Man" when "Man"
+is beside it. The spelling check in `find_similar_song()` keeps it
+(`drop_the=False`): the import's own check must not get looser.
+
 ## Closest songs by score - the last resort
 
 When no rule above finds anything, the folder playlist offers the top 3 of

@@ -354,7 +354,8 @@ non-trivial work in that area.
   `import_engine.title_after_artists()`), and titles with brackets, trailing junk, a trailing
   unbracketed "feat. X" (tried after the title with it, so an original beats its "ft." version), a
   trailing year ("... [Full Length] 2006", on both sides, so "Party Like It's 1999" still meets itself), a leading track number
-  ("T03: ", `text_utils.strip_track_number_prefix()`) and words standing for "&"
+  ("T03: ", `text_utils.strip_track_number_prefix()`), a leading "The" (tried after the title with it, so
+  "The Man" beats "Man") and words standing for "&"
   (`TITLE_AMPERSAND_WORDS`: "and", "i", "und", ...; `normalize()` drops the "&" itself) stripped. Don't swap one
   for the other: a loose "already exists" in the import would skip genuinely new songs.
   `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts

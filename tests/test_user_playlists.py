@@ -1724,6 +1724,25 @@ def test_trailing_year_in_the_tag_title_is_ignored(music_session):
     assert _title_core("1979") == "1979"
 
 
+def test_leading_the_in_a_title_is_ignored(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher, _title_core
+
+    muse = Artist(name="Muse")
+    running = Song(title="Time Is Running Out", artist=muse)
+    man, the_man = Song(title="Man", artist=muse), Song(title="The Man", artist=muse)
+    music_session.add_all([running, man, the_man])
+    music_session.commit()
+    matcher = LocalSongMatcher(music_session)
+    entry = {"artist_name": "Muse", "title": "The Time Is Running Out"}
+    assert matcher.match_exact(entry) is running
+    assert matcher.match_score(entry, running) == 1.0
+    # A song with "The" beside one without it: each file finds its own
+    assert matcher.match_exact({"artist_name": "Muse", "title": "The Man (Official Video)"}) is the_man
+    assert matcher.match_exact({"artist_name": "Muse", "title": "Man (Official Video)"}) is man
+    assert _title_core("The") == "the"
+    assert _title_core("Theatre Of Tragedy") == "theatre of tragedy"
+
+
 def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
     """Tags written in Windows-1250 come out as "Ma³pa"; read_file_metadata()
     re-reads them, but leaves genuine Latin-1 letters ("España") alone."""
