@@ -74,6 +74,16 @@ YOUTUBE_CASES = [
     ("Some Channel", "Artist - Secret Youth - Music Video", ("Artist", "Secret Youth")),
     # Changed 2026-11-01: only a quoted title is unwrapped, quotes inside stay
     ("Some Channel", 'Duke Ellington - Take The "A" Train', ("Duke Ellington", 'Take The "A" Train')),
+    # Changed 2026-11-05: a sure pair of single quotes around a title goes too
+    ("Some Channel", "M.O.O.N. - 'Hydrogen' [Hotline Miami Soundtrack]", ("M.O.O.N.", "Hydrogen")),
+    ("Some Channel", "Artist - 'Song' (INXS cover)", ("Artist", "Song (INXS cover)")),
+    ("Some Channel", "Artist - ‘Don't Stop’", ("Artist", "Don't Stop")),
+    # ... and apostrophes stay
+    ("Some Channel", "Artist - Rock 'n' Roll", ("Artist", "Rock 'n' Roll")),
+    ("Some Channel", "Artist - 'Bout Time 'n' Stuff", ("Artist", "'Bout Time 'n' Stuff")),
+    ("Some Channel", "Artist - 'Bout Time", ("Artist", "'Bout Time")),
+    ("Some Channel", "The Connells - ’74–’75", ("The Connells", "’74–’75")),
+    ("Some Channel", "Artist - ‘Song’ DANCE VERSION", ("Artist", "‘Song’ DANCE VERSION")),
 ]
 
 

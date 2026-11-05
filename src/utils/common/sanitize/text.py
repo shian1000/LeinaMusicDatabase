@@ -283,25 +283,37 @@ _TRAILING_BRACKET_RE = re.compile(r"\s*" + YOUTUBE_BRACKETED + r"\s*$")
 
 # Straight and curly double-quote characters, plus the CJK "corner bracket"
 # pair "『』" (used to set off a work's title, the way Western titles use
-# double quotes - e.g. '『Cinderella by Cidergirl』'). Only double-quote-like
-# characters are stripped (never single quotes/apostrophes, which routinely
-# appear inside a title itself - e.g. "Rock 'n' Roll", "Don't Stop") -
-# uploaders wrap the song name in them fairly often (e.g. 'Night Club -
-# "Need You Tonight" (INXS cover)'), and that's never meaningful punctuation
-# worth keeping in the stored title.
+# double quotes - e.g. '『Cinderella by Cidergirl』') - uploaders wrap the song
+# name in them fairly often (e.g. 'Night Club - "Need You Tonight" (INXS
+# cover)'), and that's never meaningful punctuation worth keeping in the
+# stored title.
 _DOUBLE_QUOTE_RE = re.compile(r'["“”„‟『』]')
+
+# Single quotes wrap a title too ("M.O.O.N. - 'Hydrogen' [Hotline Miami
+# Soundtrack]"), but they are also apostrophes ("Rock 'n' Roll", "'Bout Time",
+# "’74–’75"), so only a sure pair counts: the mark the title starts with and
+# one closing the title or standing before a bracket, with nothing but
+# apostrophes inside a word between them ("'Don't Stop'")
+_SINGLE_QUOTE = "'‘’‚‛"
+_SINGLE_QUOTED_RE = re.compile(
+    rf"[{_SINGLE_QUOTE}]((?:[^{_SINGLE_QUOTE}]|(?<=\w)[{_SINGLE_QUOTE}](?=\w))*[^{_SINGLE_QUOTE}\s])[{_SINGLE_QUOTE}]"
+    rf"(\s*(?:$|[{re.escape(''.join(YOUTUBE_BRACKET_PAIRS))}].*))"
+)
 
 
 def strip_quote_marks(title: str) -> str:
     """Unwrap a quoted title: the double-quote-like mark `title` starts with
     and the next one ('"Need You Tonight" (INXS cover)' -> 'Need You Tonight
-    (INXS cover)'); quotes inside a title stay ('Take The "A" Train'). The
+    (INXS cover)'), or a sure pair of single quotes ("'Hydrogen'" ->
+    'Hydrogen'); quotes inside a title stay ('Take The "A" Train'). The
     whitespace collapsed either way.
     """
     title = (title or "").strip()
     if title and _DOUBLE_QUOTE_RE.match(title):
         closing = _DOUBLE_QUOTE_RE.search(title, 1)
         title = title[1:closing.start()] + title[closing.end():] if closing else title[1:]
+    elif single_quoted := _SINGLE_QUOTED_RE.fullmatch(title):
+        title = single_quoted.group(1) + single_quoted.group(2)
     return re.sub(r"\s+", " ", title).strip()
 
 

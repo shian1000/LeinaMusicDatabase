@@ -214,9 +214,10 @@ fullwidth `（）`/`［］` pairs from CJK input methods (real case:
 `"Fujii Kaze - Workin’ Hard（Official Video）"`). Separately,
 `strip_quote_marks()` strips double-quote-*like* characters from the song title - ASCII/curly
 double quotes and the CJK "corner bracket" pair `『』` (used to set off a work's title the way
-Western uploads wrap it in `"..."`, e.g. `'『Cinderella by Cidergirl』'`) - but deliberately never
-single quotes/apostrophes, since those routinely appear inside a genuine title (`"Rock 'n' Roll"`,
-`"Don't Stop"`). `strip_hashtags()` drops every `#word` promo-hashtag token, wherever it appears.
+Western uploads wrap it in `"..."`, e.g. `'『Cinderella by Cidergirl』'`) - and single quotes only as
+a sure pair (`"'Hydrogen'"`: the one the title starts with and one closing the title or standing
+before a bracket, only apostrophes inside a word between them), since those routinely appear inside
+a genuine title (`"Rock 'n' Roll"`, `"'Bout Time"`, `"’74–’75"`). `strip_hashtags()` drops every `#word` promo-hashtag token, wherever it appears.
 
 All three word lists are user-curated and meant to grow by appending new entries as new junk shapes
 turn up - deliberately excluded so far: anything that marks a real alternate version worth keeping

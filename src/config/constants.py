@@ -653,7 +653,8 @@ SANITIZE_SWITCH_LABELS = {
                        "'(Official Video)', '(Visualiser)', '(Remastered)', 'Lyric Video', 'HD', '| Label', "
                        "'#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),
     "quote_marks": ("Removing", "Quote marks around a title",
-                    "'“Golden”' -> 'Golden'; quotes inside a title stay ('Take The \"A\" Train')."),
+                    "'“Golden”' -> 'Golden', \"'Hydrogen'\" -> 'Hydrogen'; quotes inside a title stay "
+                    "('Take The \"A\" Train', \"Rock 'n' Roll\")."),
     "spaces": ("Tidying", "Invisible characters and extra spaces",
                "zero-width spaces, spaces at the ends or doubled, a separator left at the end "
                "('Da li želiš_', '... - Piano Solo -')."),
