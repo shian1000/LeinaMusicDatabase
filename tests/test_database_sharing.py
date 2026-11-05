@@ -813,6 +813,34 @@ def test_login_without_a_device_works_as_before_and_old_entries_stay_valid(login
     assert account_auth.token_user(str(users_dir), token) == "ola_k"
 
 
+def test_a_request_log_line_names_the_tokens_user_and_never_the_token(login_server, serve, share_dir, capsys):
+    _, users_dir, inbox = login_server
+    handler = sharing_server.make_handler(str(share_dir), "/", str(inbox), users_dir=str(users_dir))
+    real = handler.log_message
+    base = serve(share_dir, "/", handler=handler)
+    handler.log_message = real
+    token = json.loads(_login(base)[2])["token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    def fetch(path, headers):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f"{base}{path}", headers=headers)) as resp:
+                resp.read()
+        except urllib.error.HTTPError:
+            pass
+
+    fetch("/users/ola_k", auth)
+    fetch("/users/ola_k", {"Authorization": "Bearer wrong"})
+    fetch("/music.db", {})
+    lines = capsys.readouterr().err.splitlines()
+
+    assert ' - ola_k [' in lines[-4] and '"POST /login' in lines[-4]
+    assert ' - ola_k [' in lines[-3] and '" 200 ' in lines[-3]
+    assert " - - [" in lines[-2] and '" 401 ' in lines[-2]
+    assert " - - [" in lines[-1] and '"GET /music.db' in lines[-1]
+    assert token not in "\n".join(lines)
+
+
 def test_a_token_entry_removed_from_the_file_is_refused_at_once(login_server):
     """What an outside tool (the owner's server manager) relies on to revoke
     one device: the server re-reads tokens.json per request."""

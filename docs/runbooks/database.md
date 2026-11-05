@@ -153,6 +153,9 @@ what would be written now) and lingering, and a summary with the phone's address
   the script at start. Everything else is a 404 with no
   directory listing; this is why plain `python -m http.server` is not used. `Cache-Control:
   no-store` is set. The other files it serves are the library's audio files, below.
+- **Who in the log (2026-11-05):** a request's journal line has the user of a valid token in the
+  `authuser` place: `<address> - <user> [<date>] "GET ..." 200 -`, and `-` without one (databases,
+  library files, a bad token). Never the token itself.
 - **Library files (2026-10-14):** `GET`/`HEAD /library/<files.id>` serves one file of the music
   library, so Leina Radio can play a song from the server (its source "Serwer"). The service
   gets `--library` = `Settings.local_library_dir` (`files_index.local_library_path()`; left out

@@ -502,6 +502,19 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         # nothing gives its thread back. Downloads, streaming and uploads set
         # their own (equal) timeouts later.
         timeout = REQUEST_SOCKET_TIMEOUT
+        # The user a valid token showed on this request, for the request's log line
+        log_user = None
+
+        def parse_request(self):
+            # Connections are reused: one request's user mustn't reach the next line
+            self.log_user = None
+            return super().parse_request()
+
+        def log_message(self, format, *args):
+            # The base class's line, with the token's user in the "authuser" place
+            message = "".join(c if c.isprintable() else f"\\x{ord(c):02x}" for c in format % args)
+            print(f"{self.address_string()} - {self.log_user or '-'} [{self.log_date_time_string()}] {message}",
+                  file=sys.stderr)
 
         def send_response(self, code, message=None):
             self._responded = True
@@ -725,6 +738,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 print(f"Storing a token for {name} failed: {exc}", flush=True)
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return
+            self.log_user = name
             on_device = f" ({device})" if device else ""
             print(f"User {name} logged in from {self.client_address[0]}{on_device}", flush=True)
             self._reply_json(HTTPStatus.OK, {"username": name, "token": token,
@@ -748,7 +762,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             token = self._bearer_token()
             if token is None and user_part is None:
                 return True
-            sender = account_auth.token_user(users_dir, token)
+            sender = self.log_user = account_auth.token_user(users_dir, token)
             if sender is None:
                 self._reply(HTTPStatus.UNAUTHORIZED, "log in again")
                 return False
@@ -763,7 +777,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if not data_available():
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
                 return None
-            sender = account_auth.token_user(users_dir, self._bearer_token())
+            sender = self.log_user = account_auth.token_user(users_dir, self._bearer_token())
             if sender is None:
                 self._reply(HTTPStatus.UNAUTHORIZED, "log in again")
             return sender
