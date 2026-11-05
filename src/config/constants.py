@@ -611,6 +611,16 @@ SANITIZE_CONFIG_FILE = PROJECT_ROOT / "sanitize_config.json"
 # case-insensitively against the channel name minus " - Topic".
 GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
 
+# What a CD ripper writes into an mp3's tags for a disc it didn't recognise
+# (real case: "Ørganek - Wiosna.mp3" tagged "Nieznany wykonawca" - "Ścieżka 15",
+# album "Nieznany album (2018-09-10 12:31:53)"). Such a tag counts as missing,
+# so the file name is read. Only for tags: elsewhere "Track 5" may be a title.
+# Matched whole and case-insensitively; a title is the word plus a number, an
+# album may end in a bracket (the rip's date)
+PLACEHOLDER_TAG_ARTISTS = {"nieznany wykonawca", "unknown artist"}
+PLACEHOLDER_TAG_ALBUMS = ("nieznany album", "unknown album")
+PLACEHOLDER_TAG_TITLE_WORDS = ("ścieżka", "sciezka", "utwór", "utwor", "track")
+
 # "Zespół <Name>" is a channel's way of saying the band <Name> ("Zespół Hurt"),
 # but the first word after it can make "Zespół" part of the name: "Zespół
 # Pieśni i Tańca Śląsk". Matched case-insensitively.

@@ -1,13 +1,20 @@
 """Utilities for extracting and normalizing metadata from MP3 files."""
 
+import re
 from pathlib import Path
 
 from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 
+from config.constants import PLACEHOLDER_TAG_ALBUMS, PLACEHOLDER_TAG_ARTISTS, PLACEHOLDER_TAG_TITLE_WORDS
 from utils.common.debug import flog, slog
 
 from utils.common.normalizer import normalize, extract_unknown_data
+
+_MISSING_TITLES = {None, "", "Unknown Title"}
+_MISSING_ARTISTS = {None, "", "Unknown Artist"}
+_PLACEHOLDER_TITLE_RE = re.compile(rf"(?:{'|'.join(PLACEHOLDER_TAG_TITLE_WORDS)})\s*\d+", re.IGNORECASE)
+_PLACEHOLDER_ALBUM_RE = re.compile(rf"(?:{'|'.join(PLACEHOLDER_TAG_ALBUMS)})(?:\s*\(.*\))?", re.IGNORECASE)
 
 
 def audio_duration(file: Path) -> int | None:
@@ -23,7 +30,8 @@ def extract_mp3_metadata(file: Path) -> dict:
     """Extract metadata from an MP3 file.
 
     Returns a dict with keys: 'title', 'artist_name', 'album', 'year', 'language', 'origin'.
-    Handles missing ID3 tags gracefully with sensible defaults.
+    Handles missing ID3 tags gracefully with sensible defaults; a CD ripper's
+    placeholder ("Nieznany wykonawca", "Ścieżka 15") counts as missing.
     """
     audio = MP3(file)
     easy = EasyID3(file)
@@ -31,6 +39,12 @@ def extract_mp3_metadata(file: Path) -> dict:
     title = easy.get("title", ["Unknown Title"])[0]
     artist_name = easy.get("artist", ["Unknown Artist"])[0]
     album = easy.get("album", [None])[0]
+    if _PLACEHOLDER_TITLE_RE.fullmatch(title.strip()):
+        title = "Unknown Title"
+    if artist_name.strip().casefold() in PLACEHOLDER_TAG_ARTISTS:
+        artist_name = "Unknown Artist"
+    if album and _PLACEHOLDER_ALBUM_RE.fullmatch(album.strip()):
+        album = None
     year = easy.get("date", [None])[0]
     language = easy.get("language", ["Unknown"])[0]
 
@@ -61,7 +75,9 @@ def extract_metadata_with_fallback(file: Path) -> dict:
 
     Attempts to extract metadata from ID3 tags first. If the tags are present
     but do not contain usable title/artist values, it falls back to parsing the
-    filename using extract_unknown_data.
+    filename using extract_unknown_data. The other tags stay (the year of a
+    rip whose names are placeholders), and so does a usable artist or title
+    when the filename has no "Artist - Title" to read.
 
     Args:
         file: Path to the MP3 file
@@ -76,7 +92,7 @@ def extract_metadata_with_fallback(file: Path) -> dict:
         print(f"Could not read ID3 tags from {file.name}, attempting to extract from filename...")
         metadata = None
 
-    if metadata and metadata.get("title") not in {None, "", "Unknown Title"} and metadata.get("artist_name") not in {None, "", "Unknown Artist"}:
+    if metadata and metadata.get("title") not in _MISSING_TITLES and metadata.get("artist_name") not in _MISSING_ARTISTS:
         slog(f"[METADATA] Successfully extracted from ID3 tags: {file.name}")
         return metadata
 
@@ -89,14 +105,13 @@ def extract_metadata_with_fallback(file: Path) -> dict:
         artist_name, title = extract_unknown_data(file)
         slog(f"[METADATA FALLBACK] Extracted from filename: artist='{artist_name}', title='{title}'")
 
-        return {
-            "title": title,
-            "artist_name": artist_name,
-            "album": None,
-            "year": None,
-            "language": "Unknown",
-            "origin": None,
-        }
+        tags = metadata or {"album": None, "year": None, "language": "Unknown", "origin": None}
+        if not artist_name:
+            if tags.get("artist_name") not in _MISSING_ARTISTS:
+                artist_name = tags["artist_name"]
+            if not title and tags.get("title") not in _MISSING_TITLES:
+                title = tags["title"]
+        return {**tags, "title": title, "artist_name": artist_name}
     except Exception as fallback_error:
         slog(f"[METADATA ERROR] Both ID3 and fallback extraction failed for {file.name}: {fallback_error}")
         raise ValueError(f"Could not extract metadata from {file.name} via ID3 or filename") from fallback_error

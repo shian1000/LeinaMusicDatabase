@@ -99,6 +99,15 @@ and `.copy()` give a plain dict without the attributes - use `copy_with()` -
 and it is never a `Song` - a transient `Song` given an existing artist
 joins the session through `back_populates` and an autoflush inserts it.
 
+A CD ripper's placeholder tags ("Nieznany wykonawca" - "Ścieżka 15", album
+"Nieznany album (2018-09-10 12:31:53)"; `PLACEHOLDER_TAG_*` in `constants.py`)
+count as missing in `mp3_utils.extract_mp3_metadata()`, so the file name is
+read. Deliberately not a sanitize step: steps run for every source, and in a
+video title or a request "Track 5" may really be the title. Reading the file
+name replaces only the artist and title: the file's other tags (year, album,
+language, origin) stay, and so does a usable artist or title when the name
+has no "Artist - Title" to read.
+
 A builder with its own questions about some entries (the YouTube importer's
 missing-artist and artist/title-swap reviews) must not ask them before calling
 `run_import_batch()` - the user would then wait through the whole slow loop
