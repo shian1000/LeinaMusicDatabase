@@ -352,6 +352,16 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
 
     return new_artist_obj, False
 
+def song_year(value) -> int | None:
+    """An entry's year as a number; a tag's whole date ("2017-12-01") counts
+    as its year. None when it holds neither."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        match = re.match(r"(\d{4})-", str(value))
+        return int(match[1]) if match else None
+
+
 def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     """Add the song `metadata` describes, by `artist_obj` (one with an id),
     to `session` (default: the global music session). The caller commits."""
@@ -360,10 +370,7 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     new_song_obj.artist_id = artist_obj.id
     new_song_obj.title = metadata.title
     new_song_obj.album = metadata.album
-    try:
-        new_song_obj.year = int(metadata.year)
-    except (ValueError, TypeError):
-        new_song_obj.year = None
+    new_song_obj.year = song_year(metadata.year)
     new_song_obj.language = metadata.language
     # Only present for entries sourced from a YouTube playlist import - mp3
     # imports never carry this key, so this is a no-op (None) for them.

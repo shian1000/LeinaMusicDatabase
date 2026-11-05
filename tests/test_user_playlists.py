@@ -567,6 +567,40 @@ def test_file_added_as_a_new_song_credits_the_featured_artists_of_its_title(
     assert "Featuring: Hey, Jamie Principle" in capsys.readouterr().out
 
 
+def test_file_added_as_a_new_song_keeps_the_album_and_year_of_its_tags(
+        users_env, tmp_path, music_session, monkeypatch, capsys):
+    users.create_user("ania", "secret1")
+    folder = tmp_path / "music"
+    folder.mkdir()
+    _id3_file(folder / "Ørganek - Wiosna.mp3")
+    tags = {"Ørganek - Wiosna.mp3": {"artist_name": "Ørganek", "title": "Wiosna", "album": "Czarna Madonna",
+                                     "year": "2017-12-01"}}
+    menu, _ = _menu_for_folder(monkeypatch, music_session, folder, tags, ["Add it to the database as a new song"])
+
+    menu._create_playlist_from_folder("ania")
+
+    song = music_session.query(Song).filter(Song.title == "Wiosna").one()
+    assert (song.album, song.year) == ("Czarna Madonna", 2017)
+    out = capsys.readouterr().out
+    assert "Album:  Czarna Madonna" in out and "Year:   2017" in out
+
+
+def test_adding_a_file_of_an_existing_song_leaves_its_album_and_year(music_session):
+    karma = music_session.query(Song).filter(Song.title == "Karma").one()
+    before = (karma.album, karma.year)
+
+    assert fp.add_song_for_file(music_session, "Hey", "Karma", album="Other", year=1999) is karma
+    assert (karma.album, karma.year) == before
+
+
+@pytest.mark.parametrize("value, year", [
+    ("2016", 2016), (2016, 2016), ("2017-12-01", 2017), ("2017-12", 2017), (None, None), ("", None), ("unknown", None)])
+def test_song_year_reads_a_year_or_a_whole_date(value, year):
+    from utils.discoveries.import_engine import song_year
+
+    assert song_year(value) == year
+
+
 def test_video_without_a_file_keeps_the_featured_artists_for_a_new_song(music_session):
     from utils.database.song_artists import additional_artists
     from utils.discoveries.folder_youtube_playlist import youtube_entries, youtube_only_track

@@ -266,11 +266,16 @@ def _add_song_for_file(music_session, track):
     print(f"  Title:  {title}")
     if track.feat_artists:
         print(f"  Featuring: {', '.join(track.feat_artists)}")
+    if track.album:
+        print(f"  Album:  {track.album}")
+    if track.year:
+        print(f"  Year:   {track.year}")
     if not ask_yes_no("Add this song to the database?" if existing is None else "Add it as a new song instead?"):
         return None
     # add_db_entry() says what it added
     song = add_song_for_file(music_session, artist.name if artist else artist_name, title,
-                             even_if_similar=existing is not None, feat_artists=track.feat_artists)
+                             even_if_similar=existing is not None, feat_artists=track.feat_artists,
+                             album=track.album, year=track.year)
     submit_global_database_session()
     return song
 
