@@ -184,7 +184,10 @@ def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited
     artists, see song_artists.py). We query with the primary artist alone, but
     services often credit the whole collab in one field ("Sw@da, Maxim &
     Niczos") - plain similarity to "Sw@da" then fails, so also accept a
-    matched field that contains any credited artist as whole words."""
+    matched field that contains any credited artist as whole words. Or just
+    one of them, spelt their way: Spotify's first artist of "Alizbar - Idje
+    Sen" is "Ann' Sannat", stored as "Ann`Sannat", so each credited artist
+    gets the same checks as the queried one."""
     threshold = scaled_similarity_threshold(queried_artist, matched_artist, SPELLING_CHECK_THRESHOLD)
     if similarity(queried_artist, matched_artist) >= threshold:
         return True
@@ -206,7 +209,8 @@ def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited
     if credited_artists:
         matched_padded = f" {normalize(matched_artist)} "
         return any(
-            normalize(name) and f" {normalize(name)} " in matched_padded
+            (normalize(name) and f" {normalize(name)} " in matched_padded)
+            or _matched_artist_resembles(name, matched_artist)
             for name in credited_artists
         )
     return False

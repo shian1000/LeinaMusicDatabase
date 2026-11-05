@@ -285,6 +285,16 @@ def test_matched_artist_crediting_the_whole_collab_is_accepted():
     assert dm._validate_result(unrelated, "Sw@da", "Bahato", "Fake", credited) is None
 
 
+def test_matched_artist_being_another_credited_artist_spelt_differently_is_accepted():
+    # Spotify and YouTube Music report the collab's first artist, in their own spelling
+    result = DiscoveryResult(album="Welcome into the Morning", matched_title="Idje Sen", matched_artist="Ann' Sannat")
+    assert dm._validate_result(result, "Alizbar", "Idje Sen", "Fake", ["Alizbar", "Ann`Sannat"]) \
+        == "Welcome into the Morning"
+    # Only because the song credits that artist
+    assert dm._validate_result(result, "Alizbar", "Idje Sen", "Fake") is None
+    assert dm._validate_result(result, "Alizbar", "Idje Sen", "Fake", ["Alizbar", "Someone Else"]) is None
+
+
 def test_matched_artist_list_naming_the_queried_artist_is_accepted_but_not_a_longer_name():
     # Google credits the whole cover project; the DB has the song under Paulina Przybysz alone
     listed = DiscoveryResult(album="Trzeba było zostać dresiarą", matched_title="Trzeba było zostać dresiarą",

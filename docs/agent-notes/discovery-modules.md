@@ -366,7 +366,10 @@ on the primary artist alone: a guest on one track isn't the album's artist.
 
 Validation had to change with it: querying "Sw@da" while the service credits "Sw@da, Maxim &
 Niczos" fails plain similarity, so `_matched_artist_resembles()` also accepts a matched field that
-contains any of the song's credited artists as whole words (after `normalize()`). Only for
+contains any of the song's credited artists as whole words (after `normalize()`), or that passes
+these same checks against one of them: services name one artist of a collab, their first, spelt
+their way (Spotify and YouTube Music's "Ann' Sannat" for "Alizbar - Idje Sen", stored as
+"Ann`Sannat"; `normalize()` makes those "ann sannat" and "annsannat"). Only for
 multi-artist songs. Separately, for every song, a matched field that `propose_artist_split()` splits
 into names is accepted when one of the names resembles the query ("Paulina Przybysz, Ten Typ Mes,
 Albo Inaczej" for a song stored under Paulina Przybysz alone) — name by name, never substring, so
