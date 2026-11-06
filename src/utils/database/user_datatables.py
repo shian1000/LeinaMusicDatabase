@@ -27,7 +27,7 @@ class Playlist(UserBase):
     revision = Column(Integer, nullable=False, default=0)
     deleted_at = Column(Integer)  # Unix ms; NULL = live, else a marker without tracks
     song_ids_checked_to = Column(Integer)
-    cover_sha256 = Column(String)  # the phone-picked cover (covers.py); NULL = none
+    cover_sha256 = Column(String)  # the phone-picked cover (user_covers.py); NULL = none
     # JSON list of source ids (video / Spotify track) the user removed; NULL = none
     excluded_source_tracks = Column(String)
 
@@ -71,7 +71,7 @@ class PrivateTag(UserBase):
     promoted_to = Column(Integer)  # tag.db id of the global mood it was moved into
     promoted_to_name = Column(String)
     merged_into = Column(String)  # uid of the mood it was merged into
-    cover_sha256 = Column(String)  # the phone-picked cover (covers.py); NULL = none
+    cover_sha256 = Column(String)  # the phone-picked cover (user_covers.py); NULL = none
 
 
 class GlobalMoodCover(UserBase):

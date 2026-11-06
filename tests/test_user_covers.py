@@ -1,4 +1,4 @@
-"""Covers of playlists and moods (utils/database/covers.py, the cover rules in
+"""Covers of playlists and moods (musicdatabase_core/user_covers.py, the cover rules in
 playlist_sync.py / mood_sync.py): blobs stored under their sha256 (hash and
 signature checks, re-upload touching the mtime), migration 0006 and
 NotMigratedError before it, `cover` kept when the key is missing and removed
@@ -22,7 +22,7 @@ repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
-from utils.database import covers
+from musicdatabase_core import user_covers
 from utils.database import mood_sync as ms
 from utils.database import playlist_sync as ps
 from utils.database.migrations import initialize_user_db
@@ -63,48 +63,48 @@ def _mood(conn, folder, uid="uid-0001", base=0, updated_at=1000, name="Siłownia
 # ==================== blobs ====================
 
 def test_blob_is_stored_once_under_its_hash(user_folder):
-    assert covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
-    path = covers.blob_path(user_folder, sha(PNG))
+    assert user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    path = user_covers.blob_path(user_folder, sha(PNG))
     assert path == user_folder / "covers" / f"{sha(PNG)}.png" and path.read_bytes() == PNG
     os.utime(path, (0, 0))
-    assert not covers.store_blob(user_folder, sha(PNG), PNG, "image/png")  # already there
+    assert not user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")  # already there
     assert path.stat().st_mtime > 0  # touched: the grace period starts again
-    assert covers.store_blob(user_folder, sha(JPEG), JPEG, "image/jpeg; charset=binary")
-    assert covers.content_type_of(covers.blob_path(user_folder, sha(JPEG))) == "image/jpeg"
+    assert user_covers.store_blob(user_folder, sha(JPEG), JPEG, "image/jpeg; charset=binary")
+    assert user_covers.content_type_of(user_covers.blob_path(user_folder, sha(JPEG))) == "image/jpeg"
     assert [p.name for p in (user_folder / "covers").iterdir() if p.name.startswith(".")] == []
 
 
 def test_blob_lookup_takes_only_a_hash(user_folder):
     # DB-37: a value that isn't a hash never becomes a path, a stray file isn't a cover
-    covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
     for value in ("../" + sha(PNG), sha(PNG) + "\n", sha(PNG).upper(), "", None):
-        assert covers.blob_path(user_folder, value) is None
-    assert covers.archive_blob(user_folder, "../covers/" + sha(PNG)) is None
-    with pytest.raises(covers.UnsupportedImageError):
-        covers.content_type_of(user_folder / "covers" / "notes.txt")
+        assert user_covers.blob_path(user_folder, value) is None
+    assert user_covers.archive_blob(user_folder, "../covers/" + sha(PNG)) is None
+    with pytest.raises(user_covers.UnsupportedImageError):
+        user_covers.content_type_of(user_folder / "covers" / "notes.txt")
 
 
 @pytest.mark.parametrize("data, content_type, error", [
-    (PNG, "image/png", covers.HashMismatchError),         # sent under another picture's hash
-    (PNG, "image/gif", covers.UnsupportedImageError),
-    (PNG, None, covers.UnsupportedImageError),
-    (b"GIF89a....", "image/png", covers.UnsupportedImageError),
-    (PNG, "image/jpeg", covers.UnsupportedImageError),    # type and bytes disagree
+    (PNG, "image/png", user_covers.HashMismatchError),         # sent under another picture's hash
+    (PNG, "image/gif", user_covers.UnsupportedImageError),
+    (PNG, None, user_covers.UnsupportedImageError),
+    (b"GIF89a....", "image/png", user_covers.UnsupportedImageError),
+    (PNG, "image/jpeg", user_covers.UnsupportedImageError),    # type and bytes disagree
 ])
 def test_bad_blobs_are_refused(user_folder, data, content_type, error):
-    name = sha(PNG_B) if error is covers.HashMismatchError else sha(data)
+    name = sha(PNG_B) if error is user_covers.HashMismatchError else sha(data)
     with pytest.raises(error):
-        covers.store_blob(user_folder, name, data, content_type)
+        user_covers.store_blob(user_folder, name, data, content_type)
     assert not (user_folder / "covers").exists() or not list((user_folder / "covers").iterdir())
 
 
 def test_require_blob(user_folder):
-    covers.require_blob(user_folder, None)
-    with pytest.raises(covers.CoverMissingError) as exc:
-        covers.require_blob(user_folder, sha(PNG))
+    user_covers.require_blob(user_folder, None)
+    with pytest.raises(user_covers.CoverMissingError) as exc:
+        user_covers.require_blob(user_folder, sha(PNG))
     assert exc.value.cover == sha(PNG)
-    covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
-    covers.require_blob(user_folder, sha(PNG))
+    user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    user_covers.require_blob(user_folder, sha(PNG))
 
 
 def test_migration_is_required(tmp_path):
@@ -113,7 +113,7 @@ def test_migration_is_required(tmp_path):
     db.execute("CREATE TABLE schema_version (id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT UNIQUE NOT NULL,"
                " applied_at TEXT NOT NULL DEFAULT (datetime('now')))")
     for f in sorted((repo_root / "migrations" / "user").glob("*.sql")):
-        if f.name == covers.REQUIRED_MIGRATION:
+        if f.name == user_covers.REQUIRED_MIGRATION:
             break
         db.executescript(f.read_text())
         db.execute("INSERT INTO schema_version (filename) VALUES (?)", (f.name,))
@@ -181,13 +181,13 @@ def test_same_import_older_side_gives_its_cover_only_when_the_stored_has_none(co
 
 
 def test_deleted_playlist_archives_its_cover_and_drops_the_reference(conn, user_folder):
-    covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
     _playlist(conn, cover=sha(PNG))
     applied, stored, archived = ps.delete_playlist(conn, user_folder, "uid-0001", 1, 5000)
     assert applied and "cover" not in stored
     assert (user_folder / "archive" / "covers" / f"{sha(PNG)}.png").read_bytes() == PNG
     assert '"cover": "' + sha(PNG) in archived.read_text()
-    assert covers.referenced(conn) == set()
+    assert user_covers.referenced(conn) == set()
 
 
 # ==================== cover in moods ====================
@@ -215,14 +215,14 @@ def test_same_mood_name_merge_keeps_the_newer_sides_cover(conn, user_folder, fir
 
 
 def test_rename_onto_another_mood_brings_its_own_cover(conn, user_folder):
-    covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
+    user_covers.store_blob(user_folder, sha(PNG), PNG, "image/png")
     _mood(conn, user_folder, uid="uid-gym-01", name="Siłownia", updated_at=1000)
     _mood(conn, user_folder, uid="uid-run-01", name="Bieganie", updated_at=1000, cover=sha(PNG))
     # Renamed by an app without covers (no key): the renamed mood's cover goes along
     _, stored = _mood(conn, user_folder, uid="uid-run-01", base=2, name="Siłownia", updated_at=2000)
     assert stored["uid"] == "uid-gym-01" and stored["cover"] == sha(PNG)
     assert (user_folder / "archive" / "covers" / f"{sha(PNG)}.png").exists()
-    assert covers.referenced(conn) == {sha(PNG)}
+    assert user_covers.referenced(conn) == {sha(PNG)}
 
 
 def test_promotion_turns_the_cover_into_a_private_global_mood_cover(conn, user_folder):
@@ -231,7 +231,7 @@ def test_promotion_turns_the_cover_into_a_private_global_mood_cover(conn, user_f
     ms.mark_promoted(conn, user_folder, tag_id, 12, "Siłownia", at=5000)
     assert ms.global_covers_since(conn, 0) == {
         "revision": 1, "covers": [{"mood_id": 12, "revision": 1, "cover": sha(PNG), "updated_at": 5000}]}
-    assert covers.referenced(conn) == {sha(PNG)}
+    assert user_covers.referenced(conn) == {sha(PNG)}
     # Without a cover, nothing is written
     _mood(conn, user_folder, uid="uid-0002", name="Chill")
     tag_id = conn.execute("SELECT id FROM tags WHERE uid = 'uid-0002'").fetchone()[0]
@@ -272,7 +272,7 @@ def test_bad_global_cover_bodies(body):
 
 def test_clean_up_removes_only_old_unreferenced_blobs(conn, user_folder):
     for data in (PNG, PNG_B, JPEG):
-        covers.store_blob(user_folder, sha(data), data, "image/jpeg" if data is JPEG else "image/png")
+        user_covers.store_blob(user_folder, sha(data), data, "image/jpeg" if data is JPEG else "image/png")
     _playlist(conn, cover=sha(PNG))
     ms.store_global_cover(conn, 1, sha(JPEG), 0, 1)
     leftover = user_folder / "covers" / f".{sha(PNG_B)}.png.part"
@@ -280,8 +280,8 @@ def test_clean_up_removes_only_old_unreferenced_blobs(conn, user_folder):
     now = (user_folder / "covers" / f"{sha(PNG_B)}.png").stat().st_mtime
 
     # Unreferenced but fresh: kept (the PUT naming it may be on its way)
-    assert covers.clean_up(conn, user_folder, now=now + covers.CLEAN_UP_GRACE_SECONDS - 60) == []
-    removed = covers.clean_up(conn, user_folder, now=now + covers.CLEAN_UP_GRACE_SECONDS + 60)
+    assert user_covers.clean_up(conn, user_folder, now=now + user_covers.CLEAN_UP_GRACE_SECONDS - 60) == []
+    removed = user_covers.clean_up(conn, user_folder, now=now + user_covers.CLEAN_UP_GRACE_SECONDS + 60)
     assert sorted(p.name for p in removed) == sorted([f"{sha(PNG_B)}.png", leftover.name])
-    assert covers.has_blob(user_folder, sha(PNG)) and covers.has_blob(user_folder, sha(JPEG))
-    assert covers.clean_up(conn, tmp_folder := user_folder / "nobody") == [] and not tmp_folder.exists()
+    assert user_covers.has_blob(user_folder, sha(PNG)) and user_covers.has_blob(user_folder, sha(JPEG))
+    assert user_covers.clean_up(conn, tmp_folder := user_folder / "nobody") == [] and not tmp_folder.exists()

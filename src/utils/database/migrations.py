@@ -33,6 +33,9 @@ any pending migration (see `backup_databases`) stays the last safety net.
 import sqlite3
 from pathlib import Path
 
+from musicdatabase_core.user_schema import apply_migration as _apply_one
+from musicdatabase_core.user_schema import applied_filenames as _applied_filenames
+from musicdatabase_core.user_schema import ensure_schema_version_table as _ensure_schema_version_table
 from settings import Settings
 from utils.common.debug import flog, mlog
 from utils.database.backup import DB_FILES as BACKED_UP_DB_FILES, backup_databases
@@ -57,29 +60,6 @@ def _migration_files(db_name: str) -> list[Path]:
     if not directory.exists():
         return []
     return sorted(directory.glob("*.sql"))
-
-
-def _ensure_schema_version_table(conn: sqlite3.Connection) -> bool:
-    """Creates schema_version if missing. Returns True if it just created it
-    (i.e. this DB predates the migration mechanism)."""
-    cur = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
-    )
-    if cur.fetchone():
-        return False
-    conn.execute(
-        "CREATE TABLE schema_version ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-        "filename TEXT UNIQUE NOT NULL, "
-        "applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
-    )
-    conn.commit()
-    return True
-
-
-def _applied_filenames(conn: sqlite3.Connection) -> set:
-    cur = conn.execute("SELECT filename FROM schema_version")
-    return {row[0] for row in cur.fetchall()}
 
 
 def run_pending_migrations(db_name: str) -> list:
@@ -140,24 +120,6 @@ def _apply_pending(conn: sqlite3.Connection, files: list[Path], label: str, back
             flog(f"{label}: migration {f.name} FAILED, stopping here: {exc}")
             raise
     return executed
-
-
-def _apply_one(conn: sqlite3.Connection, f: Path) -> None:
-    """Runs one migration file and records it, all or nothing.
-    executescript() can't take parameters, hence the quoted literal."""
-    name = f.name.replace("'", "''")
-    script = (
-        "BEGIN;\n"
-        f"{f.read_text()}\n;\n"
-        f"INSERT INTO schema_version (filename) VALUES ('{name}');\n"
-        "COMMIT;"
-    )
-    try:
-        conn.executescript(script)
-    except BaseException:
-        if conn.in_transaction:
-            conn.rollback()
-        raise
 
 
 def initialize_db(db_path: Path, track: str, label: str) -> list:

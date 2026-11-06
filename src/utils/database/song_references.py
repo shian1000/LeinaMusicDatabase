@@ -50,8 +50,8 @@ from pathlib import Path
 from sqlalchemy import event, func, select, text
 
 from config.constants import FILE_MATCH_AUTO, TAG_KIND_MOOD
+from musicdatabase_core import song_id_replay
 from utils.common.debug import flog, mlog
-from utils.database import mood_sync, playlist_sync, saved_sync
 from utils.database.backup import DB_FILES
 from utils.database.datatables import Song, SongIdChange
 from utils.database.user_datatables import user_db_session
@@ -171,128 +171,26 @@ def existing_song_ids() -> set:
         return {r[0] for r in conn.execute(select(Song.id))}
 
 
+def _raw(session):
+    session.flush()  # the pending changes the statements below must see
+    return session.connection().connection.driver_connection
+
+
 def _cursor(session):
-    return session.execute(text("SELECT last_change_id FROM applied_song_changes WHERE id = 1")).scalar()
+    return song_id_replay.cursor(_raw(session))
 
 
 def set_cursor(session, change_id: int) -> None:
-    session.execute(
-        text("INSERT INTO applied_song_changes (id, last_change_id) VALUES (1, :c) "
-             "ON CONFLICT (id) DO UPDATE SET last_change_id = :c"),
-        {"c": change_id},
-    )
+    song_id_replay.set_cursor(_raw(session), change_id)
 
 
-def _replay(session, changes: list, has_playlists: bool = False, has_tags: bool = True,
-            has_files: bool = False, changed_playlists: set | None = None, changed_tags: set | None = None) -> int:
-    """Apply the log entries past this file's cursor. Returns how many rows
-    changed; adds the playlists whose tracks changed to `changed_playlists`
-    and the tags whose songs changed to `changed_tags`. Caller commits."""
-    last = _cursor(session) or 0
-    touched = 0
-    for change_id, old_id, new_id in changes:
-        if change_id <= last:
-            continue
-        params = {"old": old_id, "new": new_id, "auto": FILE_MATCH_AUTO}
-        if has_playlists:
-            # Merged -> the kept song, deleted -> NULL (title/artist/video stay)
-            if changed_playlists is not None:
-                changed_playlists.update(r[0] for r in session.execute(
-                    text("SELECT DISTINCT playlist_id FROM playlist_tracks WHERE song_id = :old"), params))
-            touched += session.execute(
-                text("UPDATE playlist_tracks SET song_id = :new WHERE song_id = :old"), params).rowcount
-        if has_tags and changed_tags is not None:
-            changed_tags.update(r[0] for r in session.execute(
-                text("SELECT DISTINCT tag_id FROM song_tags WHERE song_id = :old"), params))
-        if new_id is not None:
-            if has_tags:
-                touched += session.execute(
-                    text("UPDATE OR IGNORE song_tags SET song_id = :new WHERE song_id = :old"), params).rowcount
-                session.execute(text("DELETE FROM song_tags WHERE song_id = :old"), params)
-            if has_files:
-                touched += session.execute(
-                    text("UPDATE files SET song_id = :new WHERE song_id = :old"), params).rowcount
-        else:
-            if has_tags:
-                touched += session.execute(text("DELETE FROM song_tags WHERE song_id = :old"), params).rowcount
-            if has_files:
-                # Even a hand-set match: its song is gone, so let a scan find another
-                touched += session.execute(
-                    text("UPDATE files SET song_id = NULL, match_source = :auto WHERE song_id = :old"),
-                    params).rowcount
-        last = change_id
-    set_cursor(session, last)
-    return touched
-
-
-def _catch_up_server_playlists(session, changes: list, changed_playlists: set) -> int:
-    """Playlists the sharing server stored, resolved against the shared copy
-    of music.db up to song_ids_checked_to: replay what came after that, up
-    to this file's cursor, for their tracks only (what's past the cursor
-    follows in _replay() for every track)."""
-    cursor = _cursor(session) or 0
-    touched = 0
-    pending = session.execute(text(
-        "SELECT id, song_ids_checked_to FROM playlists WHERE song_ids_checked_to IS NOT NULL")).all()
-    for playlist_id, checked_to in pending:
-        for change_id, old_id, new_id in changes:
-            if checked_to < change_id <= cursor:
-                rows = session.execute(
-                    text("UPDATE playlist_tracks SET song_id = :new WHERE playlist_id = :p AND song_id = :old"),
-                    {"new": new_id, "old": old_id, "p": playlist_id}).rowcount
-                if rows:
-                    touched += rows
-                    changed_playlists.add(playlist_id)
-        # Only if the server hasn't stored it again meanwhile
-        session.execute(text("UPDATE playlists SET song_ids_checked_to = NULL WHERE id = :p "
-                             "AND song_ids_checked_to = :c"), {"p": playlist_id, "c": checked_to})
-    return touched
-
-
-def _catch_up_server_moods(session, changes: list, changed_tags: set) -> int:
-    """_catch_up_server_playlists() for moods: the songs of a mood the
-    sharing server stored, checked up to song_ids_checked_to."""
-    cursor = _cursor(session) or 0
-    touched = 0
-    pending = session.execute(text(
-        "SELECT id, song_ids_checked_to FROM tags WHERE song_ids_checked_to IS NOT NULL")).all()
-    for tag_id, checked_to in pending:
-        for change_id, old_id, new_id in changes:
-            if checked_to < change_id <= cursor:
-                params = {"new": new_id, "old": old_id, "t": tag_id}
-                rows = 0
-                if new_id is not None:
-                    rows += session.execute(text("UPDATE OR IGNORE song_tags SET song_id = :new "
-                                                 "WHERE tag_id = :t AND song_id = :old"), params).rowcount
-                rows += session.execute(text("DELETE FROM song_tags WHERE tag_id = :t AND song_id = :old"),
-                                        params).rowcount
-                if rows:
-                    touched += rows
-                    changed_tags.add(tag_id)
-        session.execute(text("UPDATE tags SET song_ids_checked_to = NULL WHERE id = :t "
-                             "AND song_ids_checked_to = :c"), {"t": tag_id, "c": checked_to})
-    return touched
+def _replay(session, changes: list, **what) -> int:
+    """song_id_replay.replay() in this session's transaction. Caller commits."""
+    return song_id_replay.replay(_raw(session), changes, auto_match_source=FILE_MATCH_AUTO, **what)
 
 
 def _replay_user_db(session, changes: list) -> int:
-    raw = session.connection().connection.driver_connection
-    if not playlist_sync.is_migrated(raw):
-        # Before the sync columns (migration not applied yet): tracks only
-        return _replay(session, changes, has_playlists=True)
-    has_moods = playlist_sync.is_migrated(raw, mood_sync.REQUIRED_MIGRATION)
-    changed_playlists, changed_tags = set(), set()
-    touched = _catch_up_server_playlists(session, changes, changed_playlists)
-    if has_moods:
-        touched += _catch_up_server_moods(session, changes, changed_tags)
-    touched += _replay(session, changes, has_playlists=True, changed_playlists=changed_playlists,
-                       changed_tags=changed_tags if has_moods else None)
-    # A new revision, so the phones fetch the new song ids
-    playlist_sync.mark_changed(raw, changed_playlists)
-    if has_moods:
-        mood_sync.mark_changed(raw, changed_tags)
-    # The whole log, not past the cursor: see follow_song_merges()
-    touched += saved_sync.follow_song_merges(raw, changes)
-    return touched
+    return song_id_replay.replay_user_db(_raw(session), changes)
 
 
 def _replay_tag_db(tag_session, changes: list) -> int:

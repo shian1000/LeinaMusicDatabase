@@ -619,7 +619,7 @@ contract, is [`docs/handoffs/covers-for-musicdatabaseapp.md`](../handoffs/covers
 MusicDatabase only stores covers; the menu can't set them, it just adds ", cover" to the playlist
 and mood lists.
 
-- **Pictures are files, not rows** (`utils/database/covers.py`): `Users/<name>/covers/<sha256>.png|.jpg`,
+- **Pictures are files, not rows** (`musicdatabase_core/user_covers.py`): `Users/<name>/covers/<sha256>.png|.jpg`,
   named by the SHA-256 of the exact bytes. `PUT /users/<name>/covers/<sha256>` (body = the image,
   `image/png` or `image/jpeg`, at most 4 MiB, signature checked, never decoded) answers 201 new /
   200 already stored, 400 hash mismatch, 413, 415; `GET` serves it with `Cache-Control: immutable`.
@@ -635,7 +635,7 @@ and mood lists.
   Own counter (`global_mood_cover_revision`), the playlist conflict rule, removal = `cover: null`
   (the row stays). Promoting a user's mood moves its cover here.
 - **Deleting** a playlist or mood copies its blob to `Users/<name>/archive/covers/` next to the
-  archived JSON and clears the reference. **Clean-up** (`covers.clean_up()`) runs on the server
+  archived JSON and clears the reference. **Clean-up** (`user_covers.clean_up()`) runs on the server
   after every applied write of that user and removes blobs nothing refers to once their file is
   24 hours old (mtime; a re-upload touches it). The grace period is there because the phone uploads
   the blob before the PUT that names it. Blob writes, the "blob exists" check plus its write, and

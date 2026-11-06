@@ -128,7 +128,7 @@ unchanged. A curl round trip over the LAN address with a temporary token passed:
 The test playlist row, the global-mood-cover row, the archive files, the blob and the token were
 removed afterwards. Revision counters only grow, so they were left as they were.
 
-Code: `src/utils/database/covers.py` (blobs, clean-up), `playlist_sync.py` / `mood_sync.py` (the
+Code: `src/musicdatabase_core/user_covers.py` (blobs, clean-up), `playlist_sync.py` / `mood_sync.py` (the
 `cover` field, merges, private global-mood covers), `sharing_server.py`,
 `migrations/user/0006_covers.sql`. Runbook: `docs/runbooks/database.md` → "Covers on the phone".
-Tests: `tests/test_covers.py`, `tests/test_database_sharing.py` (covers section).
+Tests: `tests/test_user_covers.py`, `tests/test_database_sharing.py` (covers section).

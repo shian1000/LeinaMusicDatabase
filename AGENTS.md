@@ -265,7 +265,7 @@ non-trivial work in that area.
   because the server imports it. Every write to `playlists` / `playlist_tracks` must go through
   it, or bump the revision with `mark_changed()`, or the phones never see the change. Details:
   `docs/runbooks/database.md` → "Playlists on the phone".
-  Covers of playlists and moods (picked on the phone): `covers.py` (standard-library) stores the
+  Covers of playlists and moods (picked on the phone): `musicdatabase_core/user_covers.py` (standard-library) stores the
   pictures as files `Users/<name>/covers/<sha256>.png|.jpg`, never in a DB; rows hold only
   `cover_sha256` (user migration 0006). Every sync `connect()` requires the newest user migration
   the sync code reads (`playlist_sync.NEWEST_SYNC_MIGRATION`, 0011: `playlist_tracks.added`, a track added by
@@ -327,6 +327,16 @@ non-trivial work in that area.
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
   `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
+- `src/musicdatabase_core/` — what this program shares with the planned MusicDatabaseWired
+  ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)): `account_auth`, `user_covers`, the `*_sync`
+  modules and `global_mood_log`, plus `accounts.py` (making an account), `user_schema.py` (applying
+  `migrations/user/`), `song_id_replay.py` (replaying `song_id_changes` on a plain connection, the
+  rules behind `song_references.py`), `request_format.py` and `certificates.py`. Standard library
+  only, nothing from this program (`tests/test_musicdatabase_core.py`), so a value it shares with
+  `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
+  modules are redirects (`sys.modules`) to the same module, so `utils.database.playlist_sync` still
+  works, for tests' patches too; change the code in the core. `sharing_server.py` stays where it
+  is, because the systemd unit runs it by that path.
 - `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
   copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one
   GitHub Release (fixed tag `database` in `GITHUB_DB_REPO`; `music.db`, `tag.db`, then

@@ -11,6 +11,7 @@ One row per subsystem. "Docs" links to where the *depth* lives — a system with
 | YouTube | `src/utils/youtube/` — matching songs to YouTube videos, whether a video plays (yt-dlp + Data API), downloads, playlist management, keeping yt-dlp current (`ytdlp_update.py`) | [agent-notes/youtube-search-matching.md](../agent-notes/youtube-search-matching.md) |
 | Terminal UI | `src/menu/`, `src/utils/ui/` — presentation, prompt flow, and wiring the other systems together | `AGENTS.md` → Module map |
 | Config & settings | `src/config/constants.py`, `src/settings.py` — thresholds/labels, env-based paths and secrets | `AGENTS.md` → Module map, Secrets |
+| Shared core | `src/musicdatabase_core/` — account, sync, user cover and request-format rules shared with the planned MusicDatabaseWired; standard library only | `AGENTS.md` → Module map, [ADR-0006](../decisions/0006-lite-sharing-server.md) |
 
 ## Dependencies
 
@@ -27,7 +28,8 @@ One edge per line so both directions are `grep`-able.
 - YouTube -> Normalization & matching — scores candidate videos via `similarity()` / `scaled_similarity_threshold()`
 - YouTube -> Catalog/DB search — `yt_cache.init_cache()` reads a song's artist credits (`song_artists.song_artist_credits()`) for matching, not for search
 - Catalog/DB search -> YouTube — `inbox_requests.check_link_cases()` uses `search_video_ytdlp()`, `video_playability()` and `videos_exist_via_api()` to check reported dead links and links Leina Radio found
-- Everything -> Config & settings — constants, thresholds, env-based paths/secrets
+- Catalog/DB search -> Shared core — the sharing server, `users.py`, `migrations.py` and `song_references.py` use its rules, and the old `utils/database/<name>.py` names redirect to it
+- Everything except the shared core -> Config & settings — constants, thresholds, env-based paths/secrets
 
 ## Boundaries
 

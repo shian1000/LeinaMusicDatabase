@@ -131,7 +131,7 @@ with every path passed on the command line.
   read, so a mood isn't taken for gone); the change is only recorded in
   --mood-changes/pending/ (202) - MusicDatabase applies it to the original
   tag.db later (global_mood_log.py). The server never writes tag.db.
-- Covers (only with --users; covers.py): PUT /users/<name>/covers/<sha256>
+- Covers (only with --users; user_covers.py): PUT /users/<name>/covers/<sha256>
   stores a PNG/JPEG picture under the SHA-256 of its bytes (201 new, 200
   already stored, 400 hash mismatch, 413 over 4 MiB, 415 another type or
   bytes that aren't one), GET answers it (404 unknown, cacheable forever).
@@ -160,8 +160,6 @@ with every path passed on the command line.
 """
 
 import argparse
-import base64
-import hashlib
 import ipaddress
 import json
 import os
@@ -180,22 +178,20 @@ from collections.abc import Callable
 from email.utils import formatdate
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import urllib.parse
 from urllib.parse import parse_qs, urlsplit
 
-try:
-    from . import (account_auth, covers, folder_sync, global_mood_log, listen_sync, mood_sync,  # as utils.database.sharing_server
-                   playlist_sync, saved_sync)
-except ImportError:
-    import account_auth  # run as a script by the systemd service (its folder is on sys.path)
-    import covers
-    import folder_sync
-    import global_mood_log
-    import listen_sync
-    import mood_sync
-    import playlist_sync
-    import saved_sync
+# Run as a script by the systemd service: src/ isn't on sys.path then
+_SRC = str(Path(__file__).resolve().parents[2])
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
+from musicdatabase_core import (account_auth, folder_sync, global_mood_log, listen_sync,  # noqa: E402
+                                mood_sync, playlist_sync, saved_sync, user_covers)
+from musicdatabase_core.certificates import certificate_code  # noqa: E402
+from musicdatabase_core.request_format import REQUEST_NAME_RE, SQLITE_HEADER  # noqa: E402
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
@@ -211,12 +207,6 @@ REQUEST_SOCKET_TIMEOUT = 60
 MAX_CONNECTIONS = 64
 TAILSCALE_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
-# [<user>_]<YYYY-MM-DD>_<HH-MM-SS>_<number>.db - the phone's request file names.
-# The user part is a username (account_auth.USERNAME_PATTERN, which may hold
-# "_"); the date after it has a fixed shape, so the split stays unambiguous.
-REQUEST_NAME_RE = re.compile(
-    r"^(?:(?P<user>[a-z0-9][a-z0-9_-]{1,31})_)?\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{3,9}\.db$")
-SQLITE_HEADER = b"SQLite format 3\x00"
 INBOX_PREFIX = "/inbox/"
 INBOX_NEW = "new"
 INBOX_REVIEW = "review"
@@ -904,7 +894,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                         applied, stored, archived = playlist_sync.delete_playlist(conn, folder, uid, base_revision,
                                                                                   deleted_at)
                     self._clean_up_covers(conn, folder, username)
-            except covers.CoverMissingError as exc:
+            except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
             except (OSError, sqlite3.Error) as exc:
@@ -975,7 +965,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                         applied, stored, archived = mood_sync.delete_mood(conn, folder, uid, base_revision,
                                                                           deleted_at)
                     self._clean_up_covers(conn, folder, username)
-            except covers.CoverMissingError as exc:
+            except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
             except mood_sync.BadMoodError as exc:
@@ -1158,13 +1148,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         @staticmethod
         def _require_cover(folder: str, cover) -> None:
             if cover is not playlist_sync.KEEP_COVER:
-                covers.require_blob(folder, cover)
+                user_covers.require_blob(folder, cover)
 
         @staticmethod
         def _clean_up_covers(conn, folder: str, username: str) -> None:
             """Inside covers_lock. A failure here never fails the request."""
             try:
-                removed = covers.clean_up(conn, folder)
+                removed = user_covers.clean_up(conn, folder)
             except (OSError, sqlite3.Error) as exc:
                 print(f"Cleaning up the covers of {username} failed: {exc}", flush=True)
                 return
@@ -1177,15 +1167,15 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
             data = None
             if method == "PUT":
-                data = self._read_body(covers.MAX_COVER_BYTES)
+                data = self._read_body(user_covers.MAX_COVER_BYTES)
                 if data is None:
                     return
-            if not covers.is_sha256(sha):
+            if not user_covers.is_sha256(sha):
                 self._reply(HTTPStatus.BAD_REQUEST, "expected the lowercase hex sha256 of the picture")
                 return
             folder = os.path.join(users_dir, username)
             if method == "GET":
-                path = covers.blob_path(folder, sha)
+                path = user_covers.blob_path(folder, sha)
                 try:
                     body = path.read_bytes() if path is not None else None
                 except OSError:
@@ -1194,7 +1184,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                     self._reply(HTTPStatus.NOT_FOUND)
                     return
                 self.send_response(HTTPStatus.OK)
-                self.send_header("Content-Type", covers.content_type_of(path))
+                self.send_header("Content-Type", user_covers.content_type_of(path))
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", COVER_CACHE_CONTROL)
                 self.end_headers()
@@ -1202,11 +1192,11 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 return
             try:
                 with covers_lock:
-                    created = covers.store_blob(folder, sha, data, self.headers.get("Content-Type"))
-            except covers.HashMismatchError as exc:
+                    created = user_covers.store_blob(folder, sha, data, self.headers.get("Content-Type"))
+            except user_covers.HashMismatchError as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
-            except covers.UnsupportedImageError as exc:
+            except user_covers.UnsupportedImageError as exc:
                 self._reply(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, str(exc))
                 return
             except OSError as exc:
@@ -1253,11 +1243,11 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                     self._reply_json(HTTPStatus.OK, mood_sync.global_covers_since(conn, since))
                     return
                 with covers_lock:
-                    covers.require_blob(folder, change["cover"])
+                    user_covers.require_blob(folder, change["cover"])
                     applied, stored = mood_sync.store_global_cover(conn, mood_id, change["cover"],
                                                                    change["base_revision"], change["updated_at"])
                     self._clean_up_covers(conn, folder, username)
-            except covers.CoverMissingError as exc:
+            except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
             except (OSError, sqlite3.Error) as exc:
@@ -1548,13 +1538,6 @@ def _interface_addresses(interface: str) -> list:
         except ValueError:
             continue
     return found
-
-
-def certificate_code(der: bytes) -> str:
-    """The short code the owner compares in Leina Radio: the certificate's
-    SHA-256 in base32, first 12 characters, "XXXX-XXXX-XXXX"."""
-    code = base64.b32encode(hashlib.sha256(der).digest()).decode()[:12]
-    return f"{code[:4]}-{code[4:8]}-{code[8:]}"
 
 
 def tls_certificate_code(tls_dir: str) -> str | None:
