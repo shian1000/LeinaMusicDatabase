@@ -319,9 +319,12 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   runs our own `search_video_ytdlp()` (`check_link_cases()`: one batched Data API call for
   every id, yt-dlp only for candidates the API didn't rule out, the dead link not replayed), then
   asks per song: use the suggested link / use the
-  link our search found / paste a link / "N/A" / keep the current link / skip ("Use" takes a new
-  video, "Keep" leaves the database's). Both are offered even
-  when the check says they don't play. The check is `video_playability()`: True / False / None, where
+  link our search found / several of them are correct / paste a link / "N/A" / keep the current
+  link / skip ("Use" takes a new video, "Keep" leaves the database's). "Use" is offered even
+  when the check says the video doesn't play. "Several are correct" (found links too; offered for at
+  least two videos that aren't known not to play and aren't another song's,
+  `videos_correct_together()`) asks which is the main link and saves the rest in
+  `additional_youtube_videos`; a reported link YouTube didn't confirm gone may stay the main one. The check is `video_playability()`: True / False / None, where
   None means YouTube blocked it (HTTP 429, "confirm you're not a bot") and is shown as "couldn't
   check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way. Answers go to `Inbox/decisions.json`; only "kept" is read
   back (it changes nothing in the database, so a pending or repeated report would otherwise be asked

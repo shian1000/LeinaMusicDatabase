@@ -78,12 +78,16 @@ from utils.database.inbox_requests import (
     read_review_requests,
     reject_request_file,
     review_request_paths,
+    videos_correct_together,
 )
 from config.constants import NO_VIDEO_SENTINEL
 from utils.youtube.manage_youtube_playlists import extract_video_id
 from utils.common.output import escape, show
 
 _PASTE = "Paste another link"
+_SEVERAL = "Several of these links are correct"
+_KEEP_AS_MAIN = "Keep the current link as the main one"
+_BACK = "Back"
 _NO_VIDEO = f'No YouTube video for this song ("{NO_VIDEO_SENTINEL}")'
 _KEEP = "Keep the current link"
 _SKIP = "Skip for now"
@@ -161,6 +165,11 @@ def _video_choices(case, label: str) -> list:
     for r in case.bad_replacements:
         choices.append(questionary.Choice(f"Use {label} ({r.video_id}) - found bad before: {case.bad[r.video_id]}",
                                           (USE_VIDEO, r.video_id)))
+    together = videos_correct_together(case)
+    if len(together) == 2:
+        choices.append(questionary.Choice(f"Both links are correct ({together[0]}, {together[1]})", _SEVERAL))
+    elif together[2:]:
+        choices.append(questionary.Choice(_SEVERAL, _SEVERAL))
     return choices + [
         questionary.Choice(_PASTE, _PASTE),
         questionary.Choice(_NO_VIDEO, (NO_VIDEO, None)),
@@ -175,20 +184,58 @@ def _choices(case) -> list:
     return choices
 
 
+def _video_label(case, video_id: str) -> str:
+    theirs = any(r.video_id == video_id for r in case.replacements)
+    ours = video_id == case.our_video_id
+    source = "Leina Radio and our search" if theirs and ours else "Leina Radio" if theirs else "our search"
+    return f"{_url(video_id)}  (from {source})"
+
+
+def _ask_several(case):
+    """Which of the case's videos are correct and which is the main link:
+    (decision, video id, additional video ids), or None to go back. A song's
+    link is dead or missing on this screen, so the main link is always asked;
+    a reported link YouTube didn't confirm gone may stay the main one."""
+    videos = videos_correct_together(case)
+    if len(videos) > 2:
+        choices = [questionary.Choice(_video_label(case, v), v) for v in videos]
+        videos = questionary.checkbox("Which links are correct?", choices=choices).ask() or []
+        if not videos:
+            return None
+    if len(videos) == 1:
+        return USE_VIDEO, videos[0], []
+    choices = [questionary.Choice(_video_label(case, v), v) for v in videos]
+    if case.dead_video_id and case.song.youtube_video_id == case.dead_video_id and case.dead_still_plays is not False:
+        choices.append(questionary.Choice(f"{_KEEP_AS_MAIN} ({case.dead_video_id})", _KEEP_AS_MAIN))
+    choices.append(questionary.Choice(_BACK, _BACK))
+    main = questionary.select("Which one is the song's main link? The rest are saved as additional videos.",
+                              choices=choices).ask()
+    if main is None or main == _BACK:
+        return None
+    if main == _KEEP_AS_MAIN:
+        return KEEP, None, videos
+    return USE_VIDEO, main, [v for v in videos if v != main]
+
+
 def _ask(case, choices: list):
-    """(decision, video id), _SKIP or _STOP."""
+    """(decision, video id, additional video ids), _SKIP or _STOP."""
     while True:
         answer = questionary.select("What should the database do?", choices=choices).ask()
         if answer is None:
             return _STOP
+        if answer == _SEVERAL:
+            several = _ask_several(case)
+            if several:
+                return several
+            continue
         if answer != _PASTE:
-            return answer
+            return answer if isinstance(answer, str) else (*answer, [])
         url = (questionary.text("YouTube video link (nothing = back):").ask() or "").strip()
         if not url:
             continue
         video_id = extract_video_id(url)
         if video_id:
-            return USE_VIDEO, video_id
+            return USE_VIDEO, video_id, []
         show(f"'{escape(url)}' isn't a YouTube video link.")
 
 
@@ -266,8 +313,8 @@ def _review_found_links(session, requests) -> tuple[list, bool]:
             return cases, True
         if answer == _SKIP:
             continue
-        decision, video_id = answer
-        apply_found_link_decision(case, decision, video_id)
+        decision, video_id, additional = answer
+        apply_found_link_decision(case, decision, video_id, additional=additional)
         submit_global_database_session()
     return cases, False
 
@@ -738,8 +785,8 @@ def resolve_new_requests(after_import=None) -> None:
                 break
             if answer == _SKIP:
                 continue
-            decision, video_id = answer
-            apply_dead_link_decision(case, decision, video_id)
+            decision, video_id, additional = answer
+            apply_dead_link_decision(case, decision, video_id, additional=additional)
             submit_global_database_session()
 
     # Not asked after a stop, but they still keep their files in review/

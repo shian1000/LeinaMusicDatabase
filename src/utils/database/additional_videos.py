@@ -11,8 +11,9 @@ deletions through the table's trigger on song_id_changes.
 
 Added from "Create playlist from folder and compare with YT playlist" (the
 video paired with a file whose song already had a link; a song without a
-link gets the video as its own) and by song merges (the dropped song's
-link). Every function works in the session it's given; the caller commits.
+link gets the video as its own), by song merges (the dropped song's link)
+and by "Resolve new requests" (several links marked correct, one the main
+one: inbox_requests.save_additional_videos()). Every function works in the session it's given; the caller commits.
 """
 
 from dataclasses import dataclass, field

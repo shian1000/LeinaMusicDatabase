@@ -3,7 +3,8 @@ driven end to end through resolve_new_requests() with request files in the
 inbox's review/ folder, a temp-file music.db and scripted answers: the start
 menu (no inbox, nothing to do, the automatic pass's history), each part's
 answers reaching music.db and decisions.json (dead links, links found for
-songs without one, field corrections, songs to add), pasting a link, editing
+songs without one, field corrections, songs to add), several links marked
+correct (the main one asked, the rest additional videos), pasting a link, editing
 a value, Skip keeping the file and Stop / Esc leaving the later parts unasked,
 songs approved before a stop still imported in one batch, and unreadable
 files moved to rejected/. YouTube and the import are faked."""
@@ -26,7 +27,8 @@ from utils.database import database_sessions
 from utils.database import inbox_field_corrections as fc
 from utils.database import inbox_requests as pr
 from utils.database import inbox_song_requests as sr
-from utils.database.datatables import Artist, Base, RejectedSongRequest, Song
+from utils.database.additional_videos import additional_video_ids
+from utils.database.datatables import AdditionalYoutubeVideo, Artist, Base, RejectedSongRequest, Song
 from utils.discoveries import import_engine as ie
 from utils.ui import inbox_request_review as review
 
@@ -327,6 +329,114 @@ def test_after_the_dead_links_the_found_links_are_asked(env):
     review.resolve_new_requests()
 
     assert (env["songs"][4601].youtube_video_id, env["songs"][4602].youtube_video_id) == ("new0", "found1")
+
+
+# ==================== several links correct ====================
+
+def _checked_as(monkeypatch, our_video, plays=None, dead_gone=True):
+    def check(cases, on_case=None):
+        for case in cases:
+            case.our_video_id = our_video
+            case.dead_still_plays = False if dead_gone else None
+            case.plays = plays or {}
+            case.checked_at = WHEN
+        return {"api": True, "blocked": 0}
+    monkeypatch.setattr(review, "check_link_cases", check)
+
+
+def test_both_links_correct_asks_the_main_one_and_saves_the_other_as_additional(env, monkeypatch):
+    _checked_as(monkeypatch, "ours1")
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    env["answers"].add(REVIEW_LABEL, "Both links are correct (new0, ours1)", "youtu.be/ours1")
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].youtube_video_id == "ours1"
+    assert additional_video_ids(env["session"], 4601) == ["new0"]
+    assert env["session"].get(AdditionalYoutubeVideo, "new0").source == "inbox_review"
+    decision = _decisions(env)["4601:dead0"]
+    assert decision["video_id"] == "ours1" and decision["additional_video_ids"] == ["new0"]
+    assert _folder(env, pr.PROCESSED) == ["2026-10-14_09-00-00_001.db"]
+    # YouTube confirmed the reported link gone: it can't stay the main one
+    assert not any(review._KEEP_AS_MAIN in title for title in env["answers"].selects[-1][1])
+
+
+def test_back_from_the_main_link_question_changes_nothing(env, monkeypatch):
+    _checked_as(monkeypatch, "ours1")
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    env["answers"].add(REVIEW_LABEL, "Both links are correct", review._BACK, review._SKIP)
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].youtube_video_id == "dead0"
+    assert additional_video_ids(env["session"], 4601) == []
+    assert _folder(env, pr.REVIEW) == ["2026-10-14_09-00-00_001.db"]
+
+
+def test_a_reported_link_not_confirmed_gone_may_stay_the_main_one(env, monkeypatch):
+    _checked_as(monkeypatch, "ours1", dead_gone=False)
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    env["answers"].add(REVIEW_LABEL, "Both links are correct", review._KEEP_AS_MAIN)
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].youtube_video_id == "dead0"
+    assert additional_video_ids(env["session"], 4601) == ["new0", "ours1"]
+    assert _decisions(env)["4601:dead0"]["decision"] == pr.KEEP
+
+
+def test_both_links_correct_for_a_song_without_a_link(env, monkeypatch):
+    _checked_as(monkeypatch, "ours1")
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", found=[(4602, "Losing Sleep", "found1")])
+    env["answers"].add(REVIEW_LABEL, "Both links are correct", "youtu.be/found1")
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4602].youtube_video_id == "found1"
+    assert additional_video_ids(env["session"], 4602) == ["ours1"]
+    assert not any(review._KEEP_AS_MAIN in title for title in env["answers"].selects[-1][1])
+
+
+def test_several_links_are_not_offered_for_a_video_not_playing_or_of_another_song(env, monkeypatch):
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    _checked_as(monkeypatch, "ours1", plays={"ours1": False})
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+    review.resolve_new_requests()
+    assert not any("correct" in title for title in env["answers"].selects[-1][1])
+
+    env["songs"][4603].youtube_video_id = "ours1"
+    env["session"].commit()
+    _checked_as(monkeypatch, "ours1")
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+    review.resolve_new_requests()
+    assert not any("correct" in title for title in env["answers"].selects[-1][1])
+
+
+def test_more_than_two_links_are_ticked_first(env, monkeypatch):
+    _checked_as(monkeypatch, "ours1")
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    _request(env["inbox"], "2026-10-14_09-00-00_002.db", dead=[(4601, "Chromatic", "dead0", "new1")])
+    monkeypatch.setattr(review.questionary, "checkbox",
+                        lambda question, choices: SimpleNamespace(ask=lambda: ["new1", "ours1"]))
+    env["answers"].add(REVIEW_LABEL, review._SEVERAL, "youtu.be/new1")
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].youtube_video_id == "new1"
+    assert additional_video_ids(env["session"], 4601) == ["ours1"]
+
+
+def test_the_main_link_is_not_repeated_among_additional_videos(env, monkeypatch):
+    env["session"].add(AdditionalYoutubeVideo(video_id="new0", song_id=4601, source="song_merge"))
+    env["session"].commit()
+    _checked_as(monkeypatch, "ours1")
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", dead=[(4601, "Chromatic", "dead0", "new0")])
+    env["answers"].add(REVIEW_LABEL, "Both links are correct", "youtu.be/new0")
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].youtube_video_id == "new0"
+    assert additional_video_ids(env["session"], 4601) == ["ours1"]
 
 
 # ==================== field corrections ====================

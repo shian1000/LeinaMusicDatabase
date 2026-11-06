@@ -48,6 +48,7 @@ from utils.database.inbox_requests import (
     parse_time,
     links_set_by_hand,
     resolve_song_id,
+    save_additional_videos,
     save_decision,
     superseded_by_hand,
     unmark_bad_video,
@@ -128,9 +129,10 @@ def settle_if_none_plays(case: FoundLinkCase) -> bool:
 
 
 def apply_found_link_decision(case: FoundLinkCase, decision: str, video_id: str | None = None,
-                              by: str | None = None) -> None:
+                              by: str | None = None, additional=()) -> None:
     """Set the song's link as decided and record the answer (`by` = "auto"
-    for the automatic pass). The caller commits the music session."""
+    for the automatic pass). `additional`: other videos marked correct, with
+    USE_VIDEO. The caller commits the music session."""
     phone_ids = [r.video_id for r in case.all_replacements()]
     session = object_session(case.song)
     if decision == USE_VIDEO:
@@ -145,10 +147,12 @@ def apply_found_link_decision(case: FoundLinkCase, decision: str, video_id: str 
         mark_bad_videos(session, phone_ids, BAD_VIDEO_WRONG_FOR_SONG, case.song_id)
     else:
         raise ValueError(f"Unknown decision {decision!r}")
+    save_additional_videos(case, video_id, additional)
     named = video_id or (phone_ids[0] if phone_ids else "-")
     save_decision(f"{case.key}:{named}", {
         "decision": decision,
         "video_id": video_id,
+        **({"additional_video_ids": list(additional)} if additional else {}),
         "phone_video_ids": phone_ids,
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),

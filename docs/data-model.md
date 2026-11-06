@@ -72,7 +72,8 @@ added_at      NOT NULL, default datetime('now')
   compare with YT playlist" is saved (one checkbox list: a song without a link gets the paired video
   as its own, a song with one - or marked "N/A" - gets it as additional; certain pairings ticked,
   ones by resembling names not; a video another song has or found bad is left out), by a playlist's
-  "Save its YouTube videos on the songs", and by `merge_songs()` (the dropped song's link). A
+  "Save its YouTube videos on the songs", by `merge_songs()` (the dropped song's link) and by
+  "Resolve new requests" (several links marked correct, the owner picking the main one). A
   trigger keeps `song_id` current like `bad_youtube_videos`'; `mark_bad_videos()` for a song drops
   its row. The inbox treats a requested video listed here as the song in the database.
 

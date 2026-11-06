@@ -70,6 +70,7 @@ from sqlalchemy import event, or_
 from sqlalchemy.orm import object_session
 
 from config.constants import (
+    ADDITIONAL_VIDEO_INBOX_REVIEW,
     BAD_VIDEO_NO_VIDEO_FOR_SONG,
     BAD_VIDEO_REASONS,
     BAD_VIDEO_REMOVED,
@@ -80,7 +81,7 @@ from config.constants import (
 from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
-from utils.database.additional_videos import drop_additional_videos
+from utils.database.additional_videos import add_additional_video, drop_additional_videos, song_for_video
 from utils.database.datatables import BadYoutubeVideo, Song
 from utils.database.latin_names import artist_match_synonyms
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
@@ -902,11 +903,35 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
     return {"api": api is not None, "blocked": blocked, "marked": marked}
 
 
+def videos_correct_together(case: LinkCase) -> list[str]:
+    """The videos of this case that can be saved together as the song's:
+    Leina Radio's and our search's, without one that doesn't play here or is
+    another song's video (a video belongs to one song)."""
+    session = object_session(case.song)
+    videos = []
+    for video_id in dict.fromkeys([r.video_id for r in case.replacements]
+                                  + ([case.our_video_id] if case.our_video_id else [])):
+        owner = song_for_video(session, video_id)
+        if case.plays.get(video_id) is not False and (owner is None or owner.id == case.song_id):
+            videos.append(video_id)
+    return videos
+
+
+def save_additional_videos(case: LinkCase, main_video_id: str | None, additional) -> None:
+    """After the song's link is set: the link isn't repeated among its
+    additional videos, the other videos marked correct join them."""
+    session = object_session(case.song)
+    if main_video_id:
+        drop_additional_videos(session, [main_video_id], case.song_id)
+    for video_id in additional:
+        add_additional_video(session, case.song, video_id, ADDITIONAL_VIDEO_INBOX_REVIEW)
+
+
 def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None,
-                             by: str | None = None) -> None:
+                             by: str | None = None, additional=()) -> None:
     """Change the song's link as the user decided and record the answer
-    (`by` = "auto" for the automatic pass). The caller commits the music
-    session."""
+    (`by` = "auto" for the automatic pass). `additional`: other videos marked
+    correct, with USE_VIDEO or KEEP. The caller commits the music session."""
     session = object_session(case.song)
     if decision == USE_VIDEO:
         if not video_id:
@@ -923,9 +948,11 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
         unmark_bad_video(session, case.dead_video_id, case.song_id)
     else:
         mark_bad_videos(session, [case.dead_video_id], BAD_VIDEO_REPLACED_DEAD_LINK)
+    save_additional_videos(case, video_id, additional)
     save_decision(case.key, {
         "decision": decision,
         "video_id": video_id,
+        **({"additional_video_ids": list(additional)} if additional else {}),
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
