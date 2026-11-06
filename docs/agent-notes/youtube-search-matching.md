@@ -96,7 +96,12 @@ Zulu - so the setting only matters for playlist pages.
    Records: `"'City of Stars' (Duet ft. Ryan Gosling, Emma Stone) - La La Land Original Motion
    Picture Soundtrack"`). The plain split had made the whole left side the artist, and a swap
    would only have made the soundtrack the artist. The joined performers go to the artist-split
-   review.
+   review. Then `split_album_track_title()` for `"Artist - Album #09 - Title"` (real case:
+   `"Fisz Emade - Heavi Metal #09 - Disko"`, stored with the album in its title): a second `" - "`
+   alone says nothing (`"Kashmir - Remaster"`, `"Survivor (Epic Cover - Tomb Raider - ...)"`), so
+   the signal is the two-digit number. One digit is left out for `"Symphony #5 - Allegro"`, and a
+   version or annotation after the number keeps it a title (`"Funk #49 - Live"`). Known miss:
+   `"Symphony #40 - Allegro"` reads as an album.
 
 Any entry still without an artist after this (and after the generic-Topic description lookup) is
 held back for `_review_missing_artists()`. It asks for each artist by `questionary.text()`, with the

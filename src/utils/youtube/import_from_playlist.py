@@ -25,10 +25,12 @@ from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
 # The title cleanup itself lives in sanitize (its "youtube" steps)
 from utils.common.sanitize import (
+    ALBUM,
     ANY_BRACKET_RE,
     ARTIST,
     SOURCE_YOUTUBE,
     TITLE,
+    VERSION_MARKER_RE,
     YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE,
     fold_char,
     sanitize_field,
@@ -84,6 +86,13 @@ _QUOTED_TITLE_FEAT_CREDIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# An album with a two-digit track number between the artist and the title
+# (real case: "Fisz Emade - Heavi Metal #09 - Disko"). Plain "Artist - Title"
+# splitting would leave the album and the number in the title.
+_ALBUM_TRACK_TITLE_RE = re.compile(
+    r"^(?P<artist>.+?)\s+[-–—]\s+(?P<album>.+?)\s+#\d{2}\s+[-–—]\s+(?P<title>.+)$"
+)
+
 
 # What an uploader puts after " - " when the left side is the song's title
 # and the artist is only the channel (real case, channel "Attic Ocean":
@@ -115,6 +124,19 @@ def split_quoted_title_feat_credit(title: str) -> tuple | None:
     if not match:
         return None
     return match.group("artists").strip(), match.group("title").strip()
+
+
+def split_album_track_title(title: str) -> tuple | None:
+    """Return (artist, album, title) from an "Artist - Album #09 - Title"
+    video title, or None if it isn't one. What follows a song's own number
+    can be its version ("Funk #49 - Live"), which leaves it a plain title."""
+    match = _ALBUM_TRACK_TITLE_RE.match(title or "")
+    if not match:
+        return None
+    song_title = match.group("title").strip()
+    if VERSION_MARKER_RE.search(song_title) or is_junk_only_title(song_title):
+        return None
+    return match.group("artist").strip(), match.group("album").strip(), song_title
 
 
 def extract_playlist_id(raw: str) -> str | None:
@@ -571,6 +593,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     channel = item.get("channel") or ""
     title = item.get("title") or ""
     removed = []  # what the cleanup cuts, kept on the entry
+    album = None
 
     if artist_title_override:
         artist, song_title = artist_title_override
@@ -593,6 +616,9 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         elif quoted_credit := split_quoted_title_feat_credit(parse_title):
             artist, song_title = quoted_credit
             how = "quoted title with ft. credit"
+        elif album_track := split_album_track_title(parse_title):
+            artist, album, song_title = album_track
+            how = "Artist - Album #NN - Title"
         else:
             artist, song_title = split_artist_title(parse_title)
             how = "split Artist - Title"
@@ -614,17 +640,18 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     # The title with the artist as parsed, then the artist (sanitize's
     # "youtube" steps: junk brackets and phrases, a " - 1982" year, quotes,
     # file-name artefacts, the artist repeated in the title)
-    originals = {"artist": artist, "title": song_title}
+    originals = {"artist": artist, "title": song_title, "album": album}
     # "Song ft. X": X becomes a featured artist of the song, the title "Song"
     feat_artists = []
     song_title = sanitize_field(song_title, TITLE, SOURCE_YOUTUBE, artist=artist, removed=removed,
                                 feat_artists=feat_artists)
     artist = sanitize_field(artist, ARTIST, SOURCE_YOUTUBE, removed=removed)
+    album = sanitize_field(album, ALBUM, SOURCE_YOUTUBE, removed=removed)
 
     entry = SongEntry({
         "artist_name": artist,
         "title": song_title,
-        "album": None,
+        "album": album,
         "year": None,
         "language": "Unknown",
         "origin": None,

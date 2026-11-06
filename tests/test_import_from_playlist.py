@@ -501,6 +501,31 @@ def test_quoted_title_without_feat_bracket_is_split_as_usual():
     assert _build("Artist - 'Song' (feat. Guest)")["artist_name"] == "Artist"
 
 
+@pytest.mark.parametrize("title, artist, album, song_title", [
+    ("Fisz Emade - Heavi Metal #09 - Disko", "Fisz Emade", "Heavi Metal", "Disko"),
+    ("Fisz Emade - Heavi Metal #07 - Kawa i Papierosy", "Fisz Emade", "Heavi Metal", "Kawa i Papierosy"),
+    ("Fisz Emade – Heavi Metal #09 – Disko", "Fisz Emade", "Heavi Metal", "Disko"),
+])
+def test_album_with_a_track_number_between_artist_and_title_is_the_album(title, artist, album, song_title):
+    metadata = _build(title)
+    assert (metadata["artist_name"], metadata["album"], metadata["title"]) == (artist, album, song_title)
+    assert metadata.originals["album"] == album
+
+
+@pytest.mark.parametrize("title, song_title", [
+    ("James Gang - Funk #49", "Funk #49"),  # the number belongs to the title
+    ("James Gang - Funk #49 - Live", "Funk #49 - Live"),  # its version, not a song
+    ("Artist - Song #12 - Official Video", "Song #12"),  # an upload annotation
+    ("Artist - Mixtape #5 - Song", "Mixtape #5 - Song"),  # only two digits count as a track number
+    ("Shema - Hava Nagila", "Hava Nagila"),
+    ("Led Zeppelin - Kashmir - Remaster", "Kashmir - Remaster"),
+])
+def test_title_without_an_album_track_number_gets_no_album(title, song_title):
+    assert m.split_album_track_title(title) is None
+    metadata = _build(title)
+    assert (metadata["album"], metadata["title"]) == (None, song_title)
+
+
 def test_trailing_reupload_bracket_is_stripped():
     assert _build("DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")["title"] == "BRUNETKI I BLONDYNKI"
     assert _build("Artist - Song [Re-upload]")["title"] == "Song"

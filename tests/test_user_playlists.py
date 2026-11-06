@@ -617,6 +617,21 @@ def test_video_without_a_file_keeps_the_featured_artists_for_a_new_song(music_se
     assert [a.name for a in additional_artists(song)] == ["Hey"]
 
 
+def test_video_without_a_file_keeps_the_album_its_title_named_for_a_new_song(music_session):
+    from utils.discoveries.folder_youtube_playlist import youtube_entries, youtube_only_track
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    matcher = LocalSongMatcher(music_session)
+    (entry,) = youtube_entries(matcher, [
+        {"video_id": "ytD", "title": "Fisz Emade - Heavi Metal #09 - Disko", "channel": "kacperek92"}])
+    track = youtube_only_track(fp.FolderPlaylist(folder=Path("music")), matcher, entry)
+    assert (track.artist, track.title, track.album) == ("Fisz Emade", "Disko", "Heavi Metal")
+
+    song = fp.add_song_for_file(music_session, track.artist, track.title, album=track.album)
+    music_session.flush()
+    assert (song.title, song.album) == ("Disko", "Heavi Metal")
+
+
 def test_adding_a_song_reuses_the_artist_and_an_existing_song(users_env, tmp_path, music_session, monkeypatch):
     from utils.discoveries.folder_playlist import add_song_for_file, song_for_file_plan
 
