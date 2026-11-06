@@ -1,7 +1,8 @@
 # ADR-0006: MusicDatabaseWired - a public sharing server, working with MusicDatabaseHomeServer
 
 - Status: Accepted as a plan (2026-11-06, owner's decisions). Phase 1 done (`src/musicdatabase_core/`,
-  the old module names kept as redirects); MDW itself isn't built. Replaces the first version
+  the old module names kept as redirects) and phase 2 (`tests/contract/`); MDW itself isn't built.
+  Replaces the first version
   of this ADR (2026-11-04), which called the new program "MusicDatabase Lite" and had users pick one
   program or the other.
 - Date: 2026-11-06

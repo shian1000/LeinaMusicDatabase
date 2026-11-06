@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~2,200 tests, under a minute, fully mocked (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~2,650 tests, 1-3 minutes, mocked apart from `tests/contract/` (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -336,7 +336,9 @@ non-trivial work in that area.
   `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
   modules are redirects (`sys.modules`) to the same module, so `utils.database.playlist_sync` still
   works, for tests' patches too; change the code in the core. `sharing_server.py` stays where it
-  is, because the systemd unit runs it by that path.
+  is, because the systemd unit runs it by that path. `tests/contract/` is the sharing API as a
+  black box over HTTP, the specification for both servers: a change to an endpoint, status, header
+  or JSON shape the app relies on changes it too. It imports no server code.
 - `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
   copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one
   GitHub Release (fixed tag `database` in `GITHUB_DB_REPO`; `music.db`, `tag.db`, then
@@ -861,8 +863,8 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,200 tests, under a minute, all
-  mocked, no real network calls. `python -m pytest tests/<file>.py` for one file while iterating.
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,650 tests, 1-3 minutes, all
+  mocked, no real network calls, except `tests/contract/`, which starts real servers on 127.0.0.1 with throwaway data. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
