@@ -25,6 +25,8 @@ from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
 # The title cleanup itself lives in sanitize (its "youtube" steps)
 from utils.common.sanitize import (
+    ProjectFields,
+    apply_project,
     ALBUM,
     ANY_BRACKET_RE,
     ARTIST,
@@ -643,8 +645,12 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     originals = {"artist": artist, "title": song_title, "album": album}
     # "Song ft. X": X becomes a featured artist of the song, the title "Song"
     feat_artists = []
+    project = ProjectFields(album=album, channel=channel or None, raw_text=title)
     song_title = sanitize_field(song_title, TITLE, SOURCE_YOUTUBE, artist=artist, removed=removed,
-                                feat_artists=feat_artists)
+                                feat_artists=feat_artists, project=project)
+    project_keys = {"artist_name": artist}
+    apply_project(project_keys, project)
+    artist = project_keys.pop("artist_name")
     artist = sanitize_field(artist, ARTIST, SOURCE_YOUTUBE, removed=removed)
     album = sanitize_field(album, ALBUM, SOURCE_YOUTUBE, removed=removed)
 
@@ -660,6 +666,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         "duration_s": item.get("duration"),
         "_label": title or item.get("video_id"),
         **({"feat_artists": feat_artists} if feat_artists else {}),
+        **project_keys,
     }, source=SOURCE_YOUTUBE, raw_text=title, parsed_by=how, channel=channel or None, removed=removed,
         originals={field: value for field, value in originals.items() if value is not None})
     mlog(f"[Parse] {item.get('video_id')} \"{title}\" (channel \"{channel}\", {item.get('duration')}s) -> "

@@ -12,6 +12,7 @@ COMPOSED_FIELDS = {
     "artists": ("name", "origin", "synonyms", "name_latin"),
     "songs": ("title", "title_latin", "album", "genre"),
     "albums": ("title", "title_latin"),
+    "projects": ("name", "aliases", "channels"),
 }
 
 
@@ -66,9 +67,12 @@ class Song(Base):
     album_id = Column(Integer, ForeignKey("albums.id"), index=True)
     track_number = Column(Integer)  # position on the album, NULL = unknown
     disc_number = Column(Integer)   # NULL = 1 / unknown
+    # The series a recording was made for (migration 0019) - see utils/database/projects.py
+    project_id = Column(Integer, ForeignKey("projects.id"), index=True)
 
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")
+    project = relationship("Project", back_populates="songs")
     # Only multi-artist songs have rows here - `artist` stays the primary one.
     # Use utils.database.song_artists helpers rather than reading this directly.
     additional_artist_links = relationship(
@@ -76,6 +80,24 @@ class Song(Base):
     )
 
     @validates(*COMPOSED_FIELDS["songs"])
+    def _compose(self, _key, value):
+        return composed(value)
+
+
+# --------------------
+# Projects: series and compilations recordings were made for (migration 0019)
+# --------------------
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    aliases = Column(String)   # other spellings, comma-separated
+    channels = Column(String)  # YouTube channels publishing it that aren't its artists, comma-separated
+
+    songs = relationship("Song", back_populates="project")
+
+    @validates(*COMPOSED_FIELDS["projects"])
     def _compose(self, _key, value):
         return composed(value)
 

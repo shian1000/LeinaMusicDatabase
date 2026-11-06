@@ -1,4 +1,5 @@
 from utils.common.output import GREEN, RED, RESET, review_header, say
+from utils.ui.project_review import manage_projects
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
@@ -189,6 +190,7 @@ def manage_database():
         "Divide artists": divide_artists_menu,
         "Split joined artist names": review_artist_splits,
         "Find full albums": review_full_albums,
+        "Projects": manage_projects,
         "Resolve albums with several artists": review_multi_artist_albums,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
         "Fix names and tags for mp3 files that are in the database": fix_file_names_and_tags,

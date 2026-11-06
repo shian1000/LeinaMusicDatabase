@@ -28,6 +28,7 @@ from config.constants import (
     SONG_KINDS,
 )
 from utils.common.normalizer import normalize
+from utils.common.project_names import is_project_of
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
 
@@ -77,26 +78,34 @@ def looks_like_full_album(title: str | None, duration_s: int | None = None) -> b
     return title_has_full_album_marker(title) or (duration_s or 0) >= FULL_ALBUM_MIN_DURATION_S
 
 
-def songs_for_entry(songs: list, title: str | None, duration_s: int | None = None) -> list:
-    """The songs an entry may be matched to, in the order to try them: for
-    an entry that looks like a whole album, full albums (and rows whose own
-    title says they are one) first, then the rest; otherwise every song but
-    the full albums."""
+def songs_for_entry(songs: list, title: str | None, duration_s: int | None = None,
+                    project: str | None = None) -> list:
+    """The songs an entry may be matched to, in the order to try them: only
+    those of its `project` (songs.project_id; None: of no project) - a Tiny
+    Desk recording isn't the studio song of that title - and, for an entry that
+    looks like a whole album, full albums (and rows whose own title says they
+    are one) first, then the rest; otherwise every song but the full albums.
+    Within a project a whole set is matched by its title alone."""
+    songs = [s for s in songs if is_project_of(s, project)]
+    if project:
+        return songs
     if not looks_like_full_album(title, duration_s):
         return [s for s in songs if not is_full_album(s)]
     albums = [s for s in songs if is_full_album(s) or title_has_full_album_marker(s.title)]
     return albums + [s for s in songs if s not in albums]
 
 
-def set_song_kind(songs: list[Song], kind: str | None) -> list[Song]:
+def set_song_kind(songs: list[Song], kind: str | None, file_under_album: bool = True) -> list[Song]:
     """Set `kind` on the songs (None = an ordinary song). Returns the songs
-    whose album text was filled in from their title. The caller commits."""
+    whose album text was filled in from their title - not with `file_under_album`
+    False: a project's whole set ("Tiny Desk Concert") plays no album of that
+    name, and every artist has one. The caller commits."""
     if kind is not None and kind not in SONG_KINDS:
         raise ValueError(f"Unknown song kind '{kind}'")
     filed = []
     for song in songs:
         song.kind = kind
-        if kind == SONG_KIND_FULL_ALBUM and (not song.album or is_singles(song.album)):
+        if file_under_album and kind == SONG_KIND_FULL_ALBUM and (not song.album or is_singles(song.album)):
             song.album = strip_full_album_marker(song.title)
             filed.append(song)
     return filed

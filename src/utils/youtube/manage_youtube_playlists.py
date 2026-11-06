@@ -1977,7 +1977,7 @@ def create_yt_playlist(song_list, playlist_name: str):
             # Step 2: no usable stored link — search as before.
             if not video_id:
                 video_id = search_video(
-                    youtube, artist, title, artist_synonyms=artist_synonyms, language=language,
+                    youtube, artist, entry.get("search_title") or title, artist_synonyms=artist_synonyms, language=language,
                     artist_credits=artist_credits, title_latin=title_latin, full_album=full_album,
                 )
                 rejected = bad_videos.why(video_id, getattr(song, "id", None)) if bad_videos and video_id else None

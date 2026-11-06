@@ -29,6 +29,8 @@ METADATA_KEYS = {
     "youtube_video_id": "youtube_video_id",
     "duration_s": "duration_s",          # tells a full-album recording from a track
     "feat_artists": "feat_artists",      # credited as featured when the song is created
+    "project": "project",                # a project's name (Tiny Desk), read by sanitize's "project_name" step
+    "project_whole": "project_whole",    # not one song but the artist's whole set for that project
     "label": "_label",                   # how the entry is named in the import's messages
     "unsplit_title": "unsplit_title",    # a file name split on a bare "-", read whole as the title
 }

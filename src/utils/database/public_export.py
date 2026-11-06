@@ -44,8 +44,9 @@ class DatabaseSpec:
 MUSIC_SPEC = DatabaseSpec("music.db", {
     "songs": TableSpec(("id", "title", "title_latin", "album", "year", "language", "youtube_video_id",
                         "spotify_url", "music_video_youtube_id", "genre", "kind", "artist_id", "album_id",
-                        "track_number", "disc_number")),
+                        "track_number", "disc_number", "project_id")),
     "artists": TableSpec(("id", "name", "origin", "synonyms", "name_latin")),
+    "projects": TableSpec(("id", "name", "aliases", "channels")),
     "additional_song_artists": TableSpec(("song_id", "artist_id", "role")),
     "albums": TableSpec(("id", "title", "title_latin", "artist_id", "year", "type",
                          "musicbrainz_release_group_id", "itunes_collection_id", "deezer_album_id",

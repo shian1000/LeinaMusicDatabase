@@ -645,6 +645,9 @@ SANITIZE_SWITCH_LABELS = {
     "lookalike_letters": ("Characters", "Look-alike letters",
                           "'Вjörk' -> 'Björk': a Cyrillic letter in a Latin word, or the other way round. "
                           "In Clean names offered in a list to tick."),
+    "projects": ("What the title says (kept with the song before it's cut)", "Projects",
+                 "'Boys (Like a Version)' -> 'Boys', marked as that project's recording, by the dictionary in "
+                 "Manage database -> Projects. There also offered for stored songs in a list to tick."),
     "featured_artists": ("What the title says (kept with the song before it's cut)", "Featured artists",
                          "'Song ft. X' -> 'Song', X credited as a featured artist. "
                          "In Clean names offered in a list to tick."),

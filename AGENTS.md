@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~2,650 tests, 1-3 minutes, mocked apart from `tests/contract/` (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~2,750 tests, 1-3 minutes, mocked apart from `tests/contract/` (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -189,6 +189,14 @@ non-trivial work in that area.
   `video_durations.py` — `youtube_video_durations` (migration 0017), YouTube videos' lengths by id,
   asked once (`video_durations_via_api()`, each batch stored as it comes); "Find full albums" reads
   them, Leina Radio sums them for playlists. A live stream's 0 is never stored.
+  `projects.py` — the `projects` dictionary and `songs.project_id` (migration 0019): the series a
+  recording was made for (Tiny Desk, Like a Version). The artist stays the real one, shown "Project:
+  Artist - Title". A project's recording and the studio song of that title are two rows:
+  `songs_for_entry(..., project)` is what keeps them apart in every matcher, so an entry's
+  `project` must reach it; duplicate search keys on the project too. Names are read from the
+  dictionary only, by whole spellings (`utils/common/project_names.py`): sanitize's `project_name`
+  step for what comes in, Manage database → "Projects" (`utils/ui/project_review.py`) ticks stored
+  songs. Details: `docs/data-model.md`.
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -327,18 +335,26 @@ non-trivial work in that area.
   `review_artist_splits()` batch review (Manage database → "Split joined artist names", and at the
   end of every `run_import_batch()` for the artists it created); rejected names persist in
   `data/artist_split_ignore.json`. Schema and split rules: `docs/data-model.md`.
-- `src/musicdatabase_core/` — what this program shares with the planned MusicDatabaseWired
+- `src/musicdatabase_core/` — what this program shares with MusicDatabaseWired
   ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)): `account_auth`, `user_covers`, the `*_sync`
   modules and `global_mood_log`, plus `accounts.py` (making an account), `user_schema.py` (applying
   `migrations/user/`), `song_id_replay.py` (replaying `song_id_changes` on a plain connection, the
-  rules behind `song_references.py`), `request_format.py` and `certificates.py`. Standard library
+  rules behind `song_references.py`), `request_format.py`, `certificates.py`, `server_rules.py` (limits,
+  the Host check, the login and upload limiters) and `inbox_files.py` (storing a request). Standard library
   only, nothing from this program (`tests/test_musicdatabase_core.py`), so a value it shares with
   `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
   modules are redirects (`sys.modules`) to the same module, so `utils.database.playlist_sync` still
   works, for tests' patches too; change the code in the core. `sharing_server.py` stays where it
   is, because the systemd unit runs it by that path. `tests/contract/` is the sharing API as a
   black box over HTTP, the specification for both servers: a change to an endpoint, status, header
-  or JSON shape the app relies on changes it too. It imports no server code.
+  or JSON shape the app relies on changes it too. It imports no server code; `CONTRACT_SERVER=mdw`
+  runs it against MDW.
+- `wired/` — MusicDatabaseWired, a program of its own with its own `venv/`, `.env` and README
+  ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)). FastAPI, with the rules in the core. It imports
+  only the core and the owner-approved packages (`wired/DEPENDENCIES.md`,
+  `tests/test_wired_imports.py`), never this program. A new or upgraded package there is the owner's
+  decision, and FastAPI stays at 0.141.1 on purpose: newer ones require OpenTelemetry. Pytest runs from
+  this program's venv and treats MDW as a black box (`tests/test_wired.py`).
 - `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
   copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one
   GitHub Release (fixed tag `database` in `GITHUB_DB_REPO`; `music.db`, `tag.db`, then
@@ -459,7 +475,7 @@ non-trivial work in that area.
   so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
   (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
   is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
-  turns each of its 13 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
+  turns each of its 14 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
   (`set_switch_on()`; where a step runs follows from
   what it works on, `runs_for()`, owner's choice 2026-11-01: the same everywhere, so every step must be
   safe for every name - measure on the catalog before adding or loosening one), saved in
@@ -655,7 +671,8 @@ non-trivial work in that area.
   `songs.genre` (migration 0013, its radio; keep one spelling per genre, see `genres.py`), and
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
-  out of its radio), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks
@@ -863,7 +880,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,650 tests, 1-3 minutes, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,750 tests, 1-3 minutes, all
   mocked, no real network calls, except `tests/contract/`, which starts real servers on 127.0.0.1 with throwaway data. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing

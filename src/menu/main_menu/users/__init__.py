@@ -52,6 +52,7 @@ from utils.discoveries.file_matching_settings import (
 )
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
+from utils.common.project_names import song_project_name
 from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
 from utils.ui.file_batch import apply_to_files, report_failures
@@ -108,7 +109,7 @@ def _song_tokens(song, score: float | None = None) -> list:
     """The song's coloured label as questionary tokens (song_colors): artist,
     title, album and year, and how well the file's tags fit it ("(87%)")."""
     details = ", ".join(str(v) for v in (song.album, song.year) if v)
-    tokens = song_tokens(song_artist_label(song), song.title, details)
+    tokens = song_tokens(song_artist_label(song), song.title, details, song_project_name(song))
     if score is not None:
         tokens += [("", "  "), (DETAIL_STYLE, f"({score:.0%})")]
     return tokens
@@ -270,13 +271,15 @@ def _add_song_for_file(music_session, track):
             return None
         if choice == _ADD_SWAPPED:
             artist_name, title = title, artist_name
-    artist, existing = song_for_file_plan(music_session, artist_name, title)
+    artist, existing = song_for_file_plan(music_session, artist_name, title, track.project)
     if existing is not None:
         print(f"  Already in the database: {_song_choice_label(existing)}")
         if ask_yes_no("Use this song?"):
             return existing
     print(f"  Artist: {artist.name} (already in the database)" if artist else f"  Artist: {artist_name} (new)")
     print(f"  Title:  {title}")
+    if track.project:
+        print(f"  Project: {track.project}")
     if track.feat_artists:
         print(f"  Featuring: {', '.join(track.feat_artists)}")
     if track.album:
@@ -288,7 +291,8 @@ def _add_song_for_file(music_session, track):
     # add_db_entry() says what it added
     song = add_song_for_file(music_session, artist.name if artist else artist_name, title,
                              even_if_similar=existing is not None, feat_artists=track.feat_artists,
-                             album=track.album, year=track.year)
+                             album=track.album, year=track.year, project=track.project,
+                             project_whole=track.project_whole)
     submit_global_database_session()
     return song
 

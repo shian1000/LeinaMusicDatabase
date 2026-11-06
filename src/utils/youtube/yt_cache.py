@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from utils.common.project_names import search_title, song_project_name
 from utils.database.song_artists import song_artist_credits, song_main_artist_label
 from utils.database.latin_names import artist_match_synonyms
 from config.constants import PROJECT_ROOT, SONG_KIND_FULL_ALBUM
@@ -107,12 +108,15 @@ def update_cache_songs(cache: dict, songs) -> tuple[int, int]:
 
 def _song_entry(song) -> dict:
     title = song.title
+    project = song_project_name(song)
     return {
         # "A x B" for a multi-artist song - what YouTube gets queried with
         "artist": song_main_artist_label(song),
         "title": title,
         "title_latin": getattr(song, "title_latin", None),  # retried after the title, see search_video()
-        "full_album": getattr(song, "kind", None) == SONG_KIND_FULL_ALBUM,  # songs.kind, see search_video()
+        # A project's whole set isn't looked for as a "full album", only by its name
+        "full_album": getattr(song, "kind", None) == SONG_KIND_FULL_ALBUM and not project,  # songs.kind, see search_video()
+        "search_title": search_title(song) if project else None,  # with the project, or it finds the studio song
         "synonyms": artist_match_synonyms(song.artist),  # Latin form included
         "language": song.language,
         # None for a single-artist song; see song_artist_credits()

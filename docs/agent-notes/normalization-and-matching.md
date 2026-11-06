@@ -562,3 +562,15 @@ counts as a track on purpose: an import of "Bonobo - Migration" must create
 the track even when the album row exists. `find_existing_song()` also
 matches "Migration (Full Album)" to the full album "Migration" (the title
 with the marker cut out, `strip_full_album_marker()`).
+
+## Projects vs. the studio song of the same title
+
+Once "(Like a Version)" leaves a title, "Boys" and "Boys" by one artist are two
+recordings, so `songs_for_entry()` takes an entry's `project` and offers only
+songs of that project; without one, only songs of no project. Any new matcher
+has to pass it. A project is read only from whole spellings in the dictionary,
+without review on import, so a general word ("Session", "Live") never belongs
+there. An artist that is only the project with a plain title ("NPR Music Tiny
+Desk Concert" - "Daughter") could be a band or a song: the import leaves the
+names and marks the project, and only the stored-songs list offers the title as
+the artist, unticked (`read_project(guess=True)`).

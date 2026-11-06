@@ -1,3 +1,4 @@
+from utils.common.project_names import song_project_name
 from utils.database.database_getter import get_songs_with_empty_category
 from utils.database.database_management import edit_db_entry
 from utils.ui.prompts import ask_yes_no
@@ -37,6 +38,8 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         songs_objects = get_songs_with_empty_category(category)
     else:
         songs_objects = [song for song in songs if not song.album]
+    # A project's recording isn't on the studio song's album the fetchers would find
+    songs_objects = [song for song in songs_objects if not song_project_name(song)]
 
     if not songs_objects:
         print("No songs with missing albums found")

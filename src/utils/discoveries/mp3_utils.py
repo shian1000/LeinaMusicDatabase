@@ -126,13 +126,14 @@ def write_song_tags(file: Path, song, save: bool = True) -> bool:
     from mutagen.id3 import ID3NoHeaderError
 
     from config.constants import SINGLES_ALBUM
+    from utils.common.project_names import title_with_project
     from utils.database.song_artists import song_artist_label
 
     try:
         tags = EasyID3(file)
     except ID3NoHeaderError:
         tags = EasyID3()
-    wanted = {"title": song.title, "artist": song_artist_label(song)}
+    wanted = {"title": title_with_project(song), "artist": song_artist_label(song)}
     if song.album and song.album.strip() != SINGLES_ALBUM:
         wanted["album"] = song.album
     if song.year:
@@ -154,10 +155,12 @@ _FILE_NAME_FORBIDDEN = str.maketrans({c: "_" for c in '/\\:*?"<>|'})
 
 def song_file_name(song, suffix: str = ".mp3") -> str:
     """"Artist - Title.mp3" from the database's data (the whole artist
-    credit), characters a file name can't hold replaced by "_"."""
+    credit, a project's recording "Title (Project)"), characters a file name
+    can't hold replaced by "_"."""
+    from utils.common.project_names import title_with_project
     from utils.database.song_artists import song_artist_label
 
-    stem = f"{song_artist_label(song)} - {song.title}".translate(_FILE_NAME_FORBIDDEN).strip(" .")
+    stem = f"{song_artist_label(song)} - {title_with_project(song)}".translate(_FILE_NAME_FORBIDDEN).strip(" .")
     return stem + suffix
 
 

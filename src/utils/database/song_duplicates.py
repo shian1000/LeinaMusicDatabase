@@ -52,7 +52,7 @@ from utils.database.song_references import record_song_merge
 
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
-                  "track_number", "disc_number")
+                  "track_number", "disc_number", "project_id")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 
@@ -131,11 +131,12 @@ def looks_like_versions(group: list) -> bool:
 
 
 def find_duplicate_groups(session, key=duplicate_key) -> list[list]:
-    """Groups of two or more songs of one artist and kind with the same
-    `key` (duplicate_key / spelling_key), the song to keep first; by artist."""
+    """Groups of two or more songs of one artist, kind and project with the
+    same `key` (duplicate_key / spelling_key), the song to keep first; by
+    artist. A project's recording isn't a duplicate of the studio song."""
     groups = defaultdict(list)
     for song in session.query(Song).order_by(Song.id).all():
-        groups[(song.artist_id, song.kind, key(song.title))].append(song)
+        groups[(song.artist_id, song.kind, song.project_id, key(song.title))].append(song)
     found = []
     for group in groups.values():
         if len(group) > 1:
@@ -172,7 +173,7 @@ def _cross_artist_song_to_keep(group: list) -> Song:
 
 
 def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
-    """Groups of songs with the same duplicate_key and kind but different
+    """Groups of songs with the same duplicate_key, kind and project but different
     main artists, joined by a shared artist or link - one song credited to
     two artist rows, usually one of them wrong; the song to keep first
     (_cross_artist_song_to_keep()). Never merged without asking: a title
@@ -181,7 +182,7 @@ def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
     buckets = defaultdict(list)
     for song in session.query(Song).order_by(Song.id).all():
         if song.id not in skip_ids:
-            buckets[(song.kind, duplicate_key(song.title))].append(song)
+            buckets[(song.kind, song.project_id, duplicate_key(song.title))].append(song)
     found = []
     for songs in buckets.values():
         if len({s.artist_id for s in songs}) < 2:
@@ -228,7 +229,7 @@ def merge_candidates(session, song: Song, limit: int = MERGE_CANDIDATES_MAX) -> 
     album = normalize(song.album or "") if song.album and song.album.strip() != SINGLES_ALBUM else ""
     ranked = []
     for other in session.query(Song).filter(Song.id != song.id).order_by(Song.id):
-        if other.kind != song.kind:
+        if other.kind != song.kind or other.project_id != song.project_id:
             continue
         other_title = duplicate_key(other.title)
         if other_title and other_title == title:

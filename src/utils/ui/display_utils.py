@@ -13,6 +13,7 @@ from utils.common.debug import flog
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
 from utils.database.tags_management import tag_names_by_song
+from utils.common.project_names import song_project_name
 from utils.database.song_kinds import is_full_album
 
 
@@ -40,6 +41,12 @@ def _create_table(title: str, columns: List[Tuple[str, Optional[str], Optional[s
 
 
 
+def _artist_cell(song: Song) -> str:
+    """The Artist column, so a row reads "Project: Artist - Title"."""
+    project = song_project_name(song)
+    return f"{project}: {song_artist_label(song)}" if project else song_artist_label(song)
+
+
 def display_songs(songs: Optional[List[Song]]) -> None:
     """
     Display a formatted table of songs with their properties.
@@ -63,7 +70,7 @@ def display_songs(songs: Optional[List[Song]]) -> None:
 
     for song in songs:
         table.add_row(
-            song_artist_label(song),
+            _artist_cell(song),
             f"{song.title} [full album]" if is_full_album(song) else song.title,
             song.album or "—",
             str(song.year) if song.year else "—",
@@ -179,7 +186,7 @@ def display_songs_with_tags(songs: List[Song]) -> None:
     ])
     for song in songs:
         table.add_row(
-            song_artist_label(song),
+            _artist_cell(song),
             song.title,
             song.album or "—",
             str(song.year) if song.year else "—",

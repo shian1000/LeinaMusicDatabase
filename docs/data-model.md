@@ -224,6 +224,20 @@ added_at      NOT NULL, default datetime('now')
   (yt-dlp only — the API's search results carry no length).
   Migration `0014` (2026-10-16), handoff to the app
   [`handoffs/song-kind-for-musicdatabaseapp.md`](handoffs/song-kind-for-musicdatabaseapp.md).
+- `Song.project_id` → `projects` (migration `0019`, `utils/database/projects.py`) — the series or
+  compilation a recording was made for. `songs.artist_id` stays the real artist, the title loses the
+  project's name, and the song is shown "Project: Artist - Title". `projects.aliases` holds other
+  spellings, `projects.channels` the YouTube channels publishing it that aren't its artists ("NPR
+  Music"): an artist that is only such a name is replaced by who the title names ("yeule: Tiny Desk
+  Concert" → yeule - "Tiny Desk Concert", a whole set: `kind = 'full_album'`, its album not filed
+  under the title, since every artist has one). What it changes: an entry matches only songs of its
+  own project (`song_kinds.songs_for_entry()`), and an entry with none never matches a project's
+  song; duplicates are per project; "Fill missing data → Albums" skips these songs, since the
+  fetchers would find the studio song's album; YouTube searches add the project's name; file names
+  and tags are "Title (Project)", which reads back into the same two fields. A database started
+  empty (`first_run.py`) adopts the migration without running it, so its dictionary starts empty.
+  Handoff to the app:
+  [`handoffs/projects-for-musicdatabaseapp.md`](handoffs/projects-for-musicdatabaseapp.md).
 - `Song.youtube_video_id` — persistent cache of the song's resolved video. Set manually (Song
   actions → "Set YouTube link", id parsed by `manage_youtube_playlists.extract_video_id()`) for a song
   whose correct video YouTube's own search excludes from results entirely (e.g. age-restricted

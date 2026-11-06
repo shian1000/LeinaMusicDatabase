@@ -1,5 +1,5 @@
 """Artist and title in colour, so they stand out in long lists of files and
-songs: artist cyan, title yellow, details (album, year, a score) dimmed. Artists a
+songs: artist cyan, title yellow, a project magenta, details (album, year, a score) dimmed. Artists a
 title credits as featured ("Ангела (feat. Крихітка)") get the artist colour,
 the "(feat. " and ")" around them stay plain.
 
@@ -12,11 +12,13 @@ from utils.common.title_patterns import FEAT_OR_WITH_WORD, FEAT_WORD
 
 ARTIST_STYLE = "fg:ansibrightcyan"
 TITLE_STYLE = "fg:ansibrightyellow"
+PROJECT_STYLE = "fg:ansibrightmagenta"
 DETAIL_STYLE = "fg:ansibrightblack"
 
-_ANSI = {ARTIST_STYLE: "\033[96m", TITLE_STYLE: "\033[93m", DETAIL_STYLE: "\033[90m"}
+_ANSI = {ARTIST_STYLE: "\033[96m", TITLE_STYLE: "\033[93m", PROJECT_STYLE: "\033[95m", DETAIL_STYLE: "\033[90m"}
 _RESET = "\033[0m"
-_RICH = {ARTIST_STYLE: "bright_cyan", TITLE_STYLE: "bright_yellow", DETAIL_STYLE: "bright_black"}
+_RICH = {ARTIST_STYLE: "bright_cyan", TITLE_STYLE: "bright_yellow", PROJECT_STYLE: "bright_magenta",
+         DETAIL_STYLE: "bright_black"}
 
 # Where a title's featured-artist credit starts: a bracketed "(feat. " or a
 # bare " ft. " (the names themselves come from artist_credits.feat_credits())
@@ -53,10 +55,12 @@ def title_tokens(title: str) -> list:
     return [(style, text) for style, text in tokens if text]
 
 
-def song_tokens(artist: str | None, title: str | None, details: str | None = None) -> list:
-    """"Artist - Title  (details)" as (style, text) tokens; "?" for a
-    missing artist or title."""
+def song_tokens(artist: str | None, title: str | None, details: str | None = None, project: str | None = None) -> list:
+    """"Project: Artist - Title  (details)" as (style, text) tokens; "?" for
+    a missing artist or title."""
     tokens = [(ARTIST_STYLE, artist or "?"), ("", " - "), *(title_tokens(title) if title else [(TITLE_STYLE, "?")])]
+    if project:
+        tokens = [(PROJECT_STYLE, project), ("", ": "), *tokens]
     if details:
         tokens += [("", "  "), (DETAIL_STYLE, f"({details})")]
     return tokens
@@ -75,5 +79,5 @@ def as_rich_markup(tokens: list) -> str:
                    for style, text in tokens)
 
 
-def colored_song(artist: str | None, title: str | None, details: str | None = None) -> str:
-    return as_ansi(song_tokens(artist, title, details))
+def colored_song(artist: str | None, title: str | None, details: str | None = None, project: str | None = None) -> str:
+    return as_ansi(song_tokens(artist, title, details, project))

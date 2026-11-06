@@ -17,6 +17,7 @@ from utils.database.song_artists import song_artist_label
 from utils.database.song_duplicates import merge_candidates, merge_songs
 from utils.database.song_references import song_uses
 from utils.ui.menu_utils import search_and_pick_db_object
+from utils.common.project_names import song_project_name
 from utils.ui.song_colors import colored_song, song_tokens
 
 _SEARCH = "Merge it into another song (search)..."
@@ -42,10 +43,10 @@ def merge_instead_of_deleting(songs: list) -> list | None:
         if not uses:
             to_delete.append(song)
             continue
-        label = colored_song(song_artist_label(song), song.title)
+        label = colored_song(song_artist_label(song), song.title, project=song_project_name(song))
         warn(f"Used in {_uses_text(uses)} - deleting leaves them without this song, merging moves them:")
         print(f"  {label}")
-        choices = [Choice(title=song_tokens(song_artist_label(c), c.title, c.album or None), value=c)
+        choices = [Choice(title=song_tokens(song_artist_label(c), c.title, c.album or None, song_project_name(c)), value=c)
                    for c in merge_candidates(session, song)]
         choices += [Choice(_SEARCH, value=_SEARCH), Choice(_DELETE, value=_DELETE), Choice(_KEEP, value=_KEEP)]
         picked = questionary.select("Merge it into one of these songs instead?", choices=choices).ask()

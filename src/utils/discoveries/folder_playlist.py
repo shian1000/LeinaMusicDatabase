@@ -57,6 +57,9 @@ class FolderTrack:
     # The featured artists the cleanup moved out of `title`, credited if the
     # song is added for it (add_song_for_file())
     feat_artists: list = field(default_factory=list)
+    # The project the file's name says it's from, likewise; whether it's a whole set
+    project: str | None = None
+    project_whole: bool = False
     # The file's tags, saved if the song is added for it (add_song_for_file())
     album: str | None = None
     year: int | None = None
@@ -84,7 +87,7 @@ def assign_song(track: FolderTrack, song) -> None:
     track.youtube_video_id = track.youtube_link or song.youtube_video_id or None
 
 
-def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
+def song_for_file_plan(session, artist_name: str, title: str, project: str | None = None) -> tuple:
     """(artist, song) a new song for a file would get: the database's
     artist matching `artist_name` (None = a new one is made), and the song
     of that artist the title already is, as loosely as files are matched
@@ -93,25 +96,26 @@ def song_for_file_plan(session, artist_name: str, title: str) -> tuple:
     if artist is None:
         return None, None
     songs = session.query(Song).filter(Song.artist_id == artist.id).all()
-    return artist, find_song_loosely(title, songs)
+    return artist, find_song_loosely(title, songs, project=project)
 
 
 def add_song_for_file(session, artist_name: str, title: str, even_if_similar: bool = False,
-                      feat_artists: list | None = None, album: str | None = None, year: int | None = None) -> Song:
+                      feat_artists: list | None = None, album: str | None = None, year: int | None = None,
+                      project: str | None = None, project_whole: bool = False) -> Song:
     """Add a song by `artist_name` titled `title` for a file the database
     has nothing for - the existing artist (and song) when there is one, as
     song_for_file_plan() shows it; with `even_if_similar` a new song even
     then (the user said the one found isn't it). Made like an import's
     song (create_song_entry(): "X (Full Album)" is a full album, and a new
     song is credited `feat_artists` and gets `album` and `year`; an existing
-    one is left as it is). The caller commits."""
-    artist, song = song_for_file_plan(session, artist_name, title)
+    one is left as it is; `project`: that project's recording). The caller commits."""
+    artist, song = song_for_file_plan(session, artist_name, title, project)
     if song is not None and not even_if_similar:
         return song
     if artist is None:
         artist = add_db_entry(Artist(name=artist_name), session)
-    return create_song_entry({"title": title, "feat_artists": feat_artists, "album": album, "year": year},
-                             artist, session)
+    return create_song_entry({"title": title, "feat_artists": feat_artists, "album": album, "year": year,
+                              "project": project, "project_whole": project_whole}, artist, session)
 
 
 def folder_mp3_files(folder: Path) -> list[Path]:
@@ -213,7 +217,8 @@ def build_folder_playlist(session, folder: Path, min_artist_similarity: float = 
             # as the user is shown it
             metadata = metadata.copy_with(title=unescape_entities(file.stem))
         track = FolderTrack(file=file, title=metadata.title, artist=None, feat_artists=list(metadata.feat_artists or []),
-                            album=metadata.album, year=song_year(metadata.year))
+                            album=metadata.album, year=song_year(metadata.year), project=metadata.project,
+                            project_whole=bool(metadata.project_whole))
         track.duration_s = metadata.duration_s or audio_duration(file)
         # The length tells a whole-album file from a track (song_kinds.songs_for_entry())
         metadata = metadata.copy_with(duration_s=track.duration_s)

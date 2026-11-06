@@ -197,7 +197,8 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     database like a file (folder_playlist.match_track())."""
     track = FolderTrack(file=None, title=entry.metadata.title or entry.label,
                         artist=entry.metadata.artist, duration_s=entry.duration_s,
-                        feat_artists=list(entry.metadata.feat_artists or []), album=entry.metadata.album)
+                        feat_artists=list(entry.metadata.feat_artists or []), album=entry.metadata.album,
+                        project=entry.metadata.project, project_whole=bool(entry.metadata.project_whole))
     track.youtube_link = track.youtube_video_id = entry.video_id
     track.link_song_id = entry.song.id if entry.song is not None else None
     if entry.song is not None:

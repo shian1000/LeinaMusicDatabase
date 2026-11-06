@@ -65,12 +65,24 @@ _METADATA_FIELDS = {"artist_name": ARTIST, "title": TITLE, "album": ALBUM}
 
 
 @dataclass
+class ProjectFields:
+    """What a title's "project_name" step reads besides the title, and what
+    it found (`reading`): sanitize_field() returns only the title, the artist
+    may change too (apply_project())."""
+    album: Optional[str] = None
+    channel: Optional[str] = None
+    raw_text: Optional[str] = None
+    reading: object = None
+
+
+@dataclass
 class Context:
     field: str
     source: str
     stage: str
     artist: Optional[str] = None  # the entry's artist, for a title step
     feat_artists: Optional[list] = None  # where the featured artists go; None: keep them in the title
+    project: Optional[ProjectFields] = None  # where a project read goes; None: keep it in the title
 
 
 @dataclass(frozen=True)
@@ -152,6 +164,17 @@ def _featured_artists(value: str, ctx: Context) -> str:
     return bare
 
 
+def _project_name(value: str, ctx: Context) -> str:
+    # Only when the project has somewhere to go, as _featured_artists()
+    if ctx.project is None:
+        return value
+    from utils.common.project_names import read_project
+    from utils.database.projects import known_projects
+    ctx.project.reading = read_project(ctx.artist, value, known_projects(), album=ctx.project.album,
+                                       channel=ctx.project.channel, raw_text=ctx.project.raw_text)
+    return (ctx.project.reading.title or value) if ctx.project.reading else value
+
+
 def _step(name, switch, stages, fields, func, mode=MODE_AUTO) -> Step:
     return Step(name, frozenset(stages), frozenset(fields), func, mode, switch)
 
@@ -168,12 +191,13 @@ _BOTH = (STAGE_RAW, STAGE_FIELD)
 # every source at once, so each step must be safe for every name it sees
 SWITCHES = (
     "html_entities", "encoding", "file_names_in_titles", "lookalike_letters",
-    "featured_artists", "year_in_title", "artist_in_title",
+    "projects", "featured_artists", "year_in_title", "artist_in_title",
     "site_names", "topic_channels", "band_word", "junk_in_titles", "quote_marks",
     "spaces",
 )
 
 FEAT_TO_CREDITS = "feat_to_credits"
+PROJECT_NAME = "project_name"
 
 STEPS = {step.name: step for step in (
     _step("html_entities", "html_entities", _FIELD, _ALL_FIELDS, lambda v, ctx: unescape_entities(v)),
@@ -181,6 +205,10 @@ STEPS = {step.name: step for step in (
     _step("nfc", "encoding", _FIELD, _ALL_FIELDS, lambda v, ctx: composed(v)),
     _step("invisible_chars", "spaces", _FIELD, _ALL_FIELDS, lambda v, ctx: strip_format_characters(v, keep_joiner=True)),
     _step("lookalike_letters", "lookalike_letters", _FIELD, _ALL_FIELDS, _fix_lookalike_letters, MODE_REVIEW),
+    # "Boys (Like a Version)" -> "Boys" of that project (the dictionary in
+    # music.db, utils/database/projects.py); in the database a list to tick
+    # (Manage database -> "Projects"), which also fixes the artist
+    _step(PROJECT_NAME, "projects", _FIELD, {TITLE}, _project_name, MODE_REVIEW),
     # "Song ft. X" -> "Song", X a featured artist; in the database Clean names'
     # checkbox list (name_cleanup.feat_move_proposals()). find_existing_song()
     # reads a stored title without its credits and tries the songs crediting
@@ -214,7 +242,7 @@ RAW_ORDER = ("site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags", 
 FIELD_ORDER = (
     "html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
     "invisible_chars", "whitespace", "lookalike_letters",
-    FEAT_TO_CREDITS, "title_year", "artist_in_title",
+    PROJECT_NAME, FEAT_TO_CREDITS, "title_year", "artist_in_title",
     "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
     "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", "junk_marker_brackets",
     "quote_marks",
@@ -294,11 +322,11 @@ def enabled_steps(source: str, stage: str, field: str | None = None, review: boo
     return steps
 
 
-def _run(value, source, stage, field, artist, review, feat_artists=None) -> list[tuple[str, str, str]]:
+def _run(value, source, stage, field, artist, review, feat_artists=None, project=None) -> list[tuple[str, str, str]]:
     changes = []
     if not value:
         return changes
-    ctx = Context(field=field, source=source, stage=stage, artist=artist, feat_artists=feat_artists)
+    ctx = Context(field=field, source=source, stage=stage, artist=artist, feat_artists=feat_artists, project=project)
     for step in enabled_steps(source, stage, field, review):
         new_value = step.func(value, ctx)
         if new_value != value:
@@ -314,7 +342,7 @@ def _run(value, source, stage, field, artist, review, feat_artists=None) -> list
 # "(Official Video)" say something about the song
 CUTTING_STEPS = frozenset({
     "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
-    "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", FEAT_TO_CREDITS,
+    "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", FEAT_TO_CREDITS, PROJECT_NAME,
 })
 
 
@@ -343,12 +371,14 @@ def sanitize_raw(text: str | None, source: str, removed: list | None = None) -> 
 
 
 def sanitize_field(value: str | None, field: str, source: str, *, artist: str | None = None,
-                   removed: list | None = None, feat_artists: list | None = None) -> str | None:
+                   removed: list | None = None, feat_artists: list | None = None,
+                   project: ProjectFields | None = None) -> str | None:
     """`value` of `field` ("title", "artist", "album") after `source`'s
     field steps; `artist` is the entry's artist, for a title. What they cut
     is appended to `removed`, the featured artists a title credits to
-    `feat_artists` - without it they stay in the title."""
-    changes = _run(value, source, STAGE_FIELD, field, artist, review=False, feat_artists=feat_artists)
+    `feat_artists` - without it they stay in the title - and the project it
+    names to `project` (apply_project()), the same way."""
+    changes = _run(value, source, STAGE_FIELD, field, artist, review=False, feat_artists=feat_artists, project=project)
     if removed is not None:
         removed.extend(cut_parts(changes, field))
     return changes[-1][2] if changes else value
@@ -362,22 +392,39 @@ def sanitize_changes(value: str | None, field: str, source: str, *, artist: str 
     return _run(value, source, STAGE_FIELD, field, artist, review)
 
 
+def apply_project(metadata: dict, project: ProjectFields) -> None:
+    """A title's project read onto the entry; the artist too, when the one it
+    came with was only the project or its channel. Read again from a cleaned
+    entry (an mp3's tags, then its file name), the first reading stays."""
+    reading = project.reading
+    if reading is None:
+        return
+    metadata["project"] = reading.project
+    metadata["artist_name"] = reading.artist
+    if reading.whole:
+        metadata["project_whole"] = True
+
+
 def sanitize_metadata(metadata: dict, source: str) -> dict:
     """`metadata` (an import_engine metadata dict) with its artist, title and
     album cleaned by `source`'s field steps, in place. The title first, with
     the artist as it came; a field cleaned down to nothing becomes None. The
     featured artists the title credits go to feat_artists (cleaned twice -
     an mp3's tags, then its file name - the first names stay). What the
-    steps cut goes to a SongEntry's `removed`."""
+    steps cut goes to a SongEntry's `removed`, a project it names to `project`."""
     removed = getattr(metadata, "removed", None)
     artist = metadata.get("artist_name")
     feat_artists = list(metadata.get("feat_artists") or [])
+    project = ProjectFields(metadata.get("album"), getattr(metadata, "channel", None), getattr(metadata, "raw_text", None))
     for key in ("title", "artist_name", "album"):
         value = metadata.get(key)
         if isinstance(value, str):
             cleaned = sanitize_field(value, _METADATA_FIELDS[key], source, artist=artist, removed=removed,
-                                     feat_artists=feat_artists if key == "title" else None)
+                                     feat_artists=feat_artists if key == "title" else None,
+                                     project=project if key == "title" else None)
             metadata[key] = cleaned if cleaned or not value else None
+            if key == "title":
+                apply_project(metadata, project)
     if feat_artists or "feat_artists" in metadata:
         metadata["feat_artists"] = feat_artists
     return metadata

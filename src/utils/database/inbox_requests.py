@@ -79,6 +79,7 @@ from config.constants import (
     PHONE_REQUEST_FORMAT,
 )
 from settings import Settings, drive_unavailable_message, sharing_dir_available
+from utils.common.project_names import search_title
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import normalize
 from utils.database.additional_videos import add_additional_video, drop_additional_videos, song_for_video
@@ -860,10 +861,10 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
         song = case.song
         try:
             found = search_video_ytdlp(
-                song_main_artist_label(song), song.title,
+                song_main_artist_label(song), search_title(song),
                 artist_synonyms=artist_match_synonyms(song.artist), language=song.language,
                 artist_credits=song_artist_credits(song), title_latin=song.title_latin,
-                full_album=is_full_album(song),
+                full_album=is_full_album(song) and not song.project_id,
             )
         except Exception as exc:
             flog(f"Search for inbox request {song.artist.name} - {song.title} failed: {exc}")

@@ -101,6 +101,19 @@ def test_export_keeps_the_allow_list_and_empties_the_rest(sources, tmp_path):
     assert pe.check_public_database(music, pe.MUSIC_SPEC) == []
 
 
+def test_projects_are_published_with_their_songs(sources, tmp_path):
+    conn = sqlite3.connect(str(sources["music"]))
+    with conn:
+        conn.execute("UPDATE songs SET project_id = (SELECT id FROM projects WHERE name = 'Tiny Desk')")
+    conn.close()
+    out = tmp_path / "out"
+    out.mkdir()
+    pe.export_public_databases(sources, out)
+    assert _rows(out / "music.db", "SELECT p.name, p.channels FROM songs s JOIN projects p ON p.id = s.project_id") == [
+        ("Tiny Desk", "NPR Music")]
+    assert pe.check_public_database(out / "music.db", pe.MUSIC_SPEC) == []
+
+
 def test_dropped_mood_flags_are_gone_after_the_migrations(sources):
     columns = {r[1] for r in _rows(sources["music"], "PRAGMA table_info(songs)")}
     assert not {"nostalgic", "melancholic", "party"} & columns
