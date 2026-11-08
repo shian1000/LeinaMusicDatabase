@@ -426,7 +426,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   `SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS` ("Air" starts too many titles), and a title left as
   only a bracket is no split (Leina Radio's swapped "I Follow Rivers" / "Lykke Li (La Vie
   d'Adèle)"). Checked against every real request in the inbox (2026-10-27): only correct new
-  suggestions. A request with no artist at all (a file on Leina Radio's phone without an artist
+  suggestions. A title that as a whole is an artist music.db knows by exactly that name, the
+  request's artist being one it doesn't know, is suggested swapped ("Chciałem być" / "Krzysztof
+  Krawczyk" -> Krzysztof Krawczyk / "Chciałem być"; same length rule, never for a generic Topic
+  channel, only ever a suggestion). A request with no artist at all (a file on Leina Radio's phone without an artist
   tag, named "Title Artist") is also split when its title *ends* with one artist music.db knows by
   exactly that name, same length rules ("Arriving somewhere but not here Porcupine Tree" ->
   Porcupine Tree / "Arriving somewhere but not here", then settled as already in the database);

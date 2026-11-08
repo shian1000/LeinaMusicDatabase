@@ -216,7 +216,11 @@ def test_an_unknown_channel_suggests_the_artist_from_the_title_even_a_new_one(en
     ("Some Uploads", "Бумбокс і Тіна Кароль Безодня", None),  # where "Тіна Кароль" ends is a guess
     ("фан Тіна кароль", "Тіна Кароль Безодня", None),          # only the channel knows it
     ("Okean Elzy", "Бумбокс Безодня", None),                   # another known artist's channel
-    ("Some Uploads", "Бумбокс", None),                         # nothing left for the title
+    ("Some Uploads", "Бумбокс", ("Бумбокс", "Some Uploads")),  # the whole title is the artist: swapped
+    ("Some Uploads", "BoomBox", ("Бумбокс", "Some Uploads")),  # a synonym, as the database spells it
+    ("Okean Elzy", "Бумбокс", None),                           # both known
+    ("Release", "Бумбокс", None),                              # a generic Topic channel
+    ("Some Uploads", "Air", None),                             # a short lone name is a likely title
     ("Some Uploads", "Бумбокс і", None),
     ("Some Uploads", "Air Безодня", None),                     # a short lone name starts many titles
     ("Some Uploads", "Бумбоксы Безодня", None),                # not exactly the name

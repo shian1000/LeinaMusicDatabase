@@ -41,7 +41,8 @@ A request with no artist at all (a file on the phone whose tags have none,
 named "Title Artist") whose title ends with an artist the database knows by
 exactly that name ("Arriving somewhere but not here Porcupine Tree") suggests
 that split as well - only then, since a channel's own name is the likelier
-artist. The review offers it first, and the "already in the database" check uses it
+artist. A whole title that is an artist the database knows by exactly that
+name, with an artist it doesn't know, suggests the two swapped. The review offers it first, and the "already in the database" check uses it
 too.
 
 A YouTube request whose artist is a generic Topic channel ("Release" - YouTube
@@ -101,6 +102,7 @@ REJECTED_BEFORE = "rejected before"
 
 # Where a suggestion comes from (shown in the review)
 SUGGESTED_FROM_TITLE = "the title starts with the artist"
+SUGGESTED_FROM_SWAP = "the title is a known artist's name"
 SUGGESTED_FROM_DESCRIPTION = "credited in the YouTube video's description"
 SUGGESTED_FROM_CHANNEL = "the YouTube video's title and channel"
 
@@ -227,7 +229,8 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     ("familyboombox" / "Ангела" -> ("Бумбокс", "Ангела")), unless it starts
     with known artists (_artists_at_start()), or - asked with no artist at
     all, a file on the phone named "Title Artist" - ends with one
-    (_artist_at_end()). None otherwise - a
+    (_artist_at_end()), or is swapped with an unknown artist
+    (_swapped_artist_title()). None otherwise - a
     known artist's channel uploading another artist's song is left as
     asked."""
     parts = _split_title(title or "")
@@ -238,6 +241,9 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
         at_end = None if artist else _artist_at_end(title or "", matcher)
         if at_end is not None:
             return at_end
+        swapped = _swapped_artist_title(artist, title or "", matcher)
+        if swapped is not None:
+            return swapped
         known = _known_by_other_name(artist, matcher)
         return (known.name, title) if known is not None and title else None
     in_title = matcher.artist(parts[0])
@@ -310,6 +316,20 @@ def _artist_at_end(title: str, matcher) -> tuple | None:
             return None
         return db_artist.name, rest
     return None
+
+
+def _swapped_artist_title(artist: str | None, title: str, matcher) -> tuple | None:
+    """(title as the database's artist, artist) when the whole title is an
+    artist the database knows by exactly that name and `artist` is one it
+    doesn't: "Chciałem być" / "Krzysztof Krawczyk" -> ("Krzysztof Krawczyk",
+    "Chciałem być"). None for a short lone name ("Air"), which too many songs
+    are called, and for a generic Topic channel, which is no song title."""
+    if not artist or is_generic_channel_artist(artist) or matcher.artist(artist) is not None:
+        return None
+    if len(name_key(title)) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
+        return None
+    db_artist = _known_exactly(title, matcher)
+    return (db_artist.name, artist) if db_artist is not None else None
 
 
 def _artist_words(words: list, i: int, title: str, channel: str | None, matcher) -> tuple | None:
@@ -527,7 +547,8 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
     rejected = _rejected_rows(session)
     for key, case in cases.items():
         case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
-        case.suggested_from = SUGGESTED_FROM_TITLE if case.suggested else None
+        if case.suggested:
+            case.suggested_from = SUGGESTED_FROM_SWAP if case.suggested[1] == case.latest.artist else SUGGESTED_FROM_TITLE
         if _settle(session, key, case, rejected, matcher):
             continue
         # Only now, the description fetch being slow
