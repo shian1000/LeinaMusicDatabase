@@ -153,7 +153,7 @@ non-trivial work in that area.
   request naming one is turned down without asking YouTube again, and the phone, which reads the
   table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: every 15 min a
   systemd user timer (`musicdatabase-inbox`, `auto_resolve_requests.py` at the repo root, installed
-  with the sharing service) takes `Inbox/new/`. It replaces a dead link, or fills a missing one the phone
+  with the sharing service) moves each readable file from `Inbox/new/` to `Inbox/valid/` (`read_new_requests()`, the only way on) and works from there. It replaces a dead link, or fills a missing one the phone
   found, only when the phone's and our search agree and the video plays. It saves a correction only from a user with the
   `apply_corrections` permission and when nothing conflicts. The rest goes to `Inbox/review/` with
   a note why. Manage database → "Resolve new requests" (`utils/ui/inbox_request_review.py`) runs the
@@ -348,12 +348,18 @@ non-trivial work in that area.
   is, because the systemd unit runs it by that path. `tests/contract/` is the sharing API as a
   black box over HTTP, the specification for both servers: a change to an endpoint, status, header
   or JSON shape the app relies on changes it too. It imports no server code; `CONTRACT_SERVER=mdw`
-  runs it against MDW.
+  runs it against MDW's base and `mdw-sync` with that add-on.
 - `wired/` — MusicDatabaseWired, a program of its own with its own `venv/`, `.env` and README
-  ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)). FastAPI, with the rules in the core. It imports
+  ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)). FastAPI, with the rules in the core. Its base only
+  logs phones in and checks requests; syncing and the catalog are the `addons/` package, off by default, so
+  anything beyond that goes there and not into `app.py`. It imports
   only the core and the owner-approved packages (`wired/DEPENDENCIES.md`,
   `tests/test_wired_imports.py`), never this program. A new or upgraded package there is the owner's
-  decision, and FastAPI stays at 0.141.1 on purpose: newer ones require OpenTelemetry. Pytest runs from
+  decision. FastAPI requires `opentelemetry-api`, which MDW keeps switched off: no SDK or exporter may be added.
+  `vetting.py` checks each request with Pydantic and hands on a new file: a new table, column, format or
+  correctable field of the app's requests needs a model there too, or those requests wait in `held/`
+  (the inbox's folders are `request_folders.py`; the programs share only that layout)
+  (`CORRECTABLE_FIELDS` in the core mirrors `inbox_field_corrections.FIELDS`). Pytest runs from
   this program's venv and treats MDW as a black box (`tests/test_wired.py`).
 - `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
   copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one

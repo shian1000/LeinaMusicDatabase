@@ -188,91 +188,60 @@ _SRC = str(Path(__file__).resolve().parents[2])
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from musicdatabase_core import (account_auth, folder_sync, global_mood_log, listen_sync,  # noqa: E402
+from musicdatabase_core import (account_auth, folder_sync, global_mood_log, inbox_files, listen_sync,  # noqa: E402
                                 mood_sync, playlist_sync, saved_sync, user_covers)
-from musicdatabase_core.certificates import certificate_code  # noqa: E402
+from musicdatabase_core.certificates import (TLS_CERT_FILE, TLS_KEY_FILE, certificate_code,  # noqa: E402
+                                             ensure_tls_certificate, tls_certificate_code)
+from musicdatabase_core.inbox_files import (DEFAULT_INBOX_LIMIT_BYTES, DEFAULT_MAX_REQUEST_BYTES,  # noqa: E402
+                                            INBOX_KEPT_FOLDERS, INBOX_NEW, INBOX_PROCESSED, INBOX_REVIEW)
 from musicdatabase_core.request_format import REQUEST_NAME_RE, SQLITE_HEADER  # noqa: E402
+from musicdatabase_core.server_rules import (ANONYMOUS_INBOX_SHARE, ANONYMOUS_UPLOAD_WINDOW_SECONDS,  # noqa: E402
+                                             ANONYMOUS_UPLOADS_PER_WINDOW, COVER_CACHE_CONTROL,
+                                             DEFAULT_MAX_PLAYLIST_BYTES, FOLDER_MAX_BODY_BYTES,
+                                             GLOBAL_MOOD_COVER_MAX_BODY_BYTES, LISTEN_MAX_BODY_BYTES,
+                                             LOGIN_FAILURE_WINDOW_SECONDS, LOGIN_LOCKOUT_SECONDS,
+                                             LOGIN_MAX_BODY_BYTES, LOGIN_MAX_FAILURES, MAX_CONNECTIONS,
+                                             REQUEST_SOCKET_TIMEOUT, SAVED_MAX_BODY_BYTES, LoginLimiter,
+                                             UploadLimiter, host_allowed, plain_int)
 
 SHARED_FILES = ("music.db", "tag.db", "files.db")
 RETRY_SECONDS = 10
-TLS_CERT_FILE = "cert.pem"
-TLS_KEY_FILE = "key.pem"
-TLS_CERT_DAYS = 3650
 # A client that connects and never finishes the TLS handshake gives up its thread after this
 TLS_HANDSHAKE_TIMEOUT = 15
-# ... and one that sends no request (or stops mid-headers) after this
-REQUEST_SOCKET_TIMEOUT = 60
-# Connections served at once, over every socket of the process: one more is
-# closed unanswered before it gets a thread
-MAX_CONNECTIONS = 64
 TAILSCALE_NETWORK = ipaddress.IPv4Network("100.64.0.0/10")
 
 INBOX_PREFIX = "/inbox/"
-INBOX_NEW = "new"
-INBOX_REVIEW = "review"
-INBOX_PROCESSED = "processed"
-# Where a request sent again counts as received already - by HTTP and in a
-# package (request_packages.py) alike. Not rejected/: a file rejected as
-# unreadable may come back fixed, and then it's a new request.
-INBOX_KEPT_FOLDERS = (INBOX_NEW, INBOX_REVIEW, INBOX_PROCESSED)
-DEFAULT_MAX_REQUEST_BYTES = 1024 * 1024
-DEFAULT_INBOX_LIMIT_BYTES = 100 * 1024 * 1024
+INBOX_ANSWERS = {
+    inbox_files.STORED: (HTTPStatus.CREATED, "stored"),
+    inbox_files.ALREADY_HERE: (HTTPStatus.OK, "already received"),
+    inbox_files.NAME_TAKEN: (HTTPStatus.CONFLICT, "another request has this name"),
+    inbox_files.FULL: (HTTPStatus.INSUFFICIENT_STORAGE, "inbox full"),
+    inbox_files.FULL_FOR_UNSIGNED: (HTTPStatus.INSUFFICIENT_STORAGE, "inbox full for requests without logging in"),
+}
 # A phone that stops sending mid-upload mustn't hold a server thread forever
 UPLOAD_SOCKET_TIMEOUT = 60
-# Partial uploads start with a dot; the inbox reader skips them
-_PART_PREFIX = "."
-_PART_SUFFIX = ".part"
-LOGIN_MAX_BODY_BYTES = 4096
-LOGIN_MAX_FAILURES = 5
-LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
-LOGIN_LOCKOUT_SECONDS = 5 * 60
-# Unsigned uploads (no user in the request name) per client address, then 429
-ANONYMOUS_UPLOADS_PER_WINDOW = 30
-ANONYMOUS_UPLOAD_WINDOW_SECONDS = 60 * 60
-# Unsigned files may fill at most this share of --inbox-limit-bytes, so
-# logged-in users always have room
-ANONYMOUS_INBOX_SHARE = 0.5
-# A playlist may have up to 5000 tracks (the app's limit)
-DEFAULT_MAX_PLAYLIST_BYTES = 8 * 1024 * 1024
 # /users/<name>/playlists[/<uid>]
 PLAYLISTS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/playlists(?:/(?P<uid>[^/]+))?$")
 # /users/<name>/moods[/<uid>]
 MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$")
 # /users/<name>/folders[/<uid>]
 FOLDERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/folders(?:/(?P<uid>[^/]+))?$")
-# A folder holds only refs; the app has no limit, this is generous
-FOLDER_MAX_BODY_BYTES = 1024 * 1024
 # /users/<name>/saved-songs[/<uid>], /users/<name>/later-links[/<uid>]
 SAVED_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/(?P<collection>saved-songs|later-links)(?:/(?P<uid>[^/]+))?$")
-# One song or link with a few names; generous
-SAVED_MAX_BODY_BYTES = 64 * 1024
 # /users/<name>/listens
 LISTENS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/listens$")
-# The phone sends up to 500 plays, ~250 KB of JSON
-LISTEN_MAX_BODY_BYTES = 1024 * 1024
 # /users/<name>: who the token is and what they may do
 USER_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)$")
 # /users/<name>/covers/<sha256>
 COVERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/covers/(?P<sha>[^/]+)$")
 # /users/<name>/global-mood-covers[/<mood id>]
 GLOBAL_MOOD_COVERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/global-mood-covers(?:/(?P<mood>[^/]+))?$")
-GLOBAL_MOOD_COVER_MAX_BODY_BYTES = 4096
-# A hash never changes its picture
-COVER_CACHE_CONTROL = "private, max-age=31536000, immutable"
 # /global-moods/<mood id>/songs/<song id>
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 # /library/<files.id>
 LIBRARY_PATH_RE = re.compile(r"^/library/(?P<id>[1-9][0-9]{0,17})$")
 # The synced collections answer only these
 ITEM_METHODS = ("GET", "PUT", "DELETE")
-# A number in a query or a Content-Length: ASCII digits only (str.isdigit()
-# also takes "²"), at most 18 - an SQLite integer
-PLAIN_INT_RE = re.compile(r"[0-9]{1,18}")
-
-
-def plain_int(text: str | None) -> int | None:
-    """`text` as a non-negative integer, None when it isn't a plain one."""
-    return int(text) if text is not None and PLAIN_INT_RE.fullmatch(text) else None
 
 
 # The endpoints that need --users: (path, the methods it answers, handler
@@ -301,104 +270,6 @@ BYTE_RANGE_RE = re.compile(r"^\s*bytes\s*=\s*(?P<first>[0-9]*)\s*-\s*(?P<last>[0
 LIBRARY_SOCKET_TIMEOUT = 60
 # The same for a phone downloading music.db / tag.db / files.db
 SHARED_FILE_SOCKET_TIMEOUT = 60
-
-
-class LoginLimiter:
-    """Failed logins per client address and per username: LOGIN_MAX_FAILURES
-    within the window lock that key out for LOGIN_LOCKOUT_SECONDS. In memory
-    only."""
-
-    def __init__(self, clock=time.monotonic):
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._failures: dict[tuple, list[float]] = {}
-        self._locked_until: dict[tuple, float] = {}
-
-    def retry_after(self, keys) -> int:
-        """Seconds until every key may try again; 0 = not locked."""
-        now = self._clock()
-        with self._lock:
-            until = max((self._locked_until.get(k, 0.0) for k in keys), default=0.0)
-        return max(0, int(until - now + 0.999))
-
-    def failed(self, keys) -> None:
-        now = self._clock()
-        with self._lock:
-            self._forget_old(now)
-            for key in keys:
-                recent = [t for t in self._failures.get(key, []) if now - t < LOGIN_FAILURE_WINDOW_SECONDS]
-                recent.append(now)
-                if len(recent) >= LOGIN_MAX_FAILURES:
-                    self._locked_until[key] = now + LOGIN_LOCKOUT_SECONDS
-                    recent = []
-                self._failures[key] = recent
-
-    def succeeded(self, keys) -> None:
-        with self._lock:
-            for key in keys:
-                self._failures.pop(key, None)
-
-    def _forget_old(self, now: float) -> None:
-        """Drop failures older than the window and lockouts that ran out - a
-        made-up name per try must not grow these dicts for as long as the
-        server runs."""
-        for key in [k for k, times in self._failures.items()
-                    if not any(now - t < LOGIN_FAILURE_WINDOW_SECONDS for t in times)]:
-            del self._failures[key]
-        for key in [k for k, until in self._locked_until.items() if until <= now]:
-            del self._locked_until[key]
-
-
-class UploadLimiter:
-    """Unsigned inbox uploads per client address: ANONYMOUS_UPLOADS_PER_WINDOW
-    within the window, then none until the oldest leaves it. In memory only."""
-
-    def __init__(self, limit: int = ANONYMOUS_UPLOADS_PER_WINDOW,
-                 window: float = ANONYMOUS_UPLOAD_WINDOW_SECONDS, clock=time.monotonic):
-        self._limit, self._window, self._clock = limit, window, clock
-        self._lock = threading.Lock()
-        self._uploads: dict[str, list[float]] = {}
-
-    def take(self, key: str) -> int:
-        """0 after counting an upload from `key`; else the seconds until it may send one."""
-        now = self._clock()
-        with self._lock:
-            # Every address's old uploads go, so the dict can't grow for as long as the server runs
-            for k in list(self._uploads):
-                recent = [t for t in self._uploads[k] if now - t < self._window]
-                if recent:
-                    self._uploads[k] = recent
-                else:
-                    del self._uploads[k]
-            recent = self._uploads.setdefault(key, [])
-            if len(recent) >= self._limit:
-                return max(1, int(recent[0] + self._window - now + 0.999))
-            recent.append(now)
-            return 0
-
-
-def _unsigned_size(path: str) -> int:
-    """Bytes of the request files in `path` whose name carries no user."""
-    total = 0
-    if not os.path.isdir(path):
-        return 0
-    with os.scandir(path) as entries:
-        for entry in entries:
-            match = REQUEST_NAME_RE.match(entry.name)
-            if match and match.group("user") is None and entry.is_file(follow_symlinks=False):
-                total += entry.stat(follow_symlinks=False).st_size
-    return total
-
-
-def _dir_size(path: str) -> int:
-    total = 0
-    if not os.path.isdir(path):
-        return 0
-    with os.scandir(path) as entries:
-        for entry in entries:
-            if entry.is_file(follow_symlinks=False):
-                total += entry.stat(follow_symlinks=False).st_size
-    return total
 
 
 class RangeNotSatisfiable(Exception):
@@ -452,14 +323,6 @@ def library_file_path(files_db: str, library_dir: str, file_id: int) -> str | No
     return target
 
 
-def _same_content(path: str, data: bytes) -> bool:
-    try:
-        with open(path, "rb") as f:
-            return f.read(len(data) + 1) == data
-    except OSError:
-        return False
-
-
 def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None,
                  max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
                  inbox_limit_bytes: int = DEFAULT_INBOX_LIMIT_BYTES,
@@ -470,15 +333,13 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
     # Names the Host header may carry besides an IP address; main() adds the
     # MagicDNS name once a socket is up, so it's read on every request
     host_names = host_names if host_names is not None else set()
-    # One lock for "is there room / is the name free" + the write, so two
-    # uploads at once can't both squeeze past the limit or take one name.
-    inbox_lock = threading.Lock()
     # Storing a blob, checking a cover exists + the write naming it, and the
     # clean-up never interleave, so a clean-up can't remove a blob between
     # the check and the commit
     covers_lock = threading.Lock()
     limiter = limiter or LoginLimiter()
     upload_limiter = upload_limiter or UploadLimiter()
+    inbox = inbox_files.Inbox(inbox_dir, inbox_limit_bytes) if inbox_dir else None
 
     def data_available() -> bool:
         # On an external drive (--mount): only while it's mounted. Without
@@ -1362,45 +1223,15 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             self._store(name, data, unsigned)
 
         def _store(self, name: str, data: bytes, unsigned: bool = False):
-            new_dir = os.path.join(inbox_dir, INBOX_NEW)
-            target = os.path.join(new_dir, name)
-            with inbox_lock:
-                try:
-                    os.makedirs(new_dir, exist_ok=True)
-                    # Sent again (e.g. the answer to the first try got lost)
-                    for folder in INBOX_KEPT_FOLDERS:
-                        existing = os.path.join(inbox_dir, folder, name)
-                        if os.path.exists(existing):
-                            if _same_content(existing, data):
-                                self._reply(HTTPStatus.OK, "already received")
-                            else:
-                                self._reply(HTTPStatus.CONFLICT, "another request has this name")
-                            return
-                    review_dir = os.path.join(inbox_dir, INBOX_REVIEW)
-                    waiting = _dir_size(new_dir) + _dir_size(review_dir)
-                    if waiting + len(data) > inbox_limit_bytes:
-                        self._reply(HTTPStatus.INSUFFICIENT_STORAGE, "inbox full")
-                        return
-                    if unsigned and (_unsigned_size(new_dir) + _unsigned_size(review_dir) + len(data)
-                                     > inbox_limit_bytes * ANONYMOUS_INBOX_SHARE):
-                        self._reply(HTTPStatus.INSUFFICIENT_STORAGE, "inbox full for requests without logging in")
-                        return
-                    part = os.path.join(new_dir, f"{_PART_PREFIX}{name}{_PART_SUFFIX}")
-                    try:
-                        with open(part, "wb") as f:
-                            f.write(data)
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.replace(part, target)
-                    finally:
-                        if os.path.exists(part):
-                            os.unlink(part)
-                except OSError as exc:
-                    print(f"Storing request {name} failed: {exc}", flush=True)
-                    self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                    return
-            print(f"Received request {name} ({len(data)} bytes)", flush=True)
-            self._reply(HTTPStatus.CREATED, "stored")
+            try:
+                outcome = inbox.store(name, data, unsigned)
+            except OSError as exc:
+                print(f"Storing request {name} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            if outcome == inbox_files.STORED:
+                print(f"Received request {name} ({len(data)} bytes)", flush=True)
+            self._reply(*INBOX_ANSWERS[outcome])
 
         def _reply(self, status: HTTPStatus, detail: str | None = None, headers: dict | None = None):
             if status == HTTPStatus.NO_CONTENT:
@@ -1438,32 +1269,6 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self.wfile.write(body)
 
     return ShareHandler
-
-
-def host_allowed(host: str | None, names: set[str]) -> bool:
-    """
-    Whether a Host header is one this server answers: any IP address (DNS
-    rebinding needs a domain name, and the sockets only take their own
-    addresses anyway), "localhost", or one of `names` (lowercase), with or
-    without a port. No header at all (an HTTP/1.0 client) passes too - a
-    browser always sends one.
-    """
-    if host is None:
-        return True
-    if not host:
-        return False
-    try:
-        hostname = urlsplit(f"//{host}").hostname
-    except ValueError:
-        return False
-    if not hostname:
-        return False
-    try:
-        ipaddress.ip_address(hostname)
-        return True
-    except ValueError:
-        pass
-    return hostname == "localhost" or hostname in names
 
 
 def tailscale_dns_name() -> str | None:
@@ -1538,32 +1343,6 @@ def _interface_addresses(interface: str) -> list:
         except ValueError:
             continue
     return found
-
-
-def tls_certificate_code(tls_dir: str) -> str | None:
-    """certificate_code() of the certificate in tls_dir, None when there's none (yet)."""
-    try:
-        with open(os.path.join(tls_dir, TLS_CERT_FILE), encoding="ascii") as file:
-            return certificate_code(ssl.PEM_cert_to_DER_cert(file.read()))
-    except (OSError, ValueError):
-        return None
-
-
-def ensure_tls_certificate(tls_dir: str, run=subprocess.run) -> None:
-    """Makes the server's own certificate and key in tls_dir unless both are
-    there. The folder and the key are this user's only."""
-    cert = os.path.join(tls_dir, TLS_CERT_FILE)
-    key = os.path.join(tls_dir, TLS_KEY_FILE)
-    if os.path.exists(cert) and os.path.exists(key):
-        return
-    os.makedirs(tls_dir, mode=0o700, exist_ok=True)
-    old_umask = os.umask(0o077)
-    try:
-        run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
-             "-nodes", "-days", str(TLS_CERT_DAYS), "-subj", "/CN=MusicDatabase sharing server",
-             "-keyout", key, "-out", cert], check=True, capture_output=True, timeout=60)
-    finally:
-        os.umask(old_umask)
 
 
 def tls_context(tls_dir: str) -> ssl.SSLContext:

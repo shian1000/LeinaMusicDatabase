@@ -43,6 +43,11 @@ def test_login_without_a_length_is_a_411(fresh_server):
     connection.close()
 
 
+def test_logout_always_answers_204(server):
+    assert server.call("POST", "/logout", "not-a-token").status == 204
+    assert server.call("POST", "/logout").status == 204
+
+
 def test_repeated_failures_lock_out_with_retry_after(fresh_server):
     """The phone shows the wait from Retry-After, in minutes."""
     name = fresh_server.add_user()
@@ -53,6 +58,7 @@ def test_repeated_failures_lock_out_with_retry_after(fresh_server):
     assert int(answer.headers["Retry-After"]) > 0
 
 
+@pytest.mark.requires("sync")
 def test_logout_revokes_the_token_and_always_answers_204(server):
     name, token = server.new_user()
     assert server.call("GET", f"/users/{name}", token).status == 200
@@ -62,6 +68,7 @@ def test_logout_revokes_the_token_and_always_answers_204(server):
     assert server.call("POST", "/logout").status == 204
 
 
+@pytest.mark.requires("sync")
 def test_profile_answers_the_current_permissions(server):
     name, token = server.new_user(permissions=("edit_global_moods",))
     answer = server.call("GET", f"/users/{name}", token)
@@ -72,6 +79,7 @@ def test_profile_answers_the_current_permissions(server):
     assert server.call("GET", f"/users/{name}", token).json["permissions"] == []
 
 
+@pytest.mark.requires("sync")
 def test_a_token_works_only_for_its_user(server):
     name, token = server.new_user()
     other, other_token = server.new_user()
@@ -81,6 +89,7 @@ def test_a_token_works_only_for_its_user(server):
     assert server.call("GET", f"/users/{other}", other_token).status == 200
 
 
+@pytest.mark.requires("sync")
 def test_a_token_is_checked_before_the_body_is_read(server):
     name, token = server.new_user()
     other, _ = server.new_user()

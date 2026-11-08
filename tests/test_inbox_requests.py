@@ -79,6 +79,26 @@ def _cases(env):
 
 # ==================== reading ====================
 
+def test_a_readable_request_goes_through_valid_before_anything_else(env):
+    path = _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row()])
+    assert pr.new_request_paths() == [path]
+
+    requests = pr.read_new_requests()
+
+    assert not path.exists()
+    assert [request.path.parent.name for request in requests] == ["valid"]
+    assert pr.new_request_paths() == [env["inbox"] / "valid" / path.name]
+
+
+def test_a_request_that_cant_be_read_never_reaches_valid(env):
+    bad = env["inbox"] / "new" / "2026-10-12_23-44-05_002.db"
+    bad.write_bytes(b"not a database at all")
+
+    (request,) = pr.read_new_requests()
+
+    assert request.error and bad.exists()
+    assert not (env["inbox"] / "valid" / bad.name).exists()
+
 def test_reads_a_request_file(env):
     _request(env["inbox"], "2026-10-12_23-44-05_001.db",
              [_row(replacement="new0", replacement_title="Chromatic (Official)", replacement_channel="Elise Trouw")])

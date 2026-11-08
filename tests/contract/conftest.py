@@ -4,7 +4,7 @@ specification MDHS's server and MusicDatabaseWired must both pass.
 Every test talks to a server in a process of its own, over HTTP only, so nothing
 here may import a server's code. What a test may know about a server is in
 `ContractServer`: how to start one and the folders it is given. CONTRACT_SERVER
-picks the server (only "mdhs" so far); a test for something a server may lack
+picks the server ("mdhs" by default, "mdw" for its base, "mdw-sync" with that add-on); a test for something a server may lack
 says so with @pytest.mark.requires("feature").
 """
 
@@ -39,8 +39,22 @@ def _mdhs_command(server: "ContractServer") -> list[str]:
     return command
 
 
+def _mdw_command(server: "ContractServer") -> list[str]:
+    command = [str(REPO / "wired/venv/bin/python"), str(REPO / "wired/mdw.py"), "serve",
+               "--catalog", str(server.share), "--users", str(server.users), "--inbox", str(server.inbox),
+               "--port", str(server.port), "--address", "127.0.0.1", "--no-catalog-updates"]
+    command += ["--tls-dir", str(server.tls_dir)] if server.tls else ["--no-tls"]
+    return command
+
+
+def _mdw_sync_command(server: "ContractServer") -> list[str]:
+    return [*_mdw_command(server), "--addon", "sync"]
+
+
 TARGETS = {
-    "mdhs": (_mdhs_command, {"library", "unsigned_uploads", "global_moods", "plain_http"}),
+    "mdhs": (_mdhs_command, {"library", "unsigned_uploads", "global_moods", "plain_http", "sync", "catalog"}),
+    "mdw": (_mdw_command, {"plain_http"}),
+    "mdw-sync": (_mdw_sync_command, {"plain_http", "sync", "catalog"}),
 }
 
 

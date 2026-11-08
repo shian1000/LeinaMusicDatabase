@@ -13,11 +13,14 @@ def request_file(folder: Path, number: int = 1) -> bytes:
     path = folder / f"request-{number}.db"
     conn = sqlite3.connect(path)
     conn.executescript("""
-        CREATE TABLE request (format INTEGER, created_at TEXT, user_name TEXT, app TEXT);
+        CREATE TABLE request (format INTEGER NOT NULL, created_at TEXT NOT NULL, user_name TEXT, app TEXT NOT NULL);
         INSERT INTO request VALUES (1, '2026-11-06T10:00:00', NULL, 'Leina Player');
+        CREATE TABLE song_requests (title TEXT NOT NULL, artist TEXT, album TEXT, year INTEGER, duration_s INTEGER,
+                                    youtube_video_id TEXT, spotify_track_id TEXT, source TEXT NOT NULL,
+                                    requested_at TEXT NOT NULL);
     """)
-    conn.execute("CREATE TABLE note (value INTEGER)")
-    conn.execute("INSERT INTO note VALUES (?)", (number,))
+    conn.execute("INSERT INTO song_requests (title, artist, source, requested_at) VALUES (?, 'A', 'phone_file', 'now')",
+                 (f"Song {number}",))
     conn.commit()
     conn.close()
     return path.read_bytes()

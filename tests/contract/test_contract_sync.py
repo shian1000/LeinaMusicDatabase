@@ -6,6 +6,8 @@ import pytest
 
 from contract_helpers import answer_to_a_body_never_sent
 
+pytestmark = pytest.mark.requires("sync")
+
 UID = "8f0c1a2b-0000-4000-8000-000000000001"
 
 

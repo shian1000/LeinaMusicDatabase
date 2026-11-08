@@ -26,6 +26,7 @@ def put_cover(server, name, token, data=PNG, content_type="image/png", digest=No
                        headers={"Content-Type": content_type})
 
 
+@pytest.mark.requires("sync")
 @pytest.mark.parametrize("data, content_type", [(PNG, "image/png"), (JPEG, "image/jpeg")])
 def test_a_cover_round_trip(user, data, content_type):
     server, name, token = user
@@ -39,6 +40,7 @@ def test_a_cover_round_trip(user, data, content_type):
     assert "immutable" in answer.headers["Cache-Control"]
 
 
+@pytest.mark.requires("sync")
 def test_bad_covers(user):
     server, name, token = user
     assert put_cover(server, name, token, digest=sha(b"other")).status == 400
@@ -48,6 +50,7 @@ def test_bad_covers(user):
     assert put_cover(server, name, token, PNG, "image/jpeg").status == 415
 
 
+@pytest.mark.requires("sync")
 def test_a_cover_over_its_limit_is_a_413_on_the_headers_alone(user):
     server, name, token = user
     status = answer_to_a_body_never_sent(server, "PUT", f"/users/{name}/covers/{sha(PNG)}",
@@ -56,6 +59,7 @@ def test_a_cover_over_its_limit_is_a_413_on_the_headers_alone(user):
     assert status == 413
 
 
+@pytest.mark.requires("sync")
 def test_covers_need_their_users_token(user):
     server, name, token = user
     _, other_token = server.new_user()
@@ -69,6 +73,7 @@ def test_covers_need_their_users_token(user):
     assert answer.status == 405 and answer.headers["Allow"] == "GET, PUT"
 
 
+@pytest.mark.requires("sync")
 @pytest.mark.parametrize("collection, body", [
     ("playlists", {"name": "Mix", "created_at": 900, "updated_at": 1000, "base_revision": 0, "tracks": []}),
     ("moods", {"name": "Bieg", "created_at": 900, "updated_at": 1000, "base_revision": 0, "song_ids": []}),
@@ -92,6 +97,7 @@ def test_an_item_naming_a_cover_asks_for_the_picture_first(user, collection, bod
     assert removed["cover"] is None
 
 
+@pytest.mark.requires("sync")
 def test_a_bad_cover_hash_in_an_item_is_a_400(user):
     server, name, token = user
     body = {"name": "Mix", "created_at": 900, "updated_at": 1000, "base_revision": 0, "tracks": [],
@@ -99,6 +105,7 @@ def test_a_bad_cover_hash_in_an_item_is_a_400(user):
     assert server.call("PUT", f"/users/{name}/playlists/{UID}", token, body).status == 400
 
 
+@pytest.mark.requires("sync")
 def test_global_mood_covers_sync_like_the_rest(user):
     server, name, token = user
     base = f"/users/{name}/global-mood-covers"

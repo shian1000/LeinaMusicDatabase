@@ -61,3 +61,6 @@ Thumbs.db
 # Screenshots saved into the repo folder
 Zrzut ekranu*.png
 Screenshot*.png
+
+# MusicDatabaseWired: its accounts, requests, catalog and certificate
+/wired/data/

@@ -1,0 +1,19 @@
+# Every package MusicDatabaseWired installs, the transitive ones too, each approved by the owner:
+# reasons and licences in DEPENDENCIES.md. `pip install --no-deps` keeps anything else out.
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.16.0
+click==8.5.0
+fastapi==0.162.2
+h11==0.16.0
+idna==3.20
+opentelemetry-api==1.45.2
+prompt_toolkit==3.0.52
+pydantic==2.14.3
+pydantic_core==2.50.4
+questionary==2.1.1
+starlette==1.10.0
+typing-inspection==0.4.5
+typing_extensions==4.16.0
+uvicorn==0.54.0
+wcwidth==0.2.14

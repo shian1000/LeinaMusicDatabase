@@ -95,6 +95,7 @@ INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else
 INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
 INBOX_SHARING_DIR = Path(str(Settings.sharing_dir)) if Settings.sharing_dir else None
 NEW = "new"
+VALID = "valid"
 REVIEW = "review"
 PROCESSED = "processed"
 REJECTED = "rejected"
@@ -326,9 +327,9 @@ def _request_paths(folder: str) -> list[Path]:
 
 
 def new_request_paths() -> list[Path]:
-    """Request files nobody has looked at yet (new/), oldest name first; []
-    when the data drive isn't there."""
-    return _request_paths(NEW)
+    """Request files no step has settled yet (new/ and valid/), oldest name
+    first; [] when the data drive isn't there."""
+    return sorted(_request_paths(NEW) + _request_paths(VALID), key=lambda path: path.name)
 
 
 def review_request_paths() -> list[Path]:
@@ -448,7 +449,18 @@ def read_request_file(path: Path) -> RequestFile:
 
 
 def read_new_requests() -> list[RequestFile]:
-    return [read_request_file(path) for path in new_request_paths()]
+    """The first step: a readable file in new/ moves to valid/, and only what's
+    in valid/ goes on to the next steps (the owner's rule, ADR-0006). A file
+    that can't be read comes back with its error and never reaches valid/."""
+    unreadable = []
+    for path in _request_paths(NEW):
+        request = read_request_file(path)
+        if request.error is None:
+            _move(path, VALID)
+        else:
+            unreadable.append(request)
+    return sorted(unreadable + [read_request_file(path) for path in _request_paths(VALID)],
+                  key=lambda request: request.name)
 
 
 def read_review_requests() -> list[RequestFile]:

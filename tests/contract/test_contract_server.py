@@ -10,7 +10,9 @@ import time
 import pytest
 
 
-@pytest.mark.parametrize("name", ["music.db", "tag.db", "files.db"])
+@pytest.mark.requires("catalog")
+@pytest.mark.parametrize("name", ["music.db", "tag.db",
+                                  pytest.param("files.db", marks=pytest.mark.requires("library"))])
 def test_shared_files_download_with_their_headers(server, name):
     answer = server.call("GET", f"/{name}")
     assert answer.status == 200
@@ -21,6 +23,7 @@ def test_shared_files_download_with_their_headers(server, name):
     assert answer.headers["Last-Modified"]
 
 
+@pytest.mark.requires("catalog")
 def test_head_sends_only_the_headers(server):
     answer = server.call("HEAD", "/music.db")
     assert answer.status == 200 and answer.body == b""
@@ -38,7 +41,7 @@ def test_an_unknown_host_name_is_refused(server):
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost"])
 def test_an_address_as_host_is_served(server, host):
-    assert server.call("GET", "/music.db", headers={"Host": f"{host}:{server.port}"}).status == 200
+    assert server.call("POST", "/logout", headers={"Host": f"{host}:{server.port}"}).status == 204
 
 
 def test_a_missing_files_db_is_a_404(fresh_server):
@@ -47,6 +50,7 @@ def test_a_missing_files_db_is_a_404(fresh_server):
     assert fresh_server.call("GET", "/files.db").status == 404
 
 
+@pytest.mark.requires("catalog")
 def test_a_missing_share_folder_is_a_503(fresh_server):
     """The phone shows an error and retries the next day."""
     fresh_server.share.rename(fresh_server.folder / "moved")
@@ -54,7 +58,7 @@ def test_a_missing_share_folder_is_a_503(fresh_server):
 
 
 def test_https_with_a_certificate_of_its_own(tls_server):
-    assert tls_server.call("GET", "/music.db").status == 200
+    assert tls_server.call("POST", "/logout").status == 204
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
@@ -83,7 +87,7 @@ def test_https_keeps_serving_after_plain_http(tls_server):
     except (http.client.HTTPException, OSError):
         pass
     plain.close()
-    assert tls_server.call("GET", "/music.db").status == 200
+    assert tls_server.call("POST", "/logout").status == 204
 
 
 def test_connections_over_the_cap_are_closed_and_the_rest_keep_working(fresh_server):
@@ -96,7 +100,7 @@ def test_connections_over_the_cap_are_closed_and_the_rest_keep_working(fresh_ser
             connection.close()
     for _ in range(100):
         try:
-            if fresh_server.call("GET", "/music.db").status == 200:
+            if fresh_server.call("POST", "/logout").status == 204:
                 return
         except (OSError, http.client.HTTPException):
             pass

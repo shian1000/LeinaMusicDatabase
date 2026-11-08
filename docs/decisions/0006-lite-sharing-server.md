@@ -1,8 +1,9 @@
 # ADR-0006: MusicDatabaseWired - a public sharing server, working with MusicDatabaseHomeServer
 
-- Status: Accepted as a plan (2026-11-06, owner's decisions). Phase 1 done (`src/musicdatabase_core/`,
-  the old module names kept as redirects) and phase 2 (`tests/contract/`); MDW itself isn't built.
-  Replaces the first version
+- Status: Accepted as a plan (2026-11-06, owner's decisions). Phases 1 (`src/musicdatabase_core/`, the old
+  module names kept as redirects), 2 (`tests/contract/`), 3 and 4 (`wired/`) are done: MDW's base runs,
+  passes the contract and vets requests; its base now does only that, tried on a real phone on 2026-11-08 (login, pinned certificate, a correction reaching `valid/`, read by MDHS's reader). Before it faces the internet it still needs the playlist cover
+  rule and an audit of its packages. Replaces the first version
   of this ADR (2026-11-04), which called the new program "MusicDatabase Lite" and had users pick one
   program or the other.
 - Date: 2026-11-06
@@ -43,7 +44,9 @@ migrations and settling requests.
 
 The sync and auth rules exist exactly once, in the core. Two copies would drift apart within months.
 MDW lives in this repo so that the core and both programs can change in one commit. It can be split
-off later.
+off later. It's a program of its own (owner, 2026-11-06): someone may install only MDW, so it has its
+own venv, settings and README, and needs nothing of MDHS but the core and `migrations/user/`
+(`tests/test_wired.py` runs it from a copy holding only those).
 
 ### What goes into the core
 
@@ -66,6 +69,24 @@ own approved libraries (`mutagen` only in a library module, for example). There 
 The library index and audio streaming are a later module, not part of the base. The phone already
 accepts a 404 for `files.db`, so a server without it works.
 
+### Two servers to choose from, MDW the goal (owner, 2026-11-08)
+
+MDHS keeps its server, and MDW has its own, each started automatically on the machine that runs it.
+The user picks one. In the end MDW's is meant to be the only one, and MDHS stays the program that
+builds the catalog.
+
+- **MDW's base only checks requests** (owner, 2026-11-08): a phone logs in and hands one over, and it
+  ends in `valid/`, `held/` or `rejected/`. Syncing users' data and serving `music.db` and `tag.db` are
+  the add-on `sync` in `wired/musicdatabase_wired/addons/`, off unless `WIRED_ADDONS` names it. `files.db`,
+  streaming and global moods are later add-ons. `CONTRACT_SERVER=mdw` tests the base, `mdw-sync` the add-on.
+- **Each server has its own validation for now.** MDW's sync bodies go through Pydantic models in
+  `wired/` that give the core's store functions what `parse_*()` gives them. MDHS's server keeps
+  `parse_*()` and its system Python, unchanged during the trial. This copy is temporary and goes when
+  MDHS's server does. Until then the contract tests and a test feeding the same bodies to both keep
+  them the same. This replaces the earlier rule against a second copy.
+- **Both programs have an option saying which server runs, and ask before starting one.** Only one
+  listens on an address and port at a time. During the trial MDW keeps its own port and data.
+
 ### Who does what
 
 Every piece of data has one writer.
@@ -79,15 +100,29 @@ Every piece of data has one writer.
 | Requests | receives and vets them | settles them |
 | Global moods | off at first | as today |
 
-Work for MDHS is not a new job system, since the inbox already is a queue:
+### Requests move between folders (owner, 2026-11-08)
 
-1. A phone sends a request to MDW, which vets it.
-2. MDHS connects to MDW and fetches a package of vetted requests. The home machine connects out and
-   accepts nothing from the internet.
-3. The package goes through the existing `request_packages.py`, so these files never act with an
-   account's permissions. A friend with the same login as a user of MDHS gets nothing.
-4. The improved catalog returns through the public GitHub release, which MDW downloads with the
-   checks `first_run.py` uses.
+The two programs don't talk to each other about requests. They share a folder layout, and each does its
+own steps:
+
+1. A request arrives only in `new/`. Nothing from outside can reach any other folder.
+2. The server checks it and moves it on. A correct one goes to `valid/`, and that ends the first task,
+   the only one MDW's server does. A kind it doesn't know goes to `held/`, a failed one to `rejected/`.
+3. MDHS does the remaining steps from there, as it always has.
+4. Only the servers and the machine's admin can reach any of these folders.
+
+Without the add-on, MDW has no catalog of its own, so the check can't drop a song request the owner
+already rejected; MDHS does that later. MDW enforces (4) with folders only its account can open, and refuses to start on a drive that can't keep
+permissions. `wired/musicdatabase_wired/request_folders.py` holds the layout. The improved catalog
+returns through the public GitHub release, which MDW downloads with the checks `first_run.py` uses.
+
+MDHS has the same first step: `read_new_requests()` moves a readable file to `valid/`, and only `valid/`
+goes on to its other steps. That runs in its 15-minute automatic pass and when the owner opens "Resolve new
+requests", not in its server, which runs on the system Python without the rest of the program. Its check is
+the old one, that the file reads as a request.
+
+Open on MDHS's side: its inbox is on an exFAT drive shared over Samba, where (4) can't hold. Folders on one
+machine are also all this gives: MDW on another machine needs them copied by something outside both programs.
 
 ### Playlists made in MDHS for MDW's users
 
@@ -107,14 +142,14 @@ MDHS reads its contents. MDW adds a check before anything is passed on:
    views or triggers, limited row counts.
 3. **Contents**: every row through a Pydantic model (types, lengths, the shape of a video id, the
    fields a correction may name).
-4. **Sense**: whether the song exists in the catalog (a warning only, as the catalog may lag),
-   whether it's a duplicate, whether it was already rejected (`rejected_song_requests`).
+4. **Sense**: a song request the owner already turned down (`rejected_song_requests`) isn't passed on.
+   Whether a song exists in the catalog isn't checked: the catalog may lag.
 5. **Rewriting**: the checked data goes into a new, clean file in the same format, so MDHS never
    opens a file made by a stranger and its reader needs no change.
 
 A file ends up in one of three states:
 
-- **Accepted**: answered 201 and offered to MDHS.
+- **Accepted**: answered 201 and moved to `valid/`.
 - **Refused**: answered 400 with the reason kept on the server. Leina Player moves a file answered
   400 to its `rejected` folder and doesn't send it again.
 - **Held**: a request kind this MDW doesn't know, from a newer app. Answered 201 and kept until MDW
@@ -158,14 +193,20 @@ supports registration, because MDHS's server won't.
 - Deployment: a systemd user unit. Settings in `.env`.
 - FastAPI's defaults differ from what the phone relies on, so each of these is a requirement with a
   contract test:
-  - **Token before body**: FastAPI reads a declared body before it resolves dependencies, so the
-    token check and size limit belong in middleware.
+  - **Token before body**: FastAPI reads a declared body before it resolves dependencies, so
+    handlers take the raw `Request` and read the body themselves, after the token.
   - **Unknown fields**: Pydantic drops them by default, while sync stores data verbatim (`extra`,
-    folder items, saved songs). Those models use `extra="allow"`.
+    folder items, saved songs). So sync bodies go through the core's `parse_*()`, the one copy of
+    those rules, and Pydantic checks what only MDW takes: the login body, then a request's rows.
   - **Error codes**: FastAPI answers 422 for a bad body, and Leina Player treats an unknown code as
     a failure to retry. Validation errors map to today's answers (400, 411, 413).
   - **Carried over from today's server**: the Host check (421), the login lockout, the upload limits,
-    the 64-connection cap, the 60 s idle timeout and HTTPS with its own pinned certificate.
+    the 64-connection cap, the 60 s idle timeout and HTTPS with its own pinned certificate. The cap and
+    the timeout subclass uvicorn's protocol, which uses its internals: pinned, and tested from outside.
+    A connection counts towards the cap once its TLS handshake is done; until then asyncio's own
+    60 s handshake limit applies.
+  - **Off**: uvicorn's `proxy_headers`, since it trusts `X-Forwarded-For` from 127.0.0.1 by default and
+    the login limits go by address. A reverse proxy in front would need this looked at again.
   - **Off on a public server**: `/docs`, `/redoc` and `/openapi.json`.
 
 ### Owner's rule: control over every import
@@ -179,12 +220,12 @@ supports registration, because MDHS's server won't.
 - **Enforced by a test, not by memory.** A test walks MDW's source and fails on any import outside an
   allow-list: the standard library, the core, and the approved packages.
 - **The core stays standard-library only**, enforced the same way.
-- **Licences**: GPL-compatible only (MIT, BSD, Apache 2.0, LGPL, GPLv2-or-later, GPLv3).
+- **Licences**: GPL-compatible only (MIT, BSD, Apache 2.0, LGPL, PSF-2.0, GPLv2-or-later, GPLv3).
 - **Upgrades** are deliberate: no automatic updates. An upgrade lists what changed in the lock file
   for the owner to approve.
 
-To approve before the first install: `fastapi`, `pydantic`, `uvicorn` and `questionary` (already in
-MDHS), with the full transitive list and licences prepared at that point.
+The approved list is `wired/DEPENDENCIES.md` (17 packages), with the newest FastAPI and its telemetry
+switched off. PSF-2.0 (`typing_extensions`) is GPL-compatible too.
 
 ### Phases
 
@@ -197,13 +238,15 @@ MDHS), with the full transitive list and licences prepared at that point.
 3. **MDW's base**: FastAPI passing the contract suite, accounts in questionary, the catalog from
    GitHub, sync, the inbox. The import allow-list test exists from its first commit.
 4. **Request vetting**, as above.
-5. **The exchange with MDHS**: fetching request packages, replaying song id changes in MDW's user
-   databases, sending playlists.
+5. **The folders between the programs**: both sides have the `valid/` step. Left: a private place for MDHS's
+   inbox. Replaying song id changes in MDW's user databases and MDHS's playlists wait: MDW only validates for now.
 6. **Registration**: invite codes and the hand-off to the app.
-7. **The trial**, below.
-8. **The decision about a VPS.** Hosting is decided only after MDW works.
-9. **Splitting the duties**, only when the owner agrees to it.
-10. **Modules**: streaming and others, when needed.
+7. **Pydantic models for the sync add-on's bodies**, in `wired/`, as described under "Two servers to choose from".
+8. **A systemd service for MDW and the choice of server** in both programs' options.
+9. **The trial**, below.
+10. **The decision about a VPS.** Hosting is decided only after MDW works.
+11. **Splitting the duties**, only when the owner agrees to it.
+12. **Add-ons**: `files.db` with streaming, global moods and others, when needed.
 
 ### The trial: MDHS keeps working as it does today
 
@@ -239,7 +282,7 @@ data has been written on MDW: from then on, going back means moving that data.
 
 ## Open questions (for the owner)
 
-- How MDHS connects to MDW for the exchange: an owner-only endpoint or SSH. Decided in phase 5; on a
-  VPS it shouldn't be reachable from the public internet.
+- Playlists made in MDHS were to reach MDW through its API, which is communication between the programs.
+  The folder rule covers requests; whether playlists follow it is undecided.
 - A web page for user administration, or questionary only?
 - Whether the owner's own account ever moves to MDW. Not planned: it stays on MDHS.

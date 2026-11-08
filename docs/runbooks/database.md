@@ -262,12 +262,12 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
 
 - The server stores it in `Inbox/new/`, written as a dot-named `.part` file and `os.replace()`d
   in. It never overwrites and never serves inbox files back (a GET is a 404). Answers: 201 stored,
-  200 the same file is already in `new/`, `review/` or `processed/` (a resend), 409 another file under that
+  200 the same file is already in `new/`, `valid/`, `review/` or `processed/` (a resend), 409 another file under that
   name, 400 bad name or not SQLite, 411 no `Content-Length`, 413 over `PHONE_REQUEST_MAX_BYTES`
   (1 MiB), 429 too many requests without logging in (below), 507 inbox full, 503 data drive not
   mounted (nothing is created then). Checked in this order: name, drive, token, the unsigned
   rate limit, then the body (length, SQLite header) and the room.
-- **Inbox limit:** while the files in `new/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
+- **Inbox limit:** while the files in `new/`, `valid/` and `review/` total `PHONE_INBOX_LIMIT_BYTES` (100 MiB,
   the owner's choice) nothing more is taken; the phone keeps the request and retries later. Settling
   a file moves it to `processed/`, which frees the room; `processed/` doesn't count. A resend of a
   file in any of the three folders is a 200.
@@ -288,7 +288,8 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   (15 min) by the `musicdatabase-inbox` systemd user timer (`auto_resolve_requests.py` at the repo
   root, the venv's python with `venv/bin` on PATH for yt-dlp/deno; installed with the sharing
   service by `install_sharing_service()`), and by "Resolve new requests" itself before asking.
-  It takes the files in `new/`: settles what needs no answer, replaces a dead link only when the
+  A readable file first moves from `new/` to `valid/` (`read_new_requests()`, ADR-0006), and only what's in
+  `valid/` goes further. The pass settles what needs no answer, replaces a dead link only when the
   phone's suggestion and our own search found the same video and it plays here, and saves a field
   correction only when the newest report came from a logged-in user with the `apply_corrections`
   permission (Users → Permissions; the file name's user part, which the server verified) and
