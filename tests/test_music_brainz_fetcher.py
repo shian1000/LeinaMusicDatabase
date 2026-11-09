@@ -60,6 +60,14 @@ def test_earliest_single_wins_and_undated_goes_last():
     assert _pick_release(recordings)[0] == "Song"
 
 
+def test_release_group_without_a_type_is_not_a_songs_album():
+    # Real result for "Deep Blue Something - Breakfast at Tiffanys": the search
+    # hit's only release is a radio station's compilation nobody typed.
+    untyped = {"title": "Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2",
+               "release-group": {"title": "Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2"}}
+    assert _pick_release([_recording("Breakfast at Tiffanys", [untyped])]) == (None, None)
+
+
 def test_later_recording_cannot_outrank_the_first_ones_releases():
     # An acoustic version's earlier EP shouldn't replace the main recording's single.
     recordings = [

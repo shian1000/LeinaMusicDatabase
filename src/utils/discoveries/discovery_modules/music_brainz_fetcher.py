@@ -184,7 +184,13 @@ _SKIPPED_SECONDARY_TYPES = ("Compilation", "Live", "Remix", "DJ-mix")
 
 
 def _release_is_eligible(release, artist: str | None = None) -> bool:
-    secondary_types = release.get("release-group", {}).get("secondary-type-list", [])
+    release_group = release.get("release-group", {})
+    # An entry nobody typed says nothing about being an album, and is often an
+    # untagged compilation ("Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2"
+    # as the album of "Breakfast at Tiffanys")
+    if not release_group.get("primary-type"):
+        return False
+    secondary_types = release_group.get("secondary-type-list", [])
     if any(t in _SKIPPED_SECONDARY_TYPES for t in secondary_types):
         return False
     return not is_blacklisted_album(_release_title(release), artist)

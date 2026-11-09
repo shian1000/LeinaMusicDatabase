@@ -442,11 +442,15 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 
 ## MusicBrainz: which release becomes the album, and what it can't find
 
-`_pick_release()` drops compilations/live/remix releases and releases credited to another artist
+`_pick_release()` drops compilations/live/remix releases, release groups with no type at all (often
+a compilation nobody tagged: "Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2" for Deep Blue
+Something) and releases credited to another artist
 (by MusicBrainz artist id - an Australian edition of Dido's "No Angel" carries four LeAnn Rimes
 songs; "Various Artists" passes), takes the first studio Album, and
 otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
-`tests/test_music_brainz_fetcher.py`). Two known misses are by design, not bugs to chase:
+`tests/test_music_brainz_fetcher.py`). A compilation wrongly typed plain Album still wins ("Amstel
+Pulse: Modern Rock Playlist" for "Breakfast at Tiffany's", whose first 25 hits are almost all
+compilations, without the real album). Two known misses are by design, not bugs to chase:
 
 - **A song released only on a soundtrack/compilation** (e.g. an anime theme like Yoshimi Iwasaki
   "Hoshi no Silhouette", only on the *Touch* OST `タッチ`) gets no album from MusicBrainz, because
