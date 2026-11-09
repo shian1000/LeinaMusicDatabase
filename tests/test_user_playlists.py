@@ -1102,8 +1102,8 @@ def test_video_without_a_file_offered_swapping_artist_and_title(users_env, tmp_p
         if message.startswith("No file is this video"):
             video = len(offered)
             offered[video] = menu._VIDEO_SWAP in choices
-            # The cursor stays on adding it as read: Enter never swaps
-            assert choices[0] == menu._VIDEO_ADD
+            # Adding it as read comes before swapping
+            assert next(c for c in choices if isinstance(c, str)) == menu._VIDEO_ADD
             return menu._VIDEO_SWAP if video < 2 else menu._VIDEO_ADD
         if message.startswith("What should happen"):
             return menu._UNMATCHED_KEEP
@@ -1139,7 +1139,7 @@ def test_video_from_a_band_word_channel_is_matched_exactly(music_session):
     assert LocalSongMatcher(music_session).match_exact(entry) is song
 
 
-def test_video_without_a_file_lists_the_closest_songs_before_asking(users_env, tmp_path, music_session, monkeypatch,
+def test_video_without_a_file_offers_the_closest_songs(users_env, tmp_path, music_session, monkeypatch,
                                                                     capsys):
     music_session.add_all([Song(title="Karma", artist=Artist(name="Hey")),
                            Song(title="Załoga G", artist=Artist(name="Hurt"))])
@@ -1154,12 +1154,12 @@ def test_video_without_a_file_lists_the_closest_songs_before_asking(users_env, t
 
     def select(message, choices):
         if message.startswith("No file is this video"):
-            on_screen[len(on_screen)] = capsys.readouterr().out
-            return menu._VIDEO_ADD
+            songs = [c for c in choices if isinstance(c, menu.questionary.Choice)]
+            on_screen[len(on_screen)] = capsys.readouterr().out, songs
+            return songs[0].value if songs else menu._VIDEO_ADD
         if message.startswith("What should happen"):
             return menu._UNMATCHED_KEEP
-        # Adding the video leads to the review offering the song
-        return next(c.value for c in choices if isinstance(c, menu.questionary.Choice))
+        raise AssertionError(message)
 
     menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
     monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
@@ -1168,13 +1168,54 @@ def test_video_without_a_file_lists_the_closest_songs_before_asking(users_env, t
     monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
     menu._create_playlist_from_folder_and_youtube("ania")
 
-    close, exact, none = on_screen[0], on_screen[1], on_screen[2]
-    assert "Closest songs in the database" in close and "Załoga G" in close and "%)" in close
-    assert "Closest songs in the database" not in exact
-    assert "Closest songs in the database" not in none
+    (close, close_songs), (exact, exact_songs), (none, none_songs) = on_screen[0], on_screen[1], on_screen[2]
+    assert "Closest songs in the database" in close
+    assert [c.value.title for c in close_songs] == ["Załoga G"]
+    assert close_songs[0].title[-1][1].endswith("%)")
+    assert "Closest songs in the database" not in exact and not exact_songs
+    assert "Closest songs in the database" not in none and not none_songs
     song = music_session.query(Song).filter(Song.title == "Załoga G").one().id
     assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [
         ("ytClose", song), ("ytExact", song), ("ytNone", None)]
+
+
+def test_video_without_a_file_closest_songs_turned_down_are_not_offered_again(users_env, tmp_path, music_session,
+                                                                               monkeypatch):
+    music_session.add_all([Song(title="Karma", artist=Artist(name="Hey")),
+                           Song(title="Załoga G", artist=Artist(name="Hurt"))])
+    music_session.commit()
+    items = [{"video_id": "vid1", "title": "Karma", "channel": "Hey - Topic"},
+             {"video_id": "ytClose", "title": "Zaloga G", "channel": "Hurt Official"}]
+    asked = []
+
+    def select(message, choices):
+        asked.append(message)
+        if message.startswith("No file is this video"):
+            assert any(isinstance(c, menu.questionary.Choice) for c in choices)
+            return menu._VIDEO_ADD
+        if message.startswith("What should happen"):
+            return menu._UNMATCHED_KEEP
+        raise AssertionError(message)
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
+    monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
+    # Even a score that would be taken without asking stays turned down
+    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 0.1)
+    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 0.1)
+    monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
+    defaults, mocked_select = [], menu.questionary.select
+
+    def select_noting_default(message, choices, **kwargs):
+        defaults.append(kwargs.get("default"))
+        return mocked_select(message, choices, **kwargs)
+
+    monkeypatch.setattr(menu.questionary, "select", select_noting_default)
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    # The cursor on adding it as read: Enter neither picks a song nor swaps
+    assert defaults[0] == menu._VIDEO_ADD
+    assert len(asked) == 2 and asked[1].startswith("What should happen")
+    assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [("ytClose", None)]
 
 
 def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, tmp_path, music_session, monkeypatch):

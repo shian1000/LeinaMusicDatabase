@@ -485,9 +485,10 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
                             best_guess_min_score: float = 1.1) -> list | None:
     """Each video no file was paired with: add it as a track of its own,
     read the other way round when its title is a known artist and its artist
-    isn't (offered, never done unasked), or leave it out. The closest songs
-    are only listed here: the review after this one asks about them. Returns
-    the videos to add, None on Stop."""
+    isn't (offered, never done unasked), leave it out, or say it is one of
+    the closest songs, the cursor not on them. Songs turned down here aren't
+    offered again by the review after this one. Returns the videos to add,
+    None on Stop."""
     added = []
     for i, entry in enumerate(entries, 1):
         print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
@@ -498,15 +499,21 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
             print(f"  The title looks swapped with the artist: {swap_artist.name} is in the database.")
         closest = closest_songs(matcher, entry, best_guess_min_score)
         if closest:
-            print("  Closest songs in the database (add it to pick one of them next):")
-            for song, score in closest:
-                print(f"    {as_ansi(_song_tokens(song, score))}")
+            print("  Closest songs in the database:")
         choice = questionary.select("No file is this video - what should happen with it?",
-                                    choices=[_VIDEO_ADD, *([_VIDEO_SWAP] if swap_artist is not None else []),
-                                             _VIDEO_LEAVE_OUT, _PAIR_STOP]).ask()
+                                    choices=[questionary.Choice(title=_song_tokens(song, score), value=song)
+                                             for song, score in closest]
+                                    + [_VIDEO_ADD, *([_VIDEO_SWAP] if swap_artist is not None else []),
+                                       _VIDEO_LEAVE_OUT, _PAIR_STOP],
+                                    default=_VIDEO_ADD).ask()
         if choice is None or choice == _PAIR_STOP:
             return None
-        if choice == _VIDEO_ADD:
+        if isinstance(choice, Song):
+            entry.song = choice
+            added.append(entry)
+            print(f"  -> added without a file as {_song_choice_label(choice)}")
+        elif choice == _VIDEO_ADD:
+            entry.closest_rejected = bool(closest)
             added.append(entry)
             print("  -> added without a file")
         elif choice == _VIDEO_SWAP:

@@ -453,8 +453,8 @@ non-trivial work in that area.
   "Save its YouTube videos on the songs" offers the same, none ticked. A video
   without a file can be a track with `file` None; one whose title is a known artist and whose artist
   is not gets the import's swap check (`possible_swap_artist()`) and a choice to read it the other way
-  round, never unasked. That screen only lists the closest songs (`closest_songs()`): picking one
-  stays on the review that follows adding the video, or a rejected guess would be asked about twice. Deleted / private videos and those giving neither
+  round, never unasked. That screen also offers the closest songs (`closest_songs()`), the cursor on
+  adding the video; turning them down sets `YouTubeEntry.closest_rejected`, or the review after it would ask about them twice. Deleted / private videos and those giving neither
   an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
   their source.

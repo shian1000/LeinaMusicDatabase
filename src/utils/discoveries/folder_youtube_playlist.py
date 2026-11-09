@@ -37,6 +37,7 @@ class YouTubeEntry:
     metadata: dict       # import_from_playlist.playlist_item_metadata()
     song: object | None  # the database Song its artist/title match exactly
     duration_s: int | None = None
+    closest_rejected: bool = False  # the user turned down closest_songs() for it
 
 
 def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry]:
@@ -180,8 +181,7 @@ def swap_artist_and_title(matcher: LocalSongMatcher, entry: YouTubeEntry) -> Non
 
 
 def closest_songs(matcher: LocalSongMatcher, entry: YouTubeEntry, best_guess_min_score: float) -> list[tuple]:
-    """(song, score) the review of a video added without a file will offer,
-    to show while the user decides whether to add it."""
+    """(song, score) to offer for a video no file was paired with."""
     metadata = entry.metadata
     if entry.song is not None or not metadata.title:
         return []
@@ -194,7 +194,8 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
                        min_artist_similarity: float = 1.1, best_guess_min_score: float = 1.1,
                        auto_accept_score: float = 1.1) -> FolderTrack:
     """A track for a video no file was paired with, matched to the
-    database like a file (folder_playlist.match_track())."""
+    database like a file (folder_playlist.match_track()); after the user
+    turned down its closest songs, nothing is guessed or suggested again."""
     track = FolderTrack(file=None, title=entry.metadata.title or entry.label,
                         artist=entry.metadata.artist, duration_s=entry.duration_s,
                         feat_artists=list(entry.metadata.feat_artists or []), album=entry.metadata.album,
@@ -203,6 +204,9 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     track.link_song_id = entry.song.id if entry.song is not None else None
     if entry.song is not None:
         assign_song(track, entry.song)
+    elif entry.closest_rejected:
+        match_track(playlist, matcher, track, {**entry.metadata, "title": track.title, "_label": entry.label})
+        track.similar_song, track.title_candidates, track.best_guesses = None, [], []
     else:
         match_track(playlist, matcher, track,
                     {**entry.metadata, "title": track.title, "_label": entry.label}, min_artist_similarity,
