@@ -1,152 +1,93 @@
-from bs4 import BeautifulSoup
-from utils.common.selenium_sessions import get_global_driver
-import time
+import requests
+
 from utils.common.debug import flog, slog
-from urllib.parse import quote
+from utils.common.request_pacing import RequestPacer
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
-from config.constants import SPELLING_CHECK_THRESHOLD, SINGLES_ALBUM
+from config.constants import (
+    HTTP_LOOKUP_TIMEOUT,
+    ITUNES_SEARCH_COUNTRY,
+    ITUNES_SEARCH_LIMIT,
+    ITUNES_SEARCH_MIN_INTERVAL,
+    ITUNES_SEARCH_URL,
+    SINGLES_ALBUM,
+    SPELLING_CHECK_THRESHOLD,
+)
 
-MODULE_NAME = "iTunes fetcher"
+# Apple's public iTunes Search API: JSON, no key, no browser.
+MODULE_NAME = "iTunes fetcher (Curl)"
 
-# Apple Music appends this to the product title of releases that only ever
-# came out as a single (no parent album) -- e.g. "Say So (feat. Nicki
-# Minaj) - Single". It's the only place that fact is exposed on the page.
+# Apple appends this to the name of a release that only ever came out as a
+# single (no parent album) -- e.g. "Say So (feat. Nicki Minaj) - Single".
 SINGLE_TITLE_SUFFIX = " - single"
 
+_pacer = RequestPacer(ITUNES_SEARCH_MIN_INTERVAL)
 
-def extract_from_itunes_soup(song_soup, artist, song):
-    """Returns (album, matched_title, matched_artist) or None.
 
-    Apple Music's web player no longer ships the schema.org JSON-LD tag this
-    used to parse -- it's been rebuilt around Svelte components identified by
-    stable `data-testid` attributes, which is what this reads instead.
-    """
-    title_tag = song_soup.select_one('[data-testid="non-editable-product-title"]')
-    if not title_tag:
-        return None
-    album = title_tag.get_text(strip=True)
-
-    # 1. Verify artist. product-subtitles can list several artists (e.g. a
-    # remix credited to two acts) as separate <a> tags; check the query
-    # against all of them but, like the old JSON-LD's byArtist[0], only
-    # report the first as matched_artist -- comparing against the joined
-    # text would tank the similarity score discoveries_manager computes.
-    artist_tags = song_soup.select('[data-testid="product-subtitles"] a')
-    artist_names = [a.get_text(strip=True) for a in artist_tags]
-    if not any(artist.lower() in name.lower() for name in artist_names):
-        slog(f"Artist mismatch: expected '{artist}', found {artist_names}")
-        return None
-    matched_artist = artist_names[0] if artist_names else ""
-
-    # 2. Verify song title. The page can be a multi-track album, so check
-    # every tracklist row rather than assuming the first one is ours.
-    # Apple now bakes "(feat. X)" credits straight into the visible track
-    # title (the old JSON-LD kept them out of `audio.name`), so compare
-    # against the part before the parenthetical -- same convention
-    # discover_album_name() already uses to clean the query itself.
+def _find_track(results: list[dict], artist: str, song: str):
+    """Returns (album, matched_title, matched_artist) of the result that fits
+    best, or None. An equally good title on a real album beats a single, and
+    the plain title beats its "(Live ...)" versions."""
     song_query = song.lower()
-    matched_title = None
-    for track_tag in song_soup.select('[data-testid="track-title"]'):
-        track_title = track_tag.get_text(strip=True)
-        track_title_cln = track_title.split("(")[0].strip()
-        if similarity(song_query, track_title_cln.lower()) > SPELLING_CHECK_THRESHOLD:
-            matched_title = track_title_cln
-            break
-    if not matched_title:
-        slog(f"Song mismatch: expected '{song}', no tracklist title matched", priority=1)
-        return None
+    best = None
+    best_rank = None
 
-    # 3. A single-only release reports no real album -- use the same
-    # SINGLES_ALBUM sentinel wikipedia_fetcher already uses for this case, so
-    # discoveries_manager and the rest of the pipeline need no changes.
-    if album.lower().endswith(SINGLE_TITLE_SUFFIX):
-        album = SINGLES_ALBUM
-
-    if not album:
-        return None
-
-    slog(f"Matched: {artist} - {matched_title} ({album})")
-    return album, matched_title, matched_artist
-
-
-def _iter_song_candidates(soup):
-    """Yield (title, href) for every song row in the search-results page.
-
-    Apple Music has been observed serving two different search-results
-    layouts (same URL, same query) depending on session/geo state: a
-    dedicated "Songs" section (`track-lockup`, what a geo/storefront
-    mismatch -- e.g. scraping "/us/..." from a non-US IP -- currently
-    renders) and a mixed "Top Results" list where a row's type is only
-    exposed via its subtitle text ("Song · Artist" vs "Album · Artist" /
-    "Artist" / "Music Video · Artist"). Both are handled so the fetcher
-    doesn't silently go dark if Apple serves the other one on a given run.
-    """
-    for row in soup.select('[data-testid="track-lockup"]'):
-        title_tag = row.select_one('[data-testid="track-lockup-title"]')
-        link = row.select_one('a[data-testid="click-action"]')
-        if title_tag and link and link.get("href"):
-            yield title_tag.get_text(strip=True), link["href"]
-
-    for row in soup.select('div[data-testid="top-search-list-result"]'):
-        subtitle = row.select_one('[data-testid="top-search-list-result-subtitle"]')
-        if not subtitle or not subtitle.get_text(strip=True).startswith("Song"):
+    for result in results:
+        album = result.get("collectionName")
+        track_title = result.get("trackName")
+        track_artist = result.get("artistName")
+        if result.get("kind") != "song" or not (album and track_title and track_artist):
             continue
-        title_link = row.select_one(
-            '[data-testid="top-search-list-result-title"] a[data-testid="click-action"]'
-        )
-        if title_link and title_link.get("href"):
-            yield title_link.get_text(strip=True), title_link["href"]
+        if artist.lower() not in track_artist.lower():
+            slog(f"Artist mismatch: expected '{artist}', found '{track_artist}'")
+            continue
 
+        # Apple bakes "(feat. X)" credits into the title, so compare the part
+        # before the parenthetical -- the same convention
+        # discover_album_name() uses to clean the query itself.
+        track_title_cln = track_title.split("(")[0].strip()
+        if similarity(song_query, track_title_cln.lower()) <= SPELLING_CHECK_THRESHOLD:
+            continue
 
-def _find_song_link(soup, song: str) -> str | None:
-    """Scan the search-results page for a song row resembling `song` and
-    return its href, or None. Split out from get_album_name() for testing
-    against a static fixture, no Selenium involved."""
-    song_query = song.lower()
-    for title, href in _iter_song_candidates(soup):
-        song_on_the_page = title.lower()
-        slog(song_query, priority=1)
-        slog(song_on_the_page, priority=1)
-        if similarity(song_query, song_on_the_page) > SPELLING_CHECK_THRESHOLD:
-            slog("Found", priority=1)
-            return href
-    return None
+        # A single-only release reports no real album -- the same
+        # SINGLES_ALBUM sentinel wikipedia_fetcher uses for this case.
+        if album.lower().endswith(SINGLE_TITLE_SUFFIX):
+            album = SINGLES_ALBUM
+        if is_blacklisted_album(album, artist):
+            continue
+
+        rank = (similarity(song_query, track_title.lower()), album != SINGLES_ALBUM)
+        if best_rank is None or rank > best_rank:
+            best_rank = rank
+            best = (album, track_title_cln, track_artist)
+
+    return best
 
 
 def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
-    query = quote(f"{artist} {song}")
-    url = f"https://music.apple.com/us/search?term={query}"
-
-    slog(url, priority=1)
-
-    #Open itunes and look for the song:
-    driver = get_global_driver()
-    if driver is None:
-        flog("[iTunes] No driver open. Call open_global_driver() first.")
+    _pacer.wait()
+    try:
+        response = requests.get(
+            ITUNES_SEARCH_URL,
+            params={
+                "term": f"{artist} {song}",
+                "entity": "song",
+                "country": ITUNES_SEARCH_COUNTRY,
+                "limit": ITUNES_SEARCH_LIMIT,
+            },
+            timeout=HTTP_LOOKUP_TIMEOUT,
+        )
+        response.raise_for_status()
+        results = response.json().get("results", [])
+    except requests.RequestException as exc:
+        flog(f"[iTunes] Search failed for {artist} - {song}: {exc}")
         return None
-    driver.get(url)
-    time.sleep(2)
 
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-
-    #Open the link of the song:
-    song_link = _find_song_link(soup, song)
-    if not song_link:
+    match = _find_track(results, artist, song)
+    if not match:
         flog("[iTunes] No matching song in search results")
         return None
 
-    slog(f"Found song link: {song_link}", priority=1)
-    driver.get(song_link)
-    time.sleep(2)
-
-    song_soup = BeautifulSoup(driver.page_source, "html.parser")
-    extracted = extract_from_itunes_soup(song_soup, artist, song)
-    if not extracted:
-        flog("[iTunes] No album on the song page")
-        return None
-
-    album_name, matched_title, matched_artist = extracted
-    if is_blacklisted_album(album_name, artist):
-        return None
+    album_name, matched_title, matched_artist = match
+    slog(f"Matched: {artist} - {matched_title} ({album_name})")
     return DiscoveryResult(album=album_name, matched_title=matched_title, matched_artist=matched_artist)

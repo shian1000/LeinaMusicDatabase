@@ -19,7 +19,7 @@ from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryRes
 # without being logged in. Trade-off: this depends on undocumented frontend
 # markup (data-testid attributes) rather than a stable API contract, so it's
 # more likely to break if Spotify changes their web player.
-MODULE_NAME = "Spotify fetcher"
+MODULE_NAME = "Spotify fetcher (Selenium)"
 
 # Last page that failed to load, overwritten each time - to see whether it was
 # a cookie wall, an empty search or markup that changed.
@@ -94,7 +94,7 @@ def _extract_album_from_track_page(soup: BeautifulSoup):
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     driver = get_global_driver()
     if driver is None:
-        flog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No browser available.")
         return None
 
     search_url = _search_url(f"{artist} {title}", "tracks")
@@ -217,7 +217,7 @@ def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryR
     off the album page."""
     driver = get_global_driver()
     if driver is None:
-        flog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No browser available.")
         return None
 
     kind, row_selector = ("tracks", '[data-testid="tracklist-row"]') if is_single else ("albums", '[data-encore-id="card"]')
@@ -268,7 +268,7 @@ def get_release_year_from_url(url: str) -> YearDiscoveryResult | None:
         return None
     driver = get_global_driver()
     if driver is None:
-        flog("[Spotify] No driver open. Call open_global_driver() first.")
+        flog("[Spotify] No browser available.")
         return None
     page_testid = "album-page" if "/album/" in url else "track-page"
     page = _load(driver, url, f'[data-testid="{page_testid}"]')

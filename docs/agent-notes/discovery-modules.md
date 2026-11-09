@@ -304,7 +304,7 @@ album keeps the same-artist rule, since "Greatest Hits" or "Persona" (Selah Sue)
 aren't one album. Accepted side effect: a cover filed under the original OST's album name gets the
 OST's year. Those
 years are written without review. This runs before the per-fetch cap, so it never uses up a slot
-meant for a network lookup, and it's committed even if Chrome fails to start. Later, the manual
+meant for a network lookup. Later, the manual
 fill-in prompt prints up to `MANUAL_YEAR_SAMPLE_SONGS` random titles next to an album's label as a
 hint which album it is.
 
@@ -358,8 +358,8 @@ for real albums (but work for `is_single=True` singles, which still hit the alre
 before assuming the similarity/validation logic is at fault.
 
 **`youtube_fetcher.py`'s years are only guesses, so the user reviews them.** Its
-`get_release_year()` doesn't scrape music.youtube.com like `get_album_name()` does. It runs the
-normal DB → YouTube `search_video_ytdlp()` matching (yt-dlp, no Selenium, no API quota) and reads
+`get_release_year()` doesn't search music.youtube.com like `get_album_name()` does. It runs the
+normal DB → YouTube `search_video_ytdlp()` matching (yt-dlp, no API quota) and reads
 the date with `get_video_release_year()`, which prefers yt-dlp's `release_date`/`release_year`
 (YouTube Music's "Released on") over `upload_date`. An upload date is often not the release date (a
 live session, a reupload), so it returns `YearDiscoveryResult(needs_review=True, source_url=...)`.
@@ -407,8 +407,7 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 
 - `music_brainz_fetcher.py` — reports the title/artist of the MusicBrainz *recording* that the
   chosen release came from.
-- `itunes_fetcher.py` — reports the tracklist title / first credited artist it already scrapes
-  from the song's own page to verify the match internally (see dedicated section below).
+- `itunes_fetcher.py` — reports the Search API's `trackName` (before any "(") and `artistName`.
 - `genius_fetcher.py` — reports the song-title portion of the matched URL slug (artist prefix
   stripped best-effort by `_title_portion_of_slug()`, since Genius slugs are `artist-title-lyrics`
   with no clean delimiter). The same stripped slug is what `title_matches_url()` scores the query
@@ -424,8 +423,7 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 - `spotify_fetcher.py` — reports the track title/artist scraped from the matched track's own page
   (`entityTitle` / `creator-link`), falling back to what it already matched on the search-results
   row if the track page's markup doesn't have them.
-- `youtube_fetcher.py` — reports the title/artist scraped straight from the matched row in the
-  filtered "Songs" search results (no separate track page to visit; see below).
+- `youtube_fetcher.py` — reports the title/first artist of the matched row in the "Songs" search.
 - `wikipedia_fetcher.py` never reports a matched title: the page is picked because its title
   resembles the query (song page) or the tracklist text holds it (artist/album page), so the page
   title would only echo the query. On a song page it does report `matched_artist`, the infobox's
@@ -485,11 +483,13 @@ never touch the real DB here: `tests/conftest.py` stubs `artist_has_album()` for
 ## The shared headless browser (`src/utils/common/selenium_sessions.py`)
 
 `open_global_driver()` / `close_global_driver()` manage **one** process-wide headless Chrome
-instance, reused across `google_search_fetcher.py`, `itunes_fetcher.py`, `genius_fetcher.py`,
-`spotify_fetcher.py`, and `youtube_fetcher.py` via `get_global_driver()` rather than each fetcher
-opening its own.
+instance, reused across `google_search_fetcher.py`, `genius_fetcher.py` and `spotify_fetcher.py` via
+`get_global_driver()` rather than each fetcher opening its own. The first `get_global_driver()` starts
+Chrome, so a run where MusicBrainz, iTunes or YouTube Music answer everything never starts it. A curl test
+(2026-11) showed why these three remain: Spotify's search page has no results without JavaScript, Genius
+answers 403 and Google a redirect page.
 
-Any call site that opens the driver **must** call `close_global_driver()` in a `finally`.
+Any workflow that runs the fetchers **must** call `close_global_driver()` in a `finally`.
 `fill_missing_albums.py` originally called it as a plain last statement after its fetch loop, so
 an exception — or the Chrome process itself crashing — skipped cleanup and left an orphaned
 headless `chromedriver` / `chrome` running indefinitely. This isn't just a resource nit: on the
@@ -521,9 +521,9 @@ first before re-diagnosing from scratch.
 Separately, `_build_driver()` wraps the Chrome/chromedriver launch and re-raises any
 `WebDriverException` as `ChromeDriverLaunchError` — a driver-launch failure (missing browser,
 this snap issue, etc.) used to be an uncaught exception that crashed the whole program via
-`utils.common.debug`'s global `sys.excepthook`. Any call site that calls `open_global_driver()`
-directly (not just `get_global_driver()`) should catch `ChromeDriverLaunchError` and fail that one
-operation gracefully instead of letting it escape — see `fill_missing_albums.py` for the pattern.
+`utils.common.debug`'s global `sys.excepthook`. `get_global_driver()` catches it, tells the user once
+and returns `None` until `close_global_driver()`, so every browser fetcher must handle `None`; the
+lookups without a browser carry on.
 
 ## `google_search_fetcher.py` — two different failure modes that look identical
 
@@ -556,10 +556,8 @@ Deliberately does **not** use Spotify's official Web API (which needs a register
 `open.spotify.com/search/.../tracks` and the matched track's own `open.spotify.com/track/<id>`
 page with the shared Selenium driver, the same way `itunes_fetcher.py` and `genius_fetcher.py`
 scrape their sources — searching and viewing a track/album on open.spotify.com doesn't require
-being logged in. This was a deliberate choice to get something working without first setting up
-API credentials; swapping in the official API later (better data quality guarantees, no frontend-
-markup fragility) would only mean changing this file's internals — `get_album_name(artist, title)`
-and `MODULE_NAME` are the whole contract.
+being logged in, so it needs no credentials. The official API has its own module,
+`spotify_api_fetcher.py` (see "Three kinds of fetcher").
 
 The page is a fully client-rendered SPA (a plain `requests.get()` returns an empty shell with no
 song/album data — confirmed by inspecting the raw response), so this fetcher, like the other
@@ -589,104 +587,55 @@ tested against static HTML fixtures in `tests/test_spotify_fetcher.py` — no li
 in the test, consistent with the rest of `tests/` — but that only locks in the parsing logic
 against the *fixture*, not against Spotify's real markup drifting out from under it.
 
-## `itunes_fetcher.py` — scrapes music.apple.com's web player; rewritten 2026-09 when the JSON-LD it relied on disappeared
+## `itunes_fetcher.py` — Apple's public iTunes Search API
 
-Originally parsed a `<script id="schema:song" type="application/ld+json">` tag on the song's own
-page for a clean, structured `audio.name`/`byArtist`/`inAlbum.name`. Apple stopped shipping that
-tag entirely (confirmed by inspecting a live page — it's just gone, not renamed), and the search
-page's old `.track-lockup__title` CSS class was also gone, so the fetcher was silently returning
-`None` for everything before this rewrite. It now reads stable `data-testid` attributes instead:
-`non-editable-product-title` (album), `product-subtitles` (artist link(s)), and `track-title`
-(tracklist rows) on the song's own page.
+One `GET https://itunes.apple.com/search?entity=song` per lookup: JSON, no key, no browser. It replaced
+scraping music.apple.com (two search-results layouts, then the song's page), whose markup had already
+changed under it once. Apple documents about 20 requests a minute, hence
+`ITUNES_SEARCH_MIN_INTERVAL` (`RequestPacer`, one per fetcher module).
 
-**Apple serves two different search-results DOM layouts for the same URL/query**, and this
-fetcher has to handle both (`_iter_song_candidates()`):
-- `track-lockup` / `track-lockup-title` / `track-lockup-subtitle` — a dedicated "Songs" section,
-  closer to the old markup. Observed when the request's geo doesn't match the `/us/...` storefront
-  in the URL (e.g. scraping from a non-US IP, which is the common case for this app's actual
-  users) — Apple falls back to this layout instead of (or alongside) a region-mismatch prompt.
-- `top-search-list-result` / `top-search-list-result-title` / `top-search-list-result-subtitle` —
-  a mixed "Top Results" list (songs, albums, artists, videos interleaved); a row's type is only
-  knowable from its subtitle text ("Song · Artist" vs "Album · Artist" / "Artist" / "Music Video ·
-  Artist"). Observed when geo matches the storefront.
-Which one a given run gets isn't something the fetcher controls, so both are tried every time
-rather than picking one based on an assumption about the caller's network. If this fetcher starts
-returning `None` for everything again, check which (if either) of these `data-testid` sets is
-still in `driver.page_source` before assuming the matching logic broke.
+`_find_track()` needs the queried artist inside `artistName` and the title before any "(" to clear
+`SPELLING_CHECK_THRESHOLD` (Apple bakes "(feat. X)" into titles). Of the results that fit, the one
+closest to the full title wins, so the plain title beats "(Live ...)", and at equal title a real album
+beats a single. A release whose `collectionName` ends in `" - Single"` is reported as `SINGLES_ALBUM`,
+the sentinel `wikipedia_fetcher.py` also uses. Blacklisted albums are skipped per candidate.
+Tests: `tests/test_itunes_fetcher.py`.
 
-**Apple now bakes "(feat. X)" credits straight into the visible track title** on the song's own
-page (the old JSON-LD kept `audio.name` clean of them). `extract_from_itunes_soup()` compares
-against the part before the parenthetical — the same `.split("(")[0].strip()` convention
-`discover_album_name()` already uses to clean the query — otherwise a plain query like "Say So"
-would never clear `SPELLING_CHECK_THRESHOLD` against an on-page title like "Say So (feat. Nicki
-Minaj)".
-
-**Single-only releases report no real album.** Apple appends `" - Single"` to the product title of
-a release that never had a parent album (e.g. "Say So (feat. Nicki Minaj) - Single"). Rather than
-inventing a new field to carry that fact through `DiscoveryResult`/`discoveries_manager`/the DB
-(which would need a schema change), `extract_from_itunes_soup()` reports the album as the literal
-string `"Singles"` (`constants.SINGLES_ALBUM`) — the same sentinel `wikipedia_fetcher.py` already returns when a song is found
-under a Wikipedia discography's "Singles" heading (see `_find_song_under_heading()`). This needed
-no changes anywhere else: `"Singles"` isn't on the album blacklist, and `matched_title`/
-`matched_artist` are unaffected, so `discoveries_manager._validate_result()`'s cross-check still
-runs against the real scraped title/artist, not the sentinel.
-
-`_find_song_link()` / `_iter_song_candidates()` and `extract_from_itunes_soup()` are unit tested
-against static HTML fixtures (both search-results layouts, a single, a multi-artist single, a
-regular album track, and the mismatch/missing-data cases) in `tests/test_itunes_fetcher.py` — no
-live Selenium/network in the test, same approach as `tests/test_spotify_fetcher.py` /
-`tests/test_youtube_fetcher.py`. That only locks in the parsing logic against the *fixtures*,
-not against Apple's real markup drifting out from under it again.
-
-## `youtube_fetcher.py` — scrapes the public music.youtube.com web player, not the Data API
+## `youtube_fetcher.py` — music.youtube.com's JSON search, not the Data API
 
 Deliberately does **not** use the official YouTube Data API (needs an API key and is quota-limited).
-Instead it scrapes `music.youtube.com/search`, filtered to the "Songs" tab, with the shared Selenium
-driver — the same public-web-player approach as `spotify_fetcher.py`. Unlike Spotify, the filtered
-Songs list already renders artist *and* album inline per row, so there's no second "open the track's
-own page" step: `_find_matching_song()` reads everything it needs straight out of the search results.
+`get_album_name()` POSTs to `youtubei/v1/search`, the endpoint the web player itself calls, with the
+"Songs" filter (`YOUTUBE_MUSIC_SONGS_FILTER`). No browser, cookies or consent page are involved. The
+endpoint and its answer are undocumented, so if every lookup comes back `None`, check `debug.log` for
+`[YouTube] Search failed` and then the shape below. `clientVersion` is built from today's date because a
+frozen one would age out.
 
-Flow:
+Each row (`musicResponsiveListItemRenderer`) has the title in flex column 0 and, in column 1, the runs
+for artists and album, told apart by `pageType` (`MUSIC_PAGE_TYPE_ARTIST` / `_ALBUM`), not by position.
+A multi-artist row has one run per artist, so the query artist is compared against each of them *and*
+against them joined back together (`" x "`, `", "`, `" & "`). The joined form is what makes a collab
+stored in the DB as one artist string match: "Sw@da x Maxim x Niczos" scores only ~0.4 against any single
+artist. The best row whose title *and* artist both clear `SPELLING_CHECK_THRESHOLD` wins.
+Tests: `tests/test_youtube_fetcher.py`, `tests/test_scraping_fetchers.py`.
 
-1. Load `.../search?q=<query>`. A cookie-less driver gets redirected to a `consent.youtube.com`
-   interstitial the first time any `youtube.com` page loads in that Chrome profile;
-   `_reject_consent_if_present()` detects that redirect and clicks "Reject all" (the privacy-
-   preserving choice), which sends YouTube back to the originally requested URL — re-encoded with
-   `+` instead of `%20` for spaces, which is why the fetcher re-issues `driver.get(search_url)`
-   with its own exact URL afterward rather than trusting the redirect target. This only costs an
-   extra round trip the first time the shared driver visits YouTube in a given process; the
-   resulting cookie makes every later call skip straight through.
-2. Click the "Songs" filter chip (`ytmusic-chip-cloud-chip-renderer` containing a
-   `yt-formatted-string` reading exactly "Songs") and wait for
-   `ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer` rows. The chip has no filterable
-   URL/query-param of its own — YouTube Music drives it entirely with a client-side click handler —
-   so this can't be short-circuited by requesting a different URL. Skipping this step and parsing
-   the unfiltered page instead was tried and rejected: the default mixed results page wraps every
-   individual hit (songs, videos, unrelated channel uploads, community posts) in its own
-   `ytmusic-item-section-renderer`, with no reliable per-row way to tell a song apart from a video
-   essay that happens to match on title text.
-3. Parse each row (`_find_matching_song()`): title from the `.title` element's `title` attribute
-   (not truncated by CSS ellipsis, unlike its rendered text), artist(s) from every
-   `a[href^="channel/"]`, album from `a[href^="browse/"]` — YouTube Music always orders a row's
-   links as artist(s) first, then album, so the href prefix alone (not position) is what
-   distinguishes them. A multi-artist row (e.g. "NIGHTMARE" by "Cody Ko & Young Nut") renders as
-   separate `channel/` links, one per artist, so the query artist is compared against each of them
-   *and* against them joined back together (`" x "`, `", "`, `" & "`). The joined form is what makes
-   a collab stored in the DB as one artist string match: "Sw@da x Maxim x Niczos" scores only
-   ~0.4 against any single linked artist, far under the threshold, so before the joined candidates
-   existed every such collab silently came back `None`. Joining also tolerates YouTube crediting
-   fewer artists than the DB does ("Sw@da, Niczos" still clears the threshold against
-   "Sw@da x Maxim x Niczos"). Pick the best-scoring row whose title *and* artist both clear
-   `SPELLING_CHECK_THRESHOLD` against the query, same scoring approach as `spotify_fetcher.py`'s
-   `_find_matching_track()`.
+## Three kinds of fetcher, and the API versions
 
-If this fetcher starts returning `None` for everything, check that `ytmusic-responsive-list-item-
-renderer` and the `channel/` / `browse/` href prefixes still exist in `driver.page_source` before
-assuming the matching logic broke — these are internal custom-element/routing names, not a
-documented contract, so YouTube Music's frontend can change them without notice.
+`MODULE_NAME` ends in what a module needs, shown in Settings and Statistics: `(Curl)` plain HTTP,
+`(Curl + API)` plain HTTP with a key from `.env`, `(Selenium)` the shared Chrome. "Curl" is the label
+only: the code uses `requests` or a client library.
 
-The pure-parsing helper (`_find_matching_song`) is unit tested against a static HTML fixture in
-`tests/test_youtube_fetcher.py`, same no-live-network approach as `tests/test_spotify_fetcher.py`.
+`spotify_api_fetcher.py` and `genius_api_fetcher.py` sit beside the Selenium versions as separate modules,
+so each can be ordered, switched and counted on its own. Modules listed in
+`constants.DISCOVERY_MODULES_NEEDING_API_KEY` are off in a new config and when `_reconcile_config()` adds
+them to an existing one, at the end of its order. A module switched on without its key warns once and
+returns `None`. A new module needing a key goes into that set.
+
+Spotify: client-credentials token, kept until `SPOTIFY_API_TOKEN_MARGIN` before it expires. The app's owner
+needs Premium since February 2026. Search is capped at `SPOTIFY_API_SEARCH_LIMIT` = 10 for Development Mode
+apps. A stored `Song.spotify_url` is still read by `spotify_fetcher.get_release_year_from_url()`, so with a
+browser. Genius: a search, then `/songs/<id>` for the album, which the hit doesn't carry; no
+`get_release_year()`, for the reason given under Years above. Both were written from the public docs and
+checked against mocked answers only, until someone runs them with real keys.
 
 ## Per-fetcher invocation/success stats (Statistics menu)
 

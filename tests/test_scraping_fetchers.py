@@ -231,39 +231,60 @@ def test_youtube_no_year_anywhere_gives_nothing(videos):
     assert youtube.get_release_year("Hey", "Karma", False, songs=[]) is None
 
 
-SEARCH_PAGE = '<ytmusic-chip-cloud-chip-renderer><yt-formatted-string>Songs</yt-formatted-string>' \
-              '</ytmusic-chip-cloud-chip-renderer>'
-SONG_RESULTS = """
-<ytmusic-shelf-renderer>
-  <ytmusic-responsive-list-item-renderer>
-    <a class="title">Teksański</a><a href="channel/UC1">Hey</a><a href="browse/MPRE1">Ho!</a>
-  </ytmusic-responsive-list-item-renderer>
-</ytmusic-shelf-renderer>
-"""
+def _youtube_answer(album):
+    def linked(text, page_type):
+        return {"text": text, "navigationEndpoint": {"browseEndpoint": {"browseEndpointContextSupportedConfigs": {
+            "browseEndpointContextMusicConfig": {"pageType": page_type}}}}}
+
+    def column(runs):
+        return {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": runs}}}
+
+    return {"musicResponsiveListItemRenderer": {"flexColumns": [
+        column([{"text": "Teksański"}]),
+        column([linked("Hey", "MUSIC_PAGE_TYPE_ARTIST"), linked(album, "MUSIC_PAGE_TYPE_ALBUM")]),
+    ]}}
 
 
-def _youtube_search(artist, title):
-    return f"https://music.youtube.com/search?q={quote(f'{artist} {title}')}"
+def _fake_youtube_search(monkeypatch, answer):
+    sent = []
+
+    def fake_post(url, params, headers, json, timeout):
+        sent.append(json)
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: answer)
+    monkeypatch.setattr(youtube.requests, "post", fake_post)
+    monkeypatch.setattr(youtube._pacer, "wait", lambda: None)
+    return sent
 
 
 def test_youtube_album_from_the_songs_results(monkeypatch):
-    url = _youtube_search("Hey", "Teksański")
-    browser = FakeBrowser({url: SEARCH_PAGE}, on_click={url: SONG_RESULTS}).install(youtube, monkeypatch)
+    sent = _fake_youtube_search(monkeypatch, _youtube_answer("Ho!"))
 
     result = youtube.get_album_name("Hey", "Teksański")
     assert (result.album, result.matched_title, result.matched_artist) == ("Ho!", "Teksański", "Hey")
-    assert browser.clicks == 1  # the "Songs" filter
+    assert sent[0]["query"] == "Hey Teksański"
+    assert sent[0]["params"] == youtube.YOUTUBE_MUSIC_SONGS_FILTER
 
 
-def test_youtube_without_the_songs_filter_finds_nothing(monkeypatch):
-    FakeBrowser({_youtube_search("Hey", "X"): "<html>a channel page</html>"}).install(youtube, monkeypatch)
+def test_youtube_without_any_results_finds_nothing(monkeypatch):
+    _fake_youtube_search(monkeypatch, {"contents": {}})
     assert youtube.get_album_name("Hey", "X") is None
 
 
+def test_youtube_failed_search_is_logged_not_raised(monkeypatch):
+    logged = []
+
+    def failing_post(url, params, headers, json, timeout):
+        raise youtube.requests.ConnectionError("no network")
+    monkeypatch.setattr(youtube.requests, "post", failing_post)
+    monkeypatch.setattr(youtube._pacer, "wait", lambda: None)
+    monkeypatch.setattr(youtube, "flog", logged.append)
+
+    assert youtube.get_album_name("Hey", "X") is None
+    assert logged and "no network" in logged[0]
+
+
 def test_youtube_album_that_isnt_a_real_one_is_refused(monkeypatch):
-    url = _youtube_search("Hey", "Teksański")
-    blacklisted = SONG_RESULTS.replace("Ho!", "Greatest Hits")
-    FakeBrowser({url: SEARCH_PAGE}, on_click={url: blacklisted}).install(youtube, monkeypatch)
+    _fake_youtube_search(monkeypatch, _youtube_answer("Greatest Hits"))
     monkeypatch.setattr(youtube, "is_blacklisted_album", lambda album, artist=None: album == "Greatest Hits")
 
     assert youtube.get_album_name("Hey", "Teksański") is None

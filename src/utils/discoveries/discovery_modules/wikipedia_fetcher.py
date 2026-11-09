@@ -26,7 +26,7 @@ wikipedia.set_user_agent(USER_AGENT)
 # Constants
 # ---------------------------------------------------------------------------
 
-MODULE_NAME = "Wikipedia fetcher"
+MODULE_NAME = "Wikipedia fetcher (Curl)"
 FROM_ALBUM_MARKER = "from the album"
 STRIP_CHARS = " \"''\u201c\u2018\u201d\u2019"
 GENERIC_HEADINGS = {

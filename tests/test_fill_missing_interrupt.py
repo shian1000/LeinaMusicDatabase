@@ -23,7 +23,6 @@ def _song(title, album=None):
 
 
 def _common(monkeypatch, module, edits):
-    monkeypatch.setattr(module, "open_global_driver", lambda: None)
     monkeypatch.setattr(module, "close_global_driver", lambda: None)
     monkeypatch.setattr(module, "load_max_songs_per_fetch", lambda: 100)
     monkeypatch.setattr(module, "ask_yes_no", lambda q: False)

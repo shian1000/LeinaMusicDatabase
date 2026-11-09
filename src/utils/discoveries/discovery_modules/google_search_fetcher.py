@@ -19,7 +19,7 @@ import time
 #   data-attrid="kc:/music/recording_cluster:first album"
 #   data-attrid="kc:/music/recording_cluster:release date"
 #   data-attrid="kc:/music/recording_cluster:skos_genre"
-MODULE_NAME = "Google search fetcher"
+MODULE_NAME = "Google search fetcher (Selenium)"
 
 ATTRID_MAP = {
     "artist":       "artists",
@@ -67,7 +67,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     its attrid handling revisited if this doesn't pan out)."""
     driver = get_global_driver()
     if driver is None:
-        flog("[Google] No driver open. Call open_global_driver() first.")
+        flog("[Google] No browser available.")
         return None
 
     url = f"https://www.google.com/search?q={quote_plus(f'{artist} - {query}')}&hl=en"

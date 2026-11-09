@@ -18,13 +18,18 @@ from config.constants import (
     DEFAULT_DISCOVERY_MODULE_ORDER,
     DISCOVERY_MODULES_YEAR_CONFIG_FILE,
     DEFAULT_DISCOVERY_MODULE_YEAR_ORDER,
+    DISCOVERY_MODULES_NEEDING_API_KEY,
 )
+
+
+def _on_by_default(module_id: str) -> bool:
+    return module_id not in DISCOVERY_MODULES_NEEDING_API_KEY
 
 
 def _default_config(default_order) -> dict:
     return {
         "order": list(default_order),
-        "enabled": {module_id: True for module_id in default_order},
+        "enabled": {module_id: _on_by_default(module_id) for module_id in default_order},
     }
 
 
@@ -57,7 +62,7 @@ def _reconcile_config(available_module_ids, config_file: str, default_order) -> 
     """Sync a persisted config against the modules actually available: ones
     no longer available (deleted/renamed, or - for the Years config - no
     longer implementing get_release_year()) are dropped, and new ones are
-    appended (enabled by default). Persists the result if it changed, so
+    appended (enabled, unless they need an API key). Persists the result if it changed, so
     this only needs to run once per discovery.
     """
     available = list(available_module_ids)
@@ -71,7 +76,7 @@ def _reconcile_config(available_module_ids, config_file: str, default_order) -> 
             order.append(module_id)
             known.add(module_id)
 
-    enabled = {module_id: config["enabled"].get(module_id, True) for module_id in order}
+    enabled = {module_id: config["enabled"].get(module_id, _on_by_default(module_id)) for module_id in order}
 
     reconciled = {"order": order, "enabled": enabled}
     if reconciled != config:

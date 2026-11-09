@@ -4,14 +4,14 @@ from collections import defaultdict
 from utils.common.title_patterns import FEAT_WORD
 from datetime import date
 import questionary
-from utils.common.output import RESET, YELLOW, error, review_header
+from utils.common.output import RESET, YELLOW, review_header
 from utils.ui.prompts import ask_yes_no
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
 from utils.database.database_management import edit_db_entry
 from utils.common.debug import slog
 from menu.song_actions import edit_songs_menu
 from utils.database.database_sessions import submit_global_database_session
-from utils.common.selenium_sessions import open_global_driver, close_global_driver, ChromeDriverLaunchError
+from utils.common.selenium_sessions import close_global_driver
 from utils.discoveries.discoveries_manager import (
     discover_release_year_result,
     load_year_discovery_modules,
@@ -76,12 +76,6 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
             del groups[key]
 
     print("Preparing fetch modules . . . ")
-    try:
-        open_global_driver()
-    except ChromeDriverLaunchError as exc:
-        error(f"{exc}")
-        submit_global_database_session()  # keep the years taken from the database
-        return
 
     # (label, year_or_None, [songs]) collected here, paired by index with
     # what was queried so the "fill up manually" step can show the user

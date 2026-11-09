@@ -6,6 +6,9 @@ from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
 
+from utils.common.debug import flog
+from utils.common.output import error
+
 
 class ChromeDriverLaunchError(RuntimeError):
     """Raised when Chrome/chromedriver fails to start a browser session."""
@@ -14,6 +17,7 @@ class ChromeDriverLaunchError(RuntimeError):
 
 _GLOBAL_DRIVER: Optional[webdriver.Chrome] = None
 _GLOBAL_DRIVER_LOCK = threading.Lock()
+_GLOBAL_DRIVER_FAILED = False
 
 
 def open_global_driver(headless: bool = True) -> webdriver.Chrome:
@@ -37,8 +41,18 @@ def open_global_driver(headless: bool = True) -> webdriver.Chrome:
 
 def get_global_driver() -> Optional[webdriver.Chrome]:
     """
-    Return the current global WebDriver, or None if not yet opened.
+    Return the global WebDriver, starting Chrome at the first lookup that
+    needs it. None when Chrome can't start: the user is told once, and until
+    close_global_driver() the browser lookups are skipped without retrying.
     """
+    global _GLOBAL_DRIVER_FAILED
+    if _GLOBAL_DRIVER is None and not _GLOBAL_DRIVER_FAILED:
+        try:
+            open_global_driver()
+        except ChromeDriverLaunchError as exc:
+            _GLOBAL_DRIVER_FAILED = True
+            flog(f"[Selenium] {exc}")
+            error(f"{exc}")
     return _GLOBAL_DRIVER
 
 
@@ -47,8 +61,9 @@ def close_global_driver() -> None:
     Quit the global WebDriver and clear the global reference.
     Safe to call even if the driver was never opened or already crashed.
     """
-    global _GLOBAL_DRIVER
+    global _GLOBAL_DRIVER, _GLOBAL_DRIVER_FAILED
     with _GLOBAL_DRIVER_LOCK:
+        _GLOBAL_DRIVER_FAILED = False
         if _GLOBAL_DRIVER is None:
             return
         try:

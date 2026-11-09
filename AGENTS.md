@@ -60,7 +60,7 @@ When this file disagrees with the code, trust the code and fix this file.
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
   package nothing imports any more goes, with the pins only it needed - check in a throwaway venv)
 - Focused tests: `venv/bin/python -m pytest tests/test_<area>.py`
-- Full suite: `venv/bin/python -m pytest` — ~2,750 tests, 1-3 minutes, mocked apart from `tests/contract/` (see Testing & verification)
+- Full suite: `venv/bin/python -m pytest` — ~2,950 tests, 1-3 minutes, mocked apart from `tests/contract/` (see Testing & verification)
 - Manual diagnostic/timing scripts: `python tests/manual/<script>.py` (excluded from pytest
   collection; they work on temporary copies of the databases - `tests/manual/_sandbox.py`)
 - Before any out-of-band DB write: `python tools/db_inspect.py` — its first line says whether the
@@ -576,7 +576,9 @@ non-trivial work in that area.
   None). Never stored without the owner accepting it. Not a matching key — that's
   `script_utils.matching_key()`.
 - `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
-  scraping fetchers. Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
+  fetchers that still need a browser (Spotify, Genius, Google), started by the first
+  `get_global_driver()`. iTunes and YouTube Music's album search use plain `requests`
+  (`request_pacing.RequestPacer` spaces the calls). Lifecycle rules (close in `finally`): `docs/agent-notes/discovery-modules.md`.
 - `src/utils/common/musicbrainz_client.py` — the single MusicBrainz HTTP entry point (`mb_get()`):
   shared session, process-wide ~1 req/s limiter, hard timeout, split retry policy. Don't call
   `requests.get` against `musicbrainz.org` from anywhere else. Known unmigrated exception:
@@ -775,6 +777,8 @@ non-trivial work in that area.
 - `YOUTUBE_API_KEY` (optional, `.env`) — a read-only YouTube Data API key for
   `videos_exist_via_api()`. Same rules. The OAuth token in `.secrets/token.json` (playlists) is a
   separate credential and expires; without the key and a valid token the API check is skipped.
+- `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN` (optional, `.env`) — the API
+  versions of those lookups, off by default (`DISCOVERY_MODULES_NEEDING_API_KEY`). Same rules.
 - `GITHUB_DB_TOKEN` (`.env`) — fine-grained GitHub token, Contents: read and write on
   `GITHUB_DB_REPO` only, for the public database release. Same rules; GitHub errors are
   reported without it.
@@ -905,7 +909,7 @@ non-trivial work in that area.
 
 ## Testing & verification
 
-- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,750 tests, 1-3 minutes, all
+- `python -m pytest` runs the full suite (config in `pyproject.toml`; pytest from `requirements-dev.txt`) — ~2,950 tests, 1-3 minutes, all
   mocked, no real network calls, except `tests/contract/`, which starts real servers on 127.0.0.1 with throwaway data. `python -m pytest tests/<file>.py` for one file while iterating.
   See [`tests/README.md`](tests/README.md) for what each file covers.
 - `tests/conftest.py` cuts every test off the real databases and `.env` (`database_dir` → a missing
@@ -984,8 +988,7 @@ non-trivial work in that area.
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
-  try to evade the latter), why `spotify_fetcher.py` and `youtube_fetcher.py` scrape their public
-  web players' markup instead of the official (credential-requiring) APIs, how
+  try to evade the latter), the three kinds of fetcher (Curl / Curl + API / Selenium), API modules off by default, how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the
   separate `get_release_year()` contract/config/stats for "Fill missing data -> Years" (including
   why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers,

@@ -24,11 +24,12 @@ LIBRARIES = [
     ("musicbrainzngs", "MusicBrainz searches for a song's recordings: its album and release year."),
     ("wikipedia", "Wikipedia lookups for a song's album and release year."),
     ("requests", "Plain web requests: MusicBrainz (spelling and genres), Wikipedia, lyrics for guessing "
-                 "a song's language, the public catalog's GitHub release and the check for a newer yt-dlp."),
-    ("beautifulsoup4", "Reads the web pages the lookups get back (Wikipedia, iTunes, Spotify, Google, "
-                       "YouTube)."),
+                 "a song's language, the public catalog's GitHub release, the check for a newer yt-dlp, and the iTunes "
+                 "and YouTube Music album searches."),
+    ("beautifulsoup4", "Reads the web pages the lookups get back (Wikipedia, Spotify, Google, "
+                       "Genius)."),
     ("selenium", "Drives a hidden Chrome/Chromium for the lookups that only work in a real browser "
-                 "(Google, Genius, iTunes, Spotify, YouTube search)."),
+                 "(Google, Genius, Spotify)."),
     ("yt-dlp", "YouTube: searching videos for songs, whether a video still plays, importing playlists "
                "and downloading a song's audio. Its extras - deno and yt-dlp-ejs (YouTube's JavaScript "
                "checks), brotli, pycryptodomex, websockets - are what YouTube needs today."),

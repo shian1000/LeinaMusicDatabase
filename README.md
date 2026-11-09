@@ -48,8 +48,8 @@ start empty.
     `python3`, and Debian 12's 3.11 is fine for it.
 - Nothing needs compiling: every pinned package comes as a ready wheel, or is pure Python.
 - **Optional — Google Chrome or Chromium** (not the snap package): "Fill missing data" (albums,
-  years) reads Spotify, YouTube, Google, Genius and iTunes pages in a hidden browser. Without
-  one, those lookups are skipped and the rest (MusicBrainz, Wikipedia, ...) still works. Selenium
+  years) reads Spotify, Google and Genius pages in a hidden browser, started only when a lookup gets that far. Without
+  one, those lookups are skipped and the rest (MusicBrainz, iTunes, YouTube Music, Wikipedia, ...) still works. Selenium
   downloads the matching driver itself.
 - **Optional — `xclip`** (X11) **or `wl-clipboard`** (Wayland), for "copy to clipboard". Without
   them the app asks the terminal to do it, which most terminals support.
@@ -233,8 +233,16 @@ Everything below is optional. Each goes into `.env` (see `.env.example` for the 
 | `YOUTUBE_API_KEY` — a YouTube Data API v3 key from the [Google Cloud console](https://console.cloud.google.com/apis/credentials) | Checking whether YouTube videos still exist when settling the phones' reports, without YouTube's bot wall | yt-dlp checks alone, which YouTube sometimes blocks for a while |
 | `.secrets/client_secret.json` — a Google Cloud OAuth client of type "Desktop app", with the YouTube Data API v3 enabled; the browser login then saves `.secrets/token.json` | Creating YouTube playlists from songs and importing *private* playlists | Public and unlisted playlists still import |
 | `GITHUB_DB_REPO` + `GITHUB_DB_TOKEN` — your repository (`owner/repo`) and a fine-grained token with Contents: read and write on it only | Publishing your own public copy of the catalog as a GitHub release (Settings → Server → Public database on GitHub, which explains the token) | Nothing is published. A fresh install downloads the starting catalog from `GITHUB_DB_REPO`, or from this project when it's empty |
+| `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` — an app from the [Spotify dashboard](https://developer.spotify.com/dashboard), whose owner needs Spotify Premium | "Spotify fetcher (Curl + API)", for albums and years without a browser. Also switch it on in Settings → Discovery modules | The module is off; the browser version still works |
+| `GENIUS_ACCESS_TOKEN` — a client access token from [Genius API clients](https://genius.com/api-clients) | "Genius fetcher (Curl + API)", for albums without a browser. Also switch it on in Settings → Discovery modules | The module is off; the browser version still works |
 
-MusicBrainz, Wikipedia, iTunes, Genius and the Spotify/YouTube pages need no keys.
+The album and year lookups are labelled in Settings → Discovery modules by what they need:
+
+| Label | Lookups | Needs |
+| --- | --- | --- |
+| **Curl** | MusicBrainz, Wikipedia, iTunes, YouTube | Only an internet connection |
+| **Curl + API** | Spotify, Genius (off by default) | A key from the table above, no browser |
+| **Selenium** | Spotify, Genius, Google | Chrome or Chromium, no key |
 
 ## Updating
 
@@ -268,9 +276,9 @@ What each library the program uses itself is for (also in the app: Help → Libr
 - **Pillow** — Opens the cover pictures found in music files, to save them and tell identical ones apart.
 - **musicbrainzngs** — MusicBrainz searches for a song's recordings: its album and release year.
 - **wikipedia** — Wikipedia lookups for a song's album and release year.
-- **requests** — Plain web requests: MusicBrainz (spelling and genres), Wikipedia, lyrics for guessing a song's language, the public catalog's GitHub release and the check for a newer yt-dlp.
-- **beautifulsoup4** — Reads the web pages the lookups get back (Wikipedia, iTunes, Spotify, Google, YouTube).
-- **selenium** — Drives a hidden Chrome/Chromium for the lookups that only work in a real browser (Google, Genius, iTunes, Spotify, YouTube search).
+- **requests** — Plain web requests: MusicBrainz (spelling and genres), Wikipedia, lyrics for guessing a song's language, the public catalog's GitHub release, the check for a newer yt-dlp, and the iTunes and YouTube Music album searches.
+- **beautifulsoup4** — Reads the web pages the lookups get back (Wikipedia, Spotify, Google, Genius).
+- **selenium** — Drives a hidden Chrome/Chromium for the lookups that only work in a real browser (Google, Genius, Spotify).
 - **yt-dlp** — YouTube: searching videos for songs, whether a video still plays, importing playlists and downloading a song's audio. Its extras - deno and yt-dlp-ejs (YouTube's JavaScript checks), brotli, pycryptodomex, websockets - are what YouTube needs today.
 - **google-api-python-client, google-auth, google-auth-oauthlib** — The YouTube Data API: creating YouTube playlists from songs, reading private playlists, and checking many videos at once with an API key.
 - **langdetect, pycountry** — Guessing a song's language from its lyrics, and the language's name.

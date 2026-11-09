@@ -583,6 +583,6 @@ def test_a_file_name_reads_back_into_the_same_song(session, dictionary, versions
 def test_fill_missing_albums_leaves_a_projects_songs(session, monkeypatch, capsys):
     albums = importlib.import_module(
         "menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_albums")
-    monkeypatch.setattr(albums, "open_global_driver", lambda: pytest.fail("no lookup for a project's song"))
+    monkeypatch.setattr(albums, "load_discovery_modules", lambda: pytest.fail("no lookup for a project's song"))
     albums.fill_missing_albums([_song(session, "Wolf Alice", "Boys", "Like a Version")])
     assert "No songs with missing albums" in capsys.readouterr().out

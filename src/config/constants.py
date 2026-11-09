@@ -172,13 +172,19 @@ YTDLP_PLAYLIST_LANG = "zu"
 
 DEFAULT_DISCOVERY_MODULE_ORDER = [
     "music_brainz_fetcher",
+    "spotify_api_fetcher",
     "spotify_fetcher",
     "youtube_fetcher",
     "wikipedia_fetcher",
     "google_search_fetcher",
     "itunes_fetcher",
+    "genius_api_fetcher",
     "genius_fetcher",
 ]
+
+# Modules that need a key from .env: off until the user switches them on,
+# both in a new config and when one is added to an existing config.
+DISCOVERY_MODULES_NEEDING_API_KEY = frozenset({"spotify_api_fetcher", "genius_api_fetcher"})
 
 # Seed order for the subset of modules that implement get_release_year().
 # Like DEFAULT_DISCOVERY_MODULE_ORDER, only used the first time the config
@@ -187,6 +193,7 @@ DEFAULT_DISCOVERY_MODULE_ORDER = [
 DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
     "music_brainz_fetcher",
     "google_search_fetcher",
+    "spotify_api_fetcher",
     "spotify_fetcher",
     # Last on purpose: its upload-date years need the user's review.
     "youtube_fetcher",
@@ -455,6 +462,30 @@ MUSICBRAINZ_API_MIN_INTERVAL = 1.1
 # It roughly doubles the request count for every miss; set to False to trade a
 # little recall for speed.
 MUSICBRAINZ_SPELLCHECK_USE_FALLBACK = True
+# (connect, read) timeout in seconds for the album lookups done without a browser
+HTTP_LOOKUP_TIMEOUT = (5, 12)
+# iTunes Search API. Apple's documented limit is about 20 requests a minute.
+ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
+ITUNES_SEARCH_COUNTRY = "us"
+ITUNES_SEARCH_LIMIT = 25
+ITUNES_SEARCH_MIN_INTERVAL = 3.1
+# music.youtube.com's own JSON search (undocumented, used by its web player)
+YOUTUBE_MUSIC_ORIGIN = "https://music.youtube.com"
+YOUTUBE_MUSIC_SEARCH_URL = f"{YOUTUBE_MUSIC_ORIGIN}/youtubei/v1/search"
+# The web player's "Songs" filter chip, as the search request's `params`
+YOUTUBE_MUSIC_SONGS_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+YOUTUBE_MUSIC_MIN_INTERVAL = 1.0
+# Spotify Web API. Reported cap for Development Mode apps since February 2026: 10.
+SPOTIFY_API_TOKEN_URL = "https://accounts.spotify.com/api/token"
+SPOTIFY_API_SEARCH_URL = "https://api.spotify.com/v1/search"
+SPOTIFY_API_SEARCH_LIMIT = 10
+SPOTIFY_API_MIN_INTERVAL = 0.5
+# Seconds before a token's expiry at which a new one is asked for
+SPOTIFY_API_TOKEN_MARGIN = 60
+# Genius API
+GENIUS_API_SEARCH_URL = "https://api.genius.com/search"
+GENIUS_API_SONG_URL = "https://api.genius.com/songs/{song_id}"
+GENIUS_API_MIN_INTERVAL = 0.5
 # Settings -> "Debug log": what each verbosity adds to debug.log
 # (utils.common.debug / utils.common.trace; the priorities passed to
 # slog() / mlog() are 3 - the verbosity they first show at)

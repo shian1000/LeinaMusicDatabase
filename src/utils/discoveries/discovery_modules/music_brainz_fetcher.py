@@ -16,7 +16,7 @@ from utils.common.musicbrainz_client import lucene_quote
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
 musicbrainzngs.set_useragent("MusicDatabase", "1.0", "https://github.com/shian1000/LeinaMusicDatabase")
 
-MODULE_NAME = "MusicBrainz fetcher"
+MODULE_NAME = "MusicBrainz fetcher (Curl)"
 
 # musicbrainzngs issues its HTTP requests via urllib with no per-call timeout,
 # so a stalled connection (server accepts then never answers) blocks forever

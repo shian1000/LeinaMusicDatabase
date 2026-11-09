@@ -157,7 +157,6 @@ def run_fill(monkeypatch, session):
     "Po Sećanju" (track 5) found after a swap; `picked` is what the checkbox
     list answers."""
     def run(songs, picked):
-        monkeypatch.setattr(fill_albums, "open_global_driver", lambda: None)
         monkeypatch.setattr(fill_albums, "close_global_driver", lambda: None)
         monkeypatch.setattr(fill_albums, "load_max_songs_per_fetch", lambda: 100)
         monkeypatch.setattr(fill_albums, "load_discovery_modules", lambda: [])

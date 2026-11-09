@@ -9,7 +9,7 @@ from utils.common.debug import flog, slog
 from utils.common.text_utils import remove_brackets, is_blacklisted_album, normalize, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
 
-MODULE_NAME = "Genius fetcher"
+MODULE_NAME = "Genius fetcher (Selenium)"
 
 def _url_slug(url: str) -> str:
     """"metronomy-love-letters-lyrics" -> "metronomy love letters lyrics" """
@@ -42,7 +42,10 @@ def title_matches_url(title: str, url: str, artist: str, threshold: float = 0.6)
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     slog("Genius", priority=1)
     driver = get_global_driver()
-    
+    if driver is None:
+        flog("[Genius] No browser available.")
+        return None
+
     # Search via Genius search page
     # Every character escaped: an "&" or "#" in a title would end the query
     query = quote(f"{artist} {title}", safe="")

@@ -5,7 +5,7 @@ from utils.ui.prompts import ask_yes_no
 from menu.song_actions import edit_songs_menu
 from utils.database.artist_identity import may_be_swapped
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
-from utils.common.selenium_sessions import open_global_driver, close_global_driver, ChromeDriverLaunchError
+from utils.common.selenium_sessions import close_global_driver
 from utils.discoveries.discoveries_manager import (
     AlbumTrackCache,
     discover_album,
@@ -18,7 +18,7 @@ from utils.ui.soundtrack_review import review_soundtrack_guesses
 from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM
-from utils.common.output import RESET, YELLOW, error, warn
+from utils.common.output import RESET, YELLOW, warn
 
 def _set_track_position(song, match):
     """The song's place on the album just found, unless it has one already
@@ -62,12 +62,6 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     known_works = None  # read at the first song no module found an album for
 
     print("Preparing fetch modules . . . ")
-    try:
-        open_global_driver()
-    except ChromeDriverLaunchError as exc:
-        error(f"{exc}")
-        return
-
     try:
         discovery_modules = load_discovery_modules()
         album_cache = AlbumTrackCache(songs_objects)

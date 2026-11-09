@@ -1,77 +1,78 @@
-import time
-from urllib.parse import quote
+from datetime import datetime, timezone
 
-from bs4 import BeautifulSoup
-from selenium.common.exceptions import TimeoutException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+import requests
 
-from config.constants import NO_VIDEO_SENTINEL, SPELLING_CHECK_THRESHOLD
+from config.constants import (
+    HTTP_LOOKUP_TIMEOUT,
+    NO_VIDEO_SENTINEL,
+    SPELLING_CHECK_THRESHOLD,
+    YOUTUBE_MUSIC_MIN_INTERVAL,
+    YOUTUBE_MUSIC_ORIGIN,
+    YOUTUBE_MUSIC_SEARCH_URL,
+    YOUTUBE_MUSIC_SONGS_FILTER,
+)
 from utils.common.debug import flog, slog
-from utils.common.selenium_sessions import get_global_driver
+from utils.common.request_pacing import RequestPacer
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 from utils.youtube.manage_youtube_playlists import get_video_release_year, search_video_ytdlp
 
-# Scrapes the public music.youtube.com web player instead of calling the
-# official YouTube Data API, so no app registration / API key is needed.
-# Searching and browsing music.youtube.com works without being logged in.
-# Trade-off: this depends on undocumented frontend markup (custom element
-# names and href prefixes) rather than a stable API contract, so it's more
-# likely to break if YouTube changes their web player.
-MODULE_NAME = "YouTube fetcher"
+# Asks music.youtube.com's own JSON search, the one its web player calls,
+# instead of the official YouTube Data API, so no app registration / API key
+# is needed and no browser either. Trade-off: this endpoint and the shape of
+# its answer are undocumented, so YouTube can change them without notice.
+MODULE_NAME = "YouTube fetcher (Curl)"
 
-# A fresh, cookie-less Selenium profile gets redirected to this consent
-# interstitial the first time it visits any youtube.com page. Once rejected,
-# the resulting cookie sticks for the rest of the shared driver's session.
-_CONSENT_URL_MARKER = "consent.youtube.com"
+_pacer = RequestPacer(YOUTUBE_MUSIC_MIN_INTERVAL)
 
 
-def _reject_consent_if_present(driver) -> None:
-    if _CONSENT_URL_MARKER not in driver.current_url:
-        return
-
-    slog("[YouTube] Consent interstitial shown, rejecting", priority=1)
-    try:
-        reject_button = WebDriverWait(driver, 8).until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[aria-label="Reject all"]'))
-        )
-        reject_button.click()
-    except Exception:
-        flog("[YouTube] Couldn't find/click the consent 'Reject all' button")
-        return
-
-    try:
-        WebDriverWait(driver, 8).until(
-            lambda d: _CONSENT_URL_MARKER not in d.current_url
-        )
-    except TimeoutException:
-        # get_album_name() loads the search page again either way
-        flog("[YouTube] Still on the consent page 8 s after 'Reject all'")
+def _result_rows(data):
+    """Every result row in the search answer, wherever it is nested."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key == "musicResponsiveListItemRenderer":
+                yield value
+            else:
+                yield from _result_rows(value)
+    elif isinstance(data, list):
+        for item in data:
+            yield from _result_rows(item)
 
 
-def _find_matching_song(soup: BeautifulSoup, artist: str, title: str):
+def _column_runs(row: dict, index: int) -> list[dict]:
+    columns = row.get("flexColumns", [])
+    if index >= len(columns):
+        return []
+    return columns[index].get("musicResponsiveListItemFlexColumnRenderer", {}).get("text", {}).get("runs", [])
+
+
+def _page_type(run: dict) -> str | None:
+    return (run.get("navigationEndpoint", {}).get("browseEndpoint", {})
+            .get("browseEndpointContextSupportedConfigs", {})
+            .get("browseEndpointContextMusicConfig", {}).get("pageType"))
+
+
+def _find_matching_song(data: dict, artist: str, title: str):
     """Scan the filtered 'Songs' search results and return (matched_title,
     matched_artist, album) for the best-matching row, or None if nothing
     clears the similarity threshold for both title and artist."""
     best = None
     best_score = 0.0
 
-    for row in soup.select("ytmusic-responsive-list-item-renderer"):
-        title_el = row.select_one(".title")
-        if not title_el:
+    for row in _result_rows(data):
+        row_title = "".join(run.get("text", "") for run in _column_runs(row, 0))
+        if not row_title:
             continue
-        row_title = title_el.get("title") or title_el.get_text(strip=True)
 
-        row_artists = [a.get_text(strip=True) for a in row.select('a[href^="channel/"]')]
+        details = _column_runs(row, 1)
+        row_artists = [run["text"] for run in details if _page_type(run) == "MUSIC_PAGE_TYPE_ARTIST"]
         if not row_artists:
             continue
 
-        album_link = row.select_one('a[href^="browse/"]')
-        if not album_link:
+        albums = [run["text"] for run in details if _page_type(run) == "MUSIC_PAGE_TYPE_ALBUM"]
+        if not albums:
             continue
-        album = album_link.get_text(strip=True)
+        album = albums[0]
 
         # A collab is usually stored in the DB as one joined artist
         # ("A x B x C"), while YouTube Music lists each artist separately, so
@@ -94,41 +95,32 @@ def _find_matching_song(soup: BeautifulSoup, artist: str, title: str):
 
 
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
-    driver = get_global_driver()
-    if driver is None:
-        flog("[YouTube] No driver open. Call open_global_driver() first.")
-        return None
-
-    query = quote(f"{artist} {title}")
-    search_url = f"https://music.youtube.com/search?q={query}"
-    slog(search_url, priority=1)
-    driver.get(search_url)
-    _reject_consent_if_present(driver)
-    if driver.current_url != search_url:
-        driver.get(search_url)
-    time.sleep(2)
-
+    query = f"{artist} {title}"
+    slog(f"[YouTube] Searching for {query}", priority=1)
+    _pacer.wait()
     try:
-        songs_tab = WebDriverWait(driver, 8).until(
-            EC.element_to_be_clickable((By.XPATH, "//ytmusic-chip-cloud-chip-renderer[.//yt-formatted-string[normalize-space(text())='Songs']]"))
+        response = requests.post(
+            YOUTUBE_MUSIC_SEARCH_URL,
+            params={"prettyPrint": "false"},
+            headers={"Origin": YOUTUBE_MUSIC_ORIGIN},
+            json={
+                "context": {"client": {
+                    "clientName": "WEB_REMIX",
+                    # A version frozen here would age out; the web player's own is its build date
+                    "clientVersion": f"1.{datetime.now(timezone.utc):%Y%m%d}.01.00",
+                }},
+                "query": query,
+                "params": YOUTUBE_MUSIC_SONGS_FILTER,
+            },
+            timeout=HTTP_LOOKUP_TIMEOUT,
         )
-        songs_tab.click()
-    except Exception:
-        flog("[YouTube] No 'Songs' filter chip found")
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as exc:
+        flog(f"[YouTube] Search failed for {query}: {exc}")
         return None
 
-    try:
-        WebDriverWait(driver, 8).until(
-            EC.presence_of_all_elements_located(
-                (By.CSS_SELECTOR, "ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer")
-            )
-        )
-    except Exception:
-        flog("[YouTube] No song results found")
-        return None
-
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    match = _find_matching_song(soup, artist, title)
+    match = _find_matching_song(data, artist, title)
     if not match:
         flog("[YouTube] No matching song in search results")
         return None
@@ -146,9 +138,9 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
 
 def get_release_year(artist: str, query: str, is_single: bool, songs=None) -> YearDiscoveryResult | None:
     """A release year from a YouTube video, found with the same DB ->
-    YouTube matching as playlists (yt-dlp, no Selenium, no API quota).
+    YouTube matching as playlists (yt-dlp, no API quota).
 
-    Unlike get_album_name() this doesn't scrape music.youtube.com.
+    Unlike get_album_name() this doesn't search music.youtube.com.
     get_video_release_year() prefers YouTube Music's "Released on" date and
     otherwise takes the upload date, which is often not the release date (a
     live session, a reupload, one track standing in for a whole album), so

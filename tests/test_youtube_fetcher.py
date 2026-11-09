@@ -1,140 +1,76 @@
-import importlib.util
-import os
-import sys
-from pathlib import Path
+"""YouTube fetcher's "Songs" results, on answers shaped like music.youtube.com's
+JSON search: no network."""
+import pytest
 
-from bs4 import BeautifulSoup
-
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+from utils.discoveries.discovery_modules import youtube_fetcher as youtube
 
 
-def load_youtube_fetcher_module():
-    module_path = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "utils"
-        / "discoveries"
-        / "discovery_modules"
-        / "youtube_fetcher.py"
-    )
-    spec = importlib.util.spec_from_file_location("youtube_fetcher", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def _linked(text, page_type):
+    return {"text": text, "navigationEndpoint": {"browseEndpoint": {"browseEndpointContextSupportedConfigs": {
+        "browseEndpointContextMusicConfig": {"pageType": page_type}}}}}
 
 
-SEARCH_RESULTS_HTML = """
-<div>
-  <ytmusic-responsive-list-item-renderer>
-    <yt-formatted-string class="title" title="Bohemian Rhapsody">Bohemian Rhapsody</yt-formatted-string>
-    <a href="channel/UC1dfeR4HaWDbWqFHLkxsg1d">Queen</a>
-    <a href="browse/MPREb_nightattheopera">A Night At The Opera</a>
-  </ytmusic-responsive-list-item-renderer>
-  <ytmusic-responsive-list-item-renderer>
-    <yt-formatted-string class="title" title="Bohemian Rhapsody - Live at Wembley Stadium">Bohemian Rhapsody - Live at Wembley Stadium</yt-formatted-string>
-    <a href="channel/UC1dfeR4HaWDbWqFHLkxsg1d">Queen</a>
-    <a href="browse/MPREb_livemagic">Live Magic</a>
-  </ytmusic-responsive-list-item-renderer>
-  <ytmusic-responsive-list-item-renderer>
-    <yt-formatted-string class="title" title="NIGHTMARE">NIGHTMARE</yt-formatted-string>
-    <a href="channel/UCcodyko">Cody Ko</a>
-    <a href="channel/UCyoungnut">Young Nut</a>
-    <a href="browse/MPREb_nightmare">NIGHTMARE</a>
-  </ytmusic-responsive-list-item-renderer>
-</div>
-"""
+def _column(runs):
+    return {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": runs}}}
+
+
+def _row(title, artists, album=None):
+    details = [_linked(artist, "MUSIC_PAGE_TYPE_ARTIST") for artist in artists]
+    if album:
+        details += [{"text": " • "}, _linked(album, "MUSIC_PAGE_TYPE_ALBUM")]
+    details.append({"text": " • 5:55"})
+    return {"musicResponsiveListItemRenderer": {"flexColumns": [_column([{"text": title}]), _column(details)]}}
+
+
+def _answer(*rows):
+    return {"contents": {"tabbedSearchResultsRenderer": {"tabs": [{"tabRenderer": {"content": {
+        "sectionListRenderer": {"contents": [{"musicShelfRenderer": {"contents": list(rows)}}]}}}}]}}}
+
+
+SEARCH_RESULTS = _answer(
+    _row("Bohemian Rhapsody", ["Queen"], "A Night At The Opera"),
+    _row("Bohemian Rhapsody - Live at Wembley Stadium", ["Queen"], "Live Magic"),
+    _row("NIGHTMARE", ["Cody Ko", "Young Nut"], "NIGHTMARE"),
+)
+
+
+@pytest.fixture(autouse=True)
+def no_waiting(monkeypatch):
+    monkeypatch.setattr(youtube._pacer, "wait", lambda: None)
 
 
 def test_find_matching_song_picks_studio_version_over_live_version():
-    module = load_youtube_fetcher_module()
-    soup = BeautifulSoup(SEARCH_RESULTS_HTML, "html.parser")
-
-    match = module._find_matching_song(soup, "Queen", "Bohemian Rhapsody")
+    match = youtube._find_matching_song(SEARCH_RESULTS, "Queen", "Bohemian Rhapsody")
 
     assert match == ("Bohemian Rhapsody", "Queen", "A Night At The Opera")
 
 
 def test_find_matching_song_returns_none_when_nothing_resembles_the_query():
-    module = load_youtube_fetcher_module()
-    soup = BeautifulSoup(SEARCH_RESULTS_HTML, "html.parser")
-
-    assert module._find_matching_song(soup, "Nirvana", "Smells Like Teen Spirit") is None
+    assert youtube._find_matching_song(SEARCH_RESULTS, "Nirvana", "Smells Like Teen Spirit") is None
 
 
 def test_find_matching_song_handles_multiple_artist_links_on_one_row():
-    module = load_youtube_fetcher_module()
-    soup = BeautifulSoup(SEARCH_RESULTS_HTML, "html.parser")
-
-    match = module._find_matching_song(soup, "Cody Ko", "NIGHTMARE")
+    match = youtube._find_matching_song(SEARCH_RESULTS, "Cody Ko", "NIGHTMARE")
 
     assert match == ("NIGHTMARE", "Cody Ko", "NIGHTMARE")
 
 
 def test_find_matching_song_returns_none_without_any_rows():
-    module = load_youtube_fetcher_module()
-    soup = BeautifulSoup("<div>nothing here</div>", "html.parser")
-
-    assert module._find_matching_song(soup, "Queen", "Bohemian Rhapsody") is None
+    assert youtube._find_matching_song({"contents": {}}, "Queen", "Bohemian Rhapsody") is None
 
 
 def test_find_matching_song_skips_row_without_album_link():
-    module = load_youtube_fetcher_module()
-    html = """
-    <ytmusic-responsive-list-item-renderer>
-      <yt-formatted-string class="title" title="Bohemian Rhapsody">Bohemian Rhapsody</yt-formatted-string>
-      <a href="channel/UC1dfeR4HaWDbWqFHLkxsg1d">Queen</a>
-    </ytmusic-responsive-list-item-renderer>
-    """
-    soup = BeautifulSoup(html, "html.parser")
+    data = _answer(_row("Bohemian Rhapsody", ["Queen"]))
 
-    assert module._find_matching_song(soup, "Queen", "Bohemian Rhapsody") is None
+    assert youtube._find_matching_song(data, "Queen", "Bohemian Rhapsody") is None
 
 
 def test_find_matching_song_matches_collab_stored_as_one_joined_artist():
     # The DB stores a collab as one joined artist ("A x B x C") while YouTube
     # Music lists each artist separately; no single artist clears the
     # threshold on its own, so the row's artists must be joined back together.
-    module = load_youtube_fetcher_module()
-    html = """
-    <ytmusic-responsive-list-item-renderer>
-      <yt-formatted-string class="title" title="Bahato">Bahato</yt-formatted-string>
-      <a href="channel/UCswada">Sw@da</a>
-      <a href="channel/UCmaxim">MAXIM</a>
-      <a href="channel/UCniczos">Niczos</a>
-      <a href="browse/MPREb_bahato">Bahato</a>
-    </ytmusic-responsive-list-item-renderer>
-    """
-    soup = BeautifulSoup(html, "html.parser")
+    data = _answer(_row("Bahato", ["Sw@da", "MAXIM", "Niczos"], "Bahato"))
 
-    match = module._find_matching_song(soup, "Sw@da x Maxim x Niczos", "Bahato")
+    match = youtube._find_matching_song(data, "Sw@da x Maxim x Niczos", "Bahato")
 
     assert match == ("Bahato", "Sw@da", "Bahato")
-
-
-def test_consent_page_that_doesnt_go_away_is_logged_not_raised(monkeypatch):
-    # DSC-19 / YT-15: the wait after "Reject all" timed out into the manager as a crashed module
-    from types import SimpleNamespace
-    from selenium.common.exceptions import TimeoutException
-    from utils.discoveries.discovery_modules import youtube_fetcher as yf
-
-    clicked, logged = [], []
-
-    class FakeWait:
-        def __init__(self, driver, timeout):
-            pass
-
-        def until(self, condition):
-            if callable(condition) and getattr(condition, "__name__", "") == "<lambda>":
-                raise TimeoutException("still there")
-            return SimpleNamespace(click=lambda: clicked.append(True))
-
-    monkeypatch.setattr(yf, "WebDriverWait", FakeWait)
-    monkeypatch.setattr(yf, "flog", logged.append)
-    driver = SimpleNamespace(current_url="https://consent.youtube.com/m?continue=x")
-
-    yf._reject_consent_if_present(driver)
-    assert clicked == [True]
-    assert logged and "consent" in logged[0]

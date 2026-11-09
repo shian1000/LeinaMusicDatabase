@@ -1,169 +1,95 @@
-import importlib.util
-import os
-import sys
-from pathlib import Path
+"""iTunes fetcher on fixed Search API answers: no network."""
+from types import SimpleNamespace
 
-from bs4 import BeautifulSoup
+import pytest
+import requests
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, REPO_ROOT)
-sys.path.insert(0, os.path.join(REPO_ROOT, "src"))
+from utils.discoveries.discovery_modules import itunes_fetcher as itunes
 
 
-def load_itunes_fetcher_module():
-    module_path = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "utils"
-        / "discoveries"
-        / "discovery_modules"
-        / "itunes_fetcher.py"
-    )
-    spec = importlib.util.spec_from_file_location("itunes_fetcher", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+def _track(title, album, artist="Doja Cat", kind="song"):
+    return {"kind": kind, "trackName": title, "collectionName": album, "artistName": artist}
 
 
-SEARCH_RESULTS_HTML = """
-<div>
-  <div data-testid="top-search-list-result">
-    <li data-testid="top-search-list-result-title">
-      <a data-testid="click-action" href="/album/say-so/1486465096?i=1486465101">Say So</a>
-    </li>
-    <li data-testid="top-search-list-result-subtitle">Song &middot; Doja Cat</li>
-  </div>
-  <div data-testid="top-search-list-result">
-    <li data-testid="top-search-list-result-title">
-      <a data-testid="click-action" href="/album/say-so-feat-nicki-minaj-single/1510821672?i=1510821685">Say So (feat. Nicki Minaj) - Single</a>
-    </li>
-    <li data-testid="top-search-list-result-subtitle">Album &middot; Doja Cat</li>
-  </div>
-</div>
-"""
-
-TRACK_LOCKUP_SEARCH_RESULTS_HTML = """
-<div>
-  <div data-testid="track-lockup">
-    <span data-testid="track-lockup-title">Say So</span>
-    <span data-testid="track-lockup-subtitle">Doja Cat</span>
-    <a data-testid="click-action" href="/album/say-so/1486465096?i=1486465101"></a>
-  </div>
-  <div data-testid="track-lockup">
-    <span data-testid="track-lockup-title">Say So (feat. Nicki Minaj)</span>
-    <span data-testid="track-lockup-subtitle">Doja Cat</span>
-    <a data-testid="click-action" href="/album/say-so-feat-nicki-minaj-single/1510821672?i=1510821685"></a>
-  </div>
-</div>
-"""
-
-ALBUM_PAGE_HTML = """
-<div>
-  <div data-testid="non-editable-product-title">Hot Pink</div>
-  <div data-testid="product-subtitles">
-    <a href="/artist/doja-cat/830588310">Doja Cat</a>
-  </div>
-  <div data-testid="track-list-item"><span data-testid="track-title">Cyber Sex</span></div>
-  <div data-testid="track-list-item"><span data-testid="track-title">Say So</span></div>
-</div>
-"""
-
-SINGLE_PAGE_HTML = """
-<div>
-  <div data-testid="non-editable-product-title">Say So (feat. Nicki Minaj) - Single</div>
-  <div data-testid="product-subtitles">
-    <a href="/artist/doja-cat/830588310">Doja Cat</a>
-  </div>
-  <div data-testid="track-list-item"><span data-testid="track-title">Say So (feat. Nicki Minaj)</span></div>
-</div>
-"""
-
-MULTI_ARTIST_SINGLE_HTML = """
-<div>
-  <div data-testid="non-editable-product-title">Say So (Jax Jones Midnight Snack Remix) - Single</div>
-  <div data-testid="product-subtitles">
-    <a href="/artist/doja-cat/830588310">Doja Cat</a>
-    <a href="/artist/jax-jones/1201228278">Jax Jones</a>
-  </div>
-  <div data-testid="track-list-item"><span data-testid="track-title">Say So (Jax Jones Midnight Snack Remix)</span></div>
-</div>
-"""
+@pytest.fixture(autouse=True)
+def no_waiting(monkeypatch):
+    monkeypatch.setattr(itunes._pacer, "wait", lambda: None)
 
 
-def test_find_song_link_matches_song_row_and_skips_album_rows():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(SEARCH_RESULTS_HTML, "html.parser")
+def test_find_track_reads_album_title_and_artist():
+    results = [_track("Cyber Sex", "Hot Pink"), _track("Say So", "Hot Pink")]
 
-    link = module._find_song_link(soup, "Say So")
-
-    assert link == "/album/say-so/1486465096?i=1486465101"
+    assert itunes._find_track(results, "Doja Cat", "Say So") == ("Hot Pink", "Say So", "Doja Cat")
 
 
-def test_find_song_link_returns_none_when_nothing_resembles_the_query():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(SEARCH_RESULTS_HTML, "html.parser")
+def test_find_track_skips_anything_but_songs():
+    results = [_track("Say So", "Say So Video", kind="music-video"), _track("Say So", "Hot Pink")]
 
-    assert module._find_song_link(soup, "Smells Like Teen Spirit") is None
-
-
-def test_find_song_link_matches_track_lockup_layout():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(TRACK_LOCKUP_SEARCH_RESULTS_HTML, "html.parser")
-
-    link = module._find_song_link(soup, "Say So")
-
-    assert link == "/album/say-so/1486465096?i=1486465101"
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
 
 
-def test_extract_from_itunes_soup_reads_album_title_and_artist():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(ALBUM_PAGE_HTML, "html.parser")
+def test_find_track_reports_singles_for_single_only_release():
+    results = [_track("Say So (feat. Nicki Minaj)", "Say So (feat. Nicki Minaj) - Single")]
 
-    album, matched_title, matched_artist = module.extract_from_itunes_soup(soup, "Doja Cat", "Say So")
-
-    assert album == "Hot Pink"
-    assert matched_title == "Say So"
-    assert matched_artist == "Doja Cat"
+    assert itunes._find_track(results, "Doja Cat", "Say So") == ("Singles", "Say So", "Doja Cat")
 
 
-def test_extract_from_itunes_soup_reports_singles_for_single_only_release():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(SINGLE_PAGE_HTML, "html.parser")
+def test_find_track_prefers_the_album_over_the_single():
+    results = [_track("Say So", "Say So - Single"), _track("Say So", "Hot Pink")]
 
-    album, matched_title, matched_artist = module.extract_from_itunes_soup(soup, "Doja Cat", "Say So")
-
-    assert album == "Singles"
-    assert matched_title == "Say So"
-    assert matched_artist == "Doja Cat"
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
 
 
-def test_extract_from_itunes_soup_matches_against_first_credited_artist():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(MULTI_ARTIST_SINGLE_HTML, "html.parser")
+def test_find_track_prefers_the_plain_title_over_a_live_version():
+    results = [_track("Say So (Live in Paris)", "Tour"), _track("Say So", "Hot Pink")]
 
-    album, matched_title, matched_artist = module.extract_from_itunes_soup(soup, "Jax Jones", "Say So")
-
-    assert album == "Singles"
-    assert matched_artist == "Doja Cat"
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
 
 
-def test_extract_from_itunes_soup_returns_none_on_artist_mismatch():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(ALBUM_PAGE_HTML, "html.parser")
+def test_find_track_matches_one_of_several_credited_artists():
+    results = [_track("Say So (Remix)", "Remixes - Single", artist="Doja Cat & Jax Jones")]
 
-    assert module.extract_from_itunes_soup(soup, "Nirvana", "Say So") is None
-
-
-def test_extract_from_itunes_soup_returns_none_on_title_mismatch():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup(ALBUM_PAGE_HTML, "html.parser")
-
-    assert module.extract_from_itunes_soup(soup, "Doja Cat", "Smells Like Teen Spirit") is None
+    assert itunes._find_track(results, "Jax Jones", "Say So") == ("Singles", "Say So", "Doja Cat & Jax Jones")
 
 
-def test_extract_from_itunes_soup_returns_none_without_product_title():
-    module = load_itunes_fetcher_module()
-    soup = BeautifulSoup("<div>nothing here</div>", "html.parser")
+def test_find_track_returns_none_on_artist_mismatch():
+    assert itunes._find_track([_track("Say So", "Hot Pink")], "Nirvana", "Say So") is None
 
-    assert module.extract_from_itunes_soup(soup, "Doja Cat", "Say So") is None
+
+def test_find_track_returns_none_on_title_mismatch():
+    assert itunes._find_track([_track("Say So", "Hot Pink")], "Doja Cat", "Smells Like Teen Spirit") is None
+
+
+def test_find_track_skips_a_blacklisted_album(monkeypatch):
+    monkeypatch.setattr(itunes, "is_blacklisted_album", lambda album, artist=None: album == "Greatest Hits")
+    results = [_track("Say So", "Greatest Hits"), _track("Say So", "Hot Pink")]
+
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+
+
+def test_get_album_name_sends_the_whole_query_and_reports_the_match(monkeypatch):
+    calls = []
+
+    def fake_get(url, params, timeout):
+        calls.append(params)
+        return SimpleNamespace(raise_for_status=lambda: None,
+                               json=lambda: {"results": [_track("Say So", "Hot Pink")]})
+    monkeypatch.setattr(itunes.requests, "get", fake_get)
+
+    result = itunes.get_album_name("Doja Cat", "Say So")
+
+    assert (result.album, result.matched_title, result.matched_artist) == ("Hot Pink", "Say So", "Doja Cat")
+    assert calls[0]["term"] == "Doja Cat Say So"
+    assert calls[0]["entity"] == "song"
+
+
+def test_get_album_name_logs_a_failed_request(monkeypatch):
+    logged = []
+
+    def failing_get(url, params, timeout):
+        raise requests.ConnectionError("no network")
+    monkeypatch.setattr(itunes.requests, "get", failing_get)
+    monkeypatch.setattr(itunes, "flog", logged.append)
+
+    assert itunes.get_album_name("Doja Cat", "Say So") is None
+    assert logged and "no network" in logged[0]

@@ -78,6 +78,11 @@ class Settings:
     # "YouTube Data API v3"), only for reading public video data such as
     # whether a video still exists. Unlike the OAuth token it doesn't expire.
     youtube_api_key: str | None = os.getenv("YOUTUBE_API_KEY")
+    # Keys of the optional API versions of the album / year lookups
+    # (discovery_modules/spotify_api_fetcher.py, genius_api_fetcher.py). Never print or log them.
+    spotify_client_id: str = os.getenv("SPOTIFY_CLIENT_ID", "").strip()
+    spotify_client_secret: str = os.getenv("SPOTIFY_CLIENT_SECRET", "").strip()
+    genius_access_token: str = os.getenv("GENIUS_ACCESS_TOKEN", "").strip()
     export_dir: UPath = UPath(__file__).parent.parent / "import"
     # Where music.db / tag.db are copied for the mobile app to download
     # (utils/database/sharing.py; SHARING_DIR). It may live on an external

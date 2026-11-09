@@ -320,7 +320,6 @@ def run_fill(monkeypatch, session):
     checkbox answers `pick`, `swapped` is what the lookup with the names the
     other way round finds. Returns the questions asked."""
     def run(songs, pick, swapped=None):
-        monkeypatch.setattr(fill_albums, "open_global_driver", lambda: None)
         monkeypatch.setattr(fill_albums, "close_global_driver", lambda: None)
         monkeypatch.setattr(fill_albums, "load_max_songs_per_fetch", lambda: 100)
         monkeypatch.setattr(fill_albums, "load_discovery_modules", lambda: [])

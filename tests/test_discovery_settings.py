@@ -64,6 +64,32 @@ def test_a_module_missing_from_enabled_counts_as_on(config):
     assert result["enabled"] == {"music_brainz_fetcher": True, "itunes_fetcher": False, "wikipedia_fetcher": True}
 
 
+def test_a_module_needing_a_key_is_off_in_a_new_config():
+    result = ds._default_config(["music_brainz_fetcher", "spotify_api_fetcher", "genius_api_fetcher"])
+    assert result["enabled"] == {
+        "music_brainz_fetcher": True, "spotify_api_fetcher": False, "genius_api_fetcher": False,
+    }
+
+
+def test_a_module_needing_a_key_added_to_an_existing_config_stays_off(config):
+    _write(config, ["spotify_fetcher"], {"spotify_fetcher": True})
+
+    result = ds._reconcile_config(["spotify_fetcher", "spotify_api_fetcher"], str(config), DEFAULT)
+    assert result["order"] == ["spotify_fetcher", "spotify_api_fetcher"]
+    assert result["enabled"] == {"spotify_fetcher": True, "spotify_api_fetcher": False}
+
+
+def test_a_module_needing_a_key_switched_on_stays_on(config):
+    _write(config, ["spotify_api_fetcher"], {"spotify_api_fetcher": True})
+
+    assert ds._reconcile_config(["spotify_api_fetcher"], str(config), DEFAULT)["enabled"] == {"spotify_api_fetcher": True}
+
+
+def test_every_module_needing_a_key_exists_in_the_default_orders():
+    from config.constants import DEFAULT_DISCOVERY_MODULE_ORDER, DISCOVERY_MODULES_NEEDING_API_KEY
+    assert DISCOVERY_MODULES_NEEDING_API_KEY <= set(DEFAULT_DISCOVERY_MODULE_ORDER)
+
+
 @pytest.mark.parametrize("text", ["{not json", "[1, 2]", '"x"'])
 def test_an_unreadable_or_odd_file_falls_back_to_the_defaults(config, text):
     config.write_text(text)
