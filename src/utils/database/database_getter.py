@@ -5,6 +5,7 @@ from utils.database.datatables import artist_categories, song_categories, search
 from utils.common.debug import slog
 from utils.common.text_utils import is_soundtrack_artist, normalize_text
 from utils.common.normalizer import normalize
+from utils.common.soundtrack_names import soundtrack_work, work_key
 from collections import Counter
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import (
@@ -369,7 +370,10 @@ def get_known_album_year(artist_id: int, album: str) -> int | None:
     usually stored under a different "artist" each (composer, game title,
     uploader), while the album name itself is specific. Any other album
     keeps the same-artist rule - "Greatest Hits" or "Live" by two artists
-    aren't one album.
+    aren't one album. With no such song, an album "<work> OST" takes the year
+    from the songs of an artist named exactly like the work ("Serial
+    Experiments Lain OST" -> artist "Serial Experiments Lain"); a name only
+    starting alike ("Serial Experiments レイン" by a fan) says nothing.
 
     The caller keeps SINGLES_ALBUM away from here - it isn't a real shared
     album, so one single's year says nothing about another's."""
@@ -383,6 +387,9 @@ def get_known_album_year(artist_id: int, album: str) -> int | None:
         query = query.filter(Song.artist_id == artist_id)
     rows = query.all()
     counts = Counter(year for row_album, year in rows if normalize(row_album) == target)
+    if not counts and (work := soundtrack_work(album)):
+        rows = music_session.query(Artist.name, Song.year).select_from(Song).join(Artist).filter(Song.year != None).all()
+        counts = Counter(year for artist_name, year in rows if work_key(artist_name) == work_key(work))
     if not counts:
         return None
     return max(counts, key=lambda year: (counts[year], -year))

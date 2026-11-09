@@ -311,7 +311,9 @@ A soundtrack album (a `SOUNDTRACK_ARTIST_MARKERS` word in the *album* name, e.g.
 OST") matches across all artists, because each of its tracks tends to sit under a different
 "artist" (composer, game title, YouTube uploader) while the album name is specific. Every other
 album keeps the same-artist rule, since "Greatest Hits" or "Persona" (Selah Sue) by two artists
-aren't one album. Accepted side effect: a cover filed under the original OST's album name gets the
+aren't one album. With no song of that album dated, "<work> OST" falls back on the songs of an artist
+named exactly like the work (`soundtrack_work()` + `work_key()`); only exactly, since a fan's
+"Serial Experiments レイン" (2024) starts like "Serial Experiments Lain" (1998). Accepted side effect: a cover filed under the original OST's album name gets the
 OST's year. Those
 years are written without review. This runs before the per-fetch cap, so it never uses up a slot
 meant for a network lookup. Later, the manual
