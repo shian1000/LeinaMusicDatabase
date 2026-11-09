@@ -236,6 +236,13 @@ imports.
 values (plus `_norm` variants, scores, `"found": True`); on no match they echo
 the unchanged inputs with `"found": False`.
 
+MusicBrainz's artist is taken only when its title resembles ours too
+(`_takes_mb_artist()`): a near-identical name on another title is another artist
+("Gnarls Barkley - Crazy" found "Charles Barkley Is Crazy" by Gnarls Oakley, score
+100, artist similarity 0.89). `_cached_for_input()` applies the rule again, because
+`spellcheck_cache.json` still holds older entries with such an artist: read
+corrections through `check_spelling()`, never `corrected_artist` from the file.
+
 Callers still branch on `spell_check_result.get("found")` for **semantics** — an
 unchanged echo is not a real correction. `find_similar_artist()` returns `[]` on
 the not-found path; `find_similar_song()` returns `None` (same guard,

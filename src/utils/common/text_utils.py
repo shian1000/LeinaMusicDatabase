@@ -104,14 +104,23 @@ def make_fuzzy(text: str) -> str:
     return " ".join(t + "~" for t in tokens if t)
 
 
+def _takes_mb_artist(artist_sim: float, title_sim: float, threshold: float) -> bool:
+    """Is MusicBrainz's artist a correction of ours? Only on a recording of
+    this song: "Gnarls Barkley - Crazy" found "Charles Barkley Is Crazy" by
+    Gnarls Oakley, a similar name of a different artist."""
+    return artist_sim >= threshold and title_sim >= threshold
+
+
 def _cached_for_input(cached: dict, artist: str, title: str, threshold: float) -> dict:
     """A cached check_spelling() result for this spelling of the input. The
     cache key ignores case, so the entry may come from "Abba" when "ABBA" is
     asked: a field that didn't take MusicBrainz's spelling (nothing found, or
     too unlike it) is this input, not the earlier spelling, or the caller
-    would see a "correction" to it."""
+    would see a "correction" to it. Older entries may hold an artist taken
+    from a recording of another title, so the artist rule is applied again."""
     result = dict(cached)
-    if not (cached.get("found") and cached.get("artist_similarity", 0) >= threshold):
+    if not (cached.get("found") and _takes_mb_artist(cached.get("artist_similarity", 0),
+                                                     cached.get("title_similarity", 0), threshold)):
         result["corrected_artist"] = artist
     if not (cached.get("found") and cached.get("title_similarity", 0) >= threshold):
         result["corrected_title"] = title
@@ -130,8 +139,9 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     cached = spellcheck_cache.get(artist, title)
     if cached is not None:
         MBStats.cache_hits += 1
-        mlog(f"[Spell check] cache hit: '{artist}' - '{title}' -> {_spellcheck_outcome(cached)}", 1)
-        return _cached_for_input(cached, artist, title, threshold)
+        result = _cached_for_input(cached, artist, title, threshold)
+        mlog(f"[Spell check] cache hit: '{artist}' - '{title}' -> {_spellcheck_outcome(result)}", 1)
+        return result
     MBStats.cache_misses += 1
     mlog(f"[Spell check] cache miss, asking MusicBrainz: '{artist}' - '{title}'", 1)
 
@@ -211,7 +221,7 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     slog(f"  Title: input='{title}' ({central_normalize(title)}) vs MB='{mb_title}' ({central_normalize(mb_title)})")
     slog(f"  Artist: input='{artist}' ({central_normalize(artist)}) vs MB='{mb_artist}' ({central_normalize(mb_artist)})")
 
-    final_artist = mb_artist if artist_sim >= threshold else artist
+    final_artist = mb_artist if _takes_mb_artist(artist_sim, title_sim, threshold) else artist
     final_title = mb_title if title_sim >= threshold else title
     
     is_corrected = (final_artist != artist) or (final_title != title)
