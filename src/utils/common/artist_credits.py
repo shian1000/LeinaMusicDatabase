@@ -149,7 +149,10 @@ def title_heading_artists(title: str, artist: str) -> tuple[str, str] | None:
 
 # ==================== A title's featured artists ====================
 
-_FEAT_CREDIT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+(.+)$", re.IGNORECASE)
+# A credit ends at a " - ": "17 Bas Feat. J Cole - Tribe" credits J Cole, and
+# "Tribe" is no part of the guest's name
+_CREDIT_END = r"(?=\s+[-–—]\s|$)"
+_FEAT_CREDIT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+(.+?)" + _CREDIT_END, re.IGNORECASE)
 
 
 def feat_credits(title: str) -> list[str]:
@@ -171,7 +174,7 @@ def feat_credits(title: str) -> list[str]:
 
 
 # An unbracketed credit up to the next bracket: "(Remix)" after it stays
-_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+[^()\[\]]+", re.IGNORECASE)
+_UNBRACKETED_FEAT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+[^()\[\]]+?(?=\s+[-–—]\s|\s*[()\[\]]|$)", re.IGNORECASE)
 
 
 def split_feat_credits(title: str) -> tuple[str, list[str]]:
@@ -184,6 +187,18 @@ def split_feat_credits(title: str) -> tuple[str, list[str]]:
     bare = BRACKET_RE.sub(lambda m: "" if FEAT_WORD_RE.match(m.group(1).strip() + " ") else m.group(0), title)
     bare = " ".join(_UNBRACKETED_FEAT_RE.sub(" ", bare).split())
     return (bare, names) if bare else (title, [])
+
+
+_WITH_CREDIT_RE = re.compile(r"^(.+)\s+with\s+(.+)$", re.IGNORECASE)
+
+
+def with_credits(title: str) -> tuple[str, list[str]] | None:
+    """A title read as "Title with Guests": ("Water", ["Mahalia", "Swindle"]),
+    or None. Only a reading to check against a song's artists: "Die With a
+    Smile" reads the same way, so nothing may be cut from a title by this."""
+    match = _WITH_CREDIT_RE.match(title or "")
+    split = propose_artist_split(f"X feat. {match.group(2)}") if match else None
+    return (match.group(1).strip(), split.feat) if split and split.feat else None
 
 
 def strip_feat_credits(title: str) -> str:

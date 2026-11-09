@@ -7,10 +7,11 @@ from pathlib import Path
 import questionary
 from utils.ui.prompts import ask_yes_no
 
-from config.constants import FILE_PAIR_VIDEO_CHOICES_MAX, USER_PLAYLIST_SOURCE_FOLDER
+from config.constants import FILE_BEST_GUESSES_MAX, FILE_PAIR_VIDEO_CHOICES_MAX, USER_PLAYLIST_SOURCE_FOLDER
 from settings import settings
 from utils.common.debug import slog
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
+from utils.database.projects import project_named, set_song_project
 from utils.database.song_references import apply_song_id_changes
 from utils.database.user_playlists import (PlaylistChangedError, delete_playlist, list_playlists, playlist_songs,
                                            playlist_videos, save_playlist)
@@ -94,6 +95,8 @@ _UNMATCHED_STOP = "Stop (don't save the playlist)"
 _CONFIRM_SONG = "Yes, this is the song"
 _SEARCH_INSTEAD = "No - search the database by hand"
 _SIMILAR_OTHER = "No - show the other options"
+_PROJECT_SAME_SONG = "The same song - use it and mark it with this project"
+_PROJECT_SEPARATE = "A separate recording - show the other options"
 _NONE_OF_THESE = "None of these - show the other options"
 _BACK_TO_OPTIONS = "Back to the options for this file"
 
@@ -195,6 +198,13 @@ def _review_unmatched_files(music_session, folder: Path, playlist) -> None:
             print(f"  Folder: {track.file.parent.relative_to(folder) if track.file.parent != folder else '.'}")
         print(f"  Read as: {colored_song(track.artist, track.title)}"
               + ("  (the artist from the YouTube video)" if track.artist_from_video else ""))
+        if track.project_twin is not None:
+            same = _is_project_twin(music_session, track, track.project_twin)
+            if same is None:
+                return
+            if same:
+                _pick_for_track(track, track.project_twin, unmatched)
+                continue
         if track.similar_song is not None:
             print(f"  Similar song in the database: {as_ansi(_scored_tokens(track, track.similar_song))}")
             verdict = questionary.select("Is this the right song?", choices=[_CONFIRM_SONG, _SIMILAR_OTHER]).ask()
@@ -255,6 +265,32 @@ _ADD_AS_TYPED = "As typed"
 _ADD_SWAPPED = "Swap title with artist"
 
 
+def _is_project_twin(music_session, track, song) -> bool | None:
+    """Is the file of `track.project` the song `song`, which has no project?
+    Yes marks the song with the project. None: the question was cancelled."""
+    print(f"  From the project: {track.project}")
+    print(f"  In the database with no project: {_song_choice_label(song)}")
+    verdict = questionary.select("Is this file that song?", choices=[_PROJECT_SAME_SONG, _PROJECT_SEPARATE]).ask()
+    if verdict is None:
+        return None
+    if verdict == _PROJECT_SEPARATE:
+        return False
+    set_song_project([song], project_named(music_session, track.project))
+    submit_global_database_session()
+    return True
+
+
+def _closest_to_typed(music_session, track, artist_name: str, title: str) -> list:
+    """The closest songs to the names just typed, as (song, score), without
+    those already turned down for the tags: a name typed by hand can reach a
+    song the tags couldn't, under an artist spelt differently ("17 Bas")."""
+    offered = {song.id for song, _ in track.best_guesses}
+    guesses = LocalSongMatcher(music_session).best_guesses(
+        {"artist_name": artist_name, "title": title, "project": track.project},
+        FILE_BEST_GUESSES_MAX, load_best_guess_min_score())
+    return [(song, score) for song, score in guesses if song.id not in offered]
+
+
 def _add_song_for_file(music_session, track):
     """Ask for the new song's artist and title (the tags' as defaults), offer
     swapping them when the title is a known artist and the artist isn't, show
@@ -277,6 +313,26 @@ def _add_song_for_file(music_session, track):
         print(f"  Already in the database: {_song_choice_label(existing)}")
         if ask_yes_no("Use this song?"):
             return existing
+    else:
+        twin = LocalSongMatcher(music_session).without_project(
+            {"artist_name": artist_name, "title": title, "project": track.project})
+        # Already answered "a separate recording" when the review asked
+        if twin is not None and twin is not track.project_twin:
+            same = _is_project_twin(music_session, track, twin)
+            if same is None:
+                return None
+            if same:
+                return twin
+        guesses = _closest_to_typed(music_session, track, artist_name, title)
+        if guesses:
+            print("  Closest songs in the database:")
+            choices = [questionary.Choice(title=_song_tokens(s, score), value=s) for s, score in guesses]
+            picked = questionary.select("Is one of these the song you are adding?", choices=choices + [_NONE_OF_THESE],
+                                        default=_NONE_OF_THESE).ask()
+            if picked is None:
+                return None
+            if picked != _NONE_OF_THESE:
+                return picked
     print(f"  Artist: {artist.name} (already in the database)" if artist else f"  Artist: {artist_name} (new)")
     print(f"  Title:  {title}")
     if track.project:

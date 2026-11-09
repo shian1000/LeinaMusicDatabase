@@ -13,7 +13,7 @@ from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
 from utils.common.sanitize.text import strip_trailing_junk_suffix
-from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits
+from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
 from utils.database.latin_names import artist_match_synonyms, song_titles
 from utils.database.song_artists import song_all_artists
 from utils.database.song_kinds import (
@@ -624,6 +624,14 @@ class LocalSongMatcher:
             song = find_song_loosely(rest, songs, duration, feats, metadata.project)
         return song
 
+    def without_project(self, metadata: dict) -> Song | None:
+        """For an entry of a project: the same artist's song of that title
+        that has no project, which songs_for_entry() keeps apart. May be
+        another recording or this one not marked yet (nothing in its data
+        says), so only for asking - see folder_playlist.match_track()."""
+        metadata = as_entry(metadata)
+        return self.match_exact(metadata.copy_with(project=None)) if metadata.project else None
+
     def _artist_songs(self, artist: Artist) -> list:
         if artist.id not in self._songs:
             self._songs[artist.id] = self.session.query(Song).filter(Song.artist_id == artist.id).all()
@@ -705,17 +713,23 @@ class LocalSongMatcher:
             return None
         return f"{name}-{title}"
 
-    def match_score(self, metadata: dict, song: Song, joined: bool = True) -> float:
+    def match_score(self, metadata: dict, song: Song, joined: bool = True, credits: bool = True) -> float:
         """0-1, how well the file's tags fit `song`: the title's similarity
         (whole and core, the better) and, when the file has an artist, the
         artist's (FILE_MATCH_SCORE_TITLE_WEIGHT : the rest) - read as tagged
         or with artist and title swapped, the better ("Ne Bucuram In Ciuda
         Lor" by "Carla's Dreams" tagged the other way round). Shown with every
         guess; best_guesses() ranks by it. Not `joined`: without the
-        joined_title() reading."""
+        joined_title() reading. Not `credits`: without the "Title with
+        Guests" one (_credited_score()) and the artists written as one name
+        (_run_together_score())."""
         metadata = as_entry(metadata)
         forms = self._title_forms(song)
-        return max(self._score(*wanted, forms, song, 0.0) for wanted in self._readings(metadata, joined))
+        score = max(self._score(*wanted, forms, song, 0.0) for wanted in self._readings(metadata, joined))
+        if not credits:
+            return score
+        return max(score, self._credited_score(self._with_reading(metadata), forms, song, 0.0),
+                   self._run_together_score(self._wanted(metadata), forms, song, 0.0))
 
     def best_guesses(self, metadata: dict, limit: int, min_score: float) -> list:
         """The `limit` songs scoring at least `min_score`, best first, as
@@ -731,9 +745,12 @@ class LocalSongMatcher:
             self._scoring = [(song, self._title_forms(song)) for song in self.session.query(Song).all()]
         allowed = set(map(id, songs_for_entry([song for song, _ in self._scoring],
                                                metadata.title, metadata.duration_s, metadata.project)))
+        with_reading, as_tagged = self._with_reading(metadata), self._wanted(metadata)
         scored = [(song, score) for song, forms in self._scoring
                   if id(song) in allowed
-                  and (score := max(self._score(*w, forms, song, min_score) for w in readings)) >= min_score]
+                  and (score := max(self._credited_score(with_reading, forms, song, min_score),
+                                    self._run_together_score(as_tagged, forms, song, min_score),
+                                    *(self._score(*w, forms, song, min_score) for w in readings))) >= min_score]
         scored.sort(key=lambda pair: (-pair[1], pair[0].id))
         return scored[:limit]
 
@@ -780,6 +797,52 @@ class LocalSongMatcher:
     def _title_forms(song: Song) -> list:
         return list({f for t in song_titles(song) for f in (normalize(t), _title_core(t)) if f})
 
+    def _with_reading(self, metadata: dict) -> tuple | None:
+        """(the _wanted() of "Water with Mahalia & Swindle" read as "Water",
+        the guests' names), or None."""
+        metadata = as_entry(metadata)
+        reading = with_credits(metadata.title)
+        if reading is None:
+            return None
+        title, guests = reading
+        return self._wanted({"title": title, "artist_name": metadata.artist}), [normalize(g) for g in guests]
+
+    def _credited_score(self, reading: tuple | None, song_forms: list, song: Song, floor: float) -> float:
+        """The score of `reading` (_with_reading()), only for a song crediting
+        every guest it names; a guess to confirm, never auto-accepted
+        (folder_playlist.match_track())."""
+        if reading is None:
+            return 0.0
+        wanted, guests = reading
+        score = self._score(*wanted, song_forms, song, floor)
+        if score < floor or not score:
+            return 0.0
+        known = {normalize(name) for name in _artist_names(song)}
+        return score if all(guest in known for guest in guests) else 0.0
+
+    def _run_together_score(self, wanted: tuple, song_forms: list, song: Song, floor: float) -> float:
+        """The score of a tag artist that is several of the song's artists
+        written as one name with nothing between them ("Fisz Emade Tworzywo"
+        for Fisz, Emade and Tworzywo Sztuczne), which no single one of them
+        resembles; else 0. A guess to confirm, never auto-accepted
+        (folder_playlist.match_track()): "Pearl Jam" reads the same way."""
+        title_forms, artist = wanted
+        words = set(artist.split())
+        if len(words) < 2:
+            return 0.0
+        title = self._score(title_forms, "", song_forms, song, floor)
+        if title < floor or not title:
+            return 0.0
+        names = [set(name.split()) for name in self._known_artists(song)]
+        if any(words <= name for name in names) or not all(any(w in name for name in names) for w in words):
+            return 0.0
+        return FILE_MATCH_SCORE_TITLE_WEIGHT * title + 1 - FILE_MATCH_SCORE_TITLE_WEIGHT
+
+    def _known_artists(self, song: Song) -> list:
+        if song.id not in self._artist_forms:
+            self._artist_forms[song.id] = list({normalize(n) for n in _artist_names(song)} - {""})
+        return self._artist_forms[song.id]
+
     def _score(self, title_forms: list, artist: str, song_forms: list, song: Song, floor: float) -> float:
         if not title_forms:
             return 0.0
@@ -789,9 +852,7 @@ class LocalSongMatcher:
             return title
         if title < floor:
             return 0.0
-        if song.id not in self._artist_forms:
-            self._artist_forms[song.id] = list({normalize(n) for n in _artist_names(song)} - {""})
-        artist_score = max((similarity_at_least(artist, known, 0.0) for known in self._artist_forms[song.id]), default=0.0)
+        artist_score = max((similarity_at_least(artist, known, 0.0) for known in self._known_artists(song)), default=0.0)
         return weight * title + (1 - weight) * artist_score
 
     def title_candidates(self, metadata: dict, limit: int) -> list:

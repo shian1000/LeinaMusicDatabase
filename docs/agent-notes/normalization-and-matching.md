@@ -465,6 +465,14 @@ the right song at 76% instead of 96%. Two choices that aren't obvious:
   tei") are told apart by the whole title before giving up. A misspelt artist with an exact
   title ("Liiquid tension experiment") scores ~0.993, so at 0.99 this also
   takes what the artist auto-accept setting would have asked about.
+- Readings that are only guesses can score 100% and must still ask:
+  `match_track()` auto-accepts only when `match_score(..., credits=False)`
+  gives the same score. That covers "Title with Guests" (`_credited_score()`)
+  and several of the song's artists written as one name
+  (`_run_together_score()`: "Fisz Emade Tworzywo" against Fisz, Emade and
+  Tworzywo Sztuczne was 86%, each compared alone; `propose_artist_split()`
+  sees no separator there, and "Pearl Jam" reads the same way). A new reading
+  of that kind goes behind the same flag.
 
 It compares against every song (~5.7k), so it uses
 `text_utils.similarity_at_least()` (SequenceMatcher's cheap upper bounds

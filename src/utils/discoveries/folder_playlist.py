@@ -60,6 +60,9 @@ class FolderTrack:
     # The project the file's name says it's from, likewise; whether it's a whole set
     project: str | None = None
     project_whole: bool = False
+    # The same artist's song of this title with no project, to ask about
+    # (LocalSongMatcher.without_project())
+    project_twin: object | None = None
     # The file's tags, saved if the song is added for it (add_song_for_file())
     album: str | None = None
     year: int | None = None
@@ -156,6 +159,7 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         playlist.auto_accepted.append((track, metadata.artist))
     else:
         track.title, track.artist = metadata.title, metadata.artist
+        track.project_twin = matcher.without_project(metadata)
         track.similar_song, track.title_candidates, track.best_guesses = song_suggestions(
             matcher, metadata, best_guess_min_score)
         suggested = [track.similar_song, *track.title_candidates, *(song for song, _ in track.best_guesses)]
@@ -191,7 +195,8 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
         else:
             candidates = []
         sure = {song.id: song for song in candidates
-                if song is not None and track.scores[song.id] >= auto_accept_score}
+                if song is not None and track.scores[song.id] >= auto_accept_score
+                and matcher.match_score(metadata, song, credits=False) == track.scores[song.id]}
         if len(sure) == 1:
             (song,) = sure.values()
             track.picked = True  # its tags differ from the song's: offered the name/tag fix

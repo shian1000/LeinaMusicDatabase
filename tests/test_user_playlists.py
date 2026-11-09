@@ -1418,6 +1418,47 @@ def test_unsure_joined_artist_is_not_scored_as_its_parts(music_session):
     assert matcher.match_score({"artist_name": "Earth, Wind & Fire", "title": "September"}, september) < 0.9
 
 
+def _song_of_fisz_emade_and_tworzywo(music_session) -> Song:
+    from utils.database.song_artists import add_additional_artist
+
+    song = Song(title="Nie za miłe wiadomości", artist=Artist(name="Fisz"))
+    music_session.add(song)
+    add_additional_artist(song, Artist(name="Emade"), "main")
+    add_additional_artist(song, Artist(name="Tworzywo Sztuczne"), "main")
+    music_session.commit()
+    return song
+
+
+def test_artists_written_as_one_name_are_scored_as_the_songs_artists(music_session):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    song = _song_of_fisz_emade_and_tworzywo(music_session)
+    matcher = LocalSongMatcher(music_session)
+    tags = {"artist_name": "Fisz Emade Tworzywo", "title": "Nie za miłe wiadomości"}
+
+    # Not the ~0.8 of the whole name against the closest single artist
+    assert matcher.match_score(tags, song) == pytest.approx(1.0)
+    assert matcher.match_score(tags, song, credits=False) < 0.9
+    assert matcher.best_guesses(tags, 3, 0.6) == [(song, matcher.match_score(tags, song))]
+    # A word none of the song's artists has
+    other = {"artist_name": "Fisz Emade Kowalski", "title": "Nie za miłe wiadomości"}
+    assert matcher.match_score(other, song) == matcher.match_score(other, song, credits=False) < 0.9
+
+
+def test_artists_written_as_one_name_are_not_auto_accepted(tmp_path, music_session, monkeypatch):
+    song = _song_of_fisz_emade_and_tworzywo(music_session)
+    tags = {"1.mp3": ("Fisz Emade Tworzywo", "Nie za miłe wiadomości")}
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    playlist = fp.build_folder_playlist(music_session, folder, 0.9, 0.6, 0.99)
+
+    (track,) = playlist.unmatched
+    assert [guess for guess, _ in track.best_guesses] == [song]
+    assert track.scores[song.id] == pytest.approx(1.0)
+    assert track.song_id is None and not playlist.auto_accepted_scored
+
+
 def test_title_by_artist_file_is_auto_accepted(tmp_path, music_session, monkeypatch):
     chase = Song(title="Baseball Furies Chase", artist=Artist(name="Barry De Vorzon"))
     music_session.add_all([chase, Song(title="Intro", artist=Artist(name="Moby"))])
