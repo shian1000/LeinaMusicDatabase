@@ -143,7 +143,8 @@ added_at      NOT NULL, default datetime('now')
     album, `type = 'single'`, titled like the song (a single has its own cover) and kept in step
     with the song's title, year and artist. The song's text stays "Singles".
   - A title several main artists use (a compilation or soundtrack, or two unrelated albums that
-    share a name) is **not** decided automatically. Those songs keep `album_id` NULL until the user
+    share a name) is **not** decided automatically; an album row left without songs doesn't count
+    as another artist using the title. Those songs keep `album_id` NULL until the user
     settles them in Manage database → "Resolve albums with several artists"
     (`utils/ui/album_resolution_review.py`), which is also offered at the end of an import that
     creates such a case. Its "Clear the album title from these songs" choice (`clear_album_text()`)

@@ -226,7 +226,10 @@ def _link_songs(session, songs: list[Song], index: _AlbumIndex) -> list[Song]:
 
         group_ids = {s.id for s in group if s.id is not None}
         artists = {_artist_key(s) for s in remaining}
-        others = set(by_artist) | index.pending_artists(key, group_ids)
+        # An album its songs have all left names nobody: it mustn't make the title look shared
+        with session.no_autoflush:
+            used_by = {_artist_key(a) for a in albums if a.songs}
+        others = used_by | index.pending_artists(key, group_ids)
         if len(artists | others) == 1:
             album = Album(
                 title=_most_common((s.album or "").strip() for s in remaining),
