@@ -246,6 +246,7 @@ All in Enter database -> Manage database:
   - Find covers: songs whose titles say they're covers, marked with the artist covered and shown
     'Artist - Title (Original cover)'.
   - Resolve albums with several artists: one album title shared by different artists.
+  - Resolve soundtrack album names: one soundtrack spelt several ways, brought to 'Title OST'.
   - Fill in Latin forms of names in other alphabets: 'Кино' -> 'Kino' for Leina Radio.
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
     after their song.

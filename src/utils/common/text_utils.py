@@ -267,12 +267,13 @@ def _contains_marker_word(text: str, markers) -> bool:
     """True if any marker appears in text as a whole word, case-insensitively.
 
     Plain \\b can't be used: it doesn't match after a trailing dot ("O.S.T.").
+    A dot joining another letter continues the word ("O.S.T.R." isn't "O.S.T").
     """
     if not text:
         return False
     lowered = text.lower()
     return any(
-        re.search(r'(?<!\w)' + re.escape(marker) + r'(?!\w)', lowered)
+        re.search(r'(?<!\w)' + re.escape(marker) + r'(?!\.?\w)', lowered)
         for marker in markers
     )
 

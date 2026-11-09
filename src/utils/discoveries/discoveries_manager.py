@@ -1,3 +1,4 @@
+from utils.common.soundtrack_names import soundtrack_album, soundtrack_work
 from utils.common.text_utils import (
     truncate_at_word,
     is_blacklisted_album,
@@ -517,8 +518,10 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     # last resort - a fetcher may still find the proper album name - and not
     # recorded as any fetcher's success in the Statistics menu.
     if is_soundtrack_artist(art_full):
-        print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {art_full}")
-        return AlbumMatch(art_full)
+        work = soundtrack_work(art_full)
+        album = soundtrack_album(work) if work else art_full
+        print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {album}")
+        return AlbumMatch(album)
 
     # A cover/unplugged version no fetcher knows is almost always a standalone
     # upload, not part of an album. Checked after the soundtrack fallback,

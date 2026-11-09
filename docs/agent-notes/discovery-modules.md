@@ -107,7 +107,11 @@ Game/anime soundtracks are often stored with the album in the artist field ("Tek
 Ground Zero Funk"), and no fetcher knows the individual track. If every module (with all its
 retries) comes up empty and `text_utils.is_soundtrack_artist()` matches one of
 `SOUNDTRACK_ARTIST_MARKERS` (`constants.py`) as a whole word in the artist name, `discover_album_name()`
-returns the full artist name as the album. Deliberately only after the loop — a fetcher may still
+returns "<work> OST", the one form of a soundtrack album (`utils/common/soundtrack_names.py`; the artist name
+as it is when the marker isn't at its end, "Noir OST I"). A name without a marker ("Chrono Cross
+Music", or the start of it being a work the catalog has an OST of, `soundtrack_albums.guess_soundtrack_album()`)
+is only offered, unticked, at the end of Albums. Manage database -> "Resolve soundtrack album names"
+brings stored spellings to that form. Deliberately only after the loop — a fetcher may still
 know the proper album name ("Tekken 5 Original Soundtrack") — and not recorded as any module's
 success in `discovery_stats`. Whole-word matching uses `(?<!\w)…(?!\w)` rather than `\b`, since
 `\b` fails after the trailing dot of "O.S.T."; and it's what keeps "Ghost" / "Post Malone" out.

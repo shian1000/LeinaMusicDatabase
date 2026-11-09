@@ -14,6 +14,8 @@ from utils.discoveries.discoveries_manager import (
 )
 from utils.common.text_utils import copy_to_clipboard
 from utils.ui.album_swap_review import review_swapped_albums
+from utils.ui.soundtrack_review import review_soundtrack_guesses
+from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM
 from utils.common.output import RESET, YELLOW, error, warn
@@ -55,6 +57,9 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     matches = []
     # (song, AlbumMatch) found only with the song's artist and title swapped
     swapped_finds = []
+    # (song, album) where the song's artist may be the game or film itself
+    soundtrack_guesses = []
+    known_works = None  # read at the first song no module found an album for
 
     print("Preparing fetch modules . . . ")
     try:
@@ -78,12 +83,18 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
                 if new_album is None:
                     print(f"Couldn't find album for {YELLOW}{song.artist.name} - {song.title}{RESET}")
                     session, _ = require_global_database_sessions()
-                    if may_be_swapped(session, song):
-                        swapped_match = discover_album_after_swap(song, discovery_modules)
-                        if swapped_match:
-                            print(f"Found album {YELLOW}{swapped_match.album}{RESET} with the artist and title swapped, "
-                                  "asking about it at the end")
-                            swapped_finds.append((song, swapped_match))
+                    swapped_match = (discover_album_after_swap(song, discovery_modules)
+                                     if may_be_swapped(session, song) else None)
+                    if known_works is None:
+                        known_works = known_soundtrack_works(session)
+                    guess = guess_soundtrack_album(song.artist.name, known_works)
+                    if swapped_match:
+                        print(f"Found album {YELLOW}{swapped_match.album}{RESET} with the artist and title swapped, "
+                              "asking about it at the end")
+                        swapped_finds.append((song, swapped_match))
+                    elif guess:
+                        print(f"The artist may be a soundtrack: {YELLOW}{guess}{RESET}, asking about it at the end")
+                        soundtrack_guesses.append((song, guess))
                 else:
                     if new_album == SINGLES_ALBUM:
                         warn(f"{song.artist.name} - {song.title}{RESET} is a single. Added to {YELLOW}{new_album}")
@@ -110,6 +121,10 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         _set_track_position(song, match)
         i = songs_objects.index(song)
         songs_list[i] = (song.artist.name, song.title, match.album)
+
+    for song, album in review_soundtrack_guesses(soundtrack_guesses):
+        edit_db_entry(song, "album", album)
+        songs_list[songs_objects.index(song)] = (song.artist.name, song.title, album)
 
     no_albums_count = sum(1 for art, son, alb in songs_list if alb is None)
 

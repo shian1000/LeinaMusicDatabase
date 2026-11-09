@@ -437,6 +437,32 @@ def assign_songs_to_album(session, songs: list[Song], title: str, artist: Artist
     return album
 
 
+def unify_album_titles(session, songs: list[Song], title: str, album_type: str | None = None) -> Album:
+    """Put `songs`, on differently titled albums (one album under several
+    spellings), on one album called `title` - of their artist, or various
+    artists when they have several. The row with a cover, else the oldest, is
+    kept and the others merged into it. Caller commits."""
+    albums = {s.album_entry for s in songs if s.album_entry is not None and s.album_entry.type != ALBUM_TYPE_SINGLE}
+    artists = {s.artist_id for s in songs}
+    if albums:
+        keep, *others = sorted(albums, key=lambda a: (not a.covers, a.id or 0))
+    else:
+        keep, others = Album(title=title, year=_most_common(s.year for s in songs)), []
+        session.add(keep)
+    for drop in others:
+        merge_albums(session, keep, drop)
+    keep.title = title
+    _set_album_artist(session, keep, artists.pop() if len(artists) == 1 else None)
+    if album_type is not None:
+        keep.type = album_type
+    # Row before text, so that the flush listener finds the song's album fits
+    for song in songs:
+        _attach(song, keep)
+        song.album = title
+    session.flush()
+    return keep
+
+
 def album_twin(session, album: Album, title: str) -> Album | None:
     """Another (non-single) album of the same artist already titled like
     `title` - renaming `album` to it makes them one album."""

@@ -212,6 +212,11 @@ SOUNDTRACK_ARTIST_MARKERS = [
     "soundtrack",
     "soundtracks",
 ]
+# A soundtrack's album is stored as "<film or game> OST"
+SOUNDTRACK_ALBUM_SUFFIX = "OST"
+# Endings of an artist name that may mean a soundtrack ("Chrono Cross Music")
+# but also end real names, so such an album is only offered; longest first
+SOUNDTRACK_WEAK_ARTIST_ENDINGS = ("video game music", "game music", "bgm", "music")
 
 # Whole-word, case-insensitive markers that flag a song as a standalone release
 # (a cover, an unplugged version) when found in its title or artist name

@@ -208,6 +208,12 @@ non-trivial work in that area.
   in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
   ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
   `reassign_additional_artist_links()`.
+  `soundtrack_albums.py` — a soundtrack's album is "<work> OST" (`utils/common/soundtrack_names.py`
+  reads the work from a name): guesses for artist names like "Chrono Cross Music" (reviewed at the end
+  of Albums, `utils/ui/soundtrack_review.py`) and Manage database → "Resolve soundtrack album names"
+  (`albums.unify_album_titles()`, one row kept, the rest merged). The form with "OST" is the owner's
+  choice (2026-11-09), not the bare title: `get_known_album_year()` shares a year across artists by
+  that word in the album name, so don't drop it without moving that to `albums.type`.
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -853,7 +859,7 @@ non-trivial work in that area.
   Help, the sharing wizard, `sharing_setup.py` and Settings for "phone(s)".
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Nine places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Ten places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
@@ -869,6 +875,8 @@ non-trivial work in that area.
   entries)`; all ticked, the ticked ones saved), and `review_swapped_albums()`
   (`utils/ui/album_swap_review.py`, end of Fill missing data → Albums: songs whose album was found
   only with artist and title swapped, none ticked, see `docs/agent-notes/discovery-modules.md`), and
+  `review_soundtrack_guesses()` (`utils/ui/soundtrack_review.py`, same place: artist names that may
+  be a game or film, none ticked), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha

@@ -77,8 +77,8 @@ def test_album_discovery_first_query(db_artist, db_title, expected_artist, expec
 # (id, db_artist, db_title, expected_album) - every fetcher returns nothing.
 ALBUM_EMPTY_FETCHERS_CASES = [
     ("tekken5_ost_ground_zero_funk", "Tekken 5 OST", "Ground Zero Funk", "Tekken 5 OST"),
-    ("dotted_ost_marker", "Final Fantasy VII O.S.T.", "One-Winged Angel", "Final Fantasy VII O.S.T."),
-    ("soundtrack_word", "Cowboy Bebop Original Soundtrack", "Tank!", "Cowboy Bebop Original Soundtrack"),
+    ("dotted_ost_marker", "Final Fantasy VII O.S.T.", "One-Winged Angel", "Final Fantasy VII OST"),
+    ("soundtrack_word", "Cowboy Bebop Original Soundtrack", "Tank!", "Cowboy Bebop OST"),
     # "ost" inside a word isn't a soundtrack marker.
     ("ghost_is_not_ost", "Ghost", "Mary on a Cross", None),
     ("post_malone_is_not_ost", "Post Malone", "Circles", None),
