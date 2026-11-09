@@ -16,7 +16,7 @@ from settings import settings
 from utils.common.debug import flog, slog
 from utils.common.output import warn
 from utils.common.request_pacing import RequestPacer
-from utils.common.text_utils import is_blacklisted_album, similarity
+from utils.common.text_utils import is_blacklisted_album, is_various_artists_compilation, similarity
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 
 # Spotify's official Web API, with an app's SPOTIFY_CLIENT_ID /
@@ -120,6 +120,10 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
 
     album = (track.get("album") or {}).get("name")
     if not album or is_blacklisted_album(album, artist):
+        return None
+    album_artists = (track.get("album") or {}).get("artists") or [{}]
+    if is_various_artists_compilation(album, album_artists[0].get("name")):
+        flog(f"[Spotify API] '{album}' is a various-artists compilation, skipping it")
         return None
 
     slog(f"[Spotify API] Matched: {track['name']} ({album})", priority=1)

@@ -10,6 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from config.constants import PROJECT_ROOT, SPELLING_CHECK_THRESHOLD
 from utils.common.debug import flog, slog
 from utils.common.selenium_sessions import get_global_driver
+from utils.common.soundtrack_names import soundtrack_work
 from utils.common.text_utils import is_blacklisted_album, similarity
 from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
 
@@ -91,6 +92,17 @@ def _extract_album_from_track_page(soup: BeautifulSoup):
     return album, matched_title, matched_artist
 
 
+def _is_various_artists_album(soup: BeautifulSoup) -> bool:
+    """A compilation's page names no artist (only "Various Artists", not a
+    link) and its tracks have different artists. Both are needed, so that a
+    change in Spotify's markup can't turn one artist's album into a compilation."""
+    page = soup.select_one('[data-testid="album-page"]')
+    if not page or page.select_one('a[data-testid="creator-link"]'):
+        return False
+    links = (row.select_one('a[href^="/artist/"]') for row in page.select('[data-testid="tracklist-row"]'))
+    return len({link.get_text(strip=True) for link in links if link}) > 1
+
+
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     driver = get_global_driver()
     if driver is None:
@@ -138,6 +150,17 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     album, matched_title, matched_artist = extracted
     if is_blacklisted_album(album, artist):
         return None
+
+    # The track page doesn't say what kind of album it is, only the album's own
+    # page does. One that doesn't load keeps the album. A soundtrack stays.
+    if not soundtrack_work(album):
+        album_href = track_soup.select_one('[data-testid="track-page"] a[href^="/album/"]')["href"]
+        album_soup = _load(
+            driver, f"https://open.spotify.com{album_href}", '[data-testid="album-page"] [data-testid="tracklist-row"]'
+        )
+        if album_soup and _is_various_artists_album(album_soup):
+            flog(f"[Spotify] '{album}' is a various-artists compilation, skipping it")
+            return None
 
     return DiscoveryResult(
         album=album,

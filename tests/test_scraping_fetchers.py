@@ -126,6 +126,68 @@ def test_spotify_single_year_from_its_track_page(monkeypatch):
     assert (result.year, result.matched_title, result.matched_artist) == (1975, "Bohemian Rhapsody", "Queen")
 
 
+def _spotify_track_page(album):
+    return f"""
+<section data-testid="track-page">
+  <span data-testid="entityTitle"><h1>Bohemian Rhapsody</h1></span>
+  <a data-testid="creator-link" href="/artist/Q">Queen</a>
+  <a href="/album/A1">{album}</a>
+</section>
+"""
+
+
+def _spotify_album_page(*row_artists, creator=None):
+    link = f'<a data-testid="creator-link" href="/artist/C">{creator}</a>' if creator else "<span>Various Artists</span>"
+    rows = "".join(f'<div data-testid="tracklist-row"><a href="/artist/{a}">{a}</a></div>' for a in row_artists)
+    return f'<section data-testid="album-page">{link}{rows}</section>'
+
+
+def _spotify_album_of_track(monkeypatch, album, album_page):
+    pages = {
+        spotify._search_url("Queen Bohemian Rhapsody", "tracks"): SPOTIFY_TRACKS,
+        "https://open.spotify.com/track/T1": _spotify_track_page(album),
+    }
+    if album_page:
+        pages["https://open.spotify.com/album/A1"] = album_page
+    browser = FakeBrowser(pages)
+    browser.install(spotify, monkeypatch)
+    return spotify.get_album_name("Queen", "Bohemian Rhapsody"), browser
+
+
+def test_spotify_various_artists_compilation_is_refused(monkeypatch):
+    result, browser = _spotify_album_of_track(monkeypatch, "Pop Gold", _spotify_album_page("Queen", "ABBA", "Signal"))
+
+    assert result is None
+    assert browser.visited[-1] == "https://open.spotify.com/album/A1"
+
+
+def test_spotify_one_artists_album_stays(monkeypatch):
+    page = _spotify_album_page("Queen", "Queen", creator="Queen")
+
+    assert _spotify_album_of_track(monkeypatch, "A Night at the Opera", page)[0].album == "A Night at the Opera"
+
+
+def test_spotify_album_without_the_artist_link_but_one_artist_stays(monkeypatch):
+    """Spotify's markup changing must not make every album a compilation."""
+    page = _spotify_album_page("Queen", "Queen")
+
+    assert _spotify_album_of_track(monkeypatch, "A Night at the Opera", page)[0].album == "A Night at the Opera"
+
+
+def test_spotify_album_page_that_does_not_load_keeps_the_album(monkeypatch, tmp_path):
+    monkeypatch.setattr(spotify, "DEBUG_SNAPSHOT_FILE", tmp_path / "debug_spotify.html")
+
+    assert _spotify_album_of_track(monkeypatch, "Pop Gold", None)[0].album == "Pop Gold"
+
+
+def test_spotify_soundtrack_stays_without_opening_its_page(monkeypatch):
+    album = "Some Film (Original Motion Picture Soundtrack)"
+    result, browser = _spotify_album_of_track(monkeypatch, album, _spotify_album_page("Queen", "ABBA"))
+
+    assert result.album == album
+    assert "https://open.spotify.com/album/A1" not in browser.visited
+
+
 def test_spotify_album_year_picks_the_matching_card(monkeypatch):
     browser = FakeBrowser({
         spotify._search_url("Queen A Night at the Opera", "albums"): SPOTIFY_ALBUMS,

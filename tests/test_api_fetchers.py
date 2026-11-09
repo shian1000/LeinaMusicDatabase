@@ -15,9 +15,10 @@ def _answer(data):
 
 # ==================== Spotify ====================
 
-def _track(name, album, album_type="album", release_date="1975-11-21", artist="Queen"):
+def _track(name, album, album_type="album", release_date="1975-11-21", artist="Queen", album_artist="Queen"):
     return {"name": name, "artists": [{"name": artist}],
-            "album": {"name": album, "album_type": album_type, "release_date": release_date}}
+            "album": {"name": album, "album_type": album_type, "release_date": release_date,
+                      "artists": [{"name": album_artist}]}}
 
 
 @pytest.fixture
@@ -77,6 +78,27 @@ def test_spotify_blacklisted_album_is_refused(spotify_api, monkeypatch):
     monkeypatch.setattr(spotify, "is_blacklisted_album", lambda album, artist=None: album == "Greatest Hits")
 
     assert spotify.get_album_name("Queen", "Song") is None
+
+
+def test_spotify_various_artists_compilation_is_refused(spotify_api):
+    spotify_api.results = {"tracks": {"items": [
+        _track("Song", "Pop Gold", album_type="compilation", album_artist="Various Artists"),
+    ]}}
+
+    assert spotify.get_album_name("Queen", "Song") is None
+
+
+def test_spotify_various_artists_soundtrack_stays(spotify_api):
+    album = "Some Film (Original Motion Picture Soundtrack)"
+    spotify_api.results = {"tracks": {"items": [_track("Song", album, album_type="compilation", album_artist="Various Artists")]}}
+
+    assert spotify.get_album_name("Queen", "Song").album == album
+
+
+def test_spotify_one_artists_compilation_stays(spotify_api):
+    spotify_api.results = {"tracks": {"items": [_track("Song", "The Very Best", album_type="compilation")]}}
+
+    assert spotify.get_album_name("Queen", "Song").album == "The Very Best"
 
 
 def test_spotify_year_of_a_single_comes_from_its_album(spotify_api):

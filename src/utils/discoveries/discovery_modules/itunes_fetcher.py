@@ -2,7 +2,7 @@ import requests
 
 from utils.common.debug import flog, slog
 from utils.common.request_pacing import RequestPacer
-from utils.common.text_utils import is_blacklisted_album, similarity
+from utils.common.text_utils import is_blacklisted_album, is_various_artists_compilation, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import (
     HTTP_LOOKUP_TIMEOUT,
@@ -54,6 +54,9 @@ def _find_track(results: list[dict], artist: str, song: str):
         if album.lower().endswith(SINGLE_TITLE_SUFFIX):
             album = SINGLES_ALBUM
         if is_blacklisted_album(album, artist):
+            continue
+        if is_various_artists_compilation(album, result.get("collectionArtistName")):
+            flog(f"[iTunes] '{album}' is a various-artists compilation, skipping it")
             continue
 
         rank = (similarity(song_query, track_title.lower()), album != SINGLES_ALBUM)

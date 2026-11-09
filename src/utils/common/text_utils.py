@@ -9,7 +9,9 @@ from utils.common.normalizer import normalize
 from utils.common.title_patterns import BRACKETED, FEAT_WORD
 from utils.common import spellcheck_cache
 from utils.common.musicbrainz_client import mb_get, MBStats
+from utils.common.soundtrack_names import soundtrack_work
 from config.constants import (
+    COMPILATION_ARTIST_NAMES,
     MUSICBRAINZ_API_BASE_URL,
     MUSICBRAINZ_API_LIMIT,
     MUSICBRAINZ_SPELLCHECK_USE_FALLBACK,
@@ -242,6 +244,13 @@ def _spellcheck_outcome(result: dict) -> str:
         return "not on MusicBrainz"
     return (f"'{result.get('corrected_artist')}' - '{result.get('corrected_title')}' "
             f"(score {result.get('mb_score')}, {'corrected' if result.get('corrected') else 'unchanged'})")
+
+
+def is_various_artists_compilation(album: str, album_artist: str | None) -> bool:
+    """Is this album a compilation of many artists, so not a song's real album
+    ("Golden Hits of Bulgarian Pop Music")? A soundtrack is credited to
+    "Various Artists" too and stays."""
+    return normalize(album_artist or "") in COMPILATION_ARTIST_NAMES and not soundtrack_work(album)
 
 
 def is_blacklisted_album(title: str, artist: str | None = None) -> bool:

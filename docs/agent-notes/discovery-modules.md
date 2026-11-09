@@ -579,6 +579,18 @@ Two-step flow, mirroring `itunes_fetcher.py`'s search-then-follow-link pattern:
 2. Follow that track's `/track/<id>` page, wait for `[data-testid="track-page"]`, and read the
    album from the first `a[href^="/album/"]` inside it (`_extract_album_from_track_page()`), plus
    `entityTitle`/`creator-link` for the `DiscoveryResult` match-report fields.
+3. Unless the album's name ends in a soundtrack word, open its `/album/<id>` page and refuse it when
+   it's a various-artists compilation (`_is_various_artists_album()`): "FSB - Sled 10 godini" had got
+   "Zlatni Hitove Na Bulgarskata Estradna Pesen" this way. The track page doesn't say the album's
+   kind. The rule needs both no `creator-link` and several track artists, so a markup change can't
+   refuse every album; the "Compilation" label is a plain span with hashed classes and localized,
+   so it isn't used. A page that doesn't load keeps the album. One artist's compilation stays.
+
+The API version and `itunes_fetcher.py` apply the same rule through
+`text_utils.is_various_artists_compilation()` (the album's own artist, a soundtrack kept). A fix in
+one fetcher alone is not enough: iTunes had the same compilation and was next in line. Soundtracks
+are recognised by the name's ending only, so "Moulin Rouge! Music From ..." is refused. Google,
+Genius and Wikipedia don't have this rule.
 
 All of `tracklist-row`, `track-page`, `entityTitle`, and `creator-link` are Spotify's own
 `data-testid` attributes (not hashed Encore CSS classes), which tend to be more stable across
@@ -602,7 +614,8 @@ changed under it once. Apple documents about 20 requests a minute, hence
 `SPELLING_CHECK_THRESHOLD` (Apple bakes "(feat. X)" into titles). Of the results that fit, the one
 closest to the full title wins, so the plain title beats "(Live ...)", and at equal title a real album
 beats a single. A release whose `collectionName` ends in `" - Single"` is reported as `SINGLES_ALBUM`,
-the sentinel `wikipedia_fetcher.py` also uses. Blacklisted albums are skipped per candidate.
+the sentinel `wikipedia_fetcher.py` also uses. Blacklisted albums and various-artists compilations
+(`collectionArtistName`, see the Spotify section) are skipped per candidate.
 Tests: `tests/test_itunes_fetcher.py`.
 
 ## `youtube_fetcher.py` — music.youtube.com's JSON search, not the Data API

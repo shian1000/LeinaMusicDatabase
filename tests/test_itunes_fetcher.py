@@ -67,6 +67,23 @@ def test_find_track_skips_a_blacklisted_album(monkeypatch):
     assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
 
 
+def test_find_track_skips_a_various_artists_compilation():
+    results = [
+        {**_track("Say So", "Pop Gold"), "collectionArtistName": "Various Artists"},
+        {**_track("Say So", "Hot Pink"), "collectionArtistName": "Doja Cat"},
+    ]
+
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results[:1], "Doja Cat", "Say So") is None
+
+
+def test_find_track_keeps_a_various_artists_soundtrack():
+    album = "Some Film (Original Motion Picture Soundtrack)"
+    results = [{**_track("Say So", album), "collectionArtistName": "Various Artists"}]
+
+    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == album
+
+
 def test_get_album_name_sends_the_whole_query_and_reports_the_match(monkeypatch):
     calls = []
 

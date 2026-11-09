@@ -77,6 +77,7 @@ class FakeBrowser:
         monkeypatch.setattr(module, "EC", SimpleNamespace(
             element_to_be_clickable=condition("clickable"),
             presence_of_all_elements_located=condition("all"),
+            presence_of_element_located=condition("present"),
             visibility_of_element_located=condition("visible"),
         ))
         monkeypatch.setattr(module.time, "sleep", lambda s: None)
