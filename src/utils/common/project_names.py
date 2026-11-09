@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from functools import lru_cache
 
+from utils.common.cover_names import title_with_cover
 from utils.common.normalizer import composed
 
 # What may be left at either end of a text once the project is cut out
@@ -71,9 +72,10 @@ def title_with_project(song) -> str:
     """"Boys (Like a Version)" for a file: read back into the project and the
     title by cut_project(). A title already naming it stays."""
     project = song_project_name(song)
+    title = title_with_cover(song)
     if not project or name_key(project) in name_key(song.title):
-        return song.title
-    return f"{song.title} ({project})"
+        return title
+    return f"{title} ({project})"
 
 
 def search_title(song) -> str:

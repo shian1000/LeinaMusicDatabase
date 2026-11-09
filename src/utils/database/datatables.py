@@ -30,6 +30,8 @@ class Artist(Base):
     name_latin = Column(String)  # Latin form of a non-Latin name (migration 0011), see latin_names.py
 
     songs = relationship("Song", back_populates="artist")
+    covered_songs = relationship("Song", primaryjoin="foreign(Song.covered_artist_id) == Artist.id",
+                                 back_populates="covered_artist")
     albums = relationship("Album", back_populates="artist")
     additional_song_links = relationship(
         "AdditionalSongArtist", back_populates="artist", cascade="all, delete-orphan"
@@ -69,10 +71,15 @@ class Song(Base):
     disc_number = Column(Integer)   # NULL = 1 / unknown
     # The series a recording was made for (migration 0019) - see utils/database/projects.py
     project_id = Column(Integer, ForeignKey("projects.id"), index=True)
+    # The artist this is a cover of (migration 0020) - see utils/database/covers.py. No ForeignKey
+    # here, unlike the migration: a second one onto artists makes every join(Artist) ambiguous
+    covered_artist_id = Column(Integer, index=True)
 
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")
     project = relationship("Project", back_populates="songs")
+    covered_artist = relationship("Artist", primaryjoin="foreign(Song.covered_artist_id) == Artist.id",
+                                  back_populates="covered_songs")
     # Only multi-artist songs have rows here - `artist` stays the primary one.
     # Use utils.database.song_artists helpers rather than reading this directly.
     additional_artist_links = relationship(

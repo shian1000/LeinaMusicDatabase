@@ -13,6 +13,7 @@ from utils.common.debug import flog
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
 from utils.database.tags_management import tag_names_by_song
+from utils.common.cover_names import title_with_cover
 from utils.common.project_names import song_project_name
 from utils.database.song_kinds import is_full_album
 
@@ -71,7 +72,7 @@ def display_songs(songs: Optional[List[Song]]) -> None:
     for song in songs:
         table.add_row(
             _artist_cell(song),
-            f"{song.title} [full album]" if is_full_album(song) else song.title,
+            f"{title_with_cover(song)} [full album]" if is_full_album(song) else title_with_cover(song),
             song.album or "—",
             str(song.year) if song.year else "—",
             song.language or "—",
@@ -187,7 +188,7 @@ def display_songs_with_tags(songs: List[Song]) -> None:
     for song in songs:
         table.add_row(
             _artist_cell(song),
-            song.title,
+            title_with_cover(song),
             song.album or "—",
             str(song.year) if song.year else "—",
             ", ".join(tags_by_song.get(song.id, [])) or "—",

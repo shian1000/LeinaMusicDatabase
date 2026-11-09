@@ -13,13 +13,14 @@ from utils.common.output import ok, review_header, say, warn
 from utils.database.additional_videos import apply_video_links, plan_video_links
 from utils.database.database_sessions import submit_global_database_session
 from utils.database.song_artists import song_artist_label
+from utils.common.cover_names import title_with_cover
 from utils.common.project_names import song_project_name
 from utils.ui.song_colors import song_tokens
 
 
 def _choice_title(link) -> list:
     kind = "its own link" if link.main else "additional video"
-    return song_tokens(song_artist_label(link.song), link.song.title,
+    return song_tokens(song_artist_label(link.song), title_with_cover(link.song),
                        f"{kind}: https://youtu.be/{link.video_id}", song_project_name(link.song))
 
 

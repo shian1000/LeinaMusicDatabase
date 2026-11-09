@@ -225,6 +225,10 @@ added_at      NOT NULL, default datetime('now')
   (yt-dlp only — the API's search results carry no length).
   Migration `0014` (2026-10-16), handoff to the app
   [`handoffs/song-kind-for-musicdatabaseapp.md`](handoffs/song-kind-for-musicdatabaseapp.md).
+- `Song.covered_artist_id` → `artists` (migration `0020`, `utils/database/covers.py`) — the artist the
+  song is a cover of, NULL when it isn't known to be one. `artist_id` stays the performer, the title
+  carries no credit, and the song is shown "Artist - Title (Original cover)". Such an artist may have
+  no songs of its own: it isn't removed as unused, and merges carry the reference over.
 - `Song.project_id` → `projects` (migration `0019`, `utils/database/projects.py`) — the series or
   compilation a recording was made for. `songs.artist_id` stays the real artist, the title loses the
   project's name, and the song is shown "Project: Artist - Title". `projects.aliases` holds other

@@ -33,6 +33,7 @@ from utils.database.moods import (
     rename_global_mood,
     user_mood_song_ids,
 )
+from utils.common.cover_names import title_with_cover
 from utils.common.project_names import song_project_name
 from utils.database.song_artists import song_artist_label
 from utils.database.song_references import apply_song_id_changes
@@ -69,7 +70,7 @@ def _songs(music_session, song_ids) -> list:
 
 def _song_label(song) -> str:
     project = song_project_name(song)
-    return f"{project}: " * bool(project) + f"{song_artist_label(song)} - {song.title}"
+    return f"{project}: " * bool(project) + f"{song_artist_label(song)} - {title_with_cover(song)}"
 
 
 def _show_songs(song_ids, show) -> None:

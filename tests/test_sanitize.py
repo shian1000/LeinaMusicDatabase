@@ -135,7 +135,7 @@ def test_a_step_listed_twice_runs_twice():
     names = [step.name for step in s.enabled_steps(s.SOURCE_YOUTUBE, s.STAGE_FIELD, s.TITLE)]
     assert names == ["html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
                      "invisible_chars", "whitespace", "lookalike_letters",
-                     "project_name", "feat_to_credits", "title_year", "artist_in_title",
+                     "project_name", "cover_credit", "feat_to_credits", "title_year", "artist_in_title",
                      "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
                      "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year",
                      "junk_marker_brackets", "quote_marks", "whitespace", "edge_separators"]

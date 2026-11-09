@@ -31,6 +31,7 @@ METADATA_KEYS = {
     "feat_artists": "feat_artists",      # credited as featured when the song is created
     "project": "project",                # a project's name (Tiny Desk), read by sanitize's "project_name" step
     "project_whole": "project_whole",    # not one song but the artist's whole set for that project
+    "covered_artist": "covered_artist",  # the artist it's a cover of, read by sanitize's "cover_credit" step
     "label": "_label",                   # how the entry is named in the import's messages
     "unsplit_title": "unsplit_title",    # a file name split on a bare "-", read whole as the title
 }

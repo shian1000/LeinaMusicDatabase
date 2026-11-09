@@ -563,6 +563,20 @@ the track even when the album row exists. `find_existing_song()` also
 matches "Migration (Full Album)" to the full album "Migration" (the title
 with the marker cut out, `strip_full_album_marker()`).
 
+## Reading a cover credit
+
+`read_cover()` works on text alone and can't tell whose name a bracket holds:
+"(Radiohead cover)" names the original, but "Naranca (Gingertail Cover)" names
+the performer, and catalog rows with artist and title swapped ("Creep" -
+"Vintage Postmodern Jukebox Radiohead Cover") read as a valid credit too. So
+"ticked" in Find covers only means the name is exactly a stored artist's; it
+isn't proof, and in the first run on the catalog six ticked songs were wrong.
+Without brackets only a stored artist's name counts as a credit, since "Rolling
+Keys Cover" may be a title or a name. "Cover by X" is the one form where the
+stored artist is the original and the song moves to X. Song matching needs no
+rule of its own (unlike projects): a cover's row has the performer's artist,
+so it can't meet the original's.
+
 ## Projects vs. the studio song of the same title
 
 Once "(Like a Version)" leaves a title, "Boys" and "Boys" by one artist are two

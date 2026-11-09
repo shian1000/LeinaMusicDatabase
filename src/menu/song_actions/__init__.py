@@ -8,7 +8,7 @@ from menu.song_actions.edit_songs import edit_songs_menu
 from utils.database.database_getter import extract_db_object_info
 from utils.database.datatables import song_categories
 from utils.database.tags_management import remove_tag_from_song
-from config.constants import NO_VIDEO_SENTINEL, PROJECT_CHECKED_TAG
+from config.constants import COVER_CHECKED_TAG, NO_VIDEO_SENTINEL, PROJECT_CHECKED_TAG
 from utils.youtube.manage_youtube_playlists import YouTubeLoginError, create_yt_playlist, extract_video_id
 from utils.ui.display_utils import display_songs, display_song_links
 from utils.ui.artist_change import change_songs_artist, swap_titles_and_artist_names
@@ -17,6 +17,7 @@ from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
 from utils.discoveries.discovery_modules.spotify_fetcher import normalize_spotify_url
 from utils.ui.genre_review import set_genre_of_songs
+from utils.ui.cover_review import set_covered_artist_of_songs
 from utils.ui.project_review import set_project_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
 from utils.ui.song_delete_review import merge_instead_of_deleting
@@ -26,6 +27,7 @@ def remove_check_protection(songs_objects):
         remove_tag_from_song(song, "spellchecked")
         remove_tag_from_song(song, "album_checked")
         remove_tag_from_song(song, PROJECT_CHECKED_TAG)
+        remove_tag_from_song(song, COVER_CHECKED_TAG)
 
 def make_yt_playlist_menu(songs_objects):
     print("About to create a playlist with these songs:")
@@ -208,6 +210,7 @@ def song_actions(songs_objects):
         "Set genre": lambda: set_genre_of_songs(songs_objects),
         "Song or full album": lambda: set_kind_of_songs(songs_objects),
         "Set project": lambda: set_project_of_songs(songs_objects),
+        "Set covered artist": lambda: set_covered_artist_of_songs(songs_objects),
         "Change artist": lambda: change_songs_artist(songs_objects),
         "Swap title and artist names": lambda: swap_titles_and_artist_names(songs_objects),
         "Remove links": lambda: remove_links_from_songs(songs_objects),

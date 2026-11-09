@@ -387,6 +387,12 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
         from sqlalchemy.orm import object_session
         from utils.database.projects import project_named, set_song_project
         set_song_project([new_song_obj], project_named(object_session(new_song_obj), metadata.project))
+    if metadata.covered_artist:
+        from sqlalchemy.orm import object_session
+        from utils.database.covers import artist_named, set_covered_artist
+        covered = artist_named(object_session(new_song_obj), metadata.covered_artist)
+        if covered.id != artist_obj.id:
+            set_covered_artist([new_song_obj], covered)
     # A caller that split "Title ft. X" off its title (song requests) names X here
     if metadata.feat_artists:
         from sqlalchemy.orm import object_session

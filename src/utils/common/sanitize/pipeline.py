@@ -76,6 +76,13 @@ class ProjectFields:
 
 
 @dataclass
+class CoverFields:
+    """What a title's "cover_credit" step found: sanitize_field() returns only
+    the title, the artist may change too (apply_cover())."""
+    reading: object = None
+
+
+@dataclass
 class Context:
     field: str
     source: str
@@ -83,6 +90,7 @@ class Context:
     artist: Optional[str] = None  # the entry's artist, for a title step
     feat_artists: Optional[list] = None  # where the featured artists go; None: keep them in the title
     project: Optional[ProjectFields] = None  # where a project read goes; None: keep it in the title
+    cover: Optional[CoverFields] = None  # where a cover credit read goes; None: keep it in the title
 
 
 @dataclass(frozen=True)
@@ -175,6 +183,19 @@ def _project_name(value: str, ctx: Context) -> str:
     return (ctx.project.reading.title or value) if ctx.project.reading else value
 
 
+def _cover_credit(value: str, ctx: Context) -> str:
+    # Only when the credit has somewhere to go, as _project_name(), and only
+    # when it names someone: a bare "(Cover)" stays for the list to tick
+    if ctx.cover is None:
+        return value
+    from utils.common.cover_names import read_cover
+    reading = read_cover(ctx.artist, value)
+    if reading is None or reading.covered is None or not reading.title:
+        return value
+    ctx.cover.reading = reading
+    return reading.title
+
+
 def _step(name, switch, stages, fields, func, mode=MODE_AUTO) -> Step:
     return Step(name, frozenset(stages), frozenset(fields), func, mode, switch)
 
@@ -191,13 +212,14 @@ _BOTH = (STAGE_RAW, STAGE_FIELD)
 # every source at once, so each step must be safe for every name it sees
 SWITCHES = (
     "html_entities", "encoding", "file_names_in_titles", "lookalike_letters",
-    "projects", "featured_artists", "year_in_title", "artist_in_title",
+    "projects", "covers", "featured_artists", "year_in_title", "artist_in_title",
     "site_names", "topic_channels", "band_word", "junk_in_titles", "quote_marks",
     "spaces",
 )
 
 FEAT_TO_CREDITS = "feat_to_credits"
 PROJECT_NAME = "project_name"
+COVER_CREDIT = "cover_credit"
 
 STEPS = {step.name: step for step in (
     _step("html_entities", "html_entities", _FIELD, _ALL_FIELDS, lambda v, ctx: unescape_entities(v)),
@@ -209,6 +231,9 @@ STEPS = {step.name: step for step in (
     # music.db, utils/database/projects.py); in the database a list to tick
     # (Manage database -> "Projects"), which also fixes the artist
     _step(PROJECT_NAME, "projects", _FIELD, {TITLE}, _project_name, MODE_REVIEW),
+    # "Creep (Radiohead cover)" -> "Creep", a cover of Radiohead; in the
+    # database a list to tick (Manage database -> "Find covers")
+    _step(COVER_CREDIT, "covers", _FIELD, {TITLE}, _cover_credit, MODE_REVIEW),
     # "Song ft. X" -> "Song", X a featured artist; in the database Clean names'
     # checkbox list (name_cleanup.feat_move_proposals()). find_existing_song()
     # reads a stored title without its credits and tries the songs crediting
@@ -242,7 +267,7 @@ RAW_ORDER = ("site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags", 
 FIELD_ORDER = (
     "html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
     "invisible_chars", "whitespace", "lookalike_letters",
-    PROJECT_NAME, FEAT_TO_CREDITS, "title_year", "artist_in_title",
+    PROJECT_NAME, COVER_CREDIT, FEAT_TO_CREDITS, "title_year", "artist_in_title",
     "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
     "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", "junk_marker_brackets",
     "quote_marks",
@@ -322,11 +347,12 @@ def enabled_steps(source: str, stage: str, field: str | None = None, review: boo
     return steps
 
 
-def _run(value, source, stage, field, artist, review, feat_artists=None, project=None) -> list[tuple[str, str, str]]:
+def _run(value, source, stage, field, artist, review, feat_artists=None, project=None, cover=None) -> list[tuple[str, str, str]]:
     changes = []
     if not value:
         return changes
-    ctx = Context(field=field, source=source, stage=stage, artist=artist, feat_artists=feat_artists, project=project)
+    ctx = Context(field=field, source=source, stage=stage, artist=artist, feat_artists=feat_artists, project=project,
+                  cover=cover)
     for step in enabled_steps(source, stage, field, review):
         new_value = step.func(value, ctx)
         if new_value != value:
@@ -342,7 +368,7 @@ def _run(value, source, stage, field, artist, review, feat_artists=None, project
 # "(Official Video)" say something about the song
 CUTTING_STEPS = frozenset({
     "site_names", "topic_channel", "band_word", "pipe_suffix", "junk_brackets_anywhere", "hashtags", "media_extension",
-    "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", FEAT_TO_CREDITS, PROJECT_NAME,
+    "artist_in_title", "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year", FEAT_TO_CREDITS, PROJECT_NAME, COVER_CREDIT,
 })
 
 
@@ -372,13 +398,14 @@ def sanitize_raw(text: str | None, source: str, removed: list | None = None) -> 
 
 def sanitize_field(value: str | None, field: str, source: str, *, artist: str | None = None,
                    removed: list | None = None, feat_artists: list | None = None,
-                   project: ProjectFields | None = None) -> str | None:
+                   project: ProjectFields | None = None, cover: CoverFields | None = None) -> str | None:
     """`value` of `field` ("title", "artist", "album") after `source`'s
     field steps; `artist` is the entry's artist, for a title. What they cut
     is appended to `removed`, the featured artists a title credits to
     `feat_artists` - without it they stay in the title - and the project it
     names to `project` (apply_project()), the same way."""
-    changes = _run(value, source, STAGE_FIELD, field, artist, review=False, feat_artists=feat_artists, project=project)
+    changes = _run(value, source, STAGE_FIELD, field, artist, review=False, feat_artists=feat_artists, project=project,
+                   cover=cover)
     if removed is not None:
         removed.extend(cut_parts(changes, field))
     return changes[-1][2] if changes else value
@@ -405,6 +432,17 @@ def apply_project(metadata: dict, project: ProjectFields) -> None:
         metadata["project_whole"] = True
 
 
+def apply_cover(metadata: dict, cover: CoverFields) -> None:
+    """A title's cover credit read onto the entry; "Cover by X" makes X the
+    artist. Read again from a cleaned entry, the first reading stays."""
+    reading = cover.reading
+    if reading is None:
+        return
+    metadata["covered_artist"] = reading.covered
+    if reading.performer:
+        metadata["artist_name"] = reading.performer
+
+
 def sanitize_metadata(metadata: dict, source: str) -> dict:
     """`metadata` (an import_engine metadata dict) with its artist, title and
     album cleaned by `source`'s field steps, in place. The title first, with
@@ -416,15 +454,18 @@ def sanitize_metadata(metadata: dict, source: str) -> dict:
     artist = metadata.get("artist_name")
     feat_artists = list(metadata.get("feat_artists") or [])
     project = ProjectFields(metadata.get("album"), getattr(metadata, "channel", None), getattr(metadata, "raw_text", None))
+    cover = CoverFields()
     for key in ("title", "artist_name", "album"):
         value = metadata.get(key)
         if isinstance(value, str):
             cleaned = sanitize_field(value, _METADATA_FIELDS[key], source, artist=artist, removed=removed,
                                      feat_artists=feat_artists if key == "title" else None,
-                                     project=project if key == "title" else None)
+                                     project=project if key == "title" else None,
+                                     cover=cover if key == "title" else None)
             metadata[key] = cleaned if cleaned or not value else None
             if key == "title":
                 apply_project(metadata, project)
+                apply_cover(metadata, cover)
     if feat_artists or "feat_artists" in metadata:
         metadata["feat_artists"] = feat_artists
     return metadata

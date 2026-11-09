@@ -52,7 +52,7 @@ from utils.database.song_references import record_song_merge
 
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
-                  "track_number", "disc_number", "project_id")
+                  "track_number", "disc_number", "project_id", "covered_artist_id")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 

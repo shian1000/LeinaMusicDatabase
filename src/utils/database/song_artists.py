@@ -166,14 +166,18 @@ def reassign_additional_artist_links(session, from_id: int, to_id: int) -> None:
         ),
         params,
     )
+    # The covers of from_id are covers of to_id now; to_id's own songs can't be
+    session.execute(text("UPDATE songs SET covered_artist_id = :to_id WHERE covered_artist_id = :from_id"), params)
+    session.execute(text("UPDATE songs SET covered_artist_id = NULL WHERE covered_artist_id = :to_id AND artist_id = :to_id"),
+                    {"to_id": to_id})
     # Raw SQL bypasses the ORM - drop cached link collections only. Not
     # expire_all(): callers loop over Artist objects they then delete by raw
     # SQL, and an expired deleted row raises on its next attribute access.
     for obj in list(session.identity_map.values()):
         if isinstance(obj, Song):
-            session.expire(obj, ["additional_artist_links"])
+            session.expire(obj, ["additional_artist_links", "covered_artist_id", "covered_artist"])
         elif isinstance(obj, Artist):
-            session.expire(obj, ["additional_song_links"])
+            session.expire(obj, ["additional_song_links", "covered_songs"])
 
 
 def _find_link(song: Song, artist: Artist) -> AdditionalSongArtist | None:

@@ -52,6 +52,7 @@ from utils.discoveries.file_matching_settings import (
 )
 from utils.discoveries.import_engine import find_songs_by_title
 from utils.discoveries.mp3_utils import rename_to_song, song_file_name, write_song_tags
+from utils.common.cover_names import title_with_cover
 from utils.common.project_names import song_project_name
 from utils.ui.song_colors import DETAIL_STYLE, as_ansi, colored_song, song_tokens
 from utils.ui.display_utils import display_song_links, display_songs
@@ -109,7 +110,7 @@ def _song_tokens(song, score: float | None = None) -> list:
     """The song's coloured label as questionary tokens (song_colors): artist,
     title, album and year, and how well the file's tags fit it ("(87%)")."""
     details = ", ".join(str(v) for v in (song.album, song.year) if v)
-    tokens = song_tokens(song_artist_label(song), song.title, details, song_project_name(song))
+    tokens = song_tokens(song_artist_label(song), title_with_cover(song), details, song_project_name(song))
     if score is not None:
         tokens += [("", "  "), (DETAIL_STYLE, f"({score:.0%})")]
     return tokens

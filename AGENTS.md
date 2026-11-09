@@ -198,6 +198,14 @@ non-trivial work in that area.
   step for what comes in, Manage database → "Projects" (`utils/ui/project_review.py`) ticks stored
   songs not looked at yet (`project_checked` marker; changing the dictionary clears it, or a new
   project would find nothing in checked songs). Details: `docs/data-model.md`.
+  `covers.py` — `songs.covered_artist_id` (migration 0020): the artist a song is a cover of; the title
+  loses the credit, shown "Artist - Title (Original cover)" (`cover_names.title_with_cover()`, also what
+  goes into files). A title's credit is read by `utils/common/cover_names.py`: sanitize's `cover_credit`
+  step for what comes in, Manage database → "Find covers" (`utils/ui/cover_review.py`, `find_covers()`,
+  `cover_checked` marker) for stored songs, Song actions → "Set covered artist" by hand. No `ForeignKey`
+  in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
+  ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
+  `reassign_additional_artist_links()`.
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -286,7 +294,7 @@ non-trivial work in that area.
   Unreferenced blobs go only after 24 h (the phone uploads before the PUT naming it). Details:
   `docs/runbooks/database.md` → "Covers on the phone".
   Moods ("Nastroje" on the phone): `tags.kind` (`'mood'` / `'marker'`) in tag.db and user.db.
-  `spellchecked` / `album_checked` / `project_checked` are markers and must never show up as moods. Names are unique per
+  `spellchecked` / `album_checked` / `project_checked` / `cover_checked` are markers and must never show up as moods. Names are unique per
   file across kinds. A user's own moods sync like playlists through `mood_sync.py`
   (standard-library, built on `playlist_sync.py`, own `mood_revision` counter, same-name moods
   merged). `moods.py` owns global moods (tag.db), promoting a user's mood into one, and applying
@@ -482,7 +490,7 @@ non-trivial work in that area.
   so do Clean names (`utils/database/name_cleanup.py`, the "stored" source) and song requests
   (`SongRequestCase.metadata()`, the "request" source; `song_key()` stays the names as sent - it
   is also the saved case id). Settings → "Name cleanup" (`menu/main_menu/settings/name_cleanup.py`)
-  turns each of its 14 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
+  turns each of its 15 switches (`SWITCHES`, a few `STEPS` each) on or off for every source at once
   (`set_switch_on()`; where a step runs follows from
   what it works on, `runs_for()`, owner's choice 2026-11-01: the same everywhere, so every step must be
   safe for every name - measure on the catalog before adding or loosening one), saved in
@@ -679,7 +687,7 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
-  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` (migration 0020, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks

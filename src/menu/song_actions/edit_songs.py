@@ -23,8 +23,10 @@ from utils.database.song_artists import (
 from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
 from utils.database.latin_names import latin_of
 from utils.ui.latin_forms_review import edit_latin_form
+from utils.common.cover_names import covered_artist_name
 from utils.common.project_names import song_project_name
 from utils.ui.genre_review import set_genre_of_songs
+from utils.ui.cover_review import set_covered_artist_of_songs
 from utils.ui.project_review import set_project_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
 from utils.ui.song_delete_review import merge_instead_of_deleting
@@ -144,6 +146,7 @@ def edit_entry_menu(mode: str = None, db_object = None):
     genre_option = None
     kind_option = None
     project_option = None
+    cover_option = None
     if mode == "Song":
         genre_option = f"genre ({db_object.genre or '—'})"
         displayed_list.append(genre_option)
@@ -151,6 +154,8 @@ def edit_entry_menu(mode: str = None, db_object = None):
         displayed_list.append(kind_option)
         project_option = f"project ({song_project_name(db_object) or '—'})"
         displayed_list.append(project_option)
+        cover_option = f"cover of ({covered_artist_name(db_object) or '—'})"
+        displayed_list.append(cover_option)
         displayed_list.append(swap_option)
     delete_option = "Delete from database"
     displayed_list.append(delete_option)
@@ -180,6 +185,9 @@ def edit_entry_menu(mode: str = None, db_object = None):
         return
     if choice == project_option:
         set_project_of_songs([db_object])
+        return
+    if choice == cover_option:
+        set_covered_artist_of_songs([db_object])
         return
     if choice == delete_option:
         _delete_entry(db_object, mode)

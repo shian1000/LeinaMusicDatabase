@@ -143,6 +143,8 @@ def set_primary_artist(session, song: Song, artist: Artist, keep_old_as: str | N
     if additional_artist_role(song, artist):
         remove_additional_artist(song, artist)
     song.artist = artist
+    if song.covered_artist_id == artist.id:
+        song.covered_artist = None
     # Flushed first: add_additional_artist() checks songs.artist_id too
     session.flush()
     if keep_old_as:
@@ -164,8 +166,10 @@ def _link_album_title(session, song: Song) -> None:
 
 
 def is_unused(session, artist: Artist) -> bool:
-    """No song credits the artist any more, primary or additional."""
-    return count_artist_songs(session, artist.id) == 0
+    """No song credits the artist any more, primary or additional, and none
+    is a cover of it."""
+    return (count_artist_songs(session, artist.id) == 0
+            and session.query(Song).filter(Song.covered_artist_id == artist.id).count() == 0)
 
 
 def remove_unused_artist(session, artist: Artist, heir: Artist, keep_names: bool) -> None:

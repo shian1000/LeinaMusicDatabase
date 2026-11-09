@@ -365,6 +365,8 @@ TAG_KIND_MOOD = "mood"
 TAG_KIND_MARKER = "marker"
 # Marker of songs Manage database -> Projects has looked at; the dictionary changing clears it
 PROJECT_CHECKED_TAG = "project_checked"
+# Marker of songs Manage database -> "Find covers" has looked at
+COVER_CHECKED_TAG = "cover_checked"
 
 # What the owner can allow a user (main menu -> Users -> Permissions), kept
 # in that user's account.json. Names are part of the phone contract
@@ -650,6 +652,9 @@ SANITIZE_SWITCH_LABELS = {
     "projects": ("What the title says (kept with the song before it's cut)", "Projects",
                  "'Boys (Like a Version)' -> 'Boys', marked as that project's recording, by the dictionary in "
                  "Manage database -> Projects. There also offered for stored songs in a list to tick."),
+    "covers": ("What the title says (kept with the song before it's cut)", "Covers",
+               "'Creep (Radiohead cover)' -> 'Creep', marked as a cover of Radiohead. "
+               "In Manage database -> Find covers offered for stored songs in a list to tick."),
     "featured_artists": ("What the title says (kept with the song before it's cut)", "Featured artists",
                          "'Song ft. X' -> 'Song', X credited as a featured artist. "
                          "In Clean names offered in a list to tick."),

@@ -243,6 +243,8 @@ All in Enter database -> Manage database:
   - Find full albums: songs that are a whole album in one recording.
   - Projects: the series recordings were made for (Tiny Desk, Like a Version): a song keeps its
     real artist and is shown "Project: Artist - Title". The dictionary, and stored songs to mark.
+  - Find covers: songs whose titles say they're covers, marked with the artist covered and shown
+    'Artist - Title (Original cover)'.
   - Resolve albums with several artists: one album title shared by different artists.
   - Fill in Latin forms of names in other alphabets: 'Кино' -> 'Kino' for Leina Radio.
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
