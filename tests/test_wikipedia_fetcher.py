@@ -146,3 +146,46 @@ def test_infobox_artist_picks_the_queried_name_of_a_joint_credit():
     ) == "Pharrell Williams"
     # No name equal to the query: the whole credit, for the manager to judge
     assert module._infobox_artist(_song_page_soup("Alicia Keys"), "TwoForty") == "Alicia Keys"
+
+
+# "Chciałem być" found "Taniec z gwiazdami season 26", whose tables of the songs
+# danced to gave the album "Week 3: Krzysztof Krawczyk Week"
+TV_SHOW_PAGE = """
+<html><body>
+<div class="mw-heading mw-heading3"><h3>Week 3: Krzysztof Krawczyk Week</h3></div>
+<table class="wikitable"><tr><td>"Chciałem być" - Krzysztof Krawczyk</td></tr></table>
+</body></html>
+"""
+
+
+def _track_listing_page(monkeypatch, module, page_title, html):
+    from types import SimpleNamespace
+    from bs4 import BeautifulSoup
+
+    page = SimpleNamespace(title=page_title, url="https://en.wikipedia.org/wiki/x")
+    monkeypatch.setattr(module, "_fetch_wikipedia_page", lambda artist, title: page)
+    monkeypatch.setattr(module, "_fetch_soup", lambda url: BeautifulSoup(html, "html.parser"))
+
+
+def test_a_page_not_about_the_artist_gives_no_album(monkeypatch):
+    module = load_wikipedia_fetcher_module()
+    _track_listing_page(monkeypatch, module, "Taniec z gwiazdami season 26", TV_SHOW_PAGE)
+
+    assert module.get_album_name("Krzysztof Krawczyk", "Chciałem być") is None
+    # The way round the song was stored
+    assert module.get_album_name("Chciałem być", "Krzysztof Krawczyk") is None
+
+
+def test_the_artists_own_page_and_album_page_are_still_scanned(monkeypatch):
+    module = load_wikipedia_fetcher_module()
+    listing = """
+<div class="mw-heading mw-heading2"><h2>Track listing</h2></div>
+<ol><li>"Chciałem być"</li></ol>
+"""
+    discography = listing.replace("Track listing", "Some Album")
+    _track_listing_page(monkeypatch, module, "Krzysztof Krawczyk discography", f"<html><body>{discography}</body></html>")
+    assert module.get_album_name("Krzysztof Krawczyk", "Chciałem być").album == "Some Album"
+
+    infobox = '<table class="infobox"><tr><th class="infobox-header">Studio album by Krzysztof Krawczyk</th></tr></table>'
+    _track_listing_page(monkeypatch, module, "Some Album", f"<html><body>{infobox}{listing}</body></html>")
+    assert module.get_album_name("Krzysztof Krawczyk", "Chciałem być").album == "Some Album"

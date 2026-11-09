@@ -71,8 +71,11 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     if title_resembles(title, page.title):
         album = _extract_from_infobox(soup, title)
         matched_artist = _infobox_artist(soup, artist)
-    else:
+    elif _page_is_about_artist(soup, page.title, artist):
         album = _extract_from_track_listing(soup, page.title, title, artist)
+    else:
+        flog(f"[Wikipedia] '{page.title}' is neither {artist}'s page nor an album of theirs")
+        return None
 
     if not album:
         flog(f"[Wikipedia] No album for the song on '{page.title}'")
@@ -201,6 +204,20 @@ def _infobox_artist(soup: BeautifulSoup, artist: str) -> str | None:
                 return name
         return credit or None
     return None
+
+
+def _page_is_about_artist(soup: BeautifulSoup, page_title: str, artist: str) -> bool:
+    """Whether a page that isn't the song's own can list the artist's songs: its
+    title names the artist ("X discography"), or its infobox credits them
+    ("Studio album by X"). A TV show's page has tables of songs too, and
+    "Week 3: Krzysztof Krawczyk Week" of "Taniec z gwiazdami" came back as an album."""
+    wanted = normalize(artist)
+    if not wanted:
+        return False
+    credit = _infobox_artist(soup, artist)
+    return _contains_words(normalize(page_title), wanted) or (
+        credit is not None and _contains_words(normalize(credit), wanted)
+    )
 
 
 def _extract_from_track_listing(

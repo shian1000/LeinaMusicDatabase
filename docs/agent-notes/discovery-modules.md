@@ -429,8 +429,10 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
   "Love Affair", so the search for TwoForty's song landed on Alicia Keys' page and filed it under
   "As I Am" until the manager could check the artist. Of a joint credit ("Queen and David Bowie")
   the fetcher reports the name equal to the query, since `_matched_artist_resembles()` doesn't
-  split at "and". Artist/album pages still report no artist, so there the tracklist scan is the
-  only guard, and it fires on non-song pages: the manager's first query cuts a title at "&" ("Initial
+  split at "and". Artist/album pages still report no artist. Any other page is turned down first
+  (`_page_is_about_artist()`: its title names the artist, or its infobox says "by X"), since a TV
+  show's tables of songs gave the album "Week 3: Krzysztof Krawczyk Week". Past that the tracklist
+  scan is the only guard, and it can fire on the wrong section: the manager's first query cuts a title at "&" ("Initial
   D - Night & Day" → "Night"), Wikipedia answers with the franchise page "Initial D", and its
   "See also" list held "Wangan Midnight" — "See also" came back as the album. So the scan skips
   `NON_TRACK_HEADINGS` (see also, references, external links, ...) and matches the title as
