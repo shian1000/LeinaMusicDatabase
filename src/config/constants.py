@@ -630,6 +630,10 @@ TITLE_JUNK_SUFFIXES = [
     "videoclip",
     # Written as one word, e.g. Cody Lee's "...Green Onion(MusicVideo)"
     "musicvideo",
+    # Real cases: "‘You & Me’ DANCE PERFORMANCE VIDEO", "‘뛰어(JUMP)’ M/V"
+    "dance performance video",
+    "performance video",
+    "m/v",
     "full song",
     # Upload quality tags, left at the end once everything else is cut
     # (real case: "MADUAR - Do It HD")
