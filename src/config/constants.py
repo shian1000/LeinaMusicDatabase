@@ -702,7 +702,8 @@ SANITIZE_SWITCH_LABELS = {
                       "'Legenda (1991)', 'Lumea Viseaza - 2002' -> the year taken off the title; it's offered "
                       "when looking up years, never saved without you."),
     "artist_in_title": ("What the title says (kept with the song before it's cut)", "The artist repeated in the title",
-                        "'Lynyrd Skynyrd - Free Bird' -> 'Free Bird', 'Hard Times (Paramore)' -> 'Hard Times'; "
+                        "'Lynyrd Skynyrd - Free Bird' -> 'Free Bird', 'Hard Times (Paramore)' -> 'Hard Times', "
+                        "'A & B - Song' by 'A' -> 'Song' by 'A & B'; "
                         "only at the start or in a bracket, never 'White Queen'."),
     "site_names": ("Removing", "Download-site names",
                    "'y2meta.com - ', '(greenmp3.com)', 'Y2Mate.is', Y2Mate's '-<id>-160k-<time>'."),

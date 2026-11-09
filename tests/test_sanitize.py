@@ -314,6 +314,33 @@ def test_clean_names_takes_the_artist_out_of_a_title_it_starts_with():
     assert (free_bird.title, white_queen.title) == ("Free Bird", "White Queen")
 
 
+@pytest.mark.parametrize("artist, title, expected", [
+    # A tag artist naming only one of those heading the title (real file)
+    ("ROSÉ", "ROSÉ & Bruno Mars - APT. (Official Music Video)", ("ROSÉ & Bruno Mars", "APT.")),
+    ("Bruno Mars", "ROSÉ & Bruno Mars - APT.", ("ROSÉ & Bruno Mars", "APT.")),
+    ("A", "A x B / Song", ("A x B", "Song")),
+    # Only the artist heads it: just the repeated name goes
+    ("Lynyrd Skynyrd", "Lynyrd Skynyrd - Free Bird", ("Lynyrd Skynyrd", "Free Bird")),
+    # Not the artist's names before the separator
+    ("Hey", "Old Love / New Love", ("Hey", "Old Love / New Love")),
+    ("Hey", "A & B - Song", ("Hey", "A & B - Song")),
+    # The artist is part of one name there, not one of the names
+    ("Rose", "Rose Royce & Bruno - Song", ("Rose", "Rose Royce & Bruno - Song")),
+])
+def test_artists_heading_a_title_become_the_entrys_artist(artist, title, expected):
+    metadata = s.sanitize_metadata({"artist_name": artist, "title": title}, s.SOURCE_MP3)
+    assert (metadata["artist_name"], metadata["title"]) == expected
+
+
+def test_clean_names_leaves_artists_heading_a_title_alone():
+    # The artist row is shared by its songs, so a stored song's stays
+    from types import SimpleNamespace
+    from utils.database import name_cleanup
+    song = SimpleNamespace(title="ROSÉ & Bruno Mars - APT.", album=None, artist=SimpleNamespace(id=1, name="ROSÉ"))
+    name_cleanup.apply_step([song], "artist_in_title")
+    assert (song.title, song.artist.name) == ("ROSÉ & Bruno Mars - APT.", "ROSÉ")
+
+
 def test_a_stored_name_is_never_cleaned_to_nothing():
     from types import SimpleNamespace
     from utils.database import name_cleanup

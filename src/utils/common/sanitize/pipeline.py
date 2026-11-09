@@ -83,6 +83,13 @@ class CoverFields:
 
 
 @dataclass
+class HeadingFields:
+    """The artists a title's "artist_in_title" step found heading it:
+    sanitize_field() returns only the title, the artist changes too."""
+    artists: Optional[str] = None
+
+
+@dataclass
 class Context:
     field: str
     source: str
@@ -91,6 +98,7 @@ class Context:
     feat_artists: Optional[list] = None  # where the featured artists go; None: keep them in the title
     project: Optional[ProjectFields] = None  # where a project read goes; None: keep it in the title
     cover: Optional[CoverFields] = None  # where a cover credit read goes; None: keep it in the title
+    heading: Optional[HeadingFields] = None  # where artists heading the title go; None: keep them in the title
 
 
 @dataclass(frozen=True)
@@ -196,6 +204,17 @@ def _cover_credit(value: str, ctx: Context) -> str:
     return reading.title
 
 
+def _artist_in_title(value: str, ctx: Context) -> str:
+    # Several artists heading the title become the entry's artist, when it has
+    # one to replace, as _project_name(): "ROSÉ & Bruno Mars - APT." by "ROSÉ"
+    if ctx.heading is not None:
+        from utils.common.artist_credits import title_heading_artists
+        if heading := title_heading_artists(value, ctx.artist):
+            ctx.heading.artists, value = heading
+            return value
+    return strip_artist_from_title(value, ctx.artist)
+
+
 def _step(name, switch, stages, fields, func, mode=MODE_AUTO) -> Step:
     return Step(name, frozenset(stages), frozenset(fields), func, mode, switch)
 
@@ -241,7 +260,7 @@ STEPS = {step.name: step for step in (
     # Joanna Jones"'s place
     _step(FEAT_TO_CREDITS, "featured_artists", _FIELD, {TITLE}, _featured_artists, MODE_REVIEW),
     _step("title_year", "year_in_title", _FIELD, {TITLE}, lambda v, ctx: strip_title_year(v)),
-    _step("artist_in_title", "artist_in_title", _FIELD, {TITLE}, lambda v, ctx: strip_artist_from_title(v, ctx.artist)),
+    _step("artist_in_title", "artist_in_title", _FIELD, {TITLE}, _artist_in_title),
     _step("site_names", "site_names", _BOTH, _ALL_FIELDS, _site_names),
     _step("topic_channel", "topic_channels", _FIELD, {ARTIST}, lambda v, ctx: strip_topic_channel(v)),
     _step("band_word", "band_word", _FIELD, {ARTIST}, lambda v, ctx: strip_band_word(v)),
@@ -347,12 +366,13 @@ def enabled_steps(source: str, stage: str, field: str | None = None, review: boo
     return steps
 
 
-def _run(value, source, stage, field, artist, review, feat_artists=None, project=None, cover=None) -> list[tuple[str, str, str]]:
+def _run(value, source, stage, field, artist, review, feat_artists=None, project=None, cover=None,
+         heading=None) -> list[tuple[str, str, str]]:
     changes = []
     if not value:
         return changes
     ctx = Context(field=field, source=source, stage=stage, artist=artist, feat_artists=feat_artists, project=project,
-                  cover=cover)
+                  cover=cover, heading=heading)
     for step in enabled_steps(source, stage, field, review):
         new_value = step.func(value, ctx)
         if new_value != value:
@@ -398,14 +418,16 @@ def sanitize_raw(text: str | None, source: str, removed: list | None = None) -> 
 
 def sanitize_field(value: str | None, field: str, source: str, *, artist: str | None = None,
                    removed: list | None = None, feat_artists: list | None = None,
-                   project: ProjectFields | None = None, cover: CoverFields | None = None) -> str | None:
+                   project: ProjectFields | None = None, cover: CoverFields | None = None,
+                   heading: HeadingFields | None = None) -> str | None:
     """`value` of `field` ("title", "artist", "album") after `source`'s
     field steps; `artist` is the entry's artist, for a title. What they cut
     is appended to `removed`, the featured artists a title credits to
     `feat_artists` - without it they stay in the title - and the project it
-    names to `project` (apply_project()), the same way."""
+    names to `project` (apply_project()), the same way, and the artists heading
+    it to `heading`."""
     changes = _run(value, source, STAGE_FIELD, field, artist, review=False, feat_artists=feat_artists, project=project,
-                   cover=cover)
+                   cover=cover, heading=heading)
     if removed is not None:
         removed.extend(cut_parts(changes, field))
     return changes[-1][2] if changes else value
@@ -455,15 +477,19 @@ def sanitize_metadata(metadata: dict, source: str) -> dict:
     feat_artists = list(metadata.get("feat_artists") or [])
     project = ProjectFields(metadata.get("album"), getattr(metadata, "channel", None), getattr(metadata, "raw_text", None))
     cover = CoverFields()
+    heading = HeadingFields()
     for key in ("title", "artist_name", "album"):
         value = metadata.get(key)
         if isinstance(value, str):
             cleaned = sanitize_field(value, _METADATA_FIELDS[key], source, artist=artist, removed=removed,
                                      feat_artists=feat_artists if key == "title" else None,
                                      project=project if key == "title" else None,
-                                     cover=cover if key == "title" else None)
+                                     cover=cover if key == "title" else None,
+                                     heading=heading if key == "title" else None)
             metadata[key] = cleaned if cleaned or not value else None
             if key == "title":
+                if heading.artists:
+                    metadata["artist_name"] = heading.artists
                 apply_project(metadata, project)
                 apply_cover(metadata, cover)
     if feat_artists or "feat_artists" in metadata:

@@ -38,7 +38,10 @@ refactoring. Since 2026-11-01 (owner: one switch per step, the same
 everywhere) every step is on everywhere it can run, each made safe for every
 name first - measured on the catalog (6,373 songs) and the library's tags
 (4,281 files): `artist_in_title` only at the start before a separator or a
-quoted title, or alone in a bracket ("Lynyrd Skynyrd - Free Bird", "Hard
+quoted title (several artists heading a title, one of them the entry's, become
+the entry's artist on import, `artist_credits.title_heading_artists()`: "ROSÉ &
+Bruno Mars - APT." by "ROSÉ"; never in Clean names, the artist row is shared),
+or alone in a bracket ("Lynyrd Skynyrd - Free Bird", "Hard
 Times (Paramore)"; never "White Queen" by Queen, "Feng Suave EP" - 48 such
 cuts before); `junk_marker_brackets` without the marker word "From"
 ("ДОБРОГО ВЕЧОРА (WHERE ARE YOU FROM?)", "(from “Chess”)") and, like

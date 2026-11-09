@@ -129,6 +129,24 @@ def propose_artist_split(name: str) -> SplitProposal | None:
     return SplitProposal(name, unique_main, unique_feat, confident)
 
 
+# ==================== Artists heading a title ====================
+
+_HEADING_SEPARATOR = re.compile(r"\s+[-–—/]\s+")
+
+
+def title_heading_artists(title: str, artist: str) -> tuple[str, str] | None:
+    """(the artists, the title) of a title starting with several artists, one
+    of them `artist` - "ROSÉ & Bruno Mars - APT." for artist "ROSÉ" - or None:
+    "Old Love / New Love", or a title naming only `artist` itself."""
+    parts = _HEADING_SEPARATOR.split(title or "", maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        return None
+    proposal = propose_artist_split(parts[0].strip())
+    if proposal is None or normalize(artist) not in {normalize(name) for name in proposal.main}:
+        return None
+    return parts[0].strip(), parts[1].strip()
+
+
 # ==================== A title's featured artists ====================
 
 _FEAT_CREDIT_RE = re.compile(r"(?:^|\s)" + FEAT_WORD + r"\s+(.+)$", re.IGNORECASE)
