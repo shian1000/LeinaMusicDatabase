@@ -169,6 +169,38 @@ def test_the_read_text_counts_when_the_cleanup_cut_the_project_off():
     assert (reading.project, reading.artist, reading.title) == ("Kaunas Acoustics", "Daughter", "Song")
 
 
+# Real rows the first run over the catalog read wrongly
+MESKIE_GRANIE = ProjectName("Męskie Granie")
+
+
+@pytest.mark.parametrize("artist", ["Męskie Granie Orkiestra 2022", "Męskie Granie Orkiestra 2016"])
+def test_an_artist_whose_name_only_contains_the_project_keeps_it(artist):
+    reading = read_project(artist, "Mantra", [MESKIE_GRANIE], guess=True)
+    assert (reading.project, reading.artist, reading.title, reading.whole) == ("Męskie Granie", artist, "Mantra", False)
+    assert not reading.guessed
+
+
+@pytest.mark.parametrize("guess", [True, False])
+def test_a_title_isnt_taken_for_the_artist_of_a_series_that_names_no_concert(guess):
+    reading = read_project("Męskie Granie", "Rilke", [MESKIE_GRANIE], album="Męskie Granie 2024", guess=guess)
+    assert (reading.project, reading.artist, reading.title, reading.whole) == ("Męskie Granie", "Męskie Granie", "Rilke", False)
+    assert reading.artist_unknown and not reading.guessed
+
+
+def test_a_bracket_naming_a_projects_edition_goes_whole():
+    reading = read_project("Ørganek", 'ØNA - "Kochana"(Męskie Granie 2018) - część 5/6', [MESKIE_GRANIE])
+    assert reading.title == 'ØNA - "Kochana" - część 5/6'
+
+
+def test_a_bracket_saying_more_keeps_the_rest():
+    assert read_project("A", "Song (Polish cover, Like a Version)", DICTIONARY).title == "Song (Polish cover)"
+
+
+def test_a_real_artist_with_only_a_series_as_the_title_isnt_a_whole_set():
+    reading = read_project("Lao Che", "Męskie Granie", [MESKIE_GRANIE])
+    assert (reading.artist, reading.title, reading.whole) == ("Lao Che", "Męskie Granie", False)
+
+
 # ==================== Matching ====================
 
 @pytest.fixture
@@ -380,6 +412,74 @@ def test_the_review_ticks_what_the_names_settle_and_leaves_guesses(session, monk
     assert sorted(c.checked for c in shown) == [False, True]
     assert sure.project.name == "Tiny Desk"
     assert guess.project is None and guess.artist.name == "NPR Music Tiny Desk Concert"
+
+
+@pytest.fixture
+def checked_songs(session, monkeypatch):
+    """The review's marker kept in a set, its sessions the test's."""
+    marked = set()
+    monkeypatch.setattr(project_review, "require_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(project_review, "submit_global_database_session", session.commit)
+    monkeypatch.setattr(project_review, "song_ids_with_tag", lambda tag: set(marked))
+    monkeypatch.setattr(project_review, "add_tag_to_songs", lambda ids, tag: marked.update(ids))
+    monkeypatch.setattr(project_review, "clear_tag", lambda tag: marked.clear())
+    return marked
+
+
+def _answer(monkeypatch, answer):
+    shown = []
+
+    def checkbox(_message, choices):
+        shown.append([c.value for c in choices])
+        return SimpleNamespace(ask=lambda: answer)
+
+    monkeypatch.setattr(project_review.questionary, "checkbox", checkbox)
+    return shown
+
+
+def test_a_second_run_goes_only_through_songs_not_checked(session, checked_songs, monkeypatch):
+    left = _song(session, "Daughter", "Youth (Tiny Desk Concert)")
+    plain = _song(session, "Sting", "Fragile")
+    shown = _answer(monkeypatch, [])
+    project_review.review_project_proposals()
+    assert len(shown) == 1 and checked_songs == {left.id, plain.id}
+    assert left.project is None  # left unticked, not offered again
+    project_review.review_project_proposals()
+    assert len(shown) == 1
+
+    new = _song(session, "Wolf Alice", "Boys (Like a Version)")
+    project_review.review_project_proposals()
+    assert len(shown) == 2 and shown[1] == [0]
+    assert new.id in checked_songs
+
+
+def test_cancelling_marks_nothing(session, checked_songs, monkeypatch):
+    _song(session, "Daughter", "Youth (Tiny Desk Concert)")
+    shown = _answer(monkeypatch, None)
+    project_review.review_project_proposals()
+    project_review.review_project_proposals()
+    assert len(shown) == 2 and checked_songs == set()
+
+
+def test_songs_naming_nothing_are_marked_without_asking(session, checked_songs, monkeypatch):
+    plain = _song(session, "Sting", "Fragile")
+    shown = _answer(monkeypatch, [])
+    project_review.review_project_proposals()
+    assert shown == [] and checked_songs == {plain.id}
+
+
+def test_a_changed_dictionary_checks_every_song_again(session, checked_songs, monkeypatch):
+    song = _song(session, "Sting", "Fragile (KEXP Session)")
+    shown = _answer(monkeypatch, [])
+    project_review.review_project_proposals()
+    assert shown == [] and checked_songs == {song.id}
+
+    monkeypatch.setattr(project_review, "forget_known_projects", lambda: None)
+    pr.add_project(session, "KEXP")
+    project_review._save_dictionary()
+    assert checked_songs == set()
+    project_review.review_project_proposals()
+    assert len(shown) == 1
 
 
 # ==================== The dictionary ====================

@@ -1,7 +1,11 @@
 """Manage database -> "Projects": the dictionary of series recordings were made
 for (utils/database/projects.py), the stored songs naming one in one checkbox
-list, and Song actions -> "Set project"."""
+list, and Song actions -> "Set project". The list goes through songs not looked
+at yet (PROJECT_CHECKED_TAG in tag.db); a change of the dictionary clears that,
+since a song checked against the old one may name the new project."""
 import questionary
+
+from config.constants import PROJECT_CHECKED_TAG
 
 from utils.common.output import error, review_header, say
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
@@ -15,6 +19,7 @@ from utils.database.projects import (
     project_song_counts,
     set_song_project,
 )
+from utils.database.tags_management import add_tag_to_songs, clear_tag, song_ids_with_tag
 from utils.ui.display_utils import display_songs
 from utils.ui.prompts import ask_yes_no
 from utils.ui.song_colors import song_tokens
@@ -32,7 +37,9 @@ _NONE = "No project"
 _CANCEL = "Cancel"
 
 
-def _save_dictionary() -> None:
+def _save_dictionary(check_again: bool = True) -> None:
+    if check_again:
+        clear_tag(PROJECT_CHECKED_TAG)
     submit_global_database_session()
     forget_known_projects()
 
@@ -68,7 +75,7 @@ def _edit_project(session, project: Project) -> None:
         elif choice == _DELETE:
             if ask_yes_no(f'Remove "{project.name}" from the dictionary? Its songs stay, with no project.'):
                 say(f"{delete_project(session, project)} song(s) no longer have a project.")
-                _save_dictionary()
+                _save_dictionary(check_again=False)
                 return
         else:
             attribute = {_NAME: "name", _ALIASES: "aliases", _CHANNELS: "channels"}[choice]
@@ -79,16 +86,27 @@ def _edit_project(session, project: Project) -> None:
 
 
 def review_project_proposals() -> None:
-    """The stored songs naming a project, in one checkbox list. The ones the
-    names settle are ticked; those read by a guess aren't."""
+    """The songs not looked at yet naming a project, in one checkbox list. The
+    ones the names settle are ticked; those read by a guess aren't. Answering
+    marks every song looked at, picked or not; cancelling marks none."""
     session, _ = require_global_database_sessions()
-    proposals = project_proposals(session)
+    checked = song_ids_with_tag(PROJECT_CHECKED_TAG)
+    looked_at = [song_id for (song_id,) in session.query(Song.id).filter(Song.project_id.is_(None))
+                 if song_id not in checked]
+    if not looked_at:
+        say("Every song has been checked against this dictionary.")
+        return
+    say(f"Checking {len(looked_at)} song(s) not checked yet.")
+    proposals = project_proposals(session, checked)
     if not proposals:
-        say("No stored song names a project from the dictionary.")
+        add_tag_to_songs(looked_at, PROJECT_CHECKED_TAG)
+        submit_global_database_session()
+        say("None of them names a project from the dictionary.")
         return
     review_header(f"{len(proposals)} song(s) name a project",
                   "Ticked ones get the project, and the artist and title shown after the arrow.",
-                  "Unticked: the artist is only a guess, or the names don't say who it is.")
+                  "Unticked: the artist is only a guess, or the names don't say who it is.",
+                  "Songs left unticked aren't offered again until the dictionary changes.")
     choices = []
     for i, proposal in enumerate(proposals):
         note = "artist unknown" if proposal.artist_unknown else "whole set" if proposal.whole else None
@@ -96,13 +114,14 @@ def review_project_proposals() -> None:
                  *song_tokens(proposal.artist, proposal.title, note, proposal.project.name)]
         choices.append(questionary.Choice(title=title, value=i, checked=not proposal.guessed))
     picked = questionary.checkbox("Which songs do you want to mark?", choices=choices).ask()
-    if not picked:
-        say("Nothing picked.")
+    if picked is None:
+        say("Cancelled, nothing marked as checked.")
         return
     for i in picked:
         apply_project_proposal(session, proposals[i])
+    add_tag_to_songs(looked_at, PROJECT_CHECKED_TAG)
     submit_global_database_session()
-    say(f"Marked {len(picked)} song(s).")
+    say(f"Marked {len(picked)} song(s)." if picked else "Nothing picked.")
 
 
 def manage_projects() -> None:

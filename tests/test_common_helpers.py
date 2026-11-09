@@ -50,6 +50,18 @@ def test_removing_a_tag_keeps_the_others(tags):
     assert tm.has_tag_on_song(_song(1), "chill")
 
 
+def test_a_tag_goes_on_many_songs_once_and_comes_off_all(tags):
+    tm.add_tag_to_song(_song(1), "checked")
+    tm.add_tag_to_song(_song(1), "chill")
+    assert tm.add_tag_to_songs([1, 2, 2, 3], " checked ")
+    assert tm.song_ids_with_tag("checked") == {1, 2, 3}
+    assert tags.query(Tag).filter_by(name="checked").count() == 1
+    assert tm.clear_tag("checked")
+    assert tm.clear_tag("never-existed")
+    assert tm.song_ids_with_tag("checked") == set()
+    assert tm.song_ids_with_tag("chill") == {1}
+
+
 @pytest.mark.parametrize("song, tag", [
     (SimpleNamespace(), "x"), (_song(None), "x"), (_song(1), ""), (_song(1), "   "), (_song(1), None),
 ])

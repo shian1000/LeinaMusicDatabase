@@ -114,6 +114,42 @@ def song_ids_with_tag(tag: str) -> set[int]:
     return {song_id for (song_id,) in rows}
 
 
+def add_tag_to_songs(song_ids, tag: str) -> bool:
+    """`tag` on every one of `song_ids`, in one query: add_tag_to_song() takes
+    two per song. The caller commits."""
+    sessions = get_global_database_sessions()
+    if sessions is None or not tag or not tag.strip():
+        return False
+    _, tag_session = sessions
+    tag = tag.strip()
+    try:
+        tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
+        if not tag_obj:
+            tag_obj = Tag(name=tag)
+            tag_session.add(tag_obj)
+            tag_session.flush()
+        tagged = {song_id for (song_id,) in tag_session.query(SongTag.song_id).filter_by(tag_id=tag_obj.id)}
+        tag_session.add_all(SongTag(song_id=song_id, tag_id=tag_obj.id) for song_id in set(song_ids) - tagged)
+        return True
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Adding tag '{tag}' to many songs", e)
+
+
+def clear_tag(tag: str) -> bool:
+    """`tag` off every song, the tag itself staying. The caller commits."""
+    sessions = get_global_database_sessions()
+    if sessions is None:
+        return False
+    _, tag_session = sessions
+    try:
+        tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
+        if tag_obj:
+            tag_session.query(SongTag).filter_by(tag_id=tag_obj.id).delete()
+        return True
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Clearing tag '{tag}'", e)
+
+
 def tag_names_by_song(song_ids) -> dict[int, list[str]]:
     """The tag names of each of `song_ids` that has any, sorted, in one query
     on the global tag.db session (left open)."""

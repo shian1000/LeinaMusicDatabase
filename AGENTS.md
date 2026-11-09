@@ -196,7 +196,8 @@ non-trivial work in that area.
   `project` must reach it; duplicate search keys on the project too. Names are read from the
   dictionary only, by whole spellings (`utils/common/project_names.py`): sanitize's `project_name`
   step for what comes in, Manage database → "Projects" (`utils/ui/project_review.py`) ticks stored
-  songs. Details: `docs/data-model.md`.
+  songs not looked at yet (`project_checked` marker; changing the dictionary clears it, or a new
+  project would find nothing in checked songs). Details: `docs/data-model.md`.
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -285,7 +286,7 @@ non-trivial work in that area.
   Unreferenced blobs go only after 24 h (the phone uploads before the PUT naming it). Details:
   `docs/runbooks/database.md` → "Covers on the phone".
   Moods ("Nastroje" on the phone): `tags.kind` (`'mood'` / `'marker'`) in tag.db and user.db.
-  `spellchecked` / `album_checked` are markers and must never show up as moods. Names are unique per
+  `spellchecked` / `album_checked` / `project_checked` are markers and must never show up as moods. Names are unique per
   file across kinds. A user's own moods sync like playlists through `mood_sync.py`
   (standard-library, built on `playlist_sync.py`, own `mood_revision` counter, same-name moods
   merged). `moods.py` owns global moods (tag.db), promoting a user's mood into one, and applying

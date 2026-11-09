@@ -363,6 +363,8 @@ USER_PLAYLIST_SOURCE_SPOTIFY_ALBUM = "spotifyAlbum"
 # marker. The phone reads only moods (utils/database/mood_sync.MOOD_KIND must match).
 TAG_KIND_MOOD = "mood"
 TAG_KIND_MARKER = "marker"
+# Marker of songs Manage database -> Projects has looked at; the dictionary changing clears it
+PROJECT_CHECKED_TAG = "project_checked"
 
 # What the owner can allow a user (main menu -> Users -> Permissions), kept
 # in that user's account.json. Names are part of the phone contract

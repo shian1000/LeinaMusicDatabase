@@ -235,7 +235,9 @@ added_at      NOT NULL, default datetime('now')
   own project (`song_kinds.songs_for_entry()`), and an entry with none never matches a project's
   song; duplicates are per project; "Fill missing data → Albums" skips these songs, since the
   fetchers would find the studio song's album; YouTube searches add the project's name; file names
-  and tags are "Title (Project)", which reads back into the same two fields. A database started
+  and tags are "Title (Project)", which reads back into the same two fields. The list of stored
+  songs goes only through those without the `project_checked` marker in tag.db (every song it looked
+  at gets it, ticked or not); any change of the dictionary clears the marker. A database started
   empty (`first_run.py`) adopts the migration without running it, so its dictionary starts empty.
   Handoff to the app:
   [`handoffs/projects-for-musicdatabaseapp.md`](handoffs/projects-for-musicdatabaseapp.md).

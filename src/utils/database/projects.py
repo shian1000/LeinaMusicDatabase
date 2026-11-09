@@ -104,14 +104,16 @@ class ProjectProposal:
     artist_unknown: bool = False
 
 
-def project_proposals(session) -> list[ProjectProposal]:
+def project_proposals(session, skip_ids=frozenset()) -> list[ProjectProposal]:
     """Every song with no project whose artist, title or album names one from
-    the dictionary, by artist."""
+    the dictionary, by artist. `skip_ids`: songs already looked at."""
     projects = session.query(Project).all()
     names = [_as_name(p) for p in projects]
     by_name = {p.name: p for p in projects}
     proposals = []
     for song in session.query(Song).filter(Song.project_id.is_(None)).order_by(Song.id):
+        if song.id in skip_ids:
+            continue
         reading = read_project(song.artist.name, song.title, names, album=song.album, guess=True)
         if reading:
             proposals.append(ProjectProposal(song, by_name[reading.project], reading.artist, reading.title,

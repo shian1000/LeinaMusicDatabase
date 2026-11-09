@@ -8,7 +8,7 @@ from menu.song_actions.edit_songs import edit_songs_menu
 from utils.database.database_getter import extract_db_object_info
 from utils.database.datatables import song_categories
 from utils.database.tags_management import remove_tag_from_song
-from config.constants import NO_VIDEO_SENTINEL
+from config.constants import NO_VIDEO_SENTINEL, PROJECT_CHECKED_TAG
 from utils.youtube.manage_youtube_playlists import YouTubeLoginError, create_yt_playlist, extract_video_id
 from utils.ui.display_utils import display_songs, display_song_links
 from utils.ui.artist_change import change_songs_artist, swap_titles_and_artist_names
@@ -25,6 +25,7 @@ def remove_check_protection(songs_objects):
     for song in songs_objects:
         remove_tag_from_song(song, "spellchecked")
         remove_tag_from_song(song, "album_checked")
+        remove_tag_from_song(song, PROJECT_CHECKED_TAG)
 
 def make_yt_playlist_menu(songs_objects):
     print("About to create a playlist with these songs:")

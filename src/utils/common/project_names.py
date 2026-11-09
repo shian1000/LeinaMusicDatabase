@@ -16,6 +16,10 @@ _TRAILING_WORD = r"(?:\s+(?:sessions?|concert|performance))?"
 _REPEATED_SEPARATOR_RE = re.compile(r"(\s[-–—|:]\s+)(?:[-–—|:]\s+)+")
 _EMPTY_LIST_ITEM_RE = re.compile(r"\s*,\s*(?=[)\]}】）」］])|(?<=[(\[{【（「［])\s*,\s*")
 _ARTIST_TITLE_RE = re.compile(r"\s+[-–—]\s+|\s+:\s+")
+_SEPARATORS_AROUND_A_NAME = ":|-–—/"
+# A spelling naming a performance itself: only then can a title be the whole
+# set of whoever it names. "Męskie Granie" - "Rilke" is just a song
+_WHOLE_SET_WORD_RE = re.compile(r"(?<!\w)(?:concerts?|koncert|sessions?|sesja)(?!\w)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -128,7 +132,8 @@ def _enclosing_bracket(text: str, start: int, end: int) -> tuple | None:
 def cut_project(text: str | None, projects: list) -> tuple | None:
     """(project, `text` without it, the spelling as written), or None when
     `text` names none: "Boys (Like a Version)" -> "Boys", "Daughter | Tiny Desk
-    Concert" -> "Daughter". A bracket left with nothing in it goes too."""
+    Concert" -> "Daughter". A bracket left with nothing but numbers in it goes
+    too: "(Męskie Granie 2018)" is that edition."""
     found = _find(text, projects)
     if found is None:
         return None
@@ -136,7 +141,7 @@ def cut_project(text: str | None, projects: list) -> tuple | None:
     text = composed(text)
     start, end = match.span()
     bracket = _enclosing_bracket(text, start, end)
-    if bracket and not (text[bracket[0] + 1:start] + text[end:bracket[1]]).strip(_EDGE_SEPARATORS):
+    if bracket and not re.sub(r"[\W\d_]", "", text[bracket[0] + 1:start] + text[end:bracket[1]]):
         start, end = bracket[0], bracket[1] + 1
     rest = text[:start] + text[end:]
     rest = _EMPTY_LIST_ITEM_RE.sub("", " ".join(rest.split()))
@@ -155,16 +160,29 @@ def _whole_set_title(project: ProjectName, spelling: str) -> str:
     return spelling
 
 
+def _set_apart(text: str, match: re.Match) -> bool:
+    """Does a separator or a bracket divide the project from the rest of
+    `text`? "Kaunas Acoustics : Liūdni slibinai" - but "Męskie Granie Orkiestra
+    2022" is one name, the project only part of it."""
+    before, after = text[:match.start()].rstrip(), text[match.end():].lstrip()
+    return bool(before and before[-1] in _SEPARATORS_AROUND_A_NAME + "([{【（「［"
+                or after and after[0] in _SEPARATORS_AROUND_A_NAME + ")]}】）」］")
+
+
 def read_project(artist: str | None, title: str | None, projects: list, *, album: str | None = None,
                  channel: str | None = None, raw_text: str | None = None, guess: bool = False) -> ProjectReading | None:
     """The project a song's artist, title, album, channel or whole read text
     names, with the artist and title it leaves, or None. `guess`: the title
     of an artist that is only the project ("NPR Music Tiny Desk Concert" -
-    "Daughter") read as the artist (for a list the owner ticks; an import
-    leaves it, there is no one to ask)."""
+    "Daughter") read as the artist, only when the spelling names a concert or
+    session (for a list the owner ticks; an import leaves it, there is no one
+    to ask). An artist whose name only contains the project keeps it."""
     if not projects:
         return None
     in_artist = cut_project(artist, projects)
+    found_in_artist = _find(artist, projects)
+    if in_artist and in_artist[1] and not _set_apart(composed(artist), found_in_artist[1]):
+        in_artist = None
     if in_artist and in_artist[1]:
         # "Kaunas Acoustics : Liūdni slibinai"
         in_title = cut_project(title, projects)
@@ -172,6 +190,9 @@ def read_project(artist: str | None, title: str | None, projects: list, *, album
     in_title = cut_project(title, projects)
     if in_title:
         project, rest, spelling = in_title
+        whole_set = bool(_WHOLE_SET_WORD_RE.search(spelling))
+        if _named_by(artist, [project], channels=False) and not whole_set:
+            return ProjectReading(project.name, artist, rest or spelling, artist_unknown=True)
         if _named_by(artist, [project]):
             # A channel as the artist: who plays is in the title
             if not rest:
@@ -181,12 +202,13 @@ def read_project(artist: str | None, title: str | None, projects: list, *, album
             if len(parts) == 2 and all(parts):
                 return ProjectReading(project.name, parts[0], parts[1])
             return ProjectReading(project.name, rest, _whole_set_title(project, spelling), whole=True)
-        return ProjectReading(project.name, artist, rest or _whole_set_title(project, spelling), whole=not rest)
+        return ProjectReading(project.name, artist, rest or _whole_set_title(project, spelling),
+                              whole=not rest and whole_set)
     if in_artist:
         project, _, spelling = in_artist
-        if guess and title:
+        if guess and title and _WHOLE_SET_WORD_RE.search(spelling):
             return ProjectReading(project.name, title, _whole_set_title(project, spelling), whole=True, guessed=True)
         return ProjectReading(project.name, artist, title, artist_unknown=True)
-    found = _find(album, projects) or _find(raw_text, projects)
+    found = _find(album, projects) or _find(raw_text, projects) or found_in_artist
     project = found[0] if found else _named_by(channel, projects, channels=False)
     return ProjectReading(project.name, artist, title) if project else None
