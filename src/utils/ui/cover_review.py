@@ -8,7 +8,7 @@ from config.constants import COVER_CHECKED_TAG
 
 from utils.common.cover_names import cover_credit, covered_artist_name
 from utils.common.output import error, review_header, say
-from utils.database.covers import apply_cover_proposal, artist_named, find_covers, set_covered_artist
+from utils.database.covers import apply_cover_proposal, artist_named, find_covers, set_covered_artist, set_covered_title
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.database.datatables import Song
 from utils.database.tags_management import add_tag_to_songs, song_ids_with_tag
@@ -70,3 +70,19 @@ def set_covered_artist_of_songs(songs: list[Song]) -> None:
         return
     submit_global_database_session()
     say(f"{len(songs)} song(s): {f'cover of {artist.name}' if artist else 'not a cover'}.")
+
+
+def set_covered_title_of_songs(songs: list[Song]) -> None:
+    """Song actions -> "Set covered title", and the song editor for one song:
+    the original's title, for a traditional song or a cover under another name."""
+    display_songs(songs)
+    current = songs[0].covered_title if len(songs) == 1 else None
+    answer = (questionary.text("What is the original song's title? ('-' = none, empty = cancel)",
+                               default=current or "").ask() or "").strip()
+    if not answer or answer == current:
+        say("Aborted")
+        return
+    title = None if answer == "-" else answer
+    set_covered_title(songs, title)
+    submit_global_database_session()
+    say(f"{len(songs)} song(s): original title {title or 'not set'}.")

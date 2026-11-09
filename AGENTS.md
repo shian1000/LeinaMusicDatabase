@@ -198,8 +198,10 @@ non-trivial work in that area.
   step for what comes in, Manage database → "Projects" (`utils/ui/project_review.py`) ticks stored
   songs not looked at yet (`project_checked` marker; changing the dictionary clears it, or a new
   project would find nothing in checked songs). Details: `docs/data-model.md`.
-  `covers.py` — `songs.covered_artist_id` (migration 0020): the artist a song is a cover of; the title
-  loses the credit, shown "Artist - Title (Original cover)" (`cover_names.title_with_cover()`, also what
+  `covers.py` — `songs.covered_artist_id` (migration 0020): the artist a song is a cover of, artists only;
+  `songs.covered_title` (migration 0021) is the original's title when it differs or there's no artist
+  ("Bella Ciao", shown in the credit only without an artist; such a name read from a file isn't made an artist,
+  `mark_cover_of()`). The title loses the credit, shown "Artist - Title (Original cover)" (`cover_names.title_with_cover()`, also what
   goes into files). A title's credit is read by `utils/common/cover_names.py`: sanitize's `cover_credit`
   step for what comes in, Manage database → "Find covers" (`utils/ui/cover_review.py`, `find_covers()`,
   `cover_checked` marker) for stored songs, Song actions → "Set covered artist" by hand. No `ForeignKey`
@@ -687,7 +689,7 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
-  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` (migration 0020, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks

@@ -74,6 +74,8 @@ class Song(Base):
     # The artist this is a cover of (migration 0020) - see utils/database/covers.py. No ForeignKey
     # here, unlike the migration: a second one onto artists makes every join(Artist) ambiguous
     covered_artist_id = Column(Integer, index=True)
+    # The original's title, when it differs or no artist can be named (migration 0021)
+    covered_title = Column(String)
 
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")

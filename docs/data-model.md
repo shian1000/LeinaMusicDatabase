@@ -229,6 +229,10 @@ added_at      NOT NULL, default datetime('now')
   song is a cover of, NULL when it isn't known to be one. `artist_id` stays the performer, the title
   carries no credit, and the song is shown "Artist - Title (Original cover)". Such an artist may have
   no songs of its own: it isn't removed as unused, and merges carry the reference over.
+  `Song.covered_title` (migration `0021`) is the original's title when it differs from the cover's, or
+  when no artist can be named (a traditional song); only then does the credit show it.
+  Owner's choice: a game whose soundtrack is covered goes in as the covered artist ("Power Blade 2"),
+  a traditional song only as `covered_title` ("Bella Ciao"), never as an artist.
 - `Song.project_id` → `projects` (migration `0019`, `utils/database/projects.py`) — the series or
   compilation a recording was made for. `songs.artist_id` stays the real artist, the title loses the
   project's name, and the song is shown "Project: Artist - Title". `projects.aliases` holds other

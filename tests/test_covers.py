@@ -96,3 +96,25 @@ def test_a_song_cannot_cover_its_own_artist(session):
 def test_import_reads_the_credit():
     metadata = s.sanitize_metadata({"artist_name": "Ørganek", "title": "Creep (Radiohead cover)"}, s.SOURCE_YOUTUBE)
     assert (metadata["title"], metadata["covered_artist"]) == ("Creep", "Radiohead")
+
+
+def test_a_traditional_song_is_shown_by_its_original_title(session):
+    song = _song(session, "Христина Соловій", "Українська лють")
+    covers.set_covered_title([song], "Bella Ciao")
+    assert title_with_cover(song) == "Українська лють (Bella Ciao cover)"
+    assert not covers.find_covers(session)[0]
+
+
+def test_a_known_original_title_creates_no_artist(session):
+    covers.set_covered_title([_song(session, "A", "One")], "Bella Ciao")
+    song = _song(session, "B", "Two")
+    covers.mark_cover_of(session, song, "bella ciao")
+    assert song.covered_artist is None and song.covered_title == "bella ciao"
+    assert session.query(Artist).filter_by(name="bella ciao").count() == 0
+
+
+def test_the_original_title_stays_behind_the_artist(session):
+    song = _song(session, "Mistmorn", "Дарма")
+    covers.set_covered_artist([song], Artist(name="American Football"))
+    covers.set_covered_title([song], "Never Meant")
+    assert title_with_cover(song) == "Дарма (American Football cover)"

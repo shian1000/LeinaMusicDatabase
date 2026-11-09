@@ -151,6 +151,7 @@ def cover_credit(name: str) -> str:
 
 def title_with_cover(song) -> str:
     """"Crazy in Love (Beyoncé cover)": how a cover's title is shown and
-    written to a file, which read_cover() reads back."""
-    name = covered_artist_name(song)
+    written to a file, which read_cover() reads back. The original's title
+    stands in only when there's no artist: "(Bella Ciao cover)"."""
+    name = covered_artist_name(song) or getattr(song, "covered_title", None)
     return f"{song.title} {cover_credit(name)}" if name else song.title

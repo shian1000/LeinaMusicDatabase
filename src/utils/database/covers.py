@@ -66,7 +66,7 @@ def find_covers(session, skip_ids=frozenset()) -> tuple[list[CoverProposal], lis
         return artist.name if artist else None
 
     proposals, unnamed = [], []
-    for song in session.query(Song).filter(Song.covered_artist_id.is_(None)).order_by(Song.id):
+    for song in session.query(Song).filter(Song.covered_artist_id.is_(None), Song.covered_title.is_(None)).order_by(Song.id):
         if song.id in skip_ids:
             continue
         reading = read_cover(song.artist.name, song.title, known)
@@ -96,12 +96,34 @@ def find_covers(session, skip_ids=frozenset()) -> tuple[list[CoverProposal], lis
 
 
 def set_covered_artist(songs: list[Song], artist: Artist | None) -> None:
-    """`artist` None: not a cover. ValueError for a song's own artist. The
-    caller commits."""
+    """`artist` None: not a cover of an artist. ValueError for a song's own
+    artist. The caller commits."""
     if artist is not None and any(song.artist_id == artist.id for song in songs):
         raise ValueError(f"'{artist.name}' is the artist of one of these songs")
     for song in songs:
         song.covered_artist = artist
+
+
+def set_covered_title(songs: list[Song], title: str | None) -> None:
+    """The original's title (None: not known). The caller commits."""
+    for song in songs:
+        song.covered_title = title
+
+
+def is_known_work(session, name: str) -> bool:
+    """Some song already names `name` as the original's title, with no artist:
+    "(Bella Ciao cover)" read from a file is that song, not an artist."""
+    key = normalize(name)
+    return any(normalize(title) == key for (title,) in session.query(Song.covered_title).filter(
+        Song.covered_title.isnot(None), Song.covered_artist_id.is_(None)))
+
+
+def mark_cover_of(session, song: Song, name: str) -> None:
+    """Mark `song` from a name read in a title. The caller commits."""
+    if is_known_work(session, name):
+        set_covered_title([song], name)
+    else:
+        set_covered_artist([song], artist_named(session, name))
 
 
 def artist_named(session, name: str) -> Artist:
@@ -123,11 +145,13 @@ def apply_cover_proposal(session, proposal: CoverProposal) -> None:
     from utils.database.artist_reassignment import set_primary_artist
 
     song = proposal.song
-    covered = proposal.covered or artist_named(session, proposal.covered_name)
     if proposal.performer:
         performer = artist_named(session, proposal.performer)
         if performer.id != song.artist_id:
             set_primary_artist(session, song, performer)
-    set_covered_artist([song], covered)
+    if proposal.covered:
+        set_covered_artist([song], proposal.covered)
+    else:
+        mark_cover_of(session, song, proposal.covered_name)
     song.title = proposal.title
     session.flush()
