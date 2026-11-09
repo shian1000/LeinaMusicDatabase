@@ -525,8 +525,9 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     if is_soundtrack_artist(art_full):
         work = soundtrack_work(art_full)
         album = soundtrack_album(work) if work else art_full
-        print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {album}")
-        return AlbumMatch(album)
+        if not is_blacklisted_album(album):
+            print(f"No fetcher found an album; artist looks like a soundtrack, using it as the album: {album}")
+            return AlbumMatch(album)
 
     # A cover/unplugged version no fetcher knows is almost always a standalone
     # upload, not part of an album. Checked after the soundtrack fallback,

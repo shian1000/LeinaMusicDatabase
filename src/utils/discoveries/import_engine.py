@@ -11,7 +11,7 @@ from utils.common import trace
 from utils.database.database_getter import ArtistPool, get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat
+from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
 from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits
 from utils.database.latin_names import artist_match_synonyms, song_titles
@@ -23,7 +23,7 @@ from utils.database.song_kinds import (
     strip_full_album_marker,
     title_has_full_album_marker,
 )
-from config.constants import SONG_KIND_FULL_ALBUM
+from config.constants import SINGLES_ALBUM, SONG_KIND_FULL_ALBUM
 from config.constants import NAMELESS_AUTO_ACCEPT_MIN_CHARS, NAMELESS_AUTO_ACCEPT_MIN_WORDS, FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
 from utils.common.normalizer import name_key
@@ -362,6 +362,15 @@ def song_year(value) -> int | None:
         return int(match[1]) if match else None
 
 
+def importable_album(album: str | None, artist_name: str) -> str | None:
+    """`album` as a new song may store it: None for a blacklisted name (a tag's
+    "FIFA 19 Soundtrack"), which Fill missing data -> Albums then looks up."""
+    if album == SINGLES_ALBUM or not is_blacklisted_album(album, artist_name):
+        return album
+    print(f"Album name not accepted, left empty: {album}")
+    return None
+
+
 def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     """Add the song `metadata` describes, by `artist_obj` (one with an id),
     to `session` (default: the global music session). The caller commits."""
@@ -369,7 +378,7 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     new_song_obj = Song()
     new_song_obj.artist_id = artist_obj.id
     new_song_obj.title = metadata.title
-    new_song_obj.album = metadata.album
+    new_song_obj.album = importable_album(metadata.album, artist_obj.name)
     new_song_obj.year = song_year(metadata.year)
     new_song_obj.language = metadata.language
     # Only present for entries sourced from a YouTube playlist import - mp3

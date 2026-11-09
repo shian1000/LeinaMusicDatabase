@@ -450,6 +450,24 @@ def test_blacklisted_title_passes_only_for_an_artist_that_has_it(monkeypatch):
     assert is_blacklisted_album("Greatest Hits", "Abradab")
 
 
+@pytest.mark.parametrize("album, stored", [
+    ("FIFA 19 Soundtrack", None),
+    ("Abbey Road", "Abbey Road"),
+    ("Singles", "Singles"),
+    (None, None),
+])
+def test_an_import_leaves_a_blacklisted_album_empty(album, stored):
+    from utils.discoveries.import_engine import importable_album
+    assert importable_album(album, "Someone") == stored
+
+
+def test_an_import_keeps_a_blacklisted_looking_album_the_artist_has(monkeypatch):
+    from utils.database import albums
+    from utils.discoveries.import_engine import importable_album
+    monkeypatch.setattr(albums, "artist_has_album", lambda artist_name, title: artist_name == "Abradab")
+    assert importable_album("Best of Abradab", "Abradab") == "Best of Abradab"
+
+
 # Real albums whose titles hold a common word, a place or a name: blacklist.txt's
 # [substring] list used to reject them (COM-09)
 @pytest.mark.parametrize("title", [

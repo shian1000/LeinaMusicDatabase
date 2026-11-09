@@ -128,6 +128,8 @@ def test_a_real_artist_with_dots_is_not_a_soundtrack():
     # The marker isn't at the end: the name stays as it was
     ("Noir OST I", "Noir OST I"),
     ("O.S.T.R.", None),
+    # A blacklisted name isn't used either
+    ("FIFA 19 Soundtrack", None),
 ])
 def test_album_when_every_fetcher_is_empty(artist, album):
     modules = [("fake", "Fake", SimpleNamespace(get_album_name=lambda artist, title: None))]
