@@ -123,7 +123,9 @@ def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
     album = info.get("album")
     if not album:
         return None
-    return DiscoveryResult(album=album, matched_artist=info.get("artists"))
+    # The panel's "first album" may be a compilation, and it says neither who
+    # the album is by nor which recording it matched
+    return DiscoveryResult(album=album, matched_artist=info.get("artists"), needs_review=True)
 
 
 def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryResult | None:

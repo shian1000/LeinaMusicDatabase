@@ -13,6 +13,7 @@ from utils.discoveries.discoveries_manager import (
     load_discovery_modules,
 )
 from utils.common.text_utils import copy_to_clipboard
+from utils.ui.album_guess_review import review_album_guesses
 from utils.ui.album_swap_review import review_swapped_albums
 from utils.ui.soundtrack_review import review_soundtrack_guesses
 from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works
@@ -57,6 +58,8 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     matches = []
     # (song, AlbumMatch) found only with the song's artist and title swapped
     swapped_finds = []
+    # (song, AlbumMatch) only an unsure source knew
+    album_guesses = []
     # (song, album) where the song's artist may be the game or film itself
     soundtrack_guesses = []
     known_works = None  # read at the first song no module found an album for
@@ -73,6 +76,12 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
             print(f"Checking for {YELLOW}{song.artist.name} - {song.title}{RESET}")
             if song.album is None or song.album == "":
                 match = discover_album(song, discovery_modules, album_cache)
+                if getattr(match, "needs_review", False):
+                    print(f"Unsure album: {YELLOW}{match.album}{RESET}, asking about it at the end")
+                    album_guesses.append((song, match))
+                    songs_list.append((song.artist.name, song.title, None))
+                    matches.append(None)
+                    continue
                 new_album = match.album if match else None
                 if new_album is None:
                     print(f"Couldn't find album for {YELLOW}{song.artist.name} - {song.title}{RESET}")
@@ -109,6 +118,11 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         if new_album is not None:
             edit_db_entry(songs_objects[i], "album", new_album)
             _set_track_position(songs_objects[i], matches[i])
+
+    for song, match in review_album_guesses(album_guesses):
+        edit_db_entry(song, "album", match.album)
+        _set_track_position(song, match)
+        songs_list[songs_objects.index(song)] = (song.artist.name, song.title, match.album)
 
     for song, match in review_swapped_albums(swapped_finds):
         edit_db_entry(song, "album", match.album)

@@ -863,7 +863,7 @@ non-trivial work in that area.
   Help, the sharing wizard, `sharing_setup.py` and Settings for "phone(s)".
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Ten places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Eleven places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
@@ -879,6 +879,8 @@ non-trivial work in that area.
   entries)`; all ticked, the ticked ones saved), and `review_swapped_albums()`
   (`utils/ui/album_swap_review.py`, end of Fill missing data → Albums: songs whose album was found
   only with artist and title swapped, none ticked, see `docs/agent-notes/discovery-modules.md`), and
+  `review_album_guesses()` (`utils/ui/album_guess_review.py`, same place: albums only a
+  `needs_review` source knew - Google's panel - none ticked), and
   `review_soundtrack_guesses()` (`utils/ui/soundtrack_review.py`, same place: artist names that may
   be a game or film, none ticked), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:

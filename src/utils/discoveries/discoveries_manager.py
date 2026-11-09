@@ -270,11 +270,12 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
 class AlbumMatch:
     """An album found for a song, with the song's place on it when the
     module knew it (None = unknown; disc None also means a one-disc album).
-    load_tracks: the module's tracklist loader, see DiscoveryResult."""
+    load_tracks, needs_review: the module's, see DiscoveryResult."""
     album: str
     track_number: int | None = None
     disc_number: int | None = None
     load_tracks: Callable[[], list[AlbumTrack]] | None = None
+    needs_review: bool = False
 
 
 def _call_module(module, module_id: str, module_name: str, artist: str, title: str,
@@ -310,7 +311,8 @@ def _call_module_match(module, module_id: str, module_name: str, artist: str, ti
     if not isinstance(result, DiscoveryResult):
         return AlbumMatch(album)
     return AlbumMatch(album, _positive_int(result.track_number), _positive_int(result.disc_number),
-                      result.load_tracks if callable(result.load_tracks) else None)
+                      result.load_tracks if callable(result.load_tracks) else None,
+                      result.needs_review is True)
 
 
 def _positive_int(value) -> int | None:
@@ -455,6 +457,7 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     # counts as context, see script_utils.cyrillic_search_variant()
     alt_script_title = cyrillic_search_variant(son_cln, [art_full, alb or "", *synonyms])
     latin_title = _latin_search_title(song, son_cln)
+    unsure = None  # the first needs_review find, used only if nothing better turns up
 
     for module_id, module_name, module in modules:
         print(f"Looking in {module_name} module")
@@ -504,7 +507,9 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
                 if match:
                     break
 
-        if match:
+        if match and match.needs_review:
+            unsure = unsure or match
+        elif match:
             if cache:
                 cache.remember(song, match)
             return match
@@ -529,6 +534,9 @@ def discover_album(song, modules, cache: AlbumTrackCache | None = None) -> Album
     if has_singles_marker(art_full, son_full):
         print(f"No fetcher found an album; song looks like a cover/unplugged version, filing it under {SINGLES_ALBUM}")
         return AlbumMatch(SINGLES_ALBUM)
+
+    if unsure:
+        return unsure
 
     flog(f"No module found an album for '{art_full} - {son_full}'")
     return None

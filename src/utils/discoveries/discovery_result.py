@@ -26,6 +26,10 @@ class DiscoveryResult:
     load_tracks: the album's whole tracklist, fetched only when called - it
     may cost a request, so the manager asks only when other songs of the
     artist still wait for an album (see discoveries_manager.AlbumTrackCache).
+
+    needs_review marks an album that's only a guess (Google names the first
+    release it knows the recording from, maybe a compilation): the other
+    modules are still asked, and the owner confirms it if none of them knows.
     """
     album: str
     matched_title: Optional[str] = None
@@ -33,6 +37,7 @@ class DiscoveryResult:
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
     load_tracks: Optional[Callable[[], list[AlbumTrack]]] = None
+    needs_review: bool = False
 
 
 @dataclass

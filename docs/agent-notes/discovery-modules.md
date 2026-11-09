@@ -145,6 +145,16 @@ Madonna"). A ticked song gets `swap_song_names()` (a row named like its title ta
 row is renamed) and then the album; an unticked one stays as it was and goes on to the manual prompt.
 The extra lookups cost up to one more pass over the modules per missed song with a one-song artist.
 
+## An album only Google knew
+
+Google's panel gives the recording's "first album", which may be a compilation, and neither the
+album's artist nor the matched title, so the manager can check only the artist and the various-artists
+filter of Spotify / iTunes can't apply ("Folk Hit Maraton 4"). Its result is therefore
+`needs_review`: `discover_album()` keeps asking the remaining modules and any sure result wins, then
+the last-resort fallbacks (a "cover" still goes to Singles), and only then the guess is returned.
+`fill_missing_albums.py` saves nothing for it until `utils/ui/album_guess_review.py` (none ticked);
+an unticked song goes on to the manual prompt.
+
 ## Why the manager validates results itself instead of trusting modules
 
 Each fetcher scrapes/searches its own source and, historically, did its own match verification
