@@ -126,6 +126,20 @@ def mark_cover_of(session, song: Song, name: str) -> None:
         set_covered_artist([song], artist_named(session, name))
 
 
+def name_cover(session, song: Song, name: str) -> None:
+    """Mark a song whose title only says "cover" (find_covers()'s unnamed) as
+    a cover of `name`, cutting the credit out of its title. ValueError, with
+    nothing changed, for the song's own artist. The caller commits."""
+    from utils.discoveries.import_engine import find_matching_artist
+
+    artist = find_matching_artist(name, session)
+    if artist is not None and artist.id == song.artist_id:
+        raise ValueError(f"'{artist.name}' is the artist of this song")
+    reading = read_cover(song.artist.name, song.title)
+    title = reading.title if reading and reading.title else song.title
+    apply_cover_proposal(session, CoverProposal(song, title, name.strip(), artist))
+
+
 def artist_named(session, name: str) -> Artist:
     """The artist of that name, a new row when there's none."""
     from utils.discoveries.import_engine import find_matching_artist

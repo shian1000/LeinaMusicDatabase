@@ -6,13 +6,15 @@ import questionary
 
 from config.constants import COVER_CHECKED_TAG
 
-from utils.common.cover_names import cover_credit, covered_artist_name
-from utils.common.output import error, review_header, say
-from utils.database.covers import apply_cover_proposal, artist_named, find_covers, set_covered_artist, set_covered_title
+from utils.common.cover_names import cover_credit, covered_artist_name, title_with_cover
+from utils.common.output import error, review_header, say, show, styled
+from utils.database.covers import (apply_cover_proposal, artist_named, find_covers, name_cover, set_covered_artist,
+                                   set_covered_title)
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
 from utils.database.datatables import Song
 from utils.database.tags_management import add_tag_to_songs, song_ids_with_tag
 from utils.ui.display_utils import display_songs
+from utils.ui.prompts import ask_yes_no
 from utils.ui.song_colors import song_tokens
 
 
@@ -46,8 +48,38 @@ def review_covers() -> None:
     else:
         say("No new covers found by their titles.")
     if unnamed:
-        say(f"{len(unnamed)} song(s) say they're covers but not whose - use Song actions -> \"Set covered artist\":")
+        say(f"{len(unnamed)} song(s) say they're covers but not whose:")
         display_songs(unnamed)
+        if ask_yes_no("Name the covered artists now?"):
+            name_unnamed_covers(unnamed)
+
+
+def name_unnamed_covers(songs: list[Song]) -> None:
+    """Asks whose song each one covers, right after Find covers. "-" = not a
+    cover (not offered again), empty = skip (offered next time)."""
+    session, _ = require_global_database_sessions()
+    named = not_covers = 0
+    for song in songs:
+        show(styled(song.artist.name, "cyan") + " - " + styled(song.title, "yellow"))
+        answer = questionary.text("Whose song is it a cover of? ('-' = not a cover, empty = skip)").ask()
+        if answer is None:
+            break
+        answer = answer.strip()
+        if not answer:
+            continue
+        if answer == "-":
+            add_tag_to_songs([song.id], COVER_CHECKED_TAG)
+            not_covers += 1
+            continue
+        try:
+            name_cover(session, song, answer)
+        except ValueError as exc:
+            error(str(exc))
+            continue
+        named += 1
+        say(f"  -> {song.artist.name} - {title_with_cover(song)}")
+    submit_global_database_session()
+    say(f"Named {named} cover(s), {not_covers} marked as not a cover.")
 
 
 def set_covered_artist_of_songs(songs: list[Song]) -> None:

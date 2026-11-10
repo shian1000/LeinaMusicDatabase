@@ -207,7 +207,8 @@ non-trivial work in that area.
   `mark_cover_of()`). The title loses the credit, shown "Artist - Title (Original cover)" (`cover_names.title_with_cover()`, also what
   goes into files). A title's credit is read by `utils/common/cover_names.py`: sanitize's `cover_credit`
   step for what comes in, Manage database → "Find covers" (`utils/ui/cover_review.py`, `find_covers()`,
-  `cover_checked` marker) for stored songs, Song actions → "Set covered artist" by hand. No `ForeignKey`
+  `cover_checked` marker) for stored songs - a title saying only "cover" is asked about right there
+  (`name_cover()`, "-" = not a cover, marked checked) - and Song actions → "Set covered artist" by hand. No `ForeignKey`
   in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
   ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
   `reassign_additional_artist_links()`.

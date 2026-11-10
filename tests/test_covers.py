@@ -118,3 +118,18 @@ def test_the_original_title_stays_behind_the_artist(session):
     covers.set_covered_artist([song], Artist(name="American Football"))
     covers.set_covered_title([song], "Never Meant")
     assert title_with_cover(song) == "Дарма (American Football cover)"
+
+
+def test_an_unnamed_cover_is_named_and_loses_the_credit(session):
+    song = _song(session, "Alina Gingertail", "Stalker OST - Dirge for the Planet (Gingertail Cover)")
+    assert covers.find_covers(session)[1] == [song]
+    covers.name_cover(session, song, "MoozE")
+    assert (song.title, song.covered_artist.name) == ("Stalker OST - Dirge for the Planet", "MoozE")
+    assert not any(covers.find_covers(session))
+
+
+def test_naming_an_unnamed_cover_after_its_own_artist_changes_nothing(session):
+    song = _song(session, "Alina Gingertail", "Steel for Humans (Gingertail Cover)")
+    with pytest.raises(ValueError):
+        covers.name_cover(session, song, "Alina Gingertail")
+    assert (song.title, song.covered_artist) == ("Steel for Humans (Gingertail Cover)", None)
