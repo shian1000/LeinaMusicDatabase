@@ -193,7 +193,10 @@ non-trivial work in that area.
   recording was made for (Tiny Desk, Like a Version). The artist stays the real one, shown "Project:
   Artist - Title". A project's recording and the studio song of that title are two rows:
   `songs_for_entry(..., project)` is what keeps them apart in every matcher, so an entry's
-  `project` must reach it; duplicate search keys on the project too. Names are read from the
+  `project` must reach it; duplicate search keys on the project too. A song with no project may
+  also be that recording not marked yet (a project read from a file name, "Męskie Granie Orkiestra
+  2019 - Sobie i Wam.mp3", made a duplicate on 2026-11-09), and nothing in its data tells which:
+  folder playlists ask (`LocalSongMatcher.without_project()`, a yes marks the song), never decide. Names are read from the
   dictionary only, by whole spellings (`utils/common/project_names.py`): sanitize's `project_name`
   step for what comes in, Manage database → "Projects" (`utils/ui/project_review.py`) ticks stored
   songs not looked at yet (`project_checked` marker; changing the dictionary clears it, or a new
