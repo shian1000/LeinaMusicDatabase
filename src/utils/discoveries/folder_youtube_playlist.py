@@ -10,7 +10,7 @@ a track of its own, matched to the database like a file. Nothing is written
 here either; video_links() says which videos the saved playlist may give
 its songs (utils/database/additional_videos.py)."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from config.constants import SPELLING_CHECK_THRESHOLD
@@ -38,7 +38,8 @@ class YouTubeEntry:
     metadata: dict       # import_from_playlist.playlist_item_metadata()
     song: object | None  # the database Song its artist/title match exactly
     duration_s: int | None = None
-    closest_rejected: bool = False  # the user turned down closest_songs() for it
+    # The ids of closest_songs() the user turned down for it
+    closest_rejected: list = field(default_factory=list)
 
 
 def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry]:
@@ -230,6 +231,7 @@ def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entr
     elif entry.closest_rejected:
         match_track(playlist, matcher, track, {**entry.metadata, "title": track.title, "_label": entry.label})
         track.similar_song, track.title_candidates, track.best_guesses = None, [], []
+        track.rejected_song_ids = set(entry.closest_rejected)
     else:
         match_track(playlist, matcher, track,
                     {**entry.metadata, "title": track.title, "_label": entry.label}, min_artist_similarity,

@@ -1220,6 +1220,34 @@ def test_video_without_a_file_closest_songs_turned_down_are_not_offered_again(us
     assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [("ytClose", None)]
 
 
+def test_video_added_as_a_new_song_is_not_offered_its_turned_down_closest_songs_again(music_session, monkeypatch):
+    # "nemanja - Dāw Yĕn" had been offered the two "Man Down" songs again
+    # when added as a new song, though they were turned down at pairing
+    from utils.discoveries.folder_youtube_playlist import closest_songs, youtube_entries, youtube_only_track
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+    hurt = Artist(name="Hurt")
+    music_session.add_all([Song(title="Załoga G", artist=hurt), Song(title="Zaloga", artist=hurt),
+                           Song(title="Wiatr", artist=hurt)])
+    music_session.commit()
+    monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
+    matcher = LocalSongMatcher(music_session)
+    (entry,) = youtube_entries(matcher, [{"video_id": "ytClose", "title": "Zaloga G", "channel": "Hurt Official"}])
+    closest = closest_songs(matcher, entry, 0.6)
+    assert [song.title for song, _ in closest] == ["Załoga G", "Zaloga"]
+    entry.closest_rejected = [song.id for song, _ in closest]  # "Add it without a file"
+    track = youtube_only_track(fp.FolderPlaylist(folder=Path("music")), matcher, entry)
+    assert track.rejected_song_ids == set(entry.closest_rejected)
+
+    # The names as read: the same search again, so not asked
+    assert menu._closest_to_typed(music_session, track, track.artist, track.title) == []
+    # Names typed differently are searched for, without the songs turned down
+    assert menu._closest_to_typed(music_session, track, "Hurt", "Zaloga Gee") == []
+    retyped = menu._closest_to_typed(music_session, track, "Hurt", "Wiatrr")
+    assert [song.title for song, _ in retyped] == ["Wiatr"]
+
+
 def test_video_without_a_file_auto_accepts_its_closest_song(users_env, tmp_path, music_session, monkeypatch,
                                                              capsys):
     # Real case: "Fisz Emade Tworzywo - Nie za miłe wiadomości" was asked about at 100%

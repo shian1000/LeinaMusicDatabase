@@ -41,6 +41,9 @@ class FolderTrack:
     # When neither of those: the closest songs by score, (Song, score) pairs
     # (LocalSongMatcher.best_guesses())
     best_guesses: list = field(default_factory=list)
+    # Songs the user already turned down for it before these were made (a
+    # video's closest songs, folder_youtube_playlist.closest_songs()), by id
+    rejected_song_ids: set = field(default_factory=set)
     # song id -> LocalSongMatcher.match_score() of every song suggested above
     scores: dict = field(default_factory=dict)
     picked: bool = False                # its song was confirmed/picked by the user

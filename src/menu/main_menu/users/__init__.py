@@ -284,8 +284,12 @@ def _is_project_twin(music_session, track, song) -> bool | None:
 def _closest_to_typed(music_session, track, artist_name: str, title: str) -> list:
     """The closest songs to the names just typed, as (song, score), without
     those already turned down for the tags: a name typed by hand can reach a
-    song the tags couldn't, under an artist spelt differently ("17 Bas")."""
-    offered = {song.id for song, _ in track.best_guesses}
+    song the tags couldn't, under an artist spelt differently ("17 Bas").
+    Nothing for the names as read when their closest songs were turned down
+    already (a video's, before the review): the same search again."""
+    if track.rejected_song_ids and (artist_name, title) == (track.artist, _default_title(track)):
+        return []
+    offered = {song.id for song, _ in track.best_guesses} | track.rejected_song_ids
     guesses = LocalSongMatcher(music_session).best_guesses(
         {"artist_name": artist_name, "title": title, "project": track.project},
         FILE_BEST_GUESSES_MAX, load_best_guess_min_score())
@@ -589,7 +593,7 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
             added.append(entry)
             print(f"  -> added without a file as {_song_choice_label(choice)}")
         elif choice == _VIDEO_ADD:
-            entry.closest_rejected = bool(closest)
+            entry.closest_rejected = [song.id for song, _ in closest]
             added.append(entry)
             print("  -> added without a file")
         elif choice == _VIDEO_SWAP:
