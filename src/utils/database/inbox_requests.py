@@ -81,6 +81,7 @@ from config.constants import (
 from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.project_names import search_title
 from utils.common.debug import flog, mlog
+from utils.common.json_file import write_json
 from utils.common.normalizer import normalize
 from utils.database.additional_videos import add_additional_video, drop_additional_videos, song_for_video
 from utils.database.datatables import BadYoutubeVideo, Song
@@ -278,9 +279,7 @@ class LinkCase:
     @property
     def title_differs(self) -> bool:
         """The phone showed another title for this id (e.g. renamed, or merged into another song)."""
-        if self.song is None:
-            return False
-        return any(normalize(r.title or "") != normalize(self.song.title or "") for r in self.reports)
+        return reported_title_differs(self.song, self.reports)
 
 
 @dataclass
@@ -298,6 +297,14 @@ class DeadLinkCase(LinkCase):
             if vid and vid != self.dead_video_id and vid not in seen:
                 seen[vid] = Replacement(vid, report.replacement_title, report.replacement_channel)
         return list(seen.values())
+
+
+def reported_title_differs(song, reports) -> bool:
+    """Whether a report showed the song under another title than it has now
+    (renamed, or merged into another song); False without a song."""
+    if song is None:
+        return False
+    return any(normalize(r.title or "") != normalize(song.title or "") for r in reports)
 
 
 def _decision_key(song_id, video_id) -> str:
@@ -552,10 +559,7 @@ def _load_json(name: str, default, for_update: bool = False):
 
 
 def _save_json(name: str, value) -> None:
-    path = INBOX_DIR / name
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False))
-    os.replace(tmp, path)
+    write_json(INBOX_DIR / name, value, atomic=True)
 
 
 def now_iso() -> str:

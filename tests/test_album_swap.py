@@ -4,6 +4,7 @@ the lookup (discoveries_manager.discover_album_after_swap()), the swap itself
 and the review at the end (utils/ui/album_swap_review.py). In-memory SQLite
 with the album listener on; modules, prompts and the browser mocked."""
 
+import questionary
 import importlib
 import sys
 from pathlib import Path
@@ -183,7 +184,7 @@ def run_fill(monkeypatch, session):
 
         monkeypatch.setattr(fill_albums, "discover_album_after_swap", after_swap)
         monkeypatch.setattr(fill_albums, "ask_yes_no", ask_yes_no)
-        monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+        monkeypatch.setattr(questionary, "checkbox", checkbox)
         fill_albums.fill_missing_albums()
         return SimpleNamespace(looked_up=looked_up, questions=questions, listed=listed)
     return run

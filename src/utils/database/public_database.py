@@ -37,6 +37,7 @@ from config.constants import (
 )
 from settings import Settings
 from utils.common.debug import flog, mlog
+from utils.common.json_file import read_json, write_json
 from utils.database.backup import DB_FILES
 from utils.database.github_release import GithubError, GithubReleaseClient
 from utils.database.public_export import ExportError, export_public_databases
@@ -68,19 +69,11 @@ def _state_path() -> Path:
 
 
 def _load_state() -> dict:
-    try:
-        value = json.loads(_state_path().read_text())
-    except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return read_json(_state_path(), {})
 
 
 def _save_state(state: dict) -> None:
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False))
-    tmp.replace(path)
+    write_json(_state_path(), state, atomic=True)
 
 
 def daily_publish_enabled() -> bool:

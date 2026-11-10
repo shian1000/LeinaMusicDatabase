@@ -5,7 +5,7 @@ per genre (clean_genres()); nothing the owner typed is overwritten - the
 lookup only fills songs with no genre."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 
 from config.constants import GENRE_LEVEL_ARTIST
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
@@ -89,13 +89,11 @@ def _review_artist_genres(session, artist_level: list, known: dict) -> int:
     if not artist_level:
         return 0
     review_header(f"{len(artist_level)} song(s) only got their artist's genres from MusicBrainz.", "Untick the ones that don't fit the song (space toggles, enter confirms).")
-    choices = [questionary.Choice(title=f"{_label(song)}: {result.genres}", value=i, checked=True)
-               for i, (song, result) in enumerate(artist_level)]
-    selected = questionary.checkbox("Save these genres:", choices=choices).ask()
+    selected = tick_items("Save these genres:", artist_level,
+                          lambda pair: f"{_label(pair[0])}: {pair[1].genres}", checked=True)
     if not selected:
         return 0
-    for i in selected:
-        song, result = artist_level[i]
+    for song, result in selected:
         set_song_genre(session, song, result.genres, known)
         _remember_spellings(known, song.genre)
     submit_global_database_session()

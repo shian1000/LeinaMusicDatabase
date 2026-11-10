@@ -2,10 +2,9 @@ from utils.database.music_db_manager import Song, Artist
 from sqlalchemy import text
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
 from utils.database.albums import reassign_artist_albums
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 from utils.database.song_duplicates import find_duplicate_groups, merge_songs, spelling_key
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
-from utils.youtube.manage_youtube_playlists import _parse_synonyms
 from utils.common.normalizer import normalize, normalize_apostrophes
 from utils.common.script_utils import fix_mixed_script_words
 
@@ -77,7 +76,7 @@ def remove_duplicate_artists(report_none: bool = True) -> int:
     for artist in all_artists:
         if artist.id in already_flagged_ids:
             continue
-        for synonym in _parse_synonyms(artist_match_synonyms(artist)):
+        for synonym in artist_synonyms(artist):
             match = seen.get(_artist_key(synonym.strip()))
             if match and match.id != artist.id and match.id not in already_flagged_ids:
                 duplicates.append((artist, match))

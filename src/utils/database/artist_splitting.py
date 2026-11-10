@@ -7,7 +7,6 @@ review (utils/ui/artist_split_review.py), since a separator character alone
 can't tell "Sw@da & Maxim" from "Simon & Garfunkel".
 """
 
-import json
 import re
 from dataclasses import dataclass
 
@@ -25,24 +24,20 @@ from utils.common.artist_credits import (
 from utils.common.normalizer import normalize
 from utils.database.albums import link_songs, reassign_artist_albums
 from utils.database.datatables import Artist, Song
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 from utils.database.song_artists import add_additional_artist
+from utils.common.json_file import read_json, write_json
 
 _IGNORE_PATH = ARTIST_SPLIT_IGNORE_FILE
 
 # ---- ignore list ------------------------------------------------------------
 
 def load_split_ignore_list() -> set[str]:
-    try:
-        return set(json.loads(_IGNORE_PATH.read_text(encoding="utf-8")))
-    except (FileNotFoundError, ValueError):
-        return set()
+    return {n for n in read_json(_IGNORE_PATH, []) if isinstance(n, str)}
 
 
 def add_to_split_ignore_list(names: list[str]) -> None:
-    ignored = load_split_ignore_list() | {normalize(n) for n in names}
-    _IGNORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _IGNORE_PATH.write_text(json.dumps(sorted(ignored), ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json(_IGNORE_PATH, sorted(load_split_ignore_list() | {normalize(n) for n in names}))
 
 
 # ---- finding and applying ---------------------------------------------------
@@ -53,9 +48,8 @@ def _artists_by_name(session) -> dict[str, Artist]:
     by_name, by_synonym = {}, {}
     for artist in session.query(Artist).order_by(Artist.id).all():
         by_name.setdefault(normalize(artist.name), artist)
-        for syn in (artist_match_synonyms(artist) or "").split(","):
-            if syn.strip():
-                by_synonym.setdefault(normalize(syn), artist)
+        for syn in artist_synonyms(artist):
+            by_synonym.setdefault(normalize(syn), artist)
     return {**by_synonym, **by_name}
 
 

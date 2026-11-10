@@ -4,7 +4,6 @@ title) to match it without asking (DEFAULT_AUTO_ACCEPT_ARTIST_SIMILARITY),
 and the lowest score of the closest songs offered when nothing else matched
 (DEFAULT_BEST_GUESS_MIN_SCORE), and the score from which a suggestion is
 taken without asking (DEFAULT_CLOSEST_AUTO_ACCEPT_SCORE)."""
-import json
 
 from upath import UPath
 
@@ -17,7 +16,7 @@ from config.constants import (
     FILE_MATCHING_CONFIG_FILE,
     MIN_AUTO_ACCEPT_ARTIST_SIMILARITY,
 )
-from utils.common.debug import slog
+from utils.common.json_file import read_json, write_json
 
 _AUTO_ACCEPT = "auto_accept_artist_similarity"
 _BEST_GUESS = "best_guess_min_score"
@@ -35,15 +34,7 @@ def _config_path() -> UPath:
 
 
 def _read() -> dict:
-    path = _config_path()
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        slog(f"Failed to read file matching config, using defaults: {e}")
-        return {}
-    return data if isinstance(data, dict) else {}
+    return read_json(_config_path(), {}, "File matching config")
 
 
 def _load(key: str) -> float:
@@ -63,7 +54,7 @@ def _save(key: str, value: float) -> None:
         raise ValueError(f"must be between {lowest} and {highest}")
     data = _read()
     data[key] = value
-    _config_path().write_text(json.dumps(data, indent=2))
+    write_json(_config_path(), data)
 
 
 def load_auto_accept_artist_similarity() -> float:

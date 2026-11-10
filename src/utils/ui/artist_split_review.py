@@ -2,8 +2,7 @@
 utils/database/artist_splitting.py): list every proposal, let the user tick
 which ones to apply, then optionally remember the rest as single artists."""
 
-import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 
 from utils.database.artist_splitting import (
     SplitCandidate,
@@ -40,25 +39,19 @@ def review_artist_splits(artists: list[Artist] | None = None) -> int:
         return 0
 
     review_header(f"REVIEW: {len(candidates)} artist name(s) look like several artists", "Pre-selected: a feat./x credit, or every part already exists as an artist.")
-    choices = [
-        questionary.Choice(title=_describe(c), value=i, checked=c.preselected)
-        for i, c in enumerate(candidates)
-    ]
-    selected = questionary.checkbox(
-        "Select the names to split (space toggles, enter confirms):", choices=choices
-    ).ask()
+    selected = tick_items("Select the names to split (space toggles, enter confirms):", candidates, _describe,
+                          checked=lambda c: c.preselected)
     if selected is None:
         show("Aborted, nothing split.")
         return 0
 
     created = {}
-    for i in selected:
-        candidate = candidates[i]
+    for candidate in selected:
         parts = apply_artist_split(music_session, candidate, created)
         show(f"Split [green]{escape(candidate.proposal.original)}[/green] into {escape(', '.join(a.name for a in parts))}")
     submit_global_database_session()
 
-    skipped = [candidates[i].proposal.original for i in range(len(candidates)) if i not in set(selected)]
+    skipped = [c.proposal.original for c in candidates if c not in selected]
     if skipped and ask_yes_no(f"Remember the {len(skipped)} unselected name(s) as single artists, so they aren't proposed again?"):
         add_to_split_ignore_list(skipped)
         show(f"Remembered {len(skipped)} name(s).")

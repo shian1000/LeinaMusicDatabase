@@ -2,6 +2,7 @@
 separate artists: the parser, candidate finding, applying a split, the ignore
 list and the batch review. In-memory SQLite."""
 
+import questionary
 import sys
 from pathlib import Path
 
@@ -189,8 +190,8 @@ def test_review_applies_ticked_names_and_remembers_the_rest(session, monkeypatch
 
     monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(review, "submit_global_database_session", session.commit)
-    monkeypatch.setattr(review.questionary, "checkbox", fake_checkbox)
-    monkeypatch.setattr(review.questionary, "confirm", lambda message, default=False: Answer(True))
+    monkeypatch.setattr(questionary, "checkbox", fake_checkbox)
+    monkeypatch.setattr(questionary, "confirm", lambda message, default=False: Answer(True))
 
     assert review.review_artist_splits() == 1
     assert seen["checked"] == {"Simon & Garfunkel": False, "Sw@da x Maxim": True}

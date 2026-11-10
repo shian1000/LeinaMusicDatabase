@@ -11,7 +11,6 @@ from utils.youtube.manage_youtube_playlists import (
     YouTubeLoginError,
     get_youtube_service,
     _is_topic_channel,
-    _parse_synonyms,
     _run_ytdlp_search,
     _is_official_release,
     _log_ytdlp_errors,
@@ -25,7 +24,7 @@ from utils.common.soundtrack_names import soundtrack_work
 from utils.common.title_patterns import FEAT_WORD, PIPE
 from utils.discoveries.import_engine import ImportResult, find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 # The title cleanup itself lives in sanitize (its "youtube" steps)
 from utils.common.sanitize import (
     ProjectFields,
@@ -856,7 +855,7 @@ def _resolve_artist_synonyms(metadata_list: list) -> None:
     """
     synonym_to_canonical = {}
     for artist in get_artists_from_db_session():
-        for synonym in _parse_synonyms(artist_match_synonyms(artist)):
+        for synonym in artist_synonyms(artist):
             synonym_to_canonical[synonym.strip().lower()] = artist.name
 
     if not synonym_to_canonical:

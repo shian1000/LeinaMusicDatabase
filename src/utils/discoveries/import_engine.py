@@ -14,7 +14,7 @@ from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
 from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
-from utils.database.latin_names import artist_match_synonyms, song_titles
+from utils.database.latin_names import artist_synonyms, song_titles
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.song_kinds import (
     is_full_album,
@@ -227,8 +227,7 @@ def _match_artist_locally(name: str, session=None, artist_pool=None) -> tuple:
     # The search finds artists by their synonyms too ("I nad kropką" is
     # Konkret's), so they're compared like the name.
     def known_names(artist):
-        synonyms = (artist_match_synonyms(artist) or "").split(",")
-        return [n for n in (artist.name, *(s.strip() for s in synonyms)) if n]
+        return [n for n in (artist.name, *artist_synonyms(artist)) if n]
 
     search = normalize(name)
     if not search:
@@ -946,10 +945,9 @@ def _artist_names(song: Song, split_parts: bool = True):
 
 def _names_of(artist: Artist, split_parts: bool = True):
     """One artist's part of _artist_names()."""
-    synonyms = (artist_match_synonyms(artist) or "").split(",")
     split = propose_artist_split(artist.name) if split_parts else None
     parts = [*split.main, *split.feat] if split else []
-    yield from filter(None, (artist.name, *(s.strip() for s in synonyms), *parts))
+    yield from filter(None, (artist.name, *artist_synonyms(artist), *parts))
 
 
 def _artist_resembles(name: str, song: Song) -> bool:

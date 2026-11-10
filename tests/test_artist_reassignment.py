@@ -3,6 +3,7 @@
 (utils/ui/artist_change.py), with mocked prompts. In-memory SQLite with the
 album listener on."""
 
+import questionary
 import sys
 from pathlib import Path
 
@@ -543,7 +544,7 @@ def test_lookalike_letters_fix_onto_another_artists_name_is_held(session, ui, mo
     _artist(session, "Björk")
     mixed = _artist(session, "Вjörk")  # Cyrillic В
     song = _song(session, "Army of Me", mixed)
-    monkeypatch.setattr(cn.questionary, "checkbox", lambda *a, **kw: _Answer([0]))
+    monkeypatch.setattr(questionary, "checkbox", lambda *a, **kw: _Answer([0]))
     held = {}
 
     cn.fix_lookalike_letters([song], held)

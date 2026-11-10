@@ -16,7 +16,7 @@ from utils.common.text_utils import resembles_across_scripts, similarity
 from utils.database.artist_reassignment import artists_named, move_swapped_song, swap_names_of_artist
 from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 from utils.database.song_artists import count_artist_songs, song_all_artists
 
 # Cyrillic letters drawn like Latin ones, for a name typed with one of them by
@@ -29,10 +29,6 @@ _MIN_CONTAINED_NAME = 4
 # What follows a name when the longer one is a duo, not a spelling ("sanah i
 # Igor Herbut", "Dawid Podsiadło i Kaśka Sochacka")
 _JOINING_WORDS = {"i", "and", "&", "x", "feat", "feat.", "ft", "ft.", "featuring", "with", "oraz", "y", "et", "und", "vs", "vs."}
-
-
-def _synonyms(artist: Artist) -> list[str]:
-    return [s.strip() for s in (artist_match_synonyms(artist) or "").split(",") if s.strip()]
 
 
 def _fix_lookalikes(name: str) -> str:
@@ -89,7 +85,7 @@ def artists_look_same(a: Artist, b: Artist) -> bool:
     Дома", "Молчат Дома (Molchat Doma)")."""
     if a.id == b.id:
         return False
-    names_a, names_b = [a.name, *_synonyms(a)], [b.name, *_synonyms(b)]
+    names_a, names_b = [a.name, *artist_synonyms(a)], [b.name, *artist_synonyms(b)]
     if any(_names_match(x, y) for x in names_a for y in names_b):
         return True
 

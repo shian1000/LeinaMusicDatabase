@@ -1,8 +1,7 @@
 from utils.common.output import RESET, YELLOW, review_header
 from utils.database.database_getter import get_songs_from_db_session
 from utils.common.text_utils import is_blacklisted_album
-import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 from utils.database.song_artists import song_artist_label
 from utils.database.artist_reassignment import credit_unknown_artist_song, split_title_artists
 from utils.database.database_management import edit_db_entry
@@ -68,19 +67,15 @@ def fix_lookalike_letters(songs, held=None):
         return
 
     review_header(f"REVIEW: {len(proposals)} name(s) mix Latin and Cyrillic look-alike letters")
-    choices = []
-    for i, proposal in enumerate(proposals):
+    def label(proposal):
         owners = proposal.songs
         where = f"{owners[0].artist.name} - {owners[0].title}" if proposal.field == "title" else f"{len(owners)} song(s)"
-        choices.append(questionary.Choice(title=f"[{proposal.field}] {proposal.old}  ->  {proposal.new}  ({where})",
-                                          value=i, checked=True))
-    selected = questionary.checkbox(
-        "Select the names to fix (space toggles, enter confirms):", choices=choices
-    ).ask()
+        return f"[{proposal.field}] {proposal.old}  ->  {proposal.new}  ({where})"
+    selected = tick_items("Select the names to fix (space toggles, enter confirms):", proposals, label, checked=True)
     if selected is None:
         print("Aborted, nothing fixed.")
         return
-    fixed = name_cleanup.apply_proposals([proposals[i] for i in selected], held)
+    fixed = name_cleanup.apply_proposals(selected, held)
     print(f"Fixed {fixed} name(s).")
 
 def move_feat_credits(songs):
@@ -96,19 +91,15 @@ def move_feat_credits(songs):
         return
     review_header(f"REVIEW: {len(moves)} title(s) credit featured artists - move them to the songs' artists",
                   "(existing) = an artist the database has; unticked = a name that looks like more than one")
-    choices = []
-    for i, move in enumerate(moves):
+    def label(move):
         names = ", ".join(f"{name} ({'existing' if move.known[name] else 'new'})" for name in move.names)
-        choices.append(questionary.Choice(
-            title=f"{move.song.artist.name} - {move.song.title}  ->  {move.title}  + feat. {names}",
-            value=i, checked=not move.suspicious))
-    selected = questionary.checkbox(
-        "Select the titles to change (space toggles, enter confirms):", choices=choices
-    ).ask()
+        return f"{move.song.artist.name} - {move.song.title}  ->  {move.title}  + feat. {names}"
+    selected = tick_items("Select the titles to change (space toggles, enter confirms):", moves, label,
+                          checked=lambda move: not move.suspicious)
     if selected is None:
         print("Aborted, nothing changed.")
         return
-    created = name_cleanup.apply_feat_moves(session, [moves[i] for i in selected])
+    created = name_cleanup.apply_feat_moves(session, selected)
     print(f"Moved the featured artists of {len(selected)} title(s), {len(created)} new artist(s).")
     if created:
         submit_global_database_session()
@@ -197,30 +188,26 @@ def resolve_unknown_artist(songs):
     """Songs by an unknown artist with an "Artist - Title" title are credited
     to that artist (artist_reassignment.credit_unknown_artist_song()); what
     changed is printed as one summary at the end."""
-    session, _ = require_global_database_sessions()
-    changes = []
-    for song in songs:
-        old_label = f"{song.artist.name} - {song.title}"
-        artist = credit_unknown_artist_song(session, song)
-        if artist is not None:
-            changes.append(f"song_id {song.id}: '{old_label}' -> {YELLOW}'{artist.name}' - '{song.title}'{RESET}")
-
-    if changes:
-        review_header(f"Credited {len(changes)} song(s) of an unknown artist:", *(f"  {change}" for change in changes))
+    _apply_with_summary(songs, credit_unknown_artist_song, "Credited {} song(s) of an unknown artist:")
 
 
 def split_artists_from_titles(songs):
     """Titles written "Artists / Title" by the song's own artists, split
     (artist_reassignment.split_title_artists()); one summary at the end."""
+    _apply_with_summary(songs, split_title_artists, "Took the artists out of {} title(s):")
+
+
+def _apply_with_summary(songs, fix, header: str) -> None:
+    """`fix(session, song)` on every song (None = left as it was), then one
+    summary of the changed ones."""
     session, _ = require_global_database_sessions()
     changes = []
     for song in songs:
         old_label = f"{song.artist.name} - {song.title}"
-        credited = split_title_artists(session, song)
-        if credited is not None:
+        if fix(session, song) is not None:
             changes.append(f"song_id {song.id}: '{old_label}' -> {YELLOW}'{song_artist_label(song)}' - '{song.title}'{RESET}")
     if changes:
-        review_header(f"Took the artists out of {len(changes)} title(s):", *(f"  {change}" for change in changes))
+        review_header(header.format(len(changes)), *(f"  {change}" for change in changes))
 
 
 def _load_songs():

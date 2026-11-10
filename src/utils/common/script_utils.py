@@ -88,7 +88,7 @@ _HANGUL_FINALS = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l"
                   "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t"]
 
 
-def _hangul(ch: str) -> str | None:
+def hangul_syllable(ch: str) -> str | None:
     code = ord(ch) - 0xAC00
     if not 0 <= code < 11172:
         return None
@@ -139,7 +139,7 @@ def matching_key(text: str | None) -> str:
         return ""
     # Hangul syllables first - NFKD would split them into jamo - then NFKD so
     # Greek/Cyrillic letters lose accents before the table lookup
-    text = "".join(_hangul(ch) or ch for ch in text)
+    text = "".join(hangul_syllable(ch) or ch for ch in text)
     decomposed = "".join(
         c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
     )

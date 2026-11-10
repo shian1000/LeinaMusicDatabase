@@ -70,60 +70,43 @@ def set_youtube_link(songs_objects):
     YouTube's anonymous search never returns (age-restricted, or a title
     like "3some" its filter hides). Playlists and Years' YouTube date lookup
     use a stored video instead of searching."""
-    print("About to set a YouTube link for these songs:")
-    display_songs(songs_objects)
-    url = input("YouTube video link (put nothing to cancel): ").strip()
-    if not url:
-        print("Aborted")
-        return
-    video_id = extract_video_id(url)
-    if video_id is None:
-        print(f"'{url}' isn't a YouTube video link, nothing changed.")
-        return
-    for song in songs_objects:
-        song.youtube_video_id = video_id
-    submit_global_database_session()
-    print(f"Set YouTube video {video_id} on {len(songs_objects)} song(s).")
+    _set_link(songs_objects, "youtube_video_id", "a YouTube link", "YouTube video link",
+              extract_video_id, "a YouTube video link", "YouTube video {}")
 
 
 def set_music_video_link(songs_objects):
     """Store the song's music video (official clip) by hand, apart from the
     YouTube link above - only a link Leina Radio offers to open, never played
     or searched for (Song.music_video_youtube_id)."""
-    print("About to set a music video link for these songs:")
-    display_songs(songs_objects)
-    url = input("YouTube link of the music video (put nothing to cancel): ").strip()
-    if not url:
-        print("Aborted")
-        return
-    video_id = extract_video_id(url)
-    if video_id is None:
-        print(f"'{url}' isn't a YouTube video link, nothing changed.")
-        return
-    for song in songs_objects:
-        song.music_video_youtube_id = video_id
-    submit_global_database_session()
-    print(f"Set music video {video_id} on {len(songs_objects)} song(s).")
+    _set_link(songs_objects, "music_video_youtube_id", "a music video link", "YouTube link of the music video",
+              extract_video_id, "a YouTube video link", "music video {}")
 
 
 def set_spotify_link(songs_objects):
     """Store a Spotify album/track page on the selected songs, for a release
     Spotify's search never surfaces - "Fill missing data -> Years" then reads
     the year straight off it."""
-    print("About to set a Spotify link for these songs:")
+    _set_link(songs_objects, "spotify_url", "a Spotify link", "Spotify album or track link",
+              normalize_spotify_url, "a Spotify album or track link", "{}")
+
+
+def _set_link(songs_objects, field: str, what: str, asked: str, parse, kind: str, done: str) -> None:
+    """Ask for a link, `parse` it (None = not `kind`) and store it in the
+    songs' `field`; `done` shows the stored value."""
+    print(f"About to set {what} for these songs:")
     display_songs(songs_objects)
-    url = input("Spotify album or track link (put nothing to cancel): ").strip()
+    url = input(f"{asked} (put nothing to cancel): ").strip()
     if not url:
         print("Aborted")
         return
-    normalized = normalize_spotify_url(url)
-    if normalized is None:
-        print(f"'{url}' isn't a Spotify album or track link, nothing changed.")
+    value = parse(url)
+    if value is None:
+        print(f"'{url}' isn't {kind}, nothing changed.")
         return
     for song in songs_objects:
-        song.spotify_url = normalized
+        setattr(song, field, value)
     submit_global_database_session()
-    print(f"Set {normalized} on {len(songs_objects)} song(s).")
+    print(f"Set {done.format(value)} on {len(songs_objects)} song(s).")
 
 
 # Link kind -> the Song attribute holding it, for "Remove links".

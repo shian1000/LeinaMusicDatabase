@@ -32,7 +32,7 @@ Durable content that used to sprawl across root-level session reports (`OPTIMIZA
    to find which subsystem owns the area, then [`docs/architecture.md`](docs/architecture.md) /
    [`docs/data-model.md`](docs/data-model.md) if you need layout or schema.
 4. The `docs/agent-notes/` topic note(s) for that subsystem — index at the bottom of this file.
-5. Verify behaviour in the source before editing. The codebase is ~7k lines; read the actual
+5. Verify behaviour in the source before editing. The codebase is ~38k lines (`src/`); read the actual
    function rather than trusting a summary.
 
 ## Sources of truth
@@ -173,7 +173,8 @@ non-trivial work in that area.
   `utils/ui/latin_forms_review.py`, or a reviewed correction); suggestions come from
   `utils/common/romanize.py`. Search treats them as names, matching as synonyms / second titles:
   code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
-  `artist.synonyms`. Details: `docs/data-model.md`.
+  `artist.synonyms` (as a list of names: `artist_synonyms(artist)`; any synonyms text is split by
+  `artist_credits.split_synonyms()`, never by hand). Details: `docs/data-model.md`.
   `genres.py` — `songs.genre` (migration 0013), read by Leina Radio's song radio: genres
   comma-separated, main one first, **one spelling per genre** across the database (the phone only
   matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
@@ -337,7 +338,11 @@ non-trivial work in that area.
   `playlist_sync.follow_song_id_changes()` — don't write another loop.
   Details: `docs/runbooks/database.md` → "Saved songs and links on the phone".
   A new synced collection reuses the shared pieces instead of copying a handler: its counter is a
-  `playlist_sync.RevisionCounter(counter_table, data_table)`, its endpoint a row of
+  `playlist_sync.RevisionCounter(counter_table, data_table)` (which also answers `changes_since()` /
+  `row_by_uid()`), and an item-by-item one (GET since / PUT / DELETE by uid) is one row of
+  `musicdatabase_core/sync_collections.COLLECTIONS`, which both servers serve through one handler
+  (`sharing_server._collection()`, MDW's `collection_handler()`) - a function a test patches is
+  wrapped in a lambda there, looked up per call. Any other endpoint is a row of
   `sharing_server.USER_ROUTES` (the one method check: another method → 405 with `Allow`), its body
   read by `_read_body()` / `_read_json_body()` (411 / 413 / a short body closes without an answer)
   and the user.db opened by `_open_user_db()` (503 when not migrated or unreadable).
@@ -361,7 +366,8 @@ non-trivial work in that area.
   modules and `global_mood_log`, plus `accounts.py` (making an account), `user_schema.py` (applying
   `migrations/user/`), `song_id_replay.py` (replaying `song_id_changes` on a plain connection, the
   rules behind `song_references.py`), `request_format.py`, `certificates.py`, `server_rules.py` (limits,
-  the Host check, the login and upload limiters) and `inbox_files.py` (storing a request). Standard library
+  the Host check, the login and upload limiters), `sync_collections.py` (the synced collections both
+  servers serve, above) and `inbox_files.py` (storing a request). Standard library
   only, nothing from this program (`tests/test_musicdatabase_core.py`), so a value it shares with
   `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
   modules are redirects (`sys.modules`) to the same module, so `utils.database.playlist_sync` still
@@ -860,6 +866,15 @@ non-trivial work in that area.
   stop the rest; each failure in `debug.log`).
 - Every yes/no question goes through `utils/ui/prompts.ask_yes_no()` (a bare Enter means yes,
   everywhere — the owner's choice), never `questionary.confirm()` directly; a test checks that.
+  A checkbox list of items goes through `prompts.tick_items(question, items, label, checked=)`
+  (the ticked items back, None on cancel); a test fakes it by patching `questionary.checkbox` on
+  the `questionary` module itself, not on the review module. Filling a value in by hand after a
+  lookup found none ("copied to the clipboard, empty = skip") is `prompts.ask_typed()`.
+- The app's own small JSON files (settings, start-up state, ignore lists) are read and written
+  with `utils/common/json_file.read_json(path, default, what)` / `write_json(path, value,
+  atomic=)` - a missing, broken or wrongly typed file reads as `default`; `atomic` for one read
+  at every start. Not for `musicdatabase_core` (standard library only) or the inbox's
+  `_load_json()`, which must refuse an unreadable file it's about to rewrite.
 - If a change touches setup, entry points, commands, or architecture, update this file in place.
 - In user-facing text (prints, menu labels, prompts, review notes) the mobile client is "Leina
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong

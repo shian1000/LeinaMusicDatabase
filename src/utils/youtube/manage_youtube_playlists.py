@@ -32,6 +32,7 @@ from settings import Settings
 from config.constants import FULL_ALBUM_MIN_DURATION_S, NO_VIDEO_SENTINEL, PROJECT_ROOT, YOUTUBE_REGION
 from utils.database.song_kinds import strip_full_album_marker
 import json
+from utils.common.artist_credits import split_synonyms
 
 
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
@@ -661,23 +662,6 @@ def _text_containment(expected: str, candidate: str) -> float:
     return 1.0 if re.search(pattern, candidate.lower()) else 0.0
 
 
-def _parse_synonyms(synonyms: str | None) -> list[str]:
-    """Split the artists table's `synonyms` column (a plain comma-separated
-    string, no other convention exists in the DB) into individual names.
-
-    Exists because no string-similarity technique can bridge a real name
-    change — a fan channel using a translated/English name for a
-    non-Latin-script artist, a full legal name vs. a shortened stage name,
-    an artist fronting a band under their own name. Real cases: `Бумбокс`'s
-    real channel is `familyboombox` (zero character overlap); `Hall & Oates`'
-    real channel is `Daryl Hall & John Oates`; `Junecapone`'s real (Topic)
-    channel is just `June`. See docs/agent-notes/youtube-search-matching.md.
-    """
-    if not synonyms:
-        return []
-    return [s.strip() for s in synonyms.split(",") if s.strip()]
-
-
 def _normalize_multi_artist_punctuation(text: str) -> str:
     """Treat comma/slash/ampersand as interchangeable multi-artist separators.
 
@@ -1008,7 +992,7 @@ def score_result(
     back to whatever's available rather than reject everything outright.
 
     `artist_synonyms` (the artists table's `synonyms` column, comma-separated
-    — see _parse_synonyms()) is checked alongside `artist` for
+    — see split_synonyms()) is checked alongside `artist` for
     artist_relevance, taking the max across all names. No amount of
     string-similarity tuning can bridge a real name change — this is the
     only mechanism that can.
@@ -1059,7 +1043,9 @@ def score_result(
 
     channel_clean = _relevance_text(channel)
     multi_main = bool(main_artists) and len(main_artists) > 1
-    names = [artist] if multi_main else [artist, *_parse_synonyms(artist_synonyms)]
+    # Synonyms bridge real name changes no similarity can (`Бумбокс`'s channel is `familyboombox`) -
+    # docs/agent-notes/youtube-search-matching.md
+    names = [artist] if multi_main else [artist, *split_synonyms(artist_synonyms)]
     artist_relevance = max(
         _artist_relevance_for(name, candidate_clean, channel_clean, split_multi_artist=not main_artists)
         for name in names
@@ -1071,7 +1057,7 @@ def score_result(
         artist_relevance = max(
             artist_relevance,
             _credited_artists_all_present(
-                [[name, *_parse_synonyms(syn)] for name, syn in main_artists], credit_haystack
+                [[name, *split_synonyms(syn)] for name, syn in main_artists], credit_haystack
             ),
         )
 
@@ -1153,7 +1139,7 @@ def score_result(
     if feat_artists:
         feat_haystack = f"{credit_haystack} {' '.join(tags or [])}".lower()
         quality += FEAT_ARTIST_BONUS * sum(
-            any(_artist_name_present(n, feat_haystack) for n in [name, *_parse_synonyms(syn)])
+            any(_artist_name_present(n, feat_haystack) for n in [name, *split_synonyms(syn)])
             for name, syn in feat_artists
         )
     quality += _popularity_bonus(view_count)

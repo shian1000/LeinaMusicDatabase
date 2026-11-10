@@ -138,19 +138,12 @@ def item_json(row) -> dict:
 
 
 def _row_by_uid(conn, collection: Collection, uid: str):
-    return conn.execute(f"SELECT * FROM {collection.table} WHERE uid = ?", (uid,)).fetchone()
+    return collection.revisions.row_by_uid(conn, uid)
 
 
 def changes_since(conn, collection: Collection, since: int) -> dict:
-    """GET /users/<name>/<collection>?since=N: every item, deleted ones
-    included, changed after revision N, and the counter to ask with next time."""
-    conn.execute("BEGIN")
-    try:
-        rows = conn.execute(f"SELECT * FROM {collection.table} WHERE revision > ? ORDER BY revision",
-                            (since,)).fetchall()
-        return {"revision": current_revision(conn, collection), collection.list_key: [item_json(r) for r in rows]}
-    finally:
-        conn.execute("COMMIT")
+    """GET /users/<name>/<collection>?since=N."""
+    return collection.revisions.changes_since(conn, since, collection.list_key, item_json)
 
 
 # --------------------

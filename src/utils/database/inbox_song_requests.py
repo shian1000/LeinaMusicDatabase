@@ -83,7 +83,7 @@ from utils.common.debug import mlog
 from utils.common.normalizer import name_key, normalize
 from utils.database.additional_videos import song_for_video
 from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, Song
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 from utils.database.inbox_requests import (
     DECIDED,
     OPEN,
@@ -259,8 +259,7 @@ def _known_by_other_name(artist: str | None, matcher):
     known = matcher.artist(artist) if artist else None
     if known is None or name_key(artist) == name_key(known.name):
         return None
-    other_names = (artist_match_synonyms(known) or "").split(",")
-    return known if name_key(artist) in {name_key(n) for n in other_names} else None
+    return known if name_key(artist) in {name_key(n) for n in artist_synonyms(known)} else None
 
 
 def _artists_at_start(artist: str | None, title: str, matcher) -> tuple | None:
@@ -358,7 +357,7 @@ def _known_exactly(name: str, matcher):
     known = matcher.artist(name)
     if known is None:
         return None
-    names = [known.name, getattr(known, "name_latin", None), *(artist_match_synonyms(known) or "").split(",")]
+    names = [known.name, getattr(known, "name_latin", None), *artist_synonyms(known)]
     return known if name_key(name) in {name_key(n) for n in names if n} else None
 
 

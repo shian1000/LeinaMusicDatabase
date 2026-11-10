@@ -1,7 +1,6 @@
 import questionary
 from utils.ui.prompts import ask_yes_no
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
-from utils.common.debug import slog
 from utils.database.database_sessions import submit_global_database_session
 from utils.ui.menu_utils import pick_from_db_objects, search_and_pick_db_object
 from utils.database.database_management import (
@@ -116,87 +115,49 @@ def edit_entry_menu(mode: str = None, db_object = None):
     # fields (name, origin, ...) are edited from Artist actions, and "artist"
     # credits the song to another artist
     editable = EDITABLE_ARTIST_FIELDS if mode == "Artist" else EDITABLE_SONG_FIELDS
-    fields = [(category, getattr(db_object, attribute)) for category, attribute in editable.items()]
-    artist_option = None
-    if mode == "Song":
-        artist_option = f"artist ({db_object.artist.name})"
     # menu label -> category edited by typing a new value
-    field_options = {f"{category} ({value})": category for category, value in fields}
-    displayed_list = list(field_options)
-    if artist_option:
-        displayed_list.insert(1, artist_option)
-    swap_option = "Swap title and artist names"
-    extras_option = None
+    field_options = {f"{category} ({getattr(db_object, attribute)})": category
+                     for category, attribute in editable.items()}
+    # menu label -> what choosing it does; the artist goes right after the title
+    artist_action, actions = {}, {}
     # Latin forms of names in another alphabet (utils/database/latin_names.py):
     # menu label -> the Song / Artist / Album it sets
-    latin_options = {}
+    latin_rows = {}
     if mode == "Song":
+        artist_action[f"artist ({db_object.artist.name})"] = lambda: change_songs_artist([db_object])
         extras = additional_artists(db_object)
         extras_label = ", ".join(f"{a.name} ({additional_artist_role(db_object, a)})" for a in extras) or "—"
-        extras_option = f"additional artists ({extras_label})"
-        displayed_list.append(extras_option)
-        latin_options[f"title in Latin letters ({latin_of(db_object) or '—'})"] = db_object
+        actions[f"additional artists ({extras_label})"] = lambda: edit_additional_artists_menu(db_object)
+        latin_rows[f"title in Latin letters ({latin_of(db_object) or '—'})"] = db_object
         album = db_object.album_entry
         # A "Singles" album copies the song's own form
         if album is not None and album.type != ALBUM_TYPE_SINGLE:
-            latin_options[f"album title in Latin letters ({latin_of(album) or '—'})"] = album
+            latin_rows[f"album title in Latin letters ({latin_of(album) or '—'})"] = album
     else:
-        latin_options[f"name in Latin letters ({latin_of(db_object) or '—'})"] = db_object
-    displayed_list.extend(latin_options)
-    genre_option = None
-    kind_option = None
-    project_option = None
-    cover_option = None
-    cover_title_option = None
+        latin_rows[f"name in Latin letters ({latin_of(db_object) or '—'})"] = db_object
+    for label, row in latin_rows.items():
+        actions[label] = lambda row=row: edit_latin_form(row)
     if mode == "Song":
-        genre_option = f"genre ({db_object.genre or '—'})"
-        displayed_list.append(genre_option)
-        kind_option = f"song or full album ({kind_label(db_object)})"
-        displayed_list.append(kind_option)
-        project_option = f"project ({song_project_name(db_object) or '—'})"
-        displayed_list.append(project_option)
-        cover_option = f"cover of ({covered_artist_name(db_object) or '—'})"
-        displayed_list.append(cover_option)
-        cover_title_option = f"original title of the cover ({db_object.covered_title or '—'})"
-        displayed_list.append(cover_title_option)
-        displayed_list.append(swap_option)
-    delete_option = "Delete from database"
-    displayed_list.append(delete_option)
-    back_option = "back"
-    displayed_list.append(back_option)
+        songs = [db_object]
+        actions.update({
+            f"genre ({db_object.genre or '—'})": lambda: set_genre_of_songs(songs),
+            f"song or full album ({kind_label(db_object)})": lambda: set_kind_of_songs(songs),
+            f"project ({song_project_name(db_object) or '—'})": lambda: set_project_of_songs(songs),
+            f"cover of ({covered_artist_name(db_object) or '—'})": lambda: set_covered_artist_of_songs(songs),
+            f"original title of the cover ({db_object.covered_title or '—'})":
+                lambda: set_covered_title_of_songs(songs),
+            "Swap title and artist names": lambda: swap_titles_and_artist_names(songs),
+        })
+    actions["Delete from database"] = lambda: _delete_entry(db_object, mode)
+    actions.update(artist_action)
 
-    choice = questionary.select("What category do you wish to edit?", choices=displayed_list).ask()
-    if choice == back_option:
-        return
-    if choice == swap_option:
-        swap_titles_and_artist_names([db_object])
-        return
-    if choice == artist_option:
-        change_songs_artist([db_object])
-        return
-    if choice == extras_option:
-        edit_additional_artists_menu(db_object)
-        return
-    if choice in latin_options:
-        edit_latin_form(latin_options[choice])
-        return
-    if choice == genre_option:
-        set_genre_of_songs([db_object])
-        return
-    if choice == kind_option:
-        set_kind_of_songs([db_object])
-        return
-    if choice == project_option:
-        set_project_of_songs([db_object])
-        return
-    if choice == cover_option:
-        set_covered_artist_of_songs([db_object])
-        return
-    if choice == cover_title_option:
-        set_covered_title_of_songs([db_object])
-        return
-    if choice == delete_option:
-        _delete_entry(db_object, mode)
+    fields = list(field_options)
+    back_option = "back"
+    choices = [*fields[:1], *artist_action, *fields[1:], *(label for label in actions if label not in artist_action),
+               back_option]
+    choice = questionary.select("What category do you wish to edit?", choices=choices).ask()
+    if choice in actions:
+        actions[choice]()
         return
     category = field_options.get(choice)
     if category is None:
@@ -209,11 +170,6 @@ def edit_entry_menu(mode: str = None, db_object = None):
     if category == artist_categories[0] and rename_artist(db_object, new_data.strip()):
         return
 
-    slog(db_object)
-    if isinstance(db_object, Song):
-        slog(db_object.artist.name)
-        slog(db_object.title)
-        slog(db_object.artist.id)
     edit_db_entry(db_object, category, new_data)
     submit_global_database_session()
     renamed = {song_categories[0]: db_object, artist_categories[0]: getattr(db_object, "artist", db_object)}.get(category)
@@ -262,10 +218,6 @@ def edit_songs_menu(songs_objects):
             loop_running = False
             return
         else:
-            slog(selected_song)
-            slog(selected_song.artist.name)
-            slog(selected_song.title)
-            slog(selected_song.artist.id)
             edit_entry_menu(db_object=selected_song)
 
 def _ask_text(question: str, required: bool = False, number: bool = False) -> str | None:

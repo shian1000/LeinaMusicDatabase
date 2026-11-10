@@ -183,67 +183,52 @@ def set_auto_accept_artist_similarity():
     """How similar a file's tag artist must be to the song's artist (the
     title matching exactly) for "Create playlist from folder" to match it
     without asking."""
-    current = load_auto_accept_artist_similarity()
-    print("Create playlist from folder: a file whose title matches a song but whose artist is spelt")
-    print('differently ("Liiquid tension experiment" = 0.98 like "Liquid Tension Experiment") is matched')
-    print("without asking from this similarity up; below it you're asked. 1 = always ask.")
-    print(f"Current: {current}\n")
-
-    typed = questionary.text(f"New value ({MIN_AUTO_ACCEPT_ARTIST_SIMILARITY}-1):").ask()
-    if not typed:
-        print("Cancelled.")
-        return
-    try:
-        value = float(typed.replace(",", "."))
-        save_auto_accept_artist_similarity(value)
-    except ValueError:
-        error(f"'{typed}' is not a number between {MIN_AUTO_ACCEPT_ARTIST_SIMILARITY} and 1.")
-        return
-    print(f"Auto-accept similar artist names from: {value}")
+    _ask_score(["Create playlist from folder: a file whose title matches a song but whose artist is spelt",
+                'differently ("Liiquid tension experiment" = 0.98 like "Liquid Tension Experiment") is matched',
+                "without asking from this similarity up; below it you're asked. 1 = always ask."],
+               load_auto_accept_artist_similarity(), (MIN_AUTO_ACCEPT_ARTIST_SIMILARITY, 1), "New value",
+               save_auto_accept_artist_similarity, "Auto-accept similar artist names from")
 
 
 def set_best_guess_min_score():
     """The lowest score of the closest songs "Create playlist from folder"
     offers for a file nothing else matched."""
-    lowest, highest = BEST_GUESS_MIN_SCORE_RANGE
-    print("Create playlist from folder: for a file nothing else found a song for, up to 3 of the")
-    print("closest songs are offered, with how well they fit (title, and the artist when the file has")
-    print("one). Only songs from this score up are offered - higher means fewer, surer guesses.")
-    print(f"Current: {load_best_guess_min_score()}\n")
-
-    typed = questionary.text(f"New minimum score ({lowest}-{highest}):").ask()
-    if not typed:
-        print("Cancelled.")
-        return
-    try:
-        value = float(typed.replace(",", "."))
-        save_best_guess_min_score(value)
-    except ValueError:
-        error(f"'{typed}' is not a number between {lowest} and {highest}.")
-        return
-    print(f"Closest songs offered from score: {value}")
+    _ask_score(["Create playlist from folder: for a file nothing else found a song for, up to 3 of the",
+                "closest songs are offered, with how well they fit (title, and the artist when the file has",
+                "one). Only songs from this score up are offered - higher means fewer, surer guesses."],
+               load_best_guess_min_score(), BEST_GUESS_MIN_SCORE_RANGE, "New minimum score",
+               save_best_guess_min_score, "Closest songs offered from score")
 
 
 def set_closest_auto_accept_score():
     """The score from which "Create playlist from folder" takes a suggested
     song without asking."""
-    lowest, highest = CLOSEST_AUTO_ACCEPT_SCORE_RANGE
-    print("Create playlist from folder: a suggested song (similar song, closest song, ...) whose score")
-    print("reaches this is taken without asking - when it's the only one that does - and listed after")
-    print("matching as auto-accepted. A file with no artist only for a long title one song has. 1 = always ask.")
-    print(f"Current: {load_closest_auto_accept_score()}\n")
+    _ask_score(["Create playlist from folder: a suggested song (similar song, closest song, ...) whose score",
+                "reaches this is taken without asking - when it's the only one that does - and listed after",
+                "matching as auto-accepted. A file with no artist only for a long title one song has. 1 = always ask."],
+               load_closest_auto_accept_score(), CLOSEST_AUTO_ACCEPT_SCORE_RANGE, "New auto-accept score",
+               save_closest_auto_accept_score, "Closest songs auto-accepted from score")
 
-    typed = questionary.text(f"New auto-accept score ({lowest}-{highest}):").ask()
+
+def _ask_score(explanation: list[str], current: float, value_range, asked: str, save, done: str) -> None:
+    """Explain a 0-1 setting, ask for a new value in `value_range` and `save`
+    it (which raises ValueError outside the range)."""
+    lowest, highest = value_range
+    for line in explanation:
+        print(line)
+    print(f"Current: {current}\n")
+
+    typed = questionary.text(f"{asked} ({lowest}-{highest}):").ask()
     if not typed:
         print("Cancelled.")
         return
     try:
         value = float(typed.replace(",", "."))
-        save_closest_auto_accept_score(value)
+        save(value)
     except ValueError:
         error(f"'{typed}' is not a number between {lowest} and {highest}.")
         return
-    print(f"Closest songs auto-accepted from score: {value}")
+    print(f"{done}: {value}")
 
 
 def reset_statistics_records():
@@ -588,32 +573,30 @@ def _change_machine_key(key) -> None:
 
 
 def _pick_vpn_interface() -> str | None:
-    choices = [questionary.Choice(title=f"{name} ({address})", value=name) for name, address in vpn_candidates()]
-    if not choices:
-        print("No network interface that could be a VPN's found (is the VPN connected?).")
-        return None
-    choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
-    picked = questionary.select("Which interface is the VPN's?", choices=choices).ask()
-    return None if picked == "__cancel__" else picked
+    return _pick_interface(vpn_candidates(), "Which interface is the VPN's?",
+                           "No network interface that could be a VPN's found (is the VPN connected?).")
 
 
 def _pick_local_address() -> str | None:
-    choices = [questionary.Choice(title=f"{address} ({name})", value=address) for name, address in address_candidates()]
-    if not choices:
-        print("No other IPv4 address on this PC.")
-        return None
-    choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
-    picked = questionary.select("Which address should the server also listen on?", choices=choices).ask()
-    return None if picked == "__cancel__" else picked
+    return _pick_interface(address_candidates(), "Which address should the server also listen on?",
+                           "No other IPv4 address on this PC.", pick_address=True)
 
 
 def _pick_lan_interface() -> str | None:
-    choices = [questionary.Choice(title=f"{name} ({address})", value=name) for name, address in lan_interfaces()]
+    return _pick_interface(lan_interfaces(), "Which interface is on the home network?",
+                           "No network interface with a private LAN address found.")
+
+
+def _pick_interface(candidates, question: str, none_found: str, pick_address: bool = False) -> str | None:
+    """One of these (interface name, address) pairs: its name, or its address
+    with `pick_address`; None when there's none or the user cancels."""
+    choices = [questionary.Choice(title=f"{address} ({name})", value=address) if pick_address
+               else questionary.Choice(title=f"{name} ({address})", value=name) for name, address in candidates]
     if not choices:
-        print("No network interface with a private LAN address found.")
+        print(none_found)
         return None
     choices.append(questionary.Choice(title="Cancel", value="__cancel__"))
-    picked = questionary.select("Which interface is on the home network?", choices=choices).ask()
+    picked = questionary.select(question, choices=choices).ask()
     return None if picked == "__cancel__" else picked
 
 

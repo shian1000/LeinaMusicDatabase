@@ -5,7 +5,7 @@ from utils.common.title_patterns import FEAT_WORD
 from datetime import date
 import questionary
 from utils.common.output import RESET, YELLOW, review_header
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_typed, ask_yes_no
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
 from utils.database.database_management import edit_db_entry
 from utils.common.debug import slog
@@ -17,7 +17,6 @@ from utils.discoveries.discoveries_manager import (
     load_year_discovery_modules,
     release_year_from_stored_link,
 )
-from utils.common.text_utils import copy_to_clipboard
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from utils.database.latin_names import artist_match_synonyms
 from config.constants import SINGLES_ALBUM, MANUAL_YEAR_SAMPLE_SONGS
@@ -93,29 +92,24 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
             submit_global_database_session()  # keep the years taken from the database
             return
 
+        # (artist, album or single's title, is it a single, its songs, what else the lookup takes)
+        lookups = [(artist_name, album_name, False, songs,
+                    {"album_songs": songs, "alt_script_query": cyrillic_search_variant(
+                        album_name, [artist_name, *(s.title for s in songs)])})
+                   for (artist_name, album_name), songs in groups.items()]
+        lookups += [(song.artist.name, song.title, True, [song],
+                     {"song": song, "alt_script_query": cyrillic_search_variant(
+                         song.title, [song.artist.name, song.album])})
+                    for song in singles]
         try:
-            for (artist_name, album_name), songs in groups.items():
+            for artist_name, name, single, songs, extra in lookups:
+                label = f"{artist_name} - {name}"
                 print()
-                label = f"{artist_name} - {album_name}"
-                print(f"Checking release year for {YELLOW}{label}{RESET}")
+                print(f"Checking release year for {'single ' if single else ''}{YELLOW}{label}{RESET}")
                 result = (release_year_from_stored_link(songs)
-                          or discover_release_year_result(
-                              artist_name, album_name, False, modules, artist_match_synonyms(songs[0].artist),
-                              alt_script_query=cyrillic_search_variant(album_name, [artist_name, *(s.title for s in songs)]),
-                              album_songs=songs,
-                          ))
+                          or discover_release_year_result(artist_name, name, single, modules,
+                                                          artist_match_synonyms(songs[0].artist), **extra))
                 _collect(label, result, songs, results, review_results)
-
-            for song in singles:
-                print()
-                label = f"{song.artist.name} - {song.title}"
-                print(f"Checking release year for single {YELLOW}{label}{RESET}")
-                result = (release_year_from_stored_link([song])
-                          or discover_release_year_result(
-                              song.artist.name, song.title, True, modules, artist_match_synonyms(song.artist), song=song,
-                              alt_script_query=cyrillic_search_variant(song.title, [song.artist.name, song.album]),
-                          ))
-                _collect(label, result, [song], results, review_results)
         except KeyboardInterrupt:
             # The lookups are slow (a browser per module): keep what was found
             print("\nStopped - the years found so far are saved.")
@@ -140,16 +134,8 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
             f"Would you like to fill them up manually?")
         if confirmation:
             for label, songs in no_year_entries:
-                print(label + _sample_titles(label, songs))
-                copy_to_clipboard(label)
-                year_input = input("New year (put nothing to cancel): ").strip()
-                year = _typed_year(year_input)
-                if year_input == "":
-                    print(f"Skipped {label}")
-                elif year is None:
-                    print(f"'{year_input}' is not a year between {_FIRST_YEAR} and {date.today().year + 1}, "
-                          f"skipped {label}")
-                else:
+                year = _ask_year(label, "New year (put nothing to cancel): ", label + _sample_titles(label, songs))
+                if year is not None:
                     for song in songs:
                         edit_db_entry(song, "year", str(year))
                         touched_songs.append(song)
@@ -242,6 +228,17 @@ def _collect(label, result, songs, results, review_results) -> None:
 _FIRST_YEAR = 1900
 
 
+def _ask_year(label: str, question: str, shown: str) -> int | None:
+    """A year typed for `label`; None when skipped or not a year."""
+    typed = ask_typed(label, question, shown)
+    if typed is None:
+        return None
+    year = _typed_year(typed)
+    if year is None:
+        print(f"'{typed}' is not a year between {_FIRST_YEAR} and {date.today().year + 1}, skipped {label}")
+    return year
+
+
 def _typed_year(text: str) -> int | None:
     """`text` as a year from _FIRST_YEAR to next year, else None ("0", "20245")."""
     if not text.isdigit():
@@ -275,16 +272,8 @@ def _review_unsure_years(review_results) -> list:
     touched = []
     for i, (label, year, songs, _) in enumerate(review_results):
         if i not in selected:
-            print(f"{label} (found {year})")
-            copy_to_clipboard(label)
-            year_input = input("Right year (put nothing to leave it empty): ").strip()
-            if year_input == "":
-                print(f"Skipped {label}")
-                continue
-            year = _typed_year(year_input)
+            year = _ask_year(label, "Right year (put nothing to leave it empty): ", f"{label} (found {year})")
             if year is None:
-                print(f"'{year_input}' is not a year between {_FIRST_YEAR} and {date.today().year + 1}, "
-                      f"skipped {label}")
                 continue
         for song in songs:
             edit_db_entry(song, "year", str(year))

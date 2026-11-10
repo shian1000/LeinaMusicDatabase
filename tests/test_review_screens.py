@@ -291,7 +291,7 @@ def test_unsure_years_start_ticked_and_ticked_ones_are_saved(monkeypatch, capsys
     songs = {name: SimpleNamespace(title=name) for name in ("a", "b", "c")}
     written = []
     monkeypatch.setattr(fmy, "edit_db_entry", lambda song, field, value: written.append((song.title, value)))
-    monkeypatch.setattr(fmy, "copy_to_clipboard", lambda text: None)
+    monkeypatch.setattr("utils.common.text_utils.copy_to_clipboard", lambda text: None)
     shown = []
     monkeypatch.setattr(questionary, "checkbox",
                         lambda message, choices: shown.append([c.checked for c in choices]) or _answer([0]))

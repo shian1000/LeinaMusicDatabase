@@ -14,9 +14,8 @@ in a separate file (DISCOVERY_STATS_YEAR_FILE) via the *_year_stats
 functions below, so a module's year success rate doesn't get mixed into its
 album success rate in the Statistics menu.
 """
-import json
 from upath import UPath
-from utils.common.debug import slog
+from utils.common.json_file import read_json, write_json
 from config.constants import DISCOVERY_STATS_FILE, DISCOVERY_STATS_YEAR_FILE
 
 _cache: dict | None = None
@@ -34,37 +33,19 @@ def _year_stats_path() -> UPath:
 def load_discovery_stats() -> dict:
     """Read the persisted per-module counters, falling back to an empty dict
     if the file is missing or unreadable."""
-    path = _stats_path()
-    if not path.exists():
-        return {}
-
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        slog(f"Failed to read discovery fetcher stats, starting fresh: {e}")
-        return {}
+    return read_json(_stats_path(), {}, "Discovery fetcher stats")
 
 
 def save_discovery_stats(stats: dict) -> None:
-    path = _stats_path()
-    path.write_text(json.dumps(stats, indent=2))
+    write_json(_stats_path(), stats)
 
 
 def load_year_discovery_stats() -> dict:
-    path = _year_stats_path()
-    if not path.exists():
-        return {}
-
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        slog(f"Failed to read year discovery fetcher stats, starting fresh: {e}")
-        return {}
+    return read_json(_year_stats_path(), {}, "Year discovery fetcher stats")
 
 
 def save_year_discovery_stats(stats: dict) -> None:
-    path = _year_stats_path()
-    path.write_text(json.dumps(stats, indent=2))
+    write_json(_year_stats_path(), stats)
 
 
 def _get_cache() -> dict:

@@ -12,13 +12,13 @@ Never switchable, for the data's consistency or because nothing could run
 without them: waiting for the app lock, the fresh-install database choice,
 migrations (with their own backup), the album backfill after its migration,
 applying song id changes, and resuming the sharing setup."""
-import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from config.constants import STARTUP_STATE_FILE
 from utils.common.debug import flog
+from utils.common.json_file import read_json, write_json
 from utils.common.env_file import read_env_value, save_env_value
 
 OFF = "off"
@@ -97,21 +97,13 @@ ALWAYS = ("waiting for the automatic request check to finish, the database choic
 
 # ==================== the first start of a day ====================
 
-def _load_state(path: Path) -> dict:
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def first_start_today(today: date | None = None, state_file: Path | str = STARTUP_STATE_FILE) -> bool:
     """Whether the once-a-day tasks haven't run today yet; marks them as run.
     With the daily backup on, its new backup decides instead (main.py has
     always done that) - this marker is for when it's off."""
     path = Path(state_file)
     today = (today or date.today()).isoformat()
-    state = _load_state(path)
+    state = read_json(path, {})
     if state.get("daily_tasks") == today:
         return False
     mark_daily_tasks_run(today, path)
@@ -120,13 +112,10 @@ def first_start_today(today: date | None = None, state_file: Path | str = STARTU
 
 def mark_daily_tasks_run(today: str | None = None, state_file: Path | str = STARTUP_STATE_FILE) -> None:
     path = Path(state_file)
-    state = _load_state(path)
+    state = read_json(path, {})
     state["daily_tasks"] = today or date.today().isoformat()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(state, indent=2))
-        tmp.replace(path)
+        write_json(path, state, atomic=True)
     except OSError as exc:
         # At worst the daily tasks run again at the next start - but say why, or
         # a folder that's never writable runs them at every start unexplained

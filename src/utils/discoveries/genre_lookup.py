@@ -18,7 +18,6 @@ Each level's votes are summed per genre; the most voted come first, at most
 GENRE_MAX_PER_SONG, only those with GENRE_MIN_VOTE_SHARE of the top's votes.
 """
 
-import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,10 +34,11 @@ from config.constants import (
     SINGLES_ALBUM,
 )
 from utils.common.debug import flog, slog
+from utils.common.json_file import read_json, write_json
 from utils.common.musicbrainz_client import lucene_quote, mb_get
 from utils.common.normalizer import name_key, normalize
 from utils.database.genres import canonical_genre, genre_key, is_known_genre
-from utils.database.latin_names import artist_match_synonyms, song_titles
+from utils.database.latin_names import artist_synonyms, song_titles
 
 
 
@@ -160,7 +160,7 @@ def _get_json(url: str, params: dict) -> dict | None:
 
 def _artist_names(song) -> set:
     names = {name_key(song.artist.name)}
-    names.update(name_key(s) for s in (artist_match_synonyms(song.artist) or "").split(",") if s.strip())
+    names.update(name_key(s) for s in artist_synonyms(song.artist))
     return names - {""}
 
 
@@ -210,13 +210,8 @@ def _misses_path() -> Path:
 
 
 def load_misses() -> set:
-    try:
-        return set(json.loads(_misses_path().read_text()))
-    except (OSError, ValueError, TypeError):
-        return set()
+    return {i for i in read_json(_misses_path(), []) if isinstance(i, int)}
 
 
 def save_misses(song_ids: set) -> None:
-    path = _misses_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(sorted(song_ids)))
+    write_json(_misses_path(), sorted(song_ids))

@@ -3,9 +3,8 @@
 4"), in one checkbox list. Nothing is ticked: the caller saves only the ones
 the owner picks."""
 
-import questionary
-
 from utils.common.output import review_header, say
+from utils.ui.prompts import tick_items
 from utils.ui.song_colors import song_tokens
 
 
@@ -18,10 +17,8 @@ def review_album_guesses(found: list) -> list:
                   "Google names the first release it knows a recording from, which may be a compilation.",
                   "Ticked: the album is saved.",
                   "Unticked: the song stays without an album.")
-    choices = [questionary.Choice(title=song_tokens(song.title, song.artist.name, f"album: {match.album}"), value=i)
-               for i, (song, match) in enumerate(found)]
-    picked = questionary.checkbox("Save which albums?", choices=choices).ask()
+    picked = tick_items("Save which albums?", found,
+                        lambda pair: song_tokens(pair[0].title, pair[0].artist.name, f"album: {pair[1].album}"))
     if not picked:
         say("None of these albums saved.")
-        return []
-    return [found[i] for i in picked]
+    return picked or []

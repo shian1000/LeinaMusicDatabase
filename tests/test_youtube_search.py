@@ -495,7 +495,7 @@ def test_search_video_ytdlp_ignores_seo_stuffed_tags(monkeypatch):
 
 
 # Real cases: the artists table's `synonyms` column (a plain comma-separated
-# string — see _parse_synonyms()) is now consulted for artist_relevance
+# string — see split_synonyms()) is now consulted for artist_relevance
 # alongside the DB artist name, taking the max across all of them. This is
 # the only fix that can bridge a genuine name change — no string-similarity
 # technique can turn "Бумбокс" into "familyboombox", "Hall & Oates" into

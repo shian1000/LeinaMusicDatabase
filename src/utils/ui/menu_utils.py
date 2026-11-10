@@ -9,7 +9,7 @@ import questionary
 import os
 from upath import UPath
 from utils.common.debug import slog
-import json
+from utils.common.json_file import read_json, write_json
 from utils.database.database_getter import extract_db_object_info
 from utils.database.datatables import Artist, Song, artist_categories, song_categories, search_only_categories
 from utils.database.database_getter import get_artists_from_db_session, get_songs_from_db_session
@@ -35,10 +35,7 @@ def load_recent_dirs() -> list[str]:
     Returns:
         list[str]: List of recent directory paths, empty if file doesn't exist
     """
-    recent_file: UPath = UPath(RECENT_DIRS_FILE)
-    if not recent_file.exists():
-        return []
-    return json.loads(recent_file.read_text())
+    return read_json(UPath(RECENT_DIRS_FILE), [])
 
 
 def save_recent_dirs(new_dir: str) -> None:
@@ -56,8 +53,7 @@ def save_recent_dirs(new_dir: str) -> None:
         dirs.remove(new_dir)
     dirs.insert(0, new_dir)
     dirs = dirs[:MAX_RECENT_DIRS]
-    recent_file: UPath = UPath(RECENT_DIRS_FILE)
-    recent_file.write_text(json.dumps(dirs, indent=2))
+    write_json(UPath(RECENT_DIRS_FILE), dirs)
 
 
 def clear_screen() -> None:

@@ -16,7 +16,6 @@ full album - a track "Migration" must not be taken for the album "Migration".
 One that does look like it tries full albums first, then songs (a long file
 may be a mix the owner keeps as a song).
 """
-import json
 import re
 
 from config.constants import (
@@ -31,6 +30,7 @@ from utils.common.normalizer import normalize
 from utils.common.project_names import is_project_of
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
+from utils.common.json_file import read_json, write_json
 
 _IGNORE_PATH = FULL_ALBUM_IGNORE_FILE
 
@@ -118,13 +118,8 @@ def full_album_filter():
 
 def load_full_album_ignore_list() -> set[int]:
     """Song ids the owner said aren't full albums."""
-    try:
-        return set(json.loads(_IGNORE_PATH.read_text(encoding="utf-8")))
-    except (FileNotFoundError, ValueError):
-        return set()
+    return {i for i in read_json(_IGNORE_PATH, []) if isinstance(i, int)}
 
 
 def add_to_full_album_ignore_list(song_ids: list[int]) -> None:
-    ignored = load_full_album_ignore_list() | set(song_ids)
-    _IGNORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _IGNORE_PATH.write_text(json.dumps(sorted(ignored)), encoding="utf-8")
+    write_json(_IGNORE_PATH, sorted(load_full_album_ignore_list() | set(song_ids)))

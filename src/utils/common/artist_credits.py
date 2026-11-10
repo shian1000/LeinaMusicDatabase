@@ -45,6 +45,11 @@ JOINING_WORD_SEPARATOR = re.compile(
 _LINEUP_BRACKET = re.compile(r"^(?P<group>[^()]+?)\s*\((?P<lineup>[^()]+)\)\s*$")
 
 
+def split_synonyms(synonyms: str | None) -> list[str]:
+    """The names of an artists.synonyms text, a plain comma-separated list."""
+    return [s.strip() for s in (synonyms or "").split(",") if s.strip()]
+
+
 @dataclass
 class SplitProposal:
     original: str

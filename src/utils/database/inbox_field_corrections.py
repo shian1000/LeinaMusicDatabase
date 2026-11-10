@@ -91,6 +91,7 @@ from utils.database.inbox_requests import (
     mark_bad_videos,
     now_iso,
     parse_time,
+    reported_title_differs,
     resolve_song_id,
     save_decision,
     unmark_bad_video,
@@ -318,9 +319,7 @@ class FieldCorrectionCase:
     @property
     def title_differs(self) -> bool:
         """The phone showed another title for the song (renamed, or merged)."""
-        if self.song is None:
-            return False
-        return any(normalize(r.title or "") != normalize(self.song.title or "") for r in self.reports)
+        return reported_title_differs(self.song, self.reports)
 
     @property
     def not_on_song(self) -> bool:

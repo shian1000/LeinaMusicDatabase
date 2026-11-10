@@ -188,8 +188,8 @@ _SRC = str(Path(__file__).resolve().parents[2])
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from musicdatabase_core import (account_auth, folder_sync, global_mood_log, inbox_files, listen_sync,  # noqa: E402
-                                mood_sync, playlist_sync, saved_sync, user_covers)
+from musicdatabase_core import (account_auth, global_mood_log, inbox_files, listen_sync,  # noqa: E402
+                                mood_sync, playlist_sync, sync_collections, user_covers)
 from musicdatabase_core.certificates import (TLS_CERT_FILE, TLS_KEY_FILE, certificate_code,  # noqa: E402
                                              ensure_tls_certificate, tls_certificate_code)
 from musicdatabase_core.inbox_files import (DEFAULT_INBOX_LIMIT_BYTES, DEFAULT_MAX_REQUEST_BYTES,  # noqa: E402
@@ -220,14 +220,9 @@ INBOX_ANSWERS = {
 }
 # A phone that stops sending mid-upload mustn't hold a server thread forever
 UPLOAD_SOCKET_TIMEOUT = 60
-# /users/<name>/playlists[/<uid>]
-PLAYLISTS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/playlists(?:/(?P<uid>[^/]+))?$")
-# /users/<name>/moods[/<uid>]
-MOODS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/moods(?:/(?P<uid>[^/]+))?$")
-# /users/<name>/folders[/<uid>]
-FOLDERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/folders(?:/(?P<uid>[^/]+))?$")
-# /users/<name>/saved-songs[/<uid>], /users/<name>/later-links[/<uid>]
-SAVED_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/(?P<collection>saved-songs|later-links)(?:/(?P<uid>[^/]+))?$")
+# /users/<name>/<collection>[/<uid>]: playlists, moods, folders, saved-songs, later-links
+COLLECTION_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/(?P<collection>"
+                                + "|".join(map(re.escape, sync_collections.BY_PATH)) + r")(?:/(?P<uid>[^/]+))?$")
 # /users/<name>/listens
 LISTENS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/listens$")
 # /users/<name>: who the token is and what they may do
@@ -248,10 +243,7 @@ ITEM_METHODS = ("GET", "PUT", "DELETE")
 # method called with (method, match)). A path of these with another method is
 # 405 - checked here once, never in a handler, which once read a POST as a DELETE
 USER_ROUTES = (
-    (PLAYLISTS_PATH_RE, ITEM_METHODS, "_playlists"),
-    (MOODS_PATH_RE, ITEM_METHODS, "_moods"),
-    (FOLDERS_PATH_RE, ITEM_METHODS, "_folders"),
-    (SAVED_PATH_RE, ITEM_METHODS, "_saved"),
+    (COLLECTION_PATH_RE, ITEM_METHODS, "_collection"),
     (LISTENS_PATH_RE, ("GET", "POST"), "_listens"),
     (COVERS_PATH_RE, ("GET", "PUT"), "_cover_blob"),
     (GLOBAL_MOOD_COVERS_PATH_RE, ("GET", "PUT"), "_global_mood_covers"),
@@ -337,6 +329,8 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
     # clean-up never interleave, so a clean-up can't remove a blob between
     # the check and the commit
     covers_lock = threading.Lock()
+    # --max-playlist-bytes covers playlists and moods; the rest keep their own limit
+    body_limits = {"playlists": max_playlist_bytes, "moods": max_playlist_bytes}
     limiter = limiter or LoginLimiter()
     upload_limiter = upload_limiter or UploadLimiter()
     inbox = inbox_files.Inbox(inbox_dir, inbox_limit_bytes) if inbox_dir else None
@@ -701,254 +695,71 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                 self._reply(HTTPStatus.BAD_REQUEST, "not JSON")
                 return None
 
-        def _playlists(self, method: str, match: re.Match):
+        # ---- the collections synced item by item (sync_collections) ----
+
+        def _collection(self, method: str, match: re.Match):
             url = urlsplit(self.path)
             username, uid = match.group("user"), match.group("uid")
+            spec = sync_collections.BY_PATH[match.group("collection")]
             if (method == "GET") != (uid is None):
                 self._reply(HTTPStatus.NOT_FOUND)
                 return
             # The token before the body: a stranger's upload is never read
-            if not self._authorize(username, "another user's playlists"):
+            if not self._authorize(username, f"another user's {spec.label}"):
                 return
             body = None
             if method == "PUT":
-                body = self._read_json_body(max_playlist_bytes)
+                body = self._read_json_body(body_limits.get(spec.path, spec.max_body))
                 if body is None:
                     return
-            if uid is not None and not playlist_sync.UID_RE.match(uid):
-                self._reply(HTTPStatus.BAD_REQUEST, "not a playlist uid")
+            if uid is not None and not spec.uid_re.match(uid):
+                self._reply(HTTPStatus.BAD_REQUEST, f"not a uid of {spec.label}")
                 return
             query = parse_qs(url.query)
             try:
                 if method == "GET":
                     since = self._query_int(query, "since", default=0)
                 elif method == "PUT":
-                    playlist = playlist_sync.parse_playlist(body)
+                    parsed = spec.parse(body)
                     base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
                     if body.get("uid", uid) != uid:
-                        raise playlist_sync.BadPlaylistError("uid: differs from the one in the path")
+                        raise spec.bad_error("uid: differs from the one in the path")
                 else:
                     base_revision = self._query_int(query, "base_revision")
                     deleted_at = self._query_int(query, "deleted_at")
-            except playlist_sync.BadPlaylistError as exc:
+            except spec.bad_error as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
 
             folder = os.path.join(users_dir, username)
-            if method == "PUT":
-                # Before the transaction: it reads another file
-                checked_to = playlist_sync.resolve_song_ids(playlist["tracks"], os.path.join(share_dir, "music.db"))
-            conn = self._open_user_db(playlist_sync.connect, username, f"Playlists of {username}")
+            # Before the transaction: it reads another file
+            checked_to = spec.resolve(parsed, os.path.join(share_dir, "music.db")) \
+                if method == "PUT" and spec.resolve else None
+            log_name = f"{spec.label} of {username}"
+            conn = self._open_user_db(spec.connect, username, log_name)
             if conn is None:
                 return
+            archived = None
             try:
                 if method == "GET":
-                    self._reply_json(HTTPStatus.OK, playlist_sync.changes_since(conn, since))
+                    self._reply_json(HTTPStatus.OK, spec.changes_since(conn, since))
                     return
                 with covers_lock:
                     if method == "PUT":
-                        self._require_cover(folder, playlist["cover"])
-                        applied, stored = playlist_sync.store_playlist(conn, username, uid, playlist, base_revision,
-                                                                       song_ids_checked_to=checked_to)
-                        archived = None
+                        if spec.uses_covers:
+                            self._require_cover(folder, parsed["cover"])
+                        applied, stored = spec.store(conn, folder, username, uid, parsed, base_revision, checked_to)
                     else:
-                        applied, stored, archived = playlist_sync.delete_playlist(conn, folder, uid, base_revision,
-                                                                                  deleted_at)
-                    self._clean_up_covers(conn, folder, username)
+                        applied, stored, *rest = spec.delete(conn, folder, uid, base_revision, deleted_at)
+                        archived = rest[0] if rest else None
+                    if spec.uses_covers:
+                        self._clean_up_covers(conn, folder, username)
             except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Playlists of {username}: {method} {uid} failed: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                return
-            finally:
-                conn.close()
-            if applied and (method == "PUT" or archived):
-                what = "deleted (archived in " + str(archived) + ")" if archived else \
-                    f"stored ({len(stored.get('tracks', []))} tracks)"
-                print(f"Playlist {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
-            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
-
-        # ---- moods (a user's own) ----
-
-        def _moods(self, method: str, match: re.Match):
-            url = urlsplit(self.path)
-            username, uid = match.group("user"), match.group("uid")
-            if (method == "GET") != (uid is None):
-                self._reply(HTTPStatus.NOT_FOUND)
-                return
-            # The token before the body: a stranger's upload is never read
-            if not self._authorize(username, "another user's moods"):
-                return
-            body = None
-            if method == "PUT":
-                body = self._read_json_body(max_playlist_bytes)
-                if body is None:
-                    return
-            if uid is not None and not playlist_sync.UID_RE.match(uid):
-                self._reply(HTTPStatus.BAD_REQUEST, "not a mood uid")
-                return
-            query = parse_qs(url.query)
-            try:
-                if method == "GET":
-                    since = self._query_int(query, "since", default=0)
-                elif method == "PUT":
-                    mood = mood_sync.parse_mood(body)
-                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
-                    if body.get("uid", uid) != uid:
-                        raise mood_sync.BadMoodError("uid: differs from the one in the path")
-                else:
-                    base_revision = self._query_int(query, "base_revision")
-                    deleted_at = self._query_int(query, "deleted_at")
-            except mood_sync.BadMoodError as exc:
+            except spec.bad_error as exc:
                 self._reply(HTTPStatus.BAD_REQUEST, str(exc))
                 return
-
-            folder = os.path.join(users_dir, username)
-            if method == "PUT":
-                mood["song_ids"], checked_to = mood_sync.resolve_song_ids(mood["song_ids"],
-                                                                          os.path.join(share_dir, "music.db"))
-            conn = self._open_user_db(mood_sync.connect, username, f"Moods of {username}")
-            if conn is None:
-                return
-            try:
-                if method == "GET":
-                    self._reply_json(HTTPStatus.OK, mood_sync.changes_since(conn, since))
-                    return
-                archived = None
-                with covers_lock:
-                    if method == "PUT":
-                        self._require_cover(folder, mood["cover"])
-                        applied, stored = mood_sync.store_mood(conn, folder, uid, mood, base_revision,
-                                                               song_ids_checked_to=checked_to)
-                    else:
-                        applied, stored, archived = mood_sync.delete_mood(conn, folder, uid, base_revision,
-                                                                          deleted_at)
-                    self._clean_up_covers(conn, folder, username)
-            except user_covers.CoverMissingError as exc:
-                self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
-                return
-            except mood_sync.BadMoodError as exc:
-                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Moods of {username}: {method} {uid} failed: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                return
-            finally:
-                conn.close()
-            if applied and (method == "PUT" or archived):
-                what = "deleted (archived in " + str(archived) + ")" if archived else \
-                    f"stored ({len(stored.get('song_ids', []))} songs)"
-                print(f"Mood {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
-            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
-
-        # ---- folders (the phone's Biblioteka) ----
-
-        def _folders(self, method: str, match: re.Match):
-            url = urlsplit(self.path)
-            username, uid = match.group("user"), match.group("uid")
-            if (method == "GET") != (uid is None):
-                self._reply(HTTPStatus.NOT_FOUND)
-                return
-            # The token before the body: a stranger's upload is never read
-            if not self._authorize(username, "another user's folders"):
-                return
-            body = None
-            if method == "PUT":
-                body = self._read_json_body(FOLDER_MAX_BODY_BYTES)
-                if body is None:
-                    return
-            if uid is not None and not folder_sync.UID_RE.match(uid):
-                self._reply(HTTPStatus.BAD_REQUEST, "not a folder uid")
-                return
-            query = parse_qs(url.query)
-            try:
-                if method == "GET":
-                    since = self._query_int(query, "since", default=0)
-                elif method == "PUT":
-                    folder = folder_sync.parse_folder(body)
-                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
-                    if body.get("uid", uid) != uid:
-                        raise folder_sync.BadFolderError("uid: differs from the one in the path")
-                else:
-                    base_revision = self._query_int(query, "base_revision")
-                    deleted_at = self._query_int(query, "deleted_at")
-            except folder_sync.BadFolderError as exc:
-                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-
-            conn = self._open_user_db(folder_sync.connect, username, f"Folders of {username}")
-            if conn is None:
-                return
-            try:
-                if method == "GET":
-                    self._reply_json(HTTPStatus.OK, folder_sync.changes_since(conn, since))
-                    return
-                if method == "PUT":
-                    applied, stored = folder_sync.store_folder(conn, uid, folder, base_revision)
-                else:
-                    applied, stored = folder_sync.delete_folder(conn, uid, base_revision, deleted_at)
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Folders of {username}: {method} {uid} failed: {exc}", flush=True)
-                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
-                return
-            finally:
-                conn.close()
-            if applied:
-                what = "deleted" if stored["deleted"] else f"stored ({len(stored['items'])} items)"
-                print(f"Folder {stored['uid']} of {username} {what}, revision {stored['revision']}", flush=True)
-            self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
-
-        # ---- saved songs and links (liked / "Na później") ----
-
-        def _saved(self, method: str, match: re.Match):
-            url = urlsplit(self.path)
-            username, uid = match.group("user"), match.group("uid")
-            collection = saved_sync.COLLECTIONS[match.group("collection")]
-            if (method == "GET") != (uid is None):
-                self._reply(HTTPStatus.NOT_FOUND)
-                return
-            # The token before the body: a stranger's upload is never read
-            if not self._authorize(username, f"another user's {collection.path}"):
-                return
-            body = None
-            if method == "PUT":
-                body = self._read_json_body(SAVED_MAX_BODY_BYTES)
-                if body is None:
-                    return
-            if uid is not None and not saved_sync.UID_RE.match(uid):
-                self._reply(HTTPStatus.BAD_REQUEST, "not an item uid")
-                return
-            query = parse_qs(url.query)
-            try:
-                if method == "GET":
-                    since = self._query_int(query, "since", default=0)
-                elif method == "PUT":
-                    item = saved_sync.parse_item(collection, body)
-                    base_revision = playlist_sync.parse_base_revision(body.get("base_revision"))
-                    if body.get("uid", uid) != uid:
-                        raise saved_sync.BadItemError("uid: differs from the one in the path")
-                else:
-                    base_revision = self._query_int(query, "base_revision")
-                    deleted_at = self._query_int(query, "deleted_at")
-            except saved_sync.BadItemError as exc:
-                self._reply(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-
-            log_name = f"{collection.path} of {username}"
-            conn = self._open_user_db(saved_sync.connect, username, log_name)
-            if conn is None:
-                return
-            try:
-                if method == "GET":
-                    self._reply_json(HTTPStatus.OK, saved_sync.changes_since(conn, collection, since))
-                    return
-                if method == "PUT":
-                    applied, stored = saved_sync.store_item(conn, collection, uid, item, base_revision)
-                else:
-                    applied, stored = saved_sync.delete_item(conn, collection, uid, base_revision, deleted_at)
             except (OSError, sqlite3.Error) as exc:
                 print(f"{log_name}: {method} {uid} failed: {exc}", flush=True)
                 self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
@@ -956,8 +767,12 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             finally:
                 conn.close()
             if applied:
-                print(f"{collection.label} {stored['uid']} of {username} "
-                      f"{'deleted' if stored['deleted'] else 'stored'}, revision {stored['revision']}", flush=True)
+                if stored.get("deleted"):
+                    what = f"deleted (archived in {archived})" if archived else "deleted"
+                else:
+                    key, noun = spec.counted or (None, None)
+                    what = f"stored ({len(stored.get(key, []))} {noun})" if key else "stored"
+                print(f"{log_name}: {stored['uid']} {what}, revision {stored['revision']}", flush=True)
             self._reply_json(HTTPStatus.OK if applied else HTTPStatus.CONFLICT, stored)
 
         # ---- listens (plays, for the phone's listening stats) ----

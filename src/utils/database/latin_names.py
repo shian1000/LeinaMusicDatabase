@@ -22,6 +22,7 @@ from utils.common.normalizer import normalize
 from utils.common.romanize import suggest_latin
 from utils.common.script_utils import has_non_latin
 from utils.database.datatables import Album, Artist, Song
+from utils.common.artist_credits import split_synonyms
 
 # model -> (name column, Latin form column)
 LATIN_COLUMNS = {
@@ -68,7 +69,7 @@ def with_latin_synonym(synonyms: str | None, name_latin: str | None) -> str | No
     name_latin = clean_latin(name_latin)
     if not name_latin:
         return synonyms
-    existing = [s.strip() for s in (synonyms or "").split(",") if s.strip()]
+    existing = split_synonyms(synonyms)
     if normalize(name_latin) in {normalize(s) for s in existing}:
         return synonyms
     return ", ".join([name_latin, *existing])
@@ -78,6 +79,11 @@ def artist_match_synonyms(artist) -> str | None:
     """The artist's synonyms plus its Latin form - what matching (YouTube,
     fetchers, imports) should treat as its other names."""
     return with_latin_synonym(getattr(artist, "synonyms", None), getattr(artist, "name_latin", None))
+
+
+def artist_synonyms(artist) -> list[str]:
+    """artist_match_synonyms() as a list of names."""
+    return split_synonyms(artist_match_synonyms(artist))
 
 
 def song_titles(song) -> list[str]:

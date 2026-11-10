@@ -16,7 +16,6 @@ artist stays, the dropped one's isn't carried over. Groups the owner left
 unticked there can be remembered (data/song_duplicate_ignore.json) and aren't
 offered again until another song joins them."""
 
-import json
 import re
 from collections import defaultdict
 from utils.common.artist_credits import (
@@ -49,6 +48,7 @@ from utils.database.latin_names import keep_latin_on_merge
 from utils.common.artist_credits import propose_artist_split
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists, song_all_artists
 from utils.database.song_references import record_song_merge
+from utils.common.json_file import read_json, write_json
 
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
@@ -246,17 +246,13 @@ def merge_candidates(session, song: Song, limit: int = MERGE_CANDIDATES_MAX) -> 
 
 def load_not_duplicates() -> list[frozenset[int]]:
     """The groups of song ids the owner said aren't one song."""
-    try:
-        return [frozenset(ids) for ids in json.loads(_IGNORE_PATH.read_text(encoding="utf-8"))]
-    except (FileNotFoundError, ValueError, TypeError):
-        return []
+    return [frozenset(ids) for ids in read_json(_IGNORE_PATH, []) if isinstance(ids, list)]
 
 
 def remember_not_duplicates(groups: list) -> None:
     """Remember these groups (lists of Song) as different songs."""
     known = set(load_not_duplicates()) | {frozenset(s.id for s in g) for g in groups}
-    _IGNORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _IGNORE_PATH.write_text(json.dumps(sorted(sorted(ids) for ids in known)), encoding="utf-8")
+    write_json(_IGNORE_PATH, sorted(sorted(ids) for ids in known))
 
 
 def is_remembered_not_duplicate(group: list, remembered: list) -> bool:

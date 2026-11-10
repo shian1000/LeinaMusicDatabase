@@ -4,6 +4,7 @@ fetcher's flag, discover_album() preferring anything surer, and the review at
 the end (utils/ui/album_guess_review.py). In-memory SQLite with the album
 listener on; modules, prompts and the browser mocked."""
 
+import questionary
 import importlib
 import sys
 from pathlib import Path
@@ -128,7 +129,7 @@ def run_fill(session, monkeypatch):
             return SimpleNamespace(ask=lambda: picked)
 
         monkeypatch.setattr(fill_albums, "ask_yes_no", ask_yes_no)
-        monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+        monkeypatch.setattr(questionary, "checkbox", checkbox)
         fill_albums.fill_missing_albums()
         return SimpleNamespace(questions=questions, listed=listed)
     return run

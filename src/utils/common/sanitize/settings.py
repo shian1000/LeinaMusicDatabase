@@ -3,12 +3,11 @@ for every source at once - in one JSON file (SANITIZE_CONFIG_FILE). Only
 what differs from a step's default is stored, so a step whose default
 changes later follows it unless the owner set it. Read once per process:
 the app reads it at the first cleanup, the request timer at each run."""
-import json
 
 from upath import UPath
 
 from config.constants import SANITIZE_CONFIG_FILE
-from utils.common.debug import flog
+from utils.common.json_file import read_json, write_json
 
 CONFIG_PATH = SANITIZE_CONFIG_FILE
 
@@ -25,15 +24,7 @@ def load_overrides() -> dict[str, bool]:
 
 
 def _read() -> dict:
-    path = UPath(CONFIG_PATH)
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        flog(f"Name cleanup settings unreadable, using the defaults: {e}")
-        return {}
-    steps = data.get("steps") if isinstance(data, dict) else None
+    steps = read_json(UPath(CONFIG_PATH), {}, "Name cleanup settings").get("steps")
     if not isinstance(steps, dict):
         return {}
     found = {}
@@ -50,7 +41,7 @@ def save_overrides(overrides: dict[str, bool]) -> None:
     """Store `overrides` and use them from now on."""
     global _cache
     steps = {name: on for name, on in overrides.items() if isinstance(on, bool)}
-    UPath(CONFIG_PATH).write_text(json.dumps({"steps": steps}, indent=2, ensure_ascii=False))
+    write_json(UPath(CONFIG_PATH), {"steps": steps})
     _cache = steps
 
 

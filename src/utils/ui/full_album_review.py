@@ -3,8 +3,7 @@ really be whole albums (utils/database/full_album_candidates.py), then one
 question about taking "(Full Album)" out of the marked titles, then one about
 remembering the unticked ones."""
 
-import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 
 from config.constants import FULL_ALBUM_MIN_DURATION_S, SONG_KIND_FULL_ALBUM
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
@@ -39,17 +38,11 @@ def review_full_albums() -> int:
     review_header(f"REVIEW: {len(candidates)} song(s) may be whole albums",
                   f"Pre-selected: the title says so. Recordings over {FULL_ALBUM_MIN_DURATION_S // 60} min "
                   "may also be mixes or live sets - tick only real albums.")
-    choices = [
-        questionary.Choice(title=_describe(c), value=i, checked=c.title_says_so)
-        for i, c in enumerate(candidates)
-    ]
-    selected = questionary.checkbox(
-        "Select the full albums (space toggles, enter confirms):", choices=choices
-    ).ask()
-    if selected is None:
+    marked = tick_items("Select the full albums (space toggles, enter confirms):", candidates, _describe,
+                        checked=lambda c: c.title_says_so)
+    if marked is None:
         show("Aborted, nothing marked.")
         return 0
-    marked = [candidates[i] for i in selected]
 
     renames = [c for c in marked if c.cleaned_title != c.song.title]
     if renames:
@@ -66,7 +59,7 @@ def review_full_albums() -> int:
         show(f'  [cyan]{escape(song_artist_label(song))}[/cyan] - "{escape(song.title)}" had no album - '
               f'filed under "{escape(song.album)}".')
 
-    skipped = [c.song.id for i, c in enumerate(candidates) if i not in set(selected)]
+    skipped = [c.song.id for c in candidates if c not in marked]
     if skipped and ask_yes_no(f"Remember the {len(skipped)} unselected song(s) as not albums, so they aren't proposed again?"):
         add_to_full_album_ignore_list(skipped)
         show(f"Remembered {len(skipped)} song(s).")

@@ -71,19 +71,12 @@ def folder_json(row) -> dict:
             "items": json.loads(row["items"] or "[]")}
 
 
-def _row_by_uid(conn, uid: str):
-    return conn.execute("SELECT * FROM folders WHERE uid = ?", (uid,)).fetchone()
+_row_by_uid = _REVISIONS.row_by_uid
 
 
 def changes_since(conn, since: int) -> dict:
-    """GET /users/<name>/folders?since=N: every folder, deleted ones
-    included, changed after revision N, and the counter to ask with next time."""
-    conn.execute("BEGIN")
-    try:
-        rows = conn.execute("SELECT * FROM folders WHERE revision > ? ORDER BY revision", (since,)).fetchall()
-        return {"revision": current_revision(conn), "folders": [folder_json(r) for r in rows]}
-    finally:
-        conn.execute("COMMIT")
+    """GET /users/<name>/folders?since=N."""
+    return _REVISIONS.changes_since(conn, since, "folders", folder_json)
 
 
 def live_folders(conn) -> list[dict]:

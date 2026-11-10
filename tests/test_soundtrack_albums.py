@@ -5,6 +5,7 @@ soundtrack word and the bringing of stored spellings to that form
 reviews (utils/ui/soundtrack_review.py). In-memory SQLite with the album
 listener on; prompts mocked."""
 
+import questionary
 import importlib
 import sys
 from pathlib import Path
@@ -68,7 +69,7 @@ def _answer(monkeypatch, pick):
         shown.extend(choices)
         return SimpleNamespace(ask=lambda: pick(choices))
 
-    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
     return shown
 
 

@@ -22,7 +22,7 @@ from utils.database.song_duplicates import (
     missing_feat_artists,
     remember_not_duplicates,
 )
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 
 
 def _label(group: list) -> str:
@@ -47,14 +47,13 @@ def _ask_feat_credits(groups: list) -> dict | None:
     if not offers:
         return {}
     print("\nThe songs folded away credit featured artists the kept ones don't:")
-    choices = [questionary.Choice(title=f"{song_artist_label(kept)} - {clean_title(kept.title)}:  + {name} (feat.)",
-                                  value=n, checked=True) for n, (kept, name) in enumerate(offers)]
-    picked = questionary.checkbox("Credit which on the kept song?", choices=choices).ask()
+    picked = tick_items("Credit which on the kept song?", offers,
+                        lambda offer: f"{song_artist_label(offer[0])} - {clean_title(offer[0].title)}:  + {offer[1]} (feat.)",
+                        checked=True)
     if picked is None:
         return None
     credits = {}
-    for n in picked:
-        kept, name = offers[n]
+    for kept, name in picked:
         credits.setdefault(id(kept), []).append(name)
     return credits
 

@@ -6,7 +6,7 @@ suggestion and need typing. Nothing is stored that the owner didn't tick
 or type."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.latin_names import (
@@ -47,8 +47,7 @@ def _accept_suggestions(candidates: list[LatinCandidate]) -> set:
     if not offered:
         return set()
     review_header(f"{len(offered)} name(s) have a suggested Latin form. Tick the ones to save", "(space toggles, a toggles all, i inverts, enter confirms). The rest can be typed next.")
-    choices = [questionary.Choice(title=_describe(candidates[i]), value=i) for i in offered]
-    selected = questionary.checkbox("Save these Latin forms:", choices=choices).ask()
+    selected = tick_items("Save these Latin forms:", offered, lambda i: _describe(candidates[i]))
     if not selected:
         return set()
     for i in selected:

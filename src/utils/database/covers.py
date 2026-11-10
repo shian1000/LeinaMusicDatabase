@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from utils.common.cover_names import read_cover
 from utils.common.normalizer import normalize
 from utils.database.datatables import Artist, Song
+from utils.common.artist_credits import split_synonyms
 
 
 @dataclass
@@ -35,10 +36,8 @@ def _artists_by_key(session) -> dict:
     artists = session.query(Artist).order_by(Artist.id).all()
     keys = {}
     for artist in artists:
-        spellings = [artist.name_latin, *(artist.synonyms or "").split(",")]
-        for spelling in spellings:
-            if spelling and spelling.strip():
-                keys.setdefault(normalize(spelling), artist)
+        for spelling in filter(None, [artist.name_latin, *split_synonyms(artist.synonyms)]):
+            keys.setdefault(normalize(spelling), artist)
     keys.update({normalize(artist.name): artist for artist in artists if artist.name})
     keys.pop("", None)
     return keys

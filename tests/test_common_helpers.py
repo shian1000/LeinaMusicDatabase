@@ -127,11 +127,11 @@ def test_matching_key_of_nothing_is_empty():
     assert su.matching_key(None) == su.matching_key("") == ""
 
 
-def test_hangul_is_romanized_the_same_in_both_copies():
-    # COM-47: _hangul() is copied in romanize.py - the two must not drift apart
+def test_hangul_is_romanized_the_same_for_matching_and_showing():
+    # COM-47: romanize.py once had its own copy of the syllable table
     from utils.common import romanize
-    for ch in "가나다한글방탄소년단":
-        assert su._hangul(ch) == romanize._hangul(ch)
+    assert romanize.hangul_syllable is su.hangul_syllable
+    assert "".join(su.hangul_syllable(ch) for ch in "한글") == "hangeul"
 
 
 @pytest.mark.parametrize("query, context, expected", [

@@ -14,7 +14,7 @@ here: suggest_latin() gives None and the owner types the form.
 import re
 import unicodedata
 
-from utils.common.script_utils import scripts_in
+from utils.common.script_utils import hangul_syllable, scripts_in
 from utils.youtube.transliteration import belarusian_to_latin
 
 # ---- Cyrillic ---------------------------------------------------------------
@@ -186,21 +186,7 @@ _GEORGIAN = {
 
 # ---- Korean (Revised Romanization, letter by letter) ----------------------
 
-_HANGUL_INITIALS = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj",
-                    "ch", "k", "t", "p", "h"]
-_HANGUL_VOWELS = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo",
-                  "u", "wo", "we", "wi", "yu", "eu", "ui", "i"]
-_HANGUL_FINALS = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l", "l", "p", "l",
-                  "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t"]
-
-
-def _hangul(ch: str) -> str | None:
-    code = ord(ch) - 0xAC00
-    if not 0 <= code < 11172:
-        return None
-    initial, rest = divmod(code, 588)
-    vowel, final = divmod(rest, 28)
-    return _HANGUL_INITIALS[initial] + _HANGUL_VOWELS[vowel] + _HANGUL_FINALS[final]
+# hangul_syllable() from script_utils, the same for matching and for showing
 
 
 # ---- Japanese kana (Hepburn) ----------------------------------------------
@@ -294,7 +280,7 @@ def suggest_latin(text: str | None, language: str | None = None, origin: str | N
     if "GEORGIAN" in scripts:
         text = _uncased(text, lambda ch: _GEORGIAN.get(ch, ch))
     if "HANGUL" in scripts:
-        text = _uncased(text, lambda ch: _hangul(ch) or ch)
+        text = _uncased(text, lambda ch: hangul_syllable(ch) or ch)
     if "KANA" in scripts:
         text = _kana(text)
         text = re.sub(r"[a-z]", lambda m: m.group().upper(), text, count=1)

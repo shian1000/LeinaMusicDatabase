@@ -10,9 +10,8 @@ implement get_release_year() for "Fill missing data -> Years"
 (DISCOVERY_MODULES_YEAR_CONFIG_FILE) - kept separate because not every album
 fetcher supports year lookups, so their available-module sets differ.
 """
-import json
 from upath import UPath
-from utils.common.debug import slog
+from utils.common.json_file import read_json, write_json
 from config.constants import (
     DISCOVERY_MODULES_CONFIG_FILE,
     DEFAULT_DISCOVERY_MODULE_ORDER,
@@ -36,26 +35,16 @@ def _default_config(default_order) -> dict:
 def _load_config(config_file: str, default_order) -> dict:
     """Read a persisted order/enabled config, falling back to defaults if
     the file is missing or unreadable."""
-    path = UPath(config_file)
-    if not path.exists():
+    data = read_json(UPath(config_file), {}, "Discovery modules config")
+    if not data:
         return _default_config(default_order)
-
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        slog(f"Failed to read discovery modules config '{config_file}', using defaults: {e}")
-        return _default_config(default_order)
-    if not isinstance(data, dict):
-        slog(f"Discovery modules config '{config_file}' isn't a JSON object, using defaults")
-        return _default_config(default_order)
-
     data.setdefault("order", [])
     data.setdefault("enabled", {})
     return data
 
 
 def _save_config(config: dict, config_file: str) -> None:
-    UPath(config_file).write_text(json.dumps(config, indent=2))
+    write_json(UPath(config_file), config)
 
 
 def _reconcile_config(available_module_ids, config_file: str, default_order) -> dict:

@@ -16,7 +16,7 @@ from utils.common.normalizer import normalize
 from utils.database.albums import album_key, link_songs, reassign_artist_albums
 from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_synonyms
 from utils.database.song_artists import (
     add_additional_artist,
     additional_artist_role,
@@ -72,8 +72,7 @@ def credit_unknown_artist_song(session, song: Song) -> Artist | None:
 
 
 def _names_of(artist: Artist) -> list[str]:
-    synonyms = [s.strip() for s in (artist_match_synonyms(artist) or "").split(",")]
-    return [normalize(n) for n in (artist.name, *synonyms) if n and normalize(n)]
+    return [normalize(n) for n in (artist.name, *artist_synonyms(artist)) if normalize(n)]
 
 
 def _credited_as(song: Song, name: str) -> Artist | None:

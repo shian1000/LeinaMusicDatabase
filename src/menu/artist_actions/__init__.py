@@ -5,6 +5,7 @@ from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import ArtistHasSongsError, delete_db_entry
 from utils.ui.display_utils import display_artists
 from menu.song_actions.edit_songs import HAS_SONGS_HINT, edit_entry_menu
+from utils.common.artist_credits import split_synonyms
 
 
 def add_synonym_menu(artist_objects):
@@ -20,7 +21,7 @@ def add_synonym_menu(artist_objects):
         print("Aborted")
         return
 
-    existing_synonyms = [s.strip() for s in artist.synonyms.split(",")] if artist.synonyms else []
+    existing_synonyms = split_synonyms(artist.synonyms)
     if synonym.lower() in (s.lower() for s in existing_synonyms):
         print(f"'{synonym}' is already a synonym of {artist.name}")
         return
@@ -43,7 +44,7 @@ def remove_synonym_menu(artist_objects):
     else:
         artist = with_synonyms[0]
 
-    existing_synonyms = [s.strip() for s in artist.synonyms.split(",") if s.strip()]
+    existing_synonyms = split_synonyms(artist.synonyms)
     to_remove = questionary.checkbox(f"Which synonyms of {artist.name} do you want to remove?",
                                      choices=existing_synonyms).ask()
     if not to_remove:

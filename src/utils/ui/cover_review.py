@@ -14,8 +14,14 @@ from utils.database.database_sessions import require_global_database_sessions, s
 from utils.database.datatables import Song
 from utils.database.tags_management import add_tag_to_songs, song_ids_with_tag
 from utils.ui.display_utils import display_songs
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 from utils.ui.song_colors import song_tokens
+
+
+def _proposal_title(proposal) -> list:
+    return [*song_tokens(proposal.song.artist.name, proposal.song.title), ("", "  ->  "),
+            *song_tokens(proposal.performer or proposal.song.artist.name,
+                         f"{proposal.title} {cover_credit(proposal.covered_name)}", proposal.note)]
 
 
 def review_covers() -> None:
@@ -30,18 +36,13 @@ def review_covers() -> None:
                       "Ticked ones are marked, and renamed as shown after the arrow.",
                       "Unticked: the name isn't an artist in the database yet, or is only a guess.",
                       "Songs left unticked aren't offered again.")
-        choices = []
-        for i, proposal in enumerate(proposals):
-            title = [*song_tokens(proposal.song.artist.name, proposal.song.title), ("", "  ->  "),
-                     *song_tokens(proposal.performer or proposal.song.artist.name,
-                                  f"{proposal.title} {cover_credit(proposal.covered_name)}", proposal.note)]
-            choices.append(questionary.Choice(title=title, value=i, checked=proposal.certain))
-        picked = questionary.checkbox("Which songs do you want to mark?", choices=choices).ask()
+        picked = tick_items("Which songs do you want to mark?", proposals, _proposal_title,
+                            checked=lambda proposal: proposal.certain)
         if picked is None:
             say("Cancelled, nothing marked as checked.")
             return
-        for i in picked:
-            apply_cover_proposal(session, proposals[i])
+        for proposal in picked:
+            apply_cover_proposal(session, proposal)
         add_tag_to_songs([proposal.song.id for proposal in proposals], COVER_CHECKED_TAG)
         submit_global_database_session()
         say(f"Marked {len(picked)} song(s)." if picked else "Nothing picked.")

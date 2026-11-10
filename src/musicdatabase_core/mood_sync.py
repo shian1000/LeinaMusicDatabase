@@ -102,7 +102,7 @@ def mood_json(conn, row) -> dict:
 
 
 def _row_by_uid(conn, uid: str):
-    return conn.execute("SELECT * FROM tags WHERE uid = ? AND kind = ?", (uid, MOOD_KIND)).fetchone()
+    return _REVISIONS.row_by_uid(conn, uid, kind=MOOD_KIND)
 
 
 def _row_by_id(conn, tag_id: int):
@@ -114,15 +114,8 @@ def _live_by_name(conn, name: str):
 
 
 def changes_since(conn, since: int) -> dict:
-    """GET /users/<name>/moods?since=N: every mood, deleted ones included,
-    changed after revision N, and the counter to ask with next time."""
-    conn.execute("BEGIN")
-    try:
-        rows = conn.execute("SELECT * FROM tags WHERE kind = ? AND revision > ? ORDER BY revision",
-                            (MOOD_KIND, since)).fetchall()
-        return {"revision": current_revision(conn), "moods": [mood_json(conn, r) for r in rows]}
-    finally:
-        conn.execute("COMMIT")
+    """GET /users/<name>/moods?since=N."""
+    return _REVISIONS.changes_since(conn, since, "moods", lambda row: mood_json(conn, row), kind=MOOD_KIND)
 
 
 def live_moods(conn) -> list:
@@ -309,13 +302,7 @@ def _global_cover_row(conn, mood_id: int):
 
 def global_covers_since(conn, since: int) -> dict:
     """GET /users/<name>/global-mood-covers?since=N."""
-    conn.execute("BEGIN")
-    try:
-        rows = conn.execute("SELECT * FROM global_mood_covers WHERE revision > ? ORDER BY revision",
-                            (since,)).fetchall()
-        return {"revision": current_cover_revision(conn), "covers": [global_cover_json(r) for r in rows]}
-    finally:
-        conn.execute("COMMIT")
+    return _COVER_REVISIONS.changes_since(conn, since, "covers", global_cover_json)
 
 
 def global_covers(conn) -> dict[int, str]:

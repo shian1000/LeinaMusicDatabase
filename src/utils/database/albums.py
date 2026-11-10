@@ -48,6 +48,7 @@ from settings import Settings
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
 from utils.database.datatables import Album, AlbumCover, Artist, Song
+from utils.common.artist_credits import split_synonyms
 
 # Filename of the migration whose arrival triggers the one-off backfill of
 # songs.album_id for the songs already in the database (see main.py)
@@ -623,7 +624,7 @@ def artist_has_album(artist_name: str, title: str) -> bool:
         artist_ids = [
             artist_id for artist_id, name, name_latin, synonyms
             in session.execute(select(Artist.id, Artist.name, Artist.name_latin, Artist.synonyms))
-            if artist_norm in {normalize(n) for n in [name, name_latin, *(synonyms or "").split(",")] if n and n.strip()}
+            if artist_norm in {normalize(n) for n in [name, name_latin, *split_synonyms(synonyms)] if n}
         ]
         if not artist_ids:
             return False

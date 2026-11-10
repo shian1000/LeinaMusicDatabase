@@ -7,11 +7,10 @@ music_db_manager.py / tag_db_manager.py / backup.py / migrations.py, which
 all snapshot Settings.database_dir into module-level constants at import
 time.
 """
-import json
 from typing import Optional
 from upath import UPath
 from config.constants import DATABASE_LOCATION_CONFIG_FILE
-from utils.common.debug import flog
+from utils.common.json_file import read_json, write_json
 
 
 def _config_path() -> UPath:
@@ -20,18 +19,7 @@ def _config_path() -> UPath:
 
 def load_database_dir_override() -> Optional[str]:
     """Return the persisted database folder override, or None if unset/unreadable."""
-    path = _config_path()
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError) as e:
-        flog(f"Failed to read database location config, ignoring override: {e}")
-        return None
-    if not isinstance(data, dict):
-        flog(f"Database location config isn't a JSON object, ignoring override: {data!r}")
-        return None
-    return data.get("database_dir") or None
+    return read_json(_config_path(), {}, "Database location config").get("database_dir") or None
 
 
 def save_database_dir_override(path_str: Optional[str]) -> None:
@@ -41,8 +29,4 @@ def save_database_dir_override(path_str: Optional[str]) -> None:
         if path.exists():
             path.unlink()
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Read at every start: a write cut short must not leave half a file
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps({"database_dir": path_str}, indent=2))
-    tmp.replace(path)
+    write_json(path, {"database_dir": path_str}, atomic=True)  # read at every start

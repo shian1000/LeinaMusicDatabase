@@ -144,6 +144,23 @@ class RevisionCounter:
                          f"SELECT 1, COALESCE(MAX(revision), 0) + 1 FROM {self.table}")
         return self.current(conn)
 
+    def changes_since(self, conn, since: int, key: str, to_json, kind: str | None = None) -> dict:
+        """GET .../<collection>?since=N: every row of `table`, deleted ones
+        included, changed after revision N (as `to_json(row)` under `key`),
+        and the counter to ask with next time. `kind`: only tags of it."""
+        where, params = ("kind = ? AND ", (kind,)) if kind else ("", ())
+        conn.execute("BEGIN")  # one consistent snapshot of the counter and the rows
+        try:
+            rows = conn.execute(f"SELECT * FROM {self.table} WHERE {where}revision > ? ORDER BY revision",
+                                (*params, since)).fetchall()
+            return {"revision": self.current(conn), key: [to_json(r) for r in rows]}
+        finally:
+            conn.execute("COMMIT")
+
+    def row_by_uid(self, conn, uid: str, kind: str | None = None):
+        where, params = (" AND kind = ?", (kind,)) if kind else ("", ())
+        return conn.execute(f"SELECT * FROM {self.table} WHERE uid = ?{where}", (uid, *params)).fetchone()
+
 
 _REVISIONS = RevisionCounter("playlist_revision", "playlists")
 current_revision = _REVISIONS.current
@@ -187,19 +204,12 @@ def playlist_json(conn, row, with_tracks: bool = True) -> dict:
     return payload
 
 
-def _row_by_uid(conn, uid: str):
-    return conn.execute("SELECT * FROM playlists WHERE uid = ?", (uid,)).fetchone()
+_row_by_uid = _REVISIONS.row_by_uid
 
 
 def changes_since(conn, since: int) -> dict:
-    """GET /users/<name>/playlists?since=N: every playlist, deleted ones
-    included, changed after revision N, and the counter to ask with next time."""
-    conn.execute("BEGIN")  # one consistent snapshot of the counter and the rows
-    try:
-        rows = conn.execute("SELECT * FROM playlists WHERE revision > ? ORDER BY revision", (since,)).fetchall()
-        return {"revision": current_revision(conn), "playlists": [playlist_json(conn, r) for r in rows]}
-    finally:
-        conn.execute("COMMIT")
+    """GET /users/<name>/playlists?since=N."""
+    return _REVISIONS.changes_since(conn, since, "playlists", lambda row: playlist_json(conn, row))
 
 
 # --------------------
