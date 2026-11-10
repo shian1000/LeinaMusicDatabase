@@ -367,6 +367,20 @@ def _contains_whole_word(folded_haystack: str, needle: str) -> bool:
     return bool(re.search(r"\b" + re.escape(folded_needle) + r"\b", folded_haystack, re.IGNORECASE))
 
 
+def _without_leading_channel(title: str, channel: str) -> str:
+    """`title` without the channel name it starts with, followed by only a
+    space ("nipplepeople NIKADA" on the channel "nipplepeople" -> "NIKADA").
+    Only for a title the channel's name is the artist of: sanitize's
+    strip_artist_from_title() wants a separator after the name, since an
+    artist's name parsed from the title may begin the song's title too."""
+    folded_title = "".join(fold_char(c) for c in title)
+    folded_channel = "".join(fold_char(c) for c in channel).strip()
+    match = re.match(re.escape(folded_channel) + r"\s+(?=\S)", folded_title, re.IGNORECASE)
+    if not folded_channel or not match:
+        return title
+    return title[match.end():]
+
+
 def _find_official_match_via_search(raw_title: str, max_results: int = 5) -> tuple | None:
     """Search YouTube for `raw_title` verbatim (yt-dlp's own ranking already
     surfaces the right official upload near the top even for a messy title
@@ -671,7 +685,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
                     how = "Artist「Title」"
                 elif channel:
                     artist = channel.strip()
-                    song_title = parse_title.strip()
+                    song_title = _without_leading_channel(parse_title.strip(), artist)
                     how = "no separator, channel as artist"
 
     # The title with the artist as parsed, then the artist (sanitize's

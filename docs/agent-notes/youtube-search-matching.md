@@ -86,6 +86,12 @@ Zulu - so the setting only matters for playlist pages.
    case found testing this: Culture Beat's own (non-Topic) channel, video titled just
    `"Mr. Vain (Original Radio Edit)"` with no artist text in the title whatsoever. This is
    apparently common for plain artist-channel uploads, not just auto-generated Topic channels.
+   A title that starts with the channel's name followed by only a space loses it there
+   (`_without_leading_channel()`; channel "nipplepeople", "nipplepeople NIKADA" -> "NIKADA",
+   owner's choice 2026-11-10), while `strip_artist_from_title()` keeps wanting a separator after
+   the name: an artist read from the title itself may begin the song's title too. Accepted cost:
+   a song titled after its artist ("Queen Of The Night" on the channel "Queen", no separator)
+   loses that word.
    Before that, `split_corner_bracket_credit()` tries the Japanese `"<Artist>「<Title>」"`
    convention (real case: channel `GOKUMON(UchikubiGokumonDoukoukai)`, title
    `"打首獄門同好会「なつのうた」"`; the channel fallback had imported it under the channel name

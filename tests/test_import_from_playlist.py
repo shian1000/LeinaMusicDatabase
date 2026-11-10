@@ -454,6 +454,17 @@ def test_a_real_title_on_the_right_is_kept(title, expected):
     assert (metadata["artist_name"], metadata["title"]) == expected
 
 
+@pytest.mark.parametrize("title, channel, expected", [
+    ("nipplepeople NIKADA", "nipplepeople", "NIKADA"),      # the channel's name, then only a space
+    ("Siamés Summer Nights", "SIAMES", "Summer Nights"),
+    ("nipplepeople", "nipplepeople", "nipplepeople"),       # never emptied
+    ("Nipplepeoples NIKADA", "nipplepeople", "Nipplepeoples NIKADA"),  # a whole name only
+])
+def test_a_title_without_separator_loses_the_channel_name_it_starts_with(title, channel, expected):
+    metadata = _build(title, channel=channel)
+    assert (metadata["artist_name"], metadata["title"]) == (channel, expected)
+
+
 def test_junk_only_title():
     assert m.is_junk_only_title("Lyric Video (English / French)")
     assert m.is_junk_only_title("Lyrics")
