@@ -286,6 +286,15 @@ Furman"`/`"Care"`). A bigger junk-word list or a smarter split heuristic can't f
 delimiter to split on that generalizes across channels each using a completely different free-text
 title convention.
 
+`TITLE_FIRST_CHANNELS` (`constants.py`, currently `"favelamarek"`) is the lighter case: channels
+whose titles do split on " - ", but as "<Title> - <Artist>" ("Lights Go Down - Zeds Dead & Jauz
+(FIFA 20 Volta Soundtrack)"). `build_metadata_from_item()` swaps the two sides only when the title
+has a *spaced* dash: favelamarek's older uploads are "<Artist>- <Title>" ("Tom Misch- Good To Be
+Home"), checked over its ~840 videos on 2026-11-10. The brackets after the artists move to the
+title, where the usual cleanup drops the soundtrack note and reads "(ft. X)"; an unbracketed
+"ft. X" there becomes featured too (`split_feat_credits()`). The odd upload in the usual order is
+left to the swap review (`possible_swap_artist()`), which needs the artist already in music.db.
+
 `SPECIAL_DESCRIPTION_CHANNELS` is a whitelist (currently `"soundtrack series"`, `"aesthetic
 waves"`, `"soundtracksost"`, and `"lakeshore records"`, matched case-insensitively against the
 exact channel name) of

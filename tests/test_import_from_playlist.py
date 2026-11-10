@@ -295,6 +295,31 @@ def test_corner_bracket_credit_ignores_junk_and_partial_brackets():
 
 
 # ---------------------------------------------------------
+# Channels titling uploads "Title - Artist" (TITLE_FIRST_CHANNELS)
+# ---------------------------------------------------------
+
+@pytest.mark.parametrize("title, artist, song_title, feat", [
+    ("Lights Go Down - Zeds Dead & Jauz (FIFA 20 Volta Soundtrack)", "Zeds Dead & Jauz", "Lights Go Down", []),
+    ("Electric Feel - MGMT (Flash FM - GTA VI Soundtrack)", "MGMT", "Electric Feel", []),
+    ("We Got That Cool - Yves V (ft. Afrojack & Icona Pop) (FIFA 21 Official Volta Soundtrack)",
+     "Yves V", "We Got That Cool", ["Afrojack", "Icona Pop"]),
+    ("Like A Pimp - David Banner ft. Lil' Flip (Dirty South Classics -GTA VI Soundtrack)",
+     "David Banner", "Like A Pimp", ["Lil' Flip"]),
+    # the same channel's older uploads: "Artist- Title"
+    ("Tom Misch- Good To Be Home (FIFA 19 Official Soundtrack)", "Tom Misch", "Good To Be Home", []),
+])
+def test_title_first_channel_reads_title_then_artist(title, artist, song_title, feat):
+    metadata = _build(title, channel="favelamarek")
+    assert (metadata["artist_name"], metadata["title"]) == (artist, song_title)
+    assert metadata.get("feat_artists", []) == feat
+
+
+def test_other_channels_keep_artist_then_title():
+    metadata = _build("Lights Go Down - Zeds Dead & Jauz", channel="Some Channel")
+    assert (metadata["artist_name"], metadata["title"]) == ("Lights Go Down", "Zeds Dead & Jauz")
+
+
+# ---------------------------------------------------------
 # Generic Topic channels ("Release - Topic")
 # ---------------------------------------------------------
 

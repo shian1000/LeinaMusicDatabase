@@ -19,7 +19,7 @@ from utils.youtube.manage_youtube_playlists import (
     run_ytdlp,
     video_durations_via_api,
 )
-from utils.common.artist_credits import feat_credits
+from utils.common.artist_credits import feat_credits, split_feat_credits
 from utils.common.normalizer import name_key, split_artist_title
 from utils.common.soundtrack_names import soundtrack_work
 from utils.common.title_patterns import FEAT_WORD, PIPE
@@ -43,7 +43,7 @@ from utils.common.sanitize import (
     strip_hashtags,
 )
 from utils.common.song_entry import SongEntry, as_entry, describe_cuts
-from config.constants import GENERIC_TOPIC_CHANNELS, YTDLP_PLAYLIST_LANG
+from config.constants import GENERIC_TOPIC_CHANNELS, TITLE_FIRST_CHANNELS, YTDLP_PLAYLIST_LANG
 from utils.common.debug import flog, mlog
 from utils.common import trace
 
@@ -616,6 +616,11 @@ def resolve_generic_topic_artist(item: dict) -> str | None:
     return artist
 
 
+_SPACED_DASH_RE = re.compile(r"\s[-–—]\s")
+# "Zeds Dead & Jauz (FIFA 20 Volta Soundtrack)" -> the names, the brackets after them
+_TRAILING_BRACKETS_RE = re.compile(r"(.*?)((?:\s*[(\[][^()\[\]]*[)\]])*)\s*$")
+
+
 def build_metadata_from_item(item: dict, artist_title_override: tuple | None = None) -> SongEntry:
     """Turn one playlist video into an import_engine metadata dict.
 
@@ -642,6 +647,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     title = item.get("title") or ""
     removed = []  # what the cleanup cuts, kept on the entry
     album = None
+    swapped_feat = []  # a TITLE_FIRST_CHANNELS artist side's "(ft. X)"
 
     if artist_title_override:
         artist, song_title = artist_title_override
@@ -678,6 +684,15 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
                 # "Glow - Lyric Video": the title on the left, the artist only the channel
                 artist, song_title = channel.strip(), artist
                 how = "junk-only right side, channel as artist"
+            elif (artist and song_title and channel.strip().lower() in TITLE_FIRST_CHANNELS
+                    and _SPACED_DASH_RE.search(parse_title)):
+                # "Lights Go Down - Zeds Dead & Jauz (FIFA 20 Volta Soundtrack)": the
+                # brackets at the end go with the title, where the cleanup reads them
+                # ("(ft. X)" too), and an unbracketed "ft. X" of the artists is featured
+                names, brackets = _TRAILING_BRACKETS_RE.match(song_title).groups()
+                song_title = f"{artist} {brackets}".strip()
+                artist, swapped_feat = split_feat_credits(names.strip())
+                how = "Title - Artist channel"
             elif not artist or not song_title:
                 corner_credit = split_corner_bracket_credit(parse_title)
                 if corner_credit:
@@ -693,7 +708,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     # file-name artefacts, the artist repeated in the title)
     originals = {"artist": artist, "title": song_title, "album": album}
     # "Song ft. X": X becomes a featured artist of the song, the title "Song"
-    feat_artists = []
+    feat_artists = list(swapped_feat)
     project = ProjectFields(album=album, channel=channel or None, raw_text=title)
     song_title = sanitize_field(song_title, TITLE, SOURCE_YOUTUBE, artist=artist, removed=removed,
                                 feat_artists=feat_artists, project=project)

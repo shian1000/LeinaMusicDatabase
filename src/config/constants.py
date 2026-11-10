@@ -657,6 +657,14 @@ SANITIZE_CONFIG_FILE = PROJECT_ROOT / "sanitize_config.json"
 # case-insensitively against the channel name minus " - Topic".
 GENERIC_TOPIC_CHANNELS = {"release", "various artists"}
 
+# Channels titling their uploads "<Title> - <Artist>" (real case: favelamarek's
+# game soundtracks, "Lights Go Down - Zeds Dead & Jauz (FIFA 20 Volta
+# Soundtrack)"). Only a spaced " - " is read that way: the same channel's older
+# uploads are "<Artist>- <Title>" ("Tom Misch- Good To Be Home"). A rare
+# upload in the usual order is still caught by the artist/title swap check.
+# Matched case-insensitively against the exact channel name.
+TITLE_FIRST_CHANNELS = {"favelamarek"}
+
 # What a CD ripper writes into an mp3's tags for a disc it didn't recognise
 # (real case: "Ørganek - Wiosna.mp3" tagged "Nieznany wykonawca" - "Ścieżka 15",
 # album "Nieznany album (2018-09-10 12:31:53)"). Such a tag counts as missing,
