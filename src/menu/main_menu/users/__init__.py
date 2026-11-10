@@ -40,6 +40,7 @@ from utils.discoveries.folder_youtube_playlist import (
     rank_entries_for,
     search_entries,
     set_tracks,
+    sure_song,
     swap_artist_and_title,
     video_links,
     youtube_entries,
@@ -539,12 +540,15 @@ def _pair_files_by_hand(folder: Path, files: list, entries: list) -> tuple | Non
 
 
 def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: list,
-                            best_guess_min_score: float = 1.1) -> list | None:
+                            best_guess_min_score: float = 1.1, min_artist_similarity: float = 1.1,
+                            auto_accept_score: float = 1.1) -> list | None:
     """Each video no file was paired with: add it as a track of its own,
     read the other way round when its title is a known artist and its artist
     isn't (offered, never done unasked), leave it out, or say it is one of
     the closest songs, the cursor not on them. A video whose song isn't found
-    and that has no closest song nor a swap to offer is added without asking.
+    and that has no closest song nor a swap to offer is added without asking,
+    and so is one whose closest song the auto-accept settings take as for a
+    file (sure_song(); listed with the auto-accepted files at the end).
     Songs turned down here aren't offered again by the review after this
     one. Returns the videos to add, None on Stop."""
     added = []
@@ -561,6 +565,14 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
             added.append(entry)
             print(f"  No file for {colored_song(entry.metadata.artist, entry.metadata.title)} found."
                   " Added automatically without a file.")
+            continue
+        sure = sure_song(matcher, entry, min_artist_similarity, best_guess_min_score,
+                         auto_accept_score) if closest and swap_artist is None else None
+        if sure is not None:
+            song_id, score = sure
+            added.append(entry)
+            print(f"  -> added without a file as {as_ansi(_song_tokens(music_session.get(Song, song_id), score))}"
+                  " - auto-accepted")
             continue
         if closest:
             print("  Closest songs in the database:")
@@ -651,7 +663,8 @@ def _create_playlist_from_folder_and_youtube(username: str) -> None:
     added = []
     if unpaired_entries:
         print(f"\n{len(unpaired_entries)} video(s) of the YouTube playlist without a file:")
-        added = _review_unpaired_videos(music_session, matcher, unpaired_entries, min_score)
+        added = _review_unpaired_videos(music_session, matcher, unpaired_entries, min_score, min_similarity,
+                                        sure_score)
         if added is None:
             print("Playlist not saved.")
             return

@@ -472,7 +472,17 @@ the right song at 76% instead of 96%. Two choices that aren't obvious:
   (`_run_together_score()`: "Fisz Emade Tworzywo" against Fisz, Emade and
   Tworzywo Sztuczne was 86%, each compared alone; `propose_artist_split()`
   sees no separator there, and "Pearl Jam" reads the same way). A new reading
-  of that kind goes behind the same flag.
+  of that kind goes behind the same flag. One exception (owner, 2026-11-10,
+  after "Fisz Emade Tworzywo - Nie za miłe wiadomości" was asked about at
+  100%): `names_main_artists()` - the tag artist is every main artist of the
+  song (two or more) by whole name / synonym / Latin form, one after another
+  ("Tworzywo" being Tworzywo Sztuczne's synonym). "Pearl Jam" would need
+  artists "Pearl" and "Jam" on one song; a word that is only part of a name
+  still asks.
+- A video of a compared YouTube playlist with no file goes through the same
+  rule before it is asked about (`folder_youtube_playlist.sure_song()`, a
+  scratch `youtube_only_track()`): the "no file" screen had never read the
+  auto-accept settings, so even a 100% that a file would take was asked.
 
 It compares against every song (~5.7k), so it uses
 `text_utils.similarity_at_least()` (SequenceMatcher's cheap upper bounds

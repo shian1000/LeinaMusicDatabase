@@ -1204,9 +1204,6 @@ def test_video_without_a_file_closest_songs_turned_down_are_not_offered_again(us
 
     menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
     monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
-    # Even a score that would be taken without asking stays turned down
-    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 0.1)
-    monkeypatch.setattr(menu, "load_auto_accept_artist_similarity", lambda: 0.1)
     monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
     defaults, mocked_select = [], menu.questionary.select
 
@@ -1221,6 +1218,30 @@ def test_video_without_a_file_closest_songs_turned_down_are_not_offered_again(us
     assert defaults[0] == menu._VIDEO_ADD
     assert len(asked) == 2 and asked[1].startswith("What should happen")
     assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [("ytClose", None)]
+
+
+def test_video_without_a_file_auto_accepts_its_closest_song(users_env, tmp_path, music_session, monkeypatch,
+                                                             capsys):
+    # Real case: "Fisz Emade Tworzywo - Nie za miłe wiadomości" was asked about at 100%
+    music_session.add_all([Song(title="Karma", artist=Artist(name="Hey")),
+                           Song(title="Załoga G", artist=Artist(name="Hurt"))])
+    music_session.commit()
+    items = [{"video_id": "vid1", "title": "Karma", "channel": "Hey - Topic"},
+             {"video_id": "ytClose", "title": "Zaloga G", "channel": "Hurt Official"}]  # 81%
+
+    def select(message, choices):
+        raise AssertionError(message)
+
+    menu = _yt_compare_env(tmp_path, music_session, monkeypatch, {"1.mp3": ("Hey", "Karma")}, items, select)
+    monkeypatch.setattr(menu, "load_best_guess_min_score", lambda: 0.6)
+    monkeypatch.setattr(menu, "load_closest_auto_accept_score", lambda: 0.8)
+    monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
+    menu._create_playlist_from_folder_and_youtube("ania")
+
+    out = capsys.readouterr().out
+    assert "auto-accepted" in out and "(81%)" in out
+    song = music_session.query(Song).filter(Song.title == "Załoga G").one().id
+    assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [("ytClose", song)]
 
 
 def test_youtube_compare_suggests_the_videos_song_and_stops_unsaved(users_env, tmp_path, music_session, monkeypatch):
@@ -1468,6 +1489,7 @@ def test_artists_written_as_one_name_are_scored_as_the_songs_artists(music_sessi
 
 
 def test_artists_written_as_one_name_are_not_auto_accepted(tmp_path, music_session, monkeypatch):
+    # "Tworzywo" is only part of "Tworzywo Sztuczne" here, no whole name
     song = _song_of_fisz_emade_and_tworzywo(music_session)
     tags = {"1.mp3": ("Fisz Emade Tworzywo", "Nie za miłe wiadomości")}
     folder = _folder(tmp_path, tags)
@@ -1479,6 +1501,25 @@ def test_artists_written_as_one_name_are_not_auto_accepted(tmp_path, music_sessi
     assert [guess for guess, _ in track.best_guesses] == [song]
     assert track.scores[song.id] == pytest.approx(1.0)
     assert track.song_id is None and not playlist.auto_accepted_scored
+
+
+def test_main_artists_written_one_after_another_are_auto_accepted(tmp_path, music_session, monkeypatch):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    song = _song_of_fisz_emade_and_tworzywo(music_session)
+    music_session.query(Artist).filter(Artist.name == "Tworzywo Sztuczne").one().synonyms = "Tworzywo"
+    music_session.commit()
+    tags = {"1.mp3": ("Fisz Emade Tworzywo", "Nie za miłe wiadomości"),
+            "2.mp3": ("Fisz Emade", "Nie za miłe wiadomości")}  # not every main artist: asked
+    folder = _folder(tmp_path, tags)
+    monkeypatch.setattr(fp, "read_file_metadata", lambda f: dict(zip(("artist_name", "title"), tags[f.name])))
+
+    playlist = fp.build_folder_playlist(music_session, folder, 0.9, 0.6, 0.99)
+
+    first = playlist.tracks[0]
+    assert first.song_id == song.id and first.picked
+    assert [t.file.name for t in playlist.unmatched] == ["2.mp3"]
+    assert not LocalSongMatcher(music_session).names_main_artists({"artist_name": "Emade Fisz Emade Kowalski"}, song)
 
 
 def test_title_by_artist_file_is_auto_accepted(tmp_path, music_session, monkeypatch):

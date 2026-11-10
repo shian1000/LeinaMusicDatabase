@@ -15,7 +15,7 @@ from utils.common.text_utils import normalize, check_spelling, similarity, are_a
 from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
 from utils.database.latin_names import artist_match_synonyms, song_titles
-from utils.database.song_artists import song_all_artists
+from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.song_kinds import (
     is_full_album,
     set_song_kind,
@@ -838,6 +838,29 @@ class LocalSongMatcher:
             return 0.0
         return FILE_MATCH_SCORE_TITLE_WEIGHT * title + 1 - FILE_MATCH_SCORE_TITLE_WEIGHT
 
+    def names_main_artists(self, metadata: dict, song: Song) -> bool:
+        """Is the tag artist every one of the song's main artists (two or
+        more) by whole name, synonym or Latin form, one after another with
+        nothing between ("Fisz Emade Tworzywo": Fisz, Emade, and Tworzywo,
+        a synonym of Tworzywo Sztuczne)? The one run-together reading
+        (_run_together_score()) safe to auto-accept: "Pearl Jam" would need
+        a song of an artist "Pearl" with one called "Jam"."""
+        words = normalize(as_entry(metadata).artist or "").split()
+        main = {artist.id: {normalize(n) for n in _names_of(artist, split_parts=False)} - {""}
+                for artist in song_main_artists(song) if artist is not None}
+        if len(main) < 2 or not words:
+            return False
+        # reached[i]: the sets of artists whose names make up words[:i]
+        reached = [set() for _ in range(len(words) + 1)]
+        reached[0].add(frozenset())
+        for start in range(len(words)):
+            for end in range(start + 1, len(words) + 1):
+                piece = " ".join(words[start:end])
+                for artist_id, names in main.items():
+                    if piece in names:
+                        reached[end] |= {found | {artist_id} for found in reached[start]}
+        return frozenset(main) in reached[-1]
+
     def _known_artists(self, song: Song) -> list:
         if song.id not in self._artist_forms:
             self._artist_forms[song.id] = list({normalize(n) for n in _artist_names(song)} - {""})
@@ -918,10 +941,15 @@ def _artist_names(song: Song, split_parts: bool = True):
     `split_parts` - the parts of joined names not split yet ("College" of
     "College & Electric Youth")."""
     for artist in song_all_artists(song):
-        synonyms = (artist_match_synonyms(artist) or "").split(",")
-        split = propose_artist_split(artist.name) if split_parts else None
-        parts = [*split.main, *split.feat] if split else []
-        yield from filter(None, (artist.name, *(s.strip() for s in synonyms), *parts))
+        yield from _names_of(artist, split_parts)
+
+
+def _names_of(artist: Artist, split_parts: bool = True):
+    """One artist's part of _artist_names()."""
+    synonyms = (artist_match_synonyms(artist) or "").split(",")
+    split = propose_artist_split(artist.name) if split_parts else None
+    parts = [*split.main, *split.feat] if split else []
+    yield from filter(None, (artist.name, *(s.strip() for s in synonyms), *parts))
 
 
 def _artist_resembles(name: str, song: Song) -> bool:

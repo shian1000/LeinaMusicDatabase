@@ -11,6 +11,7 @@ here either; video_links() says which videos the saved playlist may give
 its songs (utils/database/additional_videos.py)."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from config.constants import SPELLING_CHECK_THRESHOLD
 from utils.common.normalizer import extract_unknown_data, name_key, normalize
@@ -194,6 +195,22 @@ def closest_songs(matcher: LocalSongMatcher, entry: YouTubeEntry, best_guess_min
     similar, candidates, guesses = song_suggestions(matcher, metadata, best_guess_min_score)
     return [(song, matcher.match_score(metadata, song))
             for song in ([similar] if similar else candidates or [song for song, _ in guesses])]
+
+
+def sure_song(matcher: LocalSongMatcher, entry: YouTubeEntry, min_artist_similarity: float = 1.1,
+              best_guess_min_score: float = 1.1, auto_accept_score: float = 1.1) -> tuple | None:
+    """(song id, score or None) of the song youtube_only_track() would give
+    a video no file was paired with without asking - the settings' rule for
+    a file (match_track()) - so the review needn't ask about it. None when
+    it would ask, or the video's song is already found."""
+    if entry.song is not None:
+        return None
+    scratch = FolderPlaylist(folder=Path())
+    track = youtube_only_track(scratch, matcher, entry, min_artist_similarity, best_guess_min_score,
+                               auto_accept_score)
+    if track.song_id is None:
+        return None
+    return track.song_id, next((score for _, _, score in scratch.auto_accepted_scored), None)
 
 
 def youtube_only_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, entry: YouTubeEntry,

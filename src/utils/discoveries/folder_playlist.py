@@ -196,7 +196,8 @@ def match_track(playlist: FolderPlaylist, matcher: LocalSongMatcher, track: Fold
             candidates = []
         sure = {song.id: song for song in candidates
                 if song is not None and track.scores[song.id] >= auto_accept_score
-                and matcher.match_score(metadata, song, credits=False) == track.scores[song.id]}
+                and (matcher.match_score(metadata, song, credits=False) == track.scores[song.id]
+                     or matcher.names_main_artists(metadata, song))}
         if len(sure) == 1:
             (song,) = sure.values()
             track.picked = True  # its tags differ from the song's: offered the name/tag fix
