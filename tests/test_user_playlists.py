@@ -1171,14 +1171,14 @@ def test_video_without_a_file_offers_the_closest_songs(users_env, tmp_path, musi
     monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
     menu._create_playlist_from_folder_and_youtube("ania")
 
-    # The video with nothing close isn't asked about, only added
-    assert len(on_screen) == 2
-    assert "Added automatically without a file." in capsys.readouterr().out
-    (close, close_songs), (exact, exact_songs) = on_screen[0], on_screen[1]
+    # Only the video with a closest song is asked about; the one whose song
+    # is found and the one with nothing close are just added
+    assert len(on_screen) == 1
+    assert capsys.readouterr().out.count("Added automatically without a file.") == 2
+    close, close_songs = on_screen[0]
     assert "Closest songs in the database" in close
     assert [c.value.title for c in close_songs] == ["Załoga G"]
     assert close_songs[0].title[-1][1].endswith("%)")
-    assert "Closest songs in the database" not in exact and not exact_songs
     song = music_session.query(Song).filter(Song.title == "Załoga G").one().id
     assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [
         ("ytClose", song), ("ytExact", song), ("ytNone", None)]
