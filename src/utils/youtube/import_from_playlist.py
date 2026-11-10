@@ -1,5 +1,6 @@
 import json
 import re
+import string
 import subprocess
 
 import questionary
@@ -18,8 +19,10 @@ from utils.youtube.manage_youtube_playlists import (
     run_ytdlp,
     video_durations_via_api,
 )
+from utils.common.artist_credits import feat_credits
 from utils.common.normalizer import name_key, split_artist_title
-from utils.common.title_patterns import FEAT_WORD
+from utils.common.soundtrack_names import soundtrack_work
+from utils.common.title_patterns import FEAT_WORD, PIPE
 from utils.discoveries.import_engine import ImportResult, find_matching_artist, run_import_batch
 from utils.database.database_getter import get_artists_from_db_session
 from utils.database.latin_names import artist_match_synonyms
@@ -139,6 +142,35 @@ def split_album_track_title(title: str) -> tuple | None:
     if VERSION_MARKER_RE.search(song_title) or is_junk_only_title(song_title):
         return None
     return match.group("artist").strip(), match.group("album").strip(), song_title
+
+
+# A series' soundtrack listed by episode (real case, channel "Ugly Tuber":
+# "The Umbrella Academy Soundtrack | S01E04 | Mirage | TORO Y MOI |"). The
+# "|" would be cut as a branding suffix, leaving the work as the title and
+# the channel as the artist; the episode marker says the song and its
+# artists follow it. No album: such a list mostly collects other artists'
+# songs ("Soul Kitchen" by The Doors), whose albums Fill missing data finds.
+_EPISODE_MARKER_RE = re.compile(r"^S\d{1,2}\s*E\d{1,3}$", re.IGNORECASE)
+_PIPE_SPLIT_RE = re.compile(r"\s*" + PIPE + r"\s*")
+
+
+def split_episode_soundtrack_title(title: str) -> tuple | None:
+    """Return (artists, title) from a "<Work> Soundtrack | S01E04 | <Title> |
+    <Artists> |" video title, or None if it isn't one. Artists the title
+    already credits as "feat." are left out of the artists ("Happy Together (feat. Ray Toro) | GERARD
+    WAY, RAY TORO"), and artists all in capitals while the title isn't are
+    the uploader's style, not their names."""
+    parts = [part for part in _PIPE_SPLIT_RE.split((title or "").strip()) if part]
+    if len(parts) != 4 or not _EPISODE_MARKER_RE.match(parts[1]):
+        return None
+    if not soundtrack_work(parts[0]):
+        return None
+    song_title, artists = parts[2], parts[3]
+    if artists.isupper() and not song_title.isupper():
+        artists = string.capwords(artists)
+    guests = {name_key(name) for name in feat_credits(song_title)}
+    names = [name for name in re.split(r",\s+", artists) if name_key(name) not in guests]
+    return ", ".join(names) or artists, song_title
 
 
 def extract_playlist_id(raw: str) -> str | None:
@@ -600,6 +632,9 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
     if artist_title_override:
         artist, song_title = artist_title_override
         how = "special channel"
+    elif episode_track := split_episode_soundtrack_title(re.sub(r"\s+", " ", title)):
+        artist, song_title = episode_track
+        how = "Work Soundtrack | SxxEyy | Title | Artists"
     else:
         # A video title's runs of spaces are one: uploaders' slips, never what
         # separates the artist (a file name "Artist  Title" is split there)

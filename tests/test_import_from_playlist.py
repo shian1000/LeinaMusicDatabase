@@ -526,6 +526,32 @@ def test_title_without_an_album_track_number_gets_no_album(title, song_title):
     assert (metadata["album"], metadata["title"]) == (None, song_title)
 
 
+@pytest.mark.parametrize("title, artist, song_title, feat", [
+    ("The Umbrella Academy Soundtrack | S01E04 | Mirage | TORO Y MOI | ", "Toro Y Moi", "Mirage", None),
+    ("The Umbrella Academy Soundtrack | S01E05 | (Feels Like) Heaven | FICTION FACTORY | ",
+     "Fiction Factory", "(Feels Like) Heaven", None),
+    # The guest the title credits isn't a main artist too
+    ("The Umbrella Academy Soundtrack | S01E05 | Happy Together (feat. Ray Toro) | GERARD WAY, RAY TORO | ",
+     "Gerard Way", "Happy Together", ["Ray Toro"]),
+    ("Stranger Things 3 Soundtrack | S03E01 | Never Surrender | Corey Hart", "Corey Hart", "Never Surrender", None),
+])
+def test_series_soundtrack_by_episode_reads_the_song_after_the_episode(title, artist, song_title, feat):
+    # Real case, channel "Ugly Tuber": the "|" had been cut as a suffix, leaving
+    # "Ugly Tuber - The Umbrella Academy Soundtrack" for every video
+    metadata = m.build_metadata_from_item({"title": title, "channel": "Ugly Tuber", "video_id": "abc"})
+    assert (metadata["artist_name"], metadata["title"], metadata["album"]) == (artist, song_title, None)
+    assert metadata.get("feat_artists") == feat
+
+
+@pytest.mark.parametrize("title", [
+    "Song | Official Video",
+    "The Umbrella Academy Soundtrack | Mirage | TORO Y MOI",  # no episode marker
+    "Artist | S01E04 | Mirage | TORO Y MOI",  # no soundtrack the episode belongs to
+])
+def test_other_pipe_titles_are_no_series_soundtrack(title):
+    assert m.split_episode_soundtrack_title(title) is None
+
+
 def test_trailing_reupload_bracket_is_stripped():
     assert _build("DISCO BANIA - BRUNETKI I BLONDYNKI (reupload HD)")["title"] == "BRUNETKI I BLONDYNKI"
     assert _build("Artist - Song [Re-upload]")["title"] == "Song"

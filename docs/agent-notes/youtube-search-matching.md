@@ -102,6 +102,14 @@ Zulu - so the setting only matters for playlist pages.
    the signal is the two-digit number. One digit is left out for `"Symphony #5 - Allegro"`, and a
    version or annotation after the number keeps it a title (`"Funk #49 - Live"`). Known miss:
    `"Symphony #40 - Allegro"` reads as an album.
+   Before everything else, even the title cleanup (whose `pipe_suffix` step would cut all after the
+   first `"|"`): `split_episode_soundtrack_title()` for a series' soundtrack listed by episode
+   (real case, channel "Ugly Tuber": `"The Umbrella Academy Soundtrack | S01E04 | Mirage | TORO Y
+   MOI |"`, read as "Ugly Tuber - The Umbrella Academy Soundtrack" for every video before). Exactly
+   four parts, the first a soundtrack name (`soundtrack_work()`), the second `SxxEyy`, then title
+   and artists. Artists in capitals while the title isn't are capwords'd ("Toro Y Moi" - matching
+   is case-insensitive, so an existing artist keeps its own spelling); a guest the title credits
+   as "feat." is dropped from the artists. No album: such lists collect other artists' songs.
 
 Any entry still without an artist after this (and after the generic-Topic description lookup) is
 held back for `_review_missing_artists()`. It asks for each artist by `questionary.text()`, with the
