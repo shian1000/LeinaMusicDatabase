@@ -590,7 +590,9 @@ delete data rather than just tiebreak a search result:
   artist name to the canonical DB name before anything is shown to the user, whenever the parsed
   name is an exact case-insensitive match for a known synonym — e.g. a channel handle
   `akuteofficial` parsed as the artist gets swapped to `Akute`. Runs once per playlist import,
-  right after `build_metadata_from_item()`.
+  right after `build_metadata_from_item()`, and in `folder_youtube_playlist.youtube_entries()`
+  ("Create playlist from folder and compare with YT playlist") before the videos are matched -
+  that path had skipped it, so a channel "Official Arctic Monkeys" showed as the artist.
 - `resolve_duplicates.py`'s `remove_duplicate_artists()` (`Manage database -> Resolve duplicates ->
   Resolve duplicated artists`) treats an artist whose plain name exactly matches a *different*
   artist's synonym as a duplicate too, alongside its existing same-name check — the synonym-

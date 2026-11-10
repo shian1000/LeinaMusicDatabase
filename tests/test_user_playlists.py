@@ -1266,6 +1266,23 @@ def test_file_without_artist_paired_by_title_takes_the_videos_artist(music_sessi
     assert fyp.pair_automatically([track], [entry] + other) == []
 
 
+def test_video_of_a_channel_named_as_a_synonym_is_read_as_the_artist(music_session):
+    from utils.discoveries import folder_youtube_playlist as fyp
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    # Real case: "Knee Socks  [Official Arctic Monkeys]" on the "Official
+    # Arctic Monkeys" channel, a synonym of "Arctic Monkeys" - shown and
+    # matched by the artist's own name, as in the YouTube import
+    music_session.add(Song(title="Knee Socks", artist=Artist(name="Arctic Monkeys",
+                                                             synonyms="Official Arctic Monkeys")))
+    music_session.commit()
+    (entry,) = fyp.youtube_entries(LocalSongMatcher(music_session), [
+        {"video_id": "lyO-Sveg6a8", "title": "Knee Socks  [Official Arctic Monkeys]",
+         "channel": "Official Arctic Monkeys"}])
+    assert (entry.metadata.artist, entry.metadata.title) == ("Arctic Monkeys", "Knee Socks")
+    assert entry.song is not None and entry.song.title == "Knee Socks"
+
+
 def test_file_with_wrong_tags_is_paired_by_its_name(music_session):
     from utils.discoveries import folder_youtube_playlist as fyp
     from utils.discoveries.import_engine import LocalSongMatcher

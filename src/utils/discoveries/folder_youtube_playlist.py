@@ -19,7 +19,7 @@ from utils.common.song_entry import as_entry
 from utils.common.text_utils import scaled_similarity_threshold, similarity, title_resembles
 from utils.discoveries.folder_playlist import FolderPlaylist, FolderTrack, assign_song, match_track, song_suggestions
 from utils.discoveries.import_engine import LocalSongMatcher
-from utils.youtube.import_from_playlist import is_placeholder_title, playlist_item_metadata
+from utils.youtube.import_from_playlist import _resolve_artist_synonyms, is_placeholder_title, playlist_item_metadata
 
 # Pairs found through the database outrank any by name
 _SAME_SONG_SCORE = 10.0
@@ -44,14 +44,20 @@ def youtube_entries(matcher: LocalSongMatcher, items: list) -> list[YouTubeEntry
     """The playlist's videos (import_from_playlist.get_playlist_items()), in
     order, without the deleted / private ones and those giving neither an
     artist nor a title (no title at all), which have nothing to pair."""
-    entries = []
+    readable = []
     for item in items:
         title = (item.get("title") or "").strip()
         if not title or is_placeholder_title(title):
             continue
         metadata = as_entry(playlist_item_metadata(item))
-        if not metadata.artist and not metadata.title:
-            continue
+        if metadata.artist or metadata.title:
+            readable.append((item, title, metadata))
+    # A channel named after the artist ("Official Arctic Monkeys", a synonym)
+    # is the artist's own name before it's shown or matched, as in the import
+    metadata_list = [metadata for _, _, metadata in readable]
+    _resolve_artist_synonyms(metadata_list)
+    entries = []
+    for (item, title, _), metadata in zip(readable, metadata_list):
         song = matcher.match_exact(metadata) if metadata.title else None
         duration = item.get("duration")
         entries.append(YouTubeEntry(video_id=item["video_id"], label=title, channel=item.get("channel") or "",
