@@ -474,7 +474,7 @@ non-trivial work in that area.
   without a file can be a track with `file` None; one whose title is a known artist and whose artist
   is not gets the import's swap check (`possible_swap_artist()`) and a choice to read it the other way
   round, never unasked. That screen also offers the closest songs (`closest_songs()`), the cursor on
-  adding the video; turning them down sets `YouTubeEntry.closest_rejected`, or the review after it would ask about them twice. Deleted / private videos and those giving neither
+  adding the video (a video not found, with no closest song and no swap to offer, is added without asking); turning them down sets `YouTubeEntry.closest_rejected`, or the review after it would ask about them twice. Deleted / private videos and those giving neither
   an artist nor a title are skipped (`youtube_entries()`), only counted. Saved in the YouTube playlist's order, unpaired
   files last, with source `folder`, not `youtube`: Leina Radio re-imports `youtube` playlists from
   their source.

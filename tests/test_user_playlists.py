@@ -1113,8 +1113,11 @@ def test_video_without_a_file_offered_swapping_artist_and_title(users_env, tmp_p
     monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
     menu._create_playlist_from_folder_and_youtube("ania")
 
-    assert offered == {0: True, 1: True, 2: True, 3: False, 4: False}
-    assert capsys.readouterr().out.count("The title looks swapped with the artist: Afina is in the database.") == 3
+    # The two with no swap and no closest song aren't asked about
+    assert offered == {0: True, 1: True, 2: True}
+    out = capsys.readouterr().out
+    assert out.count("The title looks swapped with the artist: Afina is in the database.") == 3
+    assert out.count("Added automatically without a file.") == 2
     pay = music_session.query(Song).filter(Song.title == "Pay Your Respect").one().id
     assert [(title, song_id, video) for title, song_id, video, _ in _saved_tracks("ania")][1:] == [
         ("Pay Your Respect", pay, "ytKnown"),
@@ -1168,12 +1171,14 @@ def test_video_without_a_file_offers_the_closest_songs(users_env, tmp_path, musi
     monkeypatch.setattr(menu.questionary, "checkbox", lambda message, choices: _Answer([]))
     menu._create_playlist_from_folder_and_youtube("ania")
 
-    (close, close_songs), (exact, exact_songs), (none, none_songs) = on_screen[0], on_screen[1], on_screen[2]
+    # The video with nothing close isn't asked about, only added
+    assert len(on_screen) == 2
+    assert "Added automatically without a file." in capsys.readouterr().out
+    (close, close_songs), (exact, exact_songs) = on_screen[0], on_screen[1]
     assert "Closest songs in the database" in close
     assert [c.value.title for c in close_songs] == ["Załoga G"]
     assert close_songs[0].title[-1][1].endswith("%)")
     assert "Closest songs in the database" not in exact and not exact_songs
-    assert "Closest songs in the database" not in none and not none_songs
     song = music_session.query(Song).filter(Song.title == "Załoga G").one().id
     assert [(video, song_id) for _, song_id, video, _ in _saved_tracks("ania")][1:] == [
         ("ytClose", song), ("ytExact", song), ("ytNone", None)]
@@ -1749,7 +1754,8 @@ def test_pairing_by_hand_lists_the_closest_videos_and_searches_the_rest(users_en
     menu._create_playlist_from_folder_and_youtube("ania")
 
     assert seen == [(FILE_PAIR_VIDEO_CHOICES_MAX, True), (1, True)]
-    assert [t[2] for t in _saved_tracks("ania")] == ["vR"]
+    # The other videos have no song close to them, so they're added without asking
+    assert [t[2] for t in _saved_tracks("ania")] == [f"v{i}" for i in range(30)] + ["vR"]
     entries = fyp.youtube_entries(fyp.LocalSongMatcher(music_session), items[-1:])
     assert fyp.search_entries(entries, "LEON  riVer") == entries  # every word, any case
     assert fyp.search_entries(entries, "leon ocean") == fyp.search_entries(entries, "") == []

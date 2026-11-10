@@ -543,9 +543,10 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
     """Each video no file was paired with: add it as a track of its own,
     read the other way round when its title is a known artist and its artist
     isn't (offered, never done unasked), leave it out, or say it is one of
-    the closest songs, the cursor not on them. Songs turned down here aren't
-    offered again by the review after this one. Returns the videos to add,
-    None on Stop."""
+    the closest songs, the cursor not on them. A video whose song isn't found
+    and that has no closest song nor a swap to offer is added without asking.
+    Songs turned down here aren't offered again by the review after this
+    one. Returns the videos to add, None on Stop."""
     added = []
     for i, entry in enumerate(entries, 1):
         print(f"\n[{i}/{len(entries)}] {_entry_label(entry)}")
@@ -555,6 +556,12 @@ def _review_unpaired_videos(music_session, matcher: LocalSongMatcher, entries: l
         if swap_artist is not None:
             print(f"  The title looks swapped with the artist: {swap_artist.name} is in the database.")
         closest = closest_songs(matcher, entry, best_guess_min_score)
+        if entry.song is None and not closest and swap_artist is None:
+            # Nothing to choose between: adding it as read is the only sensible answer
+            added.append(entry)
+            print(f"  No file for {colored_song(entry.metadata.artist, entry.metadata.title)} found."
+                  " Added automatically without a file.")
+            continue
         if closest:
             print("  Closest songs in the database:")
         choice = questionary.select("No file is this video - what should happen with it?",
