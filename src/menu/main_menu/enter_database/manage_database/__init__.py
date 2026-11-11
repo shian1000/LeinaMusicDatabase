@@ -1,5 +1,6 @@
 from utils.common.output import GREEN, RED, RESET, error, review_header, say, warn
 from utils.ui.cover_review import review_covers
+from utils.ui.version_review import review_versions
 from utils.ui.project_review import manage_projects
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
@@ -227,6 +228,7 @@ RUN_ALL_STEPS = {
     "full_albums": review_full_albums,
     "projects": review_project_proposals,
     "covers": review_covers,
+    "versions": review_versions,
     "songless_artists": review_songless_artists,
     "albums": fill_missing_albums,
     "soundtracks": review_soundtrack_names,
@@ -292,6 +294,7 @@ def manage_database():
         "Find full albums": review_full_albums,
         "Projects": manage_projects,
         "Find covers": review_covers,
+        "Find versions": review_versions,
         "Resolve albums with several artists": review_multi_artist_albums,
         "Resolve soundtrack album names": review_soundtrack_names,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,

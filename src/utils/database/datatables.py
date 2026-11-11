@@ -76,12 +76,21 @@ class Song(Base):
     covered_artist_id = Column(Integer, index=True)
     # The original's title, when it differs or no artist can be named (migration 0021)
     covered_title = Column(String)
+    # A live / remix / acoustic... version (migration 0022) - see utils/database/versions.py.
+    # NULL kind = not a version; version_of = the original song, when music.db has it
+    version_kind = Column(String)
+    version_label = Column(String)
+    version_of = Column(Integer, index=True)
 
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")
     project = relationship("Project", back_populates="songs")
     covered_artist = relationship("Artist", primaryjoin="foreign(Song.covered_artist_id) == Artist.id",
                                   back_populates="covered_songs")
+    # No ForeignKey here either (the migration has one): a second path onto songs makes
+    # joins from other tables ambiguous
+    original = relationship("Song", primaryjoin="foreign(Song.version_of) == Song.id", remote_side="Song.id",
+                            viewonly=True)
     # Only multi-artist songs have rows here - `artist` stays the primary one.
     # Use utils.database.song_artists helpers rather than reading this directly.
     additional_artist_links = relationship(

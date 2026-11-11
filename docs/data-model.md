@@ -233,6 +233,13 @@ added_at      NOT NULL, default datetime('now')
   when no artist can be named (a traditional song); only then does the credit show it.
   Owner's choice: a game whose soundtrack is covered goes in as the covered artist ("Power Blade 2"),
   a traditional song only as `covered_title` ("Bella Ciao"), never as an artist.
+- `Song.version_kind` / `version_label` / `version_of` → `songs` (migration `0022`,
+  `utils/database/versions.py`, [ADR-0007](decisions/0007-song-versions.md)) — a version of a song
+  (`constants.VERSION_KINDS`: live, remix, acoustic, edit, extended, demo, instrumental, other; NULL =
+  not one), shown with `version_label` or the kind's label: "Boję się (Live)". The title carries no
+  marker. `version_of` is the original when music.db has it, always the original itself; the version
+  stays a row of its own (own id, video, album, plays). Handoff to the app
+  [`handoffs/song-versions-for-musicdatabaseapp.md`](handoffs/song-versions-for-musicdatabaseapp.md).
 - `Song.project_id` → `projects` (migration `0019`, `utils/database/projects.py`) — the series or
   compilation a recording was made for. `songs.artist_id` stays the real artist, the title loses the
   project's name, and the song is shown "Project: Artist - Title". `projects.aliases` holds other

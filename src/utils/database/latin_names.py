@@ -21,6 +21,7 @@ from config.constants import ALBUM_TYPE_SINGLE
 from utils.common.normalizer import normalize
 from utils.common.romanize import suggest_latin
 from utils.common.script_utils import has_non_latin
+from utils.common.version_names import title_with_version
 from utils.database.datatables import Album, Artist, Song
 from utils.common.artist_credits import split_synonyms
 
@@ -87,8 +88,10 @@ def artist_synonyms(artist) -> list[str]:
 
 
 def song_titles(song) -> list[str]:
-    """The song's title and, if set, its Latin form."""
-    return [t for t in (song.title, getattr(song, "title_latin", None)) if t]
+    """The song's title, its Latin form if set, and a version's title with its
+    marker ("Boję się (Live)", version_names.title_with_version())."""
+    marked = title_with_version(song) if getattr(song, "version_kind", None) else None
+    return [t for t in (song.title, getattr(song, "title_latin", None), marked) if t]
 
 
 def keep_latin_on_merge(keep, drop) -> None:

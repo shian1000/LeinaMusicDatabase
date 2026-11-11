@@ -67,6 +67,7 @@ RUN_ALL_STEP_LABELS = {
     "full_albums": "Find full albums",
     "projects": "Projects: find songs to mark",
     "covers": "Find covers",
+    "versions": "Find versions",
     "songless_artists": "Remove artists without songs",
     "albums": "Fill missing albums",
     "soundtracks": "Resolve soundtrack album names",
@@ -317,6 +318,29 @@ ALBUM_TYPES = (ALBUM_TYPE_ALBUM, ALBUM_TYPE_EP, ALBUM_TYPE_SINGLE, ALBUM_TYPE_CO
 SONG_KIND_FULL_ALBUM = "full_album"
 SONG_KINDS = (SONG_KIND_FULL_ALBUM,)
 SONG_KIND_LABELS = {None: "song", SONG_KIND_FULL_ALBUM: "full album"}
+# songs.version_kind (migration 0022, utils/database/versions.py): what kind of version a
+# song row is, NULL = not a version. The values are part of the phone contract
+# (docs/handoffs/song-versions-for-musicdatabaseapp.md); the label is shown when the
+# song has no version_label of its own: "Dziwny jest ten świat (Live)".
+VERSION_LIVE = "live"
+VERSION_REMIX = "remix"
+VERSION_ACOUSTIC = "acoustic"
+VERSION_EDIT = "edit"
+VERSION_EXTENDED = "extended"
+VERSION_DEMO = "demo"
+VERSION_INSTRUMENTAL = "instrumental"
+VERSION_OTHER = "other"
+VERSION_KIND_LABELS = {
+    VERSION_LIVE: "Live",
+    VERSION_REMIX: "Remix",
+    VERSION_ACOUSTIC: "Acoustic",
+    VERSION_EDIT: "Edit",
+    VERSION_EXTENDED: "Extended",
+    VERSION_DEMO: "Demo",
+    VERSION_INSTRUMENTAL: "Instrumental",
+    VERSION_OTHER: "Version",
+}
+VERSION_KINDS = tuple(VERSION_KIND_LABELS)
 # A recording at least this long (a library file, a YouTube video) may be a
 # whole album: a candidate in the review, and a full album's YouTube search
 # takes only videos this long. A file or video this long may match a song too
@@ -410,6 +434,8 @@ TAG_KIND_MARKER = "marker"
 PROJECT_CHECKED_TAG = "project_checked"
 # Marker of songs Manage database -> "Find covers" has looked at
 COVER_CHECKED_TAG = "cover_checked"
+# Marker of songs Manage database -> "Find versions" has looked at
+VERSION_CHECKED_TAG = "version_checked"
 
 # What the owner can allow a user (main menu -> Users -> Permissions), kept
 # in that user's account.json. Names are part of the phone contract

@@ -36,10 +36,11 @@ this index is the map of everything else.
   [ADR-0005](decisions/0005-one-name-cleanup.md) (names cleaned in one place - `sanitize/` -
   by switches the same for every source, in one "extract first, then remove" order, what a title
   says kept in an in-memory `SongEntry`, featured artists out of titles),
-  and [ADR-0006](decisions/0006-lite-sharing-server.md) (a plan, with its base running in `wired/`: MusicDatabaseWired,
+  [ADR-0006](decisions/0006-lite-sharing-server.md) (a plan, with its base running in `wired/`: MusicDatabaseWired,
   a public FastAPI sharing server on a shared standard-library core, the same API as today's server,
   working with this program as MusicDatabaseHomeServer, every imported library approved by the owner
-  and enforced by an allow-list test).
+  and enforced by an allow-list test), and [ADR-0007](decisions/0007-song-versions.md) (versions of a
+  song - live, remix, acoustic - as rows of their own linked to the original).
   Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records

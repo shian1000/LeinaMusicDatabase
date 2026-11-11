@@ -1982,23 +1982,26 @@ def test_punctuation_only_title_matches_only_itself(music_session):
     assert find_existing_song(":(", [other, face]) is None
 
 
-def test_new_song_added_after_rejecting_the_one_found(users_env, tmp_path, music_session, monkeypatch):
+def test_a_version_is_added_without_offering_the_original(users_env, tmp_path, music_session, monkeypatch):
     users.create_user("ania", "secret1")
     hey = music_session.query(Artist).filter(Artist.name == "Hey").one()
     folder = tmp_path / "music"
     folder.mkdir()
     _id3_file(folder / "x.mp3")
-    # "Karma (live)" loosely is the "Karma" already there - but it's another recording
+    # "Karma (live)" is another recording than the "Karma" already there: never offered
+    # for it (song_kinds.songs_for_entry()), added as its live version
     menu, asked = _menu_for_folder(monkeypatch, music_session, folder,
                                    {"x.mp3": {"artist_name": "Nobody", "title": "Unknown"}},
                                    ["Add it to the database as a new song"],
                                    texts={"Artist:": "Hey", "Title:": "Karma (live)"},
-                                   confirms=[False, True, False])
+                                   confirms=[True, False])
     menu._create_playlist_from_folder("ania")
 
-    assert asked[:2] == ["Use this song?", "Add it as a new song instead?"]
-    assert sorted(s.title for s in music_session.query(Song).filter(Song.artist_id == hey.id)) == [
-        "Karma", "Karma (live)", "Teksański"]
+    assert asked[:1] == ["Add this song to the database?"]
+    songs = music_session.query(Song).filter(Song.artist_id == hey.id).order_by(Song.id).all()
+    studio, live = [s for s in songs if s.title == "Karma"]
+    assert (live.version_kind, live.version_of) == ("live", studio.id) and studio.version_kind is None
+    assert sorted(s.title for s in songs) == ["Karma", "Karma", "Teksański"]
 
 
 def test_trailing_year_in_the_tag_title_is_ignored(music_session):

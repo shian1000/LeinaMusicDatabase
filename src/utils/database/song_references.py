@@ -99,10 +99,20 @@ def _next_song_id(session) -> int:
 def _before_flush(session, flush_context, instances) -> None:
     logged = {c.old_song_id for c in session.new if isinstance(c, SongIdChange)}
     logged |= session.info.get(_MERGED_KEY, set())
+    deleted_ids = set()
     for obj in list(session.deleted):
-        if isinstance(obj, Song) and obj.id is not None and obj.id not in logged:
-            session.add(SongIdChange(old_song_id=obj.id, new_song_id=None))
-            logged.add(obj.id)
+        if isinstance(obj, Song) and obj.id is not None:
+            deleted_ids.add(obj.id)
+            if obj.id not in logged:
+                session.add(SongIdChange(old_song_id=obj.id, new_song_id=None))
+                logged.add(obj.id)
+    if deleted_ids:
+        # Versions of a deleted original are left without one (a merge moved them already)
+        with session.no_autoflush:
+            for version in session.query(Song).filter(Song.version_of.in_(deleted_ids)):
+                # The query reads the stored value; a merge may have moved it in memory
+                if version.version_of in deleted_ids:
+                    version.version_of = None
     if logged:
         session.info[_LOGGED_KEY] = True
 

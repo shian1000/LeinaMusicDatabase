@@ -13,6 +13,7 @@ from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
 from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
 from utils.common.sanitize.text import strip_trailing_junk_suffix
+from utils.common.version_names import title_with_version
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
 from utils.database.latin_names import artist_synonyms, song_titles
 from utils.database.song_artists import song_all_artists, song_main_artists
@@ -391,6 +392,11 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     if metadata.project_whole:
         set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM, file_under_album=False)
     add_db_entry(new_song_obj, session)
+    # "Boję się (Live)": a version, titled without the marker, of the artist's
+    # "Boję się" when there is one - kept apart from it when matching
+    from sqlalchemy.orm import object_session
+    from utils.database.versions import mark_new_song_version
+    mark_new_song_version(object_session(new_song_obj), new_song_obj)
     if metadata.project:
         from sqlalchemy.orm import object_session
         from utils.database.projects import project_named, set_song_project
@@ -466,7 +472,8 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
         # is in every title - only the very same characters are this song
         raw = " ".join((title or "").split()).casefold()
         return next((s for s in artist_songs if " ".join(s.title.split()).casefold() == raw), None) if raw else None
-    exact = next((s for s in artist_songs if normalize(s.title) == key), None)
+    # A version is compared with its marker too: "Boję się (Live)" is the live "Boję się"
+    exact = next((s for s in artist_songs if key in {normalize(s.title), normalize(title_with_version(s))}), None)
     if exact is None and key:
         exact = next((s for s in artist_songs if normalize(getattr(s, "title_latin", None) or "") == key), None)
     if exact is None:
@@ -482,7 +489,7 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
         exact = next((s for s in artist_songs if is_full_album(s) and normalize(s.title) == album_key), None)
     if exact is not None:
         return exact
-    return next((s for s in artist_songs if key in normalize(s.title)), None)
+    return next((s for s in artist_songs if key in normalize(title_with_version(s))), None)
 
 
 # What separates an artist from the title inside a tag's title field

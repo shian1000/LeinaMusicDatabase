@@ -25,8 +25,10 @@ from config.constants import (
     SONG_KIND_FULL_ALBUM,
     SONG_KIND_LABELS,
     SONG_KINDS,
+    VERSION_OTHER,
 )
 from utils.common.normalizer import normalize
+from utils.common.version_names import read_version
 from utils.common.project_names import is_project_of
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
@@ -85,14 +87,41 @@ def songs_for_entry(songs: list, title: str | None, duration_s: int | None = Non
     Desk recording isn't the studio song of that title - and, for an entry that
     looks like a whole album, full albums (and rows whose own title says they
     are one) first, then the rest; otherwise every song but the full albums.
-    Within a project a whole set is matched by its title alone."""
+    Within a project a whole set is matched by its title alone. Versions
+    (songs.version_kind) only for an entry whose title marks one - of that
+    kind, the same marker first - and never for an entry that doesn't: "Boję
+    się (Live)" isn't the studio "Boję się". A title stored with its marker
+    still (not looked at by "Find versions" yet) counts as that version."""
     songs = [s for s in songs if is_project_of(s, project)]
+    songs = _songs_of_version(songs, title)
     if project:
         return songs
     if not looks_like_full_album(title, duration_s):
         return [s for s in songs if not is_full_album(s)]
     albums = [s for s in songs if is_full_album(s) or title_has_full_album_marker(s.title)]
     return albums + [s for s in songs if s not in albums]
+
+
+def _songs_of_version(songs: list, title: str | None) -> list:
+    wanted = read_version(title)
+    if wanted is None:
+        return [s for s in songs if not getattr(s, "version_kind", None)]
+
+    def version_of(song) -> tuple:
+        if getattr(song, "version_kind", None):
+            return song.version_kind, normalize(song.version_label or "")
+        stored = read_version(song.title)
+        return (stored.kind, normalize(stored.label or "")) if stored else (None, "")
+
+    label = normalize(wanted.label or "")
+    same_kind = [(song, version_of(song)) for song in songs]
+    same_kind = [(song, version[1]) for song, version in same_kind if version[0] == wanted.kind]
+    same_marker = [song for song, own in same_kind if own == label]
+    if wanted.kind == VERSION_OTHER:
+        # A plain "version" may be anything ("Best Version Ever"): such a version
+        # first, then every song that isn't one
+        return same_marker + [s for s in songs if not getattr(s, "version_kind", None) and s not in same_marker]
+    return same_marker + [song for song, own in same_kind if own != label]
 
 
 def set_song_kind(songs: list[Song], kind: str | None, file_under_album: bool = True) -> list[Song]:

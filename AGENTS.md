@@ -214,6 +214,20 @@ non-trivial work in that area.
   in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
   ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
   `reassign_additional_artist_links()`.
+  `versions.py` — `songs.version_kind` / `version_label` / `version_of` (migration 0022,
+  [ADR-0007](docs/decisions/0007-song-versions.md)): a live / remix / acoustic... version stays a row of
+  its own, titled without the marker, shown "Title (Marker)" (`version_names.title_with_version()`, also
+  inside `title_with_cover()`, so in files too); `version_of` is the original when music.db has it, never
+  another version. A marker is read by `utils/common/version_names.py` (`read_version()`; "Radio Edit",
+  "Remastered", "Bonus track" name a release, not a version): a new song gets it in `create_song_entry()`,
+  stored ones through Manage database → "Find versions" (`utils/ui/version_review.py`, `version_checked`
+  marker), Song actions → "Set version" by hand. `song_kinds.songs_for_entry()` keeps versions and
+  originals apart for every matcher (a title still holding a marker counts as that version). A plain
+  "version" marker (kind `other`) never narrows a match nor marks a new song: it is often part of the
+  title ("Toccata (Best Version Ever)" lost its candidates that way in a folder-playlist test);
+  `song_titles()` and `find_existing_song()` compare the marked title too; duplicates are keyed by it.
+  Merges move the versions (`move_versions()`), a deleted original is dropped from its versions
+  (`song_references`' flush listener).
   `soundtrack_albums.py` — a soundtrack's album is "<work> OST" (`utils/common/soundtrack_names.py`
   reads the work from a name): guesses for artist names like "Chrono Cross Music" (reviewed at the end
   of Albums, `utils/ui/soundtrack_review.py`) and Manage database → "Resolve soundtrack album names"
@@ -736,7 +750,7 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
-  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks

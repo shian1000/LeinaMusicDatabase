@@ -48,11 +48,14 @@ from utils.database.latin_names import keep_latin_on_merge
 from utils.common.artist_credits import propose_artist_split
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists, song_all_artists
 from utils.database.song_references import record_song_merge
+from utils.common.version_names import read_version, title_with_version
+from utils.database.versions import move_versions
 from utils.common.json_file import read_json, write_json
 
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
-                  "track_number", "disc_number", "project_id", "covered_artist_id", "covered_title")
+                  "track_number", "disc_number", "project_id", "covered_artist_id", "covered_title",
+                  "version_kind", "version_label", "version_of")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 
@@ -136,7 +139,7 @@ def find_duplicate_groups(session, key=duplicate_key) -> list[list]:
     artist. A project's recording isn't a duplicate of the studio song."""
     groups = defaultdict(list)
     for song in session.query(Song).order_by(Song.id).all():
-        groups[(song.artist_id, song.kind, song.project_id, key(song.title))].append(song)
+        groups[(song.artist_id, song.kind, song.project_id, key(title_with_version(song)))].append(song)
     found = []
     for group in groups.values():
         if len(group) > 1:
@@ -182,7 +185,7 @@ def find_cross_artist_groups(session, skip_ids=frozenset()) -> list[list]:
     buckets = defaultdict(list)
     for song in session.query(Song).order_by(Song.id).all():
         if song.id not in skip_ids:
-            buckets[(song.kind, song.project_id, duplicate_key(song.title))].append(song)
+            buckets[(song.kind, song.project_id, duplicate_key(title_with_version(song)))].append(song)
     found = []
     for songs in buckets.values():
         if len({s.artist_id for s in songs}) < 2:
@@ -224,14 +227,14 @@ def merge_candidates(session, song: Song, limit: int = MERGE_CANDIDATES_MAX) -> 
     "Svefn-G-Englar"); on the same album, a title containing the other's
     ("May I Stand Unshaken" / "Unshaken") or artist and title swapped ("The
     caesars" by "Jerk it out" / "Jerk It Out" by "Caesars"). Read-only."""
-    title, artist = duplicate_key(song.title), normalize(song.artist.name if song.artist else "")
-    joined = {duplicate_key(f"{song.artist.name}{sep}{song.title}") for sep in ("-", " ")} if artist else set()
+    title, artist = duplicate_key(title_with_version(song)), normalize(song.artist.name if song.artist else "")
+    joined = {duplicate_key(f"{song.artist.name}{sep}{title_with_version(song)}") for sep in ("-", " ")} if artist else set()
     album = normalize(song.album or "") if song.album and song.album.strip() != SINGLES_ALBUM else ""
     ranked = []
     for other in session.query(Song).filter(Song.id != song.id).order_by(Song.id):
         if other.kind != song.kind or other.project_id != song.project_id:
             continue
-        other_title = duplicate_key(other.title)
+        other_title = duplicate_key(title_with_version(other))
         if other_title and other_title == title:
             ranked.append((0, other.id, other))
         elif other_title and other_title in joined:
@@ -273,6 +276,9 @@ def merge_songs(session, kept: Song, dropped: Song) -> None:
     for field in _FILLED_FIELDS:
         if not getattr(kept, field) and getattr(dropped, field):
             setattr(kept, field, getattr(dropped, field))
+    # A title still holding the marker of the version it became: "Song (Live)" live
+    if kept.version_kind and (reading := read_version(kept.title)) and reading.kind == kept.version_kind:
+        kept.title = reading.title
     keep_latin_on_merge(kept, dropped)
     keep_genre_on_merge(kept, dropped)
     # Its own link still names this recording: kept for recognising the video
@@ -284,5 +290,6 @@ def merge_songs(session, kept: Song, dropped: Song) -> None:
             add_additional_artist(kept, artist, additional_artist_role(dropped, artist))
         except ValueError:
             pass  # already credited on the kept song
+    move_versions(session, dropped.id, kept.id)
     record_song_merge(session, dropped.id, kept.id)
     session.delete(dropped)

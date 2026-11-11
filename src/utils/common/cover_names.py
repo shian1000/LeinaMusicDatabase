@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from utils.common.normalizer import normalize
 from utils.common.title_patterns import YOUTUBE_BRACKETED
+from utils.common.version_names import title_with_version
 
 _COVER = r"(?<!\w)(?:cover|кавер)(?!\w)"
 _COVER_RE = re.compile(_COVER, re.IGNORECASE)
@@ -152,6 +153,8 @@ def cover_credit(name: str) -> str:
 def title_with_cover(song) -> str:
     """"Crazy in Love (Beyoncé cover)": how a cover's title is shown and
     written to a file, which read_cover() reads back. The original's title
-    stands in only when there's no artist: "(Bella Ciao cover)"."""
+    stands in only when there's no artist: "(Bella Ciao cover)". A version's
+    marker comes first ("Creep (Live) (Radiohead cover)", version_names)."""
+    title = title_with_version(song)
     name = covered_artist_name(song) or getattr(song, "covered_title", None)
-    return f"{song.title} {cover_credit(name)}" if name else song.title
+    return f"{title} {cover_credit(name)}" if name else title
