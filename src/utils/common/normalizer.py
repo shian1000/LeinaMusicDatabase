@@ -20,12 +20,26 @@ _SPECIAL_REPLACEMENTS = {
     "\u0111": "d",
 }
 
-# Letters that don't NFKD-decompose (see manage_youtube_playlists'
-# _fold_diacritics() for why NFKD alone can't fold these) but have one
-# unambiguous plain-Latin equivalent worth substituting directly. "\u00f8" too:
-# "\u00d8rganek" is the stylized name of Organek, whose uploads all spell it with
-# a plain "O".
+# Letters that don't NFKD-decompose ("ł" is a base letter of its own in
+# Unicode) but have one unambiguous plain-Latin equivalent worth substituting
+# directly: an ASCII-typed "Milosc" means "Miłość". "ø" too: "Ørganek"
+# is the stylized name of Organek, whose uploads all spell it with a plain "O".
 NON_DECOMPOSING_LETTER_FOLDS = str.maketrans({"\u0142": "l", "\u0141": "L", "\u00f8": "o", "\u00d8": "O"})
+
+
+def fold_diacritics(text: str) -> str:
+    """`text` without accents, one character for one - nothing else changed,
+    so a match in the folded text is at the same positions in `text`
+    (sanitize's strip_artist_from_title() relies on that). NFKD, then the
+    combining marks dropped; a character that doesn't decompose to exactly one
+    base character stays, except "ł" / "ø" (NON_DECOMPOSING_LETTER_FOLDS).
+    "Niesmiertelnosc" meets "Nieśmiertelność", "SIAMES" "SIAMÉS", and the typo
+    "набіраи" "набірай" ("й" is "и" + a breve)."""
+    def fold(ch: str) -> str:
+        base = "".join(c for c in unicodedata.normalize("NFKD", ch) if not unicodedata.combining(c))
+        return base if len(base) == 1 else ch
+    return "".join(map(fold, text)).translate(NON_DECOMPOSING_LETTER_FOLDS)
+
 
 # Every apostrophe-like character, for normalize() (dropped, or a space) and
 # normalize_apostrophes() (one canonical "'") alike

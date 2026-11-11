@@ -22,6 +22,23 @@ def tick_items(question: str, items: list, label, checked=False) -> list | None:
     return None if picked is None else [items[i] for i in picked]
 
 
+def type_each(items: list, describe, question: str, save, default=None) -> int:
+    """One text question per item, below `describe(item)` (rich markup) and
+    its position; `save(item, typed)` for each answer - empty skips that item,
+    Ctrl+C stops. Returns how many were saved. `default(item)` fills it in."""
+    from utils.common.output import show
+    saved = 0
+    for position, item in enumerate(items, 1):
+        show(f"\n[{position}/{len(items)}] {describe(item)}")
+        typed = questionary.text(question, default=default(item) if default else "").ask()
+        if typed is None:
+            break
+        if typed.strip():
+            save(item, typed)
+            saved += 1
+    return saved
+
+
 def ask_typed(label: str, question: str, shown: str | None = None) -> str | None:
     """Show `shown` (else `label`), put `label` on the clipboard to search
     for and ask for a value; None, after saying so, when nothing is typed."""

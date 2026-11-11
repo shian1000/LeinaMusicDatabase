@@ -124,23 +124,29 @@ def _show_ours(case) -> None:
 
 
 def _show_case(case, position: str) -> None:
+    """A dead link case, or a found link one (no dead_video_id)."""
     song = case.song
-    show(f"\n{position} [yellow]{escape(song.artist.name)} - {escape(song.title)}[/yellow]  (song #{song.id})")
+    show(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
     if case.title_differs:
         shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
         show(f"    [red]The request showed it as[/red] {escape(shown)}")
-    current = song.youtube_video_id or "none (cleared)"
-    dead = "[red]gone (YouTube API)[/red]" if case.dead_still_plays is False else "[dim]reported dead[/dim]"
-    show(f"    Dead link:    {_url(case.dead_video_id)}  {dead}"
-          + ("" if song.youtube_video_id == case.dead_video_id else f"  [dim](now in database: {current})[/dim]"))
-    for r in case.replacements:
+    if case.dead_video_id:
+        current = song.youtube_video_id or "none (cleared)"
+        dead = "[red]gone (YouTube API)[/red]" if case.dead_still_plays is False else "[dim]reported dead[/dim]"
+        show(f"    Dead link:    {_url(case.dead_video_id)}  {dead}"
+              + ("" if song.youtube_video_id == case.dead_video_id else f"  [dim](now in database: {current})[/dim]"))
+    else:
+        show("    Now:          [dim]no YouTube link[/dim]")
+    for i, r in enumerate(case.replacements):
         about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
-        show(f"    Suggested:    {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
-              + (f"  {about}" if about else ""))
+        latest = ("  [dim](its latest pick)[/dim]" if not case.dead_video_id and i == 0
+                  and len(case.replacements) > 1 else "")
+        show(f"    {'Suggested:  ' if case.dead_video_id else 'Leina Radio:'}  {_url(r.video_id)}  "
+             f"{_plays(case.plays.get(r.video_id))}" + (f"  {about}" if about else "") + latest)
     _show_bad(case)
     _show_ours(case)
     files = escape(describe_files({r.file_name for r in case.reports}))
-    show(f"    [dim]Reported in {files}[/dim]")
+    show(f"    [dim]{'Reported' if case.dead_video_id else 'Found'} in {files}[/dim]")
     _show_auto_note(case)
 
 
@@ -262,25 +268,6 @@ def _print_check_stats(stats: dict) -> None:
 
 # ==================== found links ====================
 
-def _show_found(case, position: str) -> None:
-    song = case.song
-    show(f"\n{position} [yellow]{escape(song_artist_label(song))} - {escape(song.title)}[/yellow]  (song #{song.id})")
-    if case.title_differs:
-        shown = ", ".join(sorted({f"{r.artist} - {r.title}" for r in case.reports}))
-        show(f"    [red]The request showed it as[/red] {escape(shown)}")
-    show("    Now:          [dim]no YouTube link[/dim]")
-    for i, r in enumerate(case.replacements):
-        about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
-        latest = "  [dim](its latest pick)[/dim]" if i == 0 and len(case.replacements) > 1 else ""
-        show(f"    Leina Radio:  {_url(r.video_id)}  {_plays(case.plays.get(r.video_id))}"
-              + (f"  {about}" if about else "") + latest)
-    _show_bad(case)
-    _show_ours(case)
-    files = escape(describe_files({r.file_name for r in case.reports}))
-    show(f"    [dim]Found in {files}[/dim]")
-    _show_auto_note(case)
-
-
 def _found_choices(case) -> list:
     return _video_choices(case, "Leina Radio's link") + [
         questionary.Choice("Wrong video - leave the song without a link (not offered again)", (REJECTED, None)),
@@ -305,7 +292,7 @@ def _review_found_links(session, requests) -> tuple[list, bool]:
     _check(open_cases, "song(s) Leina Radio found a link for")
     show(f"\n{len(open_cases)} link(s) Leina Radio found for songs without one:")
     for i, case in enumerate(open_cases, 1):
-        _show_found(case, f"[{i}/{len(open_cases)}]")
+        _show_case(case, f"[{i}/{len(open_cases)}]")
         answer = _ask(case, _found_choices(case))
         if answer == _STOP:
             return cases, True

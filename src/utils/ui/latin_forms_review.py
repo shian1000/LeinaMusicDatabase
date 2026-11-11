@@ -6,7 +6,7 @@ suggestion and need typing. Nothing is stored that the owner didn't tick
 or type."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, tick_items, type_each
 
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.latin_names import (
@@ -61,19 +61,13 @@ def _type_the_rest(candidates: list[LatinCandidate]) -> int:
     """One by one, each saved as soon as it's typed. Returns how many."""
     show("Type each Latin form (the suggestion, if any, is filled in). "
           "Leave it empty to skip that one, Ctrl+C to stop.")
-    saved = 0
-    for position, candidate in enumerate(candidates, 1):
-        show(f"\n[{position}/{len(candidates)}] [yellow]{escape(candidate.name)}[/yellow]  "
-              f"[dim]({candidate.kind}, {escape(candidate.context)})[/dim]")
-        typed = questionary.text("Latin form:", default=candidate.suggestion or "").ask()
-        if typed is None:
-            break
-        if not typed.strip():
-            continue
+
+    def save(candidate, typed):
         set_latin_form(candidate.row, typed)
         submit_global_database_session()
-        saved += 1
-    return saved
+
+    return type_each(candidates, lambda c: f"[yellow]{escape(c.name)}[/yellow]  [dim]({c.kind}, {escape(c.context)})[/dim]",
+                     "Latin form:", save, default=lambda c: c.suggestion or "")
 
 
 def fill_latin_forms() -> None:

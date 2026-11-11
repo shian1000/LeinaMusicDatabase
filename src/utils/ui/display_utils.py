@@ -1,14 +1,9 @@
-"""Display utilities for rendering rich terminal tables and information.
+"""Rich terminal tables of songs and artists."""
 
-This module provides functions to display database objects (Songs, Artists)
-in formatted tables using the rich library.
-"""
-
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List
 from utils.common.output import console
 from rich.table import Table
 from utils.database.datatables import Song, Artist
-from sqlalchemy.orm import Session
 from utils.common.debug import flog
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.song_artists import count_artist_songs, song_artist_label
@@ -18,28 +13,14 @@ from utils.common.project_names import song_project_name
 from utils.database.song_kinds import is_full_album
 
 
-def _create_table(title: str, columns: List[Tuple[str, Optional[str], Optional[str]]]) -> Table:
-    """
-    Create a formatted Rich table with specified columns.
-    
-    Args:
-        title: Title for the table
-        columns: List of (name, style, justify) tuples for each column.
-                 style and justify can be None for defaults.
-    
-    Returns:
-        Table: Configured Rich Table object ready for data rows
-    """
-    table: Table = Table(title=title)
-    for name, style, justify in columns:
-        kwargs: Dict[str, str] = {}
-        if style:
-            kwargs["style"] = style
-        if justify:
-            kwargs["justify"] = justify
-        table.add_column(name, **kwargs)
-    return table
-
+def _print_table(title: str, rows: list, columns: list) -> None:
+    """`columns`: (name, cell, rich column options) - `cell(row)` is the text."""
+    table = Table(title=title)
+    for name, _, options in columns:
+        table.add_column(name, **options)
+    for row in rows:
+        table.add_row(*(cell(row) for _, cell, _ in columns))
+    console.print(table)
 
 
 def _artist_cell(song: Song) -> str:
@@ -48,149 +29,69 @@ def _artist_cell(song: Song) -> str:
     return f"{project}: {song_artist_label(song)}" if project else song_artist_label(song)
 
 
+def _youtube_url(video_id: str | None) -> str:
+    return f"https://www.youtube.com/watch?v={video_id}" if video_id else "—"
+
+
+# The first columns of every song table
+_SONG_COLUMNS = [
+    ("Artist", _artist_cell, {"style": "cyan"}),
+    ("Title", lambda s: f"{title_with_cover(s)} [full album]" if is_full_album(s) else title_with_cover(s),
+     {"style": "magenta"}),
+    ("Album", lambda s: s.album or "—", {"style": "green"}),
+    ("Year", lambda s: str(s.year) if s.year else "—", {"justify": "right"}),
+]
+
+
 def display_songs(songs: Optional[List[Song]]) -> None:
-    """
-    Display a formatted table of songs with their properties.
-    
-    Args:
-        songs: List of Song objects to display
-    """
-    if not songs:
-        return
-    
+    if songs:
+        _print_table("Songs", songs, _SONG_COLUMNS + [
+            ("Language", lambda s: s.language or "—", {}),
+            ("Genre", lambda s: s.genre or "—", {}),
+            ("Origin", lambda s: s.artist.origin, {}),
+        ])
 
-    table: Table = _create_table("Songs", [
-        ("Artist", "cyan", None),
-        ("Title", "magenta", None),
-        ("Album", "green", None),
-        ("Year", None, "right"),
-        ("Language", None, None),
-        ("Genre", None, None),
-        ("Origin", None, None),
-    ])
-
-    for song in songs:
-        table.add_row(
-            _artist_cell(song),
-            f"{title_with_cover(song)} [full album]" if is_full_album(song) else title_with_cover(song),
-            song.album or "—",
-            str(song.year) if song.year else "—",
-            song.language or "—",
-            song.genre or "—",
-            song.artist.origin,
-        )
-
-    console.print(table)
 
 def display_song_links(songs: Optional[List[Song]]) -> None:
-    """
-    Display the songs' links: the library file(s) indexed for each song in
-    files.db, its YouTube video and its Spotify page.
-
-    Args:
-        songs: List of Song objects to display
-    """
+    """The songs' library file(s) indexed in files.db, YouTube video, music
+    video and Spotify page."""
     if not songs:
         return
-
     from utils.database.files_index import song_file_paths
     from config.constants import NO_VIDEO_SENTINEL
-
-
-    table: Table = _create_table("Song links", [
-        ("Artist", "cyan", None),
-        ("Title", "magenta", None),
-        ("Album", "green", None),
-        ("Year", None, "right"),
-        ("Library file", None, None),
-        ("YouTube", None, None),
-        ("Music video", None, None),
-        ("Spotify", None, None),
-    ])
-    # Paths and URLs have no spaces to wrap at - fold them instead of cutting them off with "…"
-    for column in table.columns[4:]:
-        column.overflow = "fold"
 
     try:
         paths = song_file_paths([song.id for song in songs])
     except Exception as exc:
         flog(f"Couldn't read files.db: {type(exc).__name__}: {exc}")
         paths = {}
-
-    for song in songs:
-        video_id = song.youtube_video_id
-        if video_id == NO_VIDEO_SENTINEL:
-            youtube = "N/A (no video)"
-        elif video_id:
-            youtube = f"https://www.youtube.com/watch?v={video_id}"
-        else:
-            youtube = "—"
-        table.add_row(
-            song_artist_label(song),
-            song.title,
-            song.album or "—",
-            str(song.year) if song.year else "—",
-            "\n".join(paths.get(song.id, [])) or "—",
-            youtube,
-            f"https://www.youtube.com/watch?v={song.music_video_youtube_id}" if song.music_video_youtube_id else "—",
-            song.spotify_url or "—",
-        )
-
-    console.print(table)
-
-def display_artists(artists: Optional[List[Artist]]) -> None:
-    """
-    Display a formatted table of artists with their song counts.
-    
-    Queries the database to count songs per artist and displays
-    artist information in a formatted table.
-    
-    Args:
-        artists: List of Artist objects to display
-    """
-    if not artists:
-        return
-    
-
-    table: Table = _create_table("Artists", [
-        ("Name", "cyan", None),
-        ("Songs", None, None),
-        ("Origin", None, None),
-        ("Synonyms", None, None),
+    # Paths and URLs have no spaces to wrap at - fold them instead of cutting them off with "…"
+    fold = {"overflow": "fold"}
+    _print_table("Song links", songs, _SONG_COLUMNS + [
+        ("Library file", lambda s: "\n".join(paths.get(s.id, [])) or "—", fold),
+        ("YouTube", lambda s: "N/A (no video)" if s.youtube_video_id == NO_VIDEO_SENTINEL
+         else _youtube_url(s.youtube_video_id), fold),
+        ("Music video", lambda s: _youtube_url(s.music_video_youtube_id), fold),
+        ("Spotify", lambda s: s.spotify_url or "—", fold),
     ])
 
-    music_session: Session
+
+def display_artists(artists: Optional[List[Artist]]) -> None:
+    if not artists:
+        return
     music_session, _ = require_global_database_sessions()
+    _print_table("Artists", artists, [
+        ("Name", lambda a: a.name, {"style": "cyan"}),
+        ("Songs", lambda a: str(count_artist_songs(music_session, a.id)), {}),
+        ("Origin", lambda a: a.origin, {}),
+        ("Synonyms", lambda a: a.synonyms or "—", {}),
+    ])
 
-    for artist in artists:
-        songs_count: int = count_artist_songs(music_session, artist.id)
-        
-        table.add_row(
-            artist.name,
-            str(songs_count),
-            artist.origin,
-            artist.synonyms or "—",
-        )
-
-    console.print(table)
 
 def display_songs_with_tags(songs: List[Song]) -> None:
     """A table of `songs` with their tags (tag.db). The menu's global
     sessions stay open - other screens still hold their objects."""
     tags_by_song = tag_names_by_song(song.id for song in songs)
-    table = _create_table("Songs & Tags", [
-        ("Artist", "cyan", None),
-        ("Title", "magenta", None),
-        ("Album", "green", None),
-        ("Year", None, "right"),
-        ("Tags", "yellow", None),
+    _print_table("Songs & Tags", songs, _SONG_COLUMNS + [
+        ("Tags", lambda s: ", ".join(tags_by_song.get(s.id, [])) or "—", {"style": "yellow"}),
     ])
-    for song in songs:
-        table.add_row(
-            _artist_cell(song),
-            title_with_cover(song),
-            song.album or "—",
-            str(song.year) if song.year else "—",
-            ", ".join(tags_by_song.get(song.id, [])) or "—",
-        )
-    console.print(table)

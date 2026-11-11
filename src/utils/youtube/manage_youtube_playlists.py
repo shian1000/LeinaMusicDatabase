@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import unicodedata
 import sys
 import time
 from difflib import SequenceMatcher
@@ -22,7 +21,7 @@ from googleapiclient.errors import HttpError
 from utils.youtube.yt_cache import save_cache, song_key
 from utils.youtube.yt_cache import load_cache, init_cache, clear_cache, update_cache_songs
 from utils.common.text_utils import remove_brackets, similarity, scaled_similarity_threshold
-from utils.common.normalizer import APOSTROPHES, NON_DECOMPOSING_LETTER_FOLDS, normalize
+from utils.common.normalizer import APOSTROPHES, fold_diacritics, normalize
 from utils.common.title_patterns import BRACKETED
 from utils.youtube.transliteration import is_transliterable, transliterate
 from utils.database.database_sessions import submit_global_database_session
@@ -578,50 +577,6 @@ def _drop_punctuation(text: str) -> str:
     return dropped or text
 
 
-def _fold_diacritics(text: str) -> str:
-    """Strip accents/diacritics via Unicode NFKD decomposition + dropping
-    combining marks — the same technique `normalizer.normalize()` already
-    uses elsewhere in the app, reused here as its own relevance signal
-    rather than pulling in that function's other transformations (full
-    punctuation removal, lowercasing done elsewhere already) that aren't
-    wanted at this stage.
-
-    Real case: DB title "Niesmiertelnosc" (ASCII, missing the accents) vs
-    the real "Nieśmiertelność" — exact containment can't match across a
-    missing "ś"/"ć", and the fallback similarity() ratio, further diluted
-    by an "ABRADAB - " prefix on the candidate side, dropped low enough
-    (0.6) to lose to an unrelated "(Live)" recording (0.8). Folded, both
-    become "niesmiertelnosc" and match exactly.
-
-    This isn't limited to Latin accents — NFKD decomposition also covers
-    some same-script letter variants that read as "the same base letter
-    plus a mark" under Unicode, even when they don't look like an accent to
-    an English speaker. Real case: DB title "...набіраи" (a typo, Cyrillic
-    "и") vs the real "...набірай" (Cyrillic "й", short I) — "й" decomposes
-    to "и" + a combining breve, so folding makes the typo and the correct
-    spelling identical too, without a Cyrillic-specific rule.
-
-    Not every "looks like a diacritic" letter decomposes this way, though —
-    Polish "ł" (U+0142) has no NFKD decomposition at all; it's a genuinely
-    separate base letter in Unicode, the same non-decomposing shape already
-    documented for Belarusian "і" (see `NIZKIZ - Правілы` above) — but unlike
-    "і", an ASCII-typed DB title dropping it almost always means plain "l"
-    (there's no ambiguity the way there can be across scripts), so a direct
-    substitution table closes this specific gap safely. Real case:
-    `Krzysztof Zalewski - Milosc Milosc` (DB, ASCII) vs the real "Miłość
-    Miłość" — NFKD folds "ość"'s "ś" to "s" but leaves "ł" untouched, so the
-    folded candidate stayed "Miłosc" (still containing "ł"), missing an exact
-    match against the DB's plain "Milosc" — this bug then compounded with
-    every decorated candidate's own artist-name prefix diluting the
-    similarity() fallback, so only the shortest, bare-titled candidate (a
-    "(Live)" upload happening to have no artist prefix at all) got close
-    enough to clear the relevance bar.
-    """
-    decomposed = unicodedata.normalize("NFKD", text)
-    folded = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return folded.translate(NON_DECOMPOSING_LETTER_FOLDS)
-
-
 def _text_containment(expected: str, candidate: str) -> float:
     """How much of `expected` shows up intact inside `candidate`.
 
@@ -769,7 +724,7 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str, s
     factored out so score_result() can take the max across the DB artist
     name and any known synonyms without duplicating this logic per name.
 
-    Also tries a diacritic-folded comparison (`_fold_diacritics()`, the same
+    Also tries a diacritic-folded comparison (`fold_diacritics()`, the same
     helper title relevance already uses) — unlike title relevance, this
     wasn't previously applied here at all. Real case: `La Vida Bohème -
     Radio Capital` (DB has the accented "è") — the real official upload is
@@ -793,11 +748,11 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str, s
     """
     expected = _relevance_text(name)
     expected_normalized = _normalize_multi_artist_punctuation(expected)
-    expected_folded = _fold_diacritics(expected)
+    expected_folded = fold_diacritics(expected)
     relevance = 0.0
     if expected and candidate_clean:
         candidate_normalized = _normalize_multi_artist_punctuation(candidate_clean)
-        candidate_folded = _fold_diacritics(candidate_clean)
+        candidate_folded = fold_diacritics(candidate_clean)
         relevance = max(
             similarity(expected, candidate_clean),
             _text_containment(expected, candidate_clean),
@@ -808,7 +763,7 @@ def _artist_relevance_for(name: str, candidate_clean: str, channel_clean: str, s
         )
     if expected and channel_clean:
         channel_normalized = _normalize_multi_artist_punctuation(channel_clean)
-        channel_folded = _fold_diacritics(channel_clean)
+        channel_folded = fold_diacritics(channel_clean)
         relevance = max(
             relevance,
             similarity(expected, channel_clean),
@@ -838,7 +793,7 @@ def _artist_name_present(name: str, haystack: str) -> bool:
         return False
     return (
         _text_containment(expected, haystack) >= 1.0
-        or _text_containment(_fold_diacritics(expected), _fold_diacritics(haystack)) >= 1.0
+        or _text_containment(fold_diacritics(expected), fold_diacritics(haystack)) >= 1.0
     )
 
 
@@ -1028,8 +983,8 @@ def score_result(
         # Punctuation goes too: ranking is lexicographic, so a Topic upload
         # missing one comma ("Jeżeli kochasz, to..." -> 0.986) lost to an
         # exactly-punctuated album reupload before its quality was compared.
-        expected_title_normalized = _collapse_repeated_letters(_fold_diacritics(_drop_punctuation(expected_title)))
-        candidate_clean_normalized = _collapse_repeated_letters(_fold_diacritics(_drop_punctuation(candidate_clean)))
+        expected_title_normalized = _collapse_repeated_letters(fold_diacritics(_drop_punctuation(expected_title)))
+        candidate_clean_normalized = _collapse_repeated_letters(fold_diacritics(_drop_punctuation(candidate_clean)))
         relevance = max(
             similarity(expected_title, candidate_clean),
             _text_containment(expected_title, candidate_clean),

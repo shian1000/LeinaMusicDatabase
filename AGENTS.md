@@ -572,7 +572,8 @@ non-trivial work in that area.
   `compose_decomposed_letters()` for every column) and a review step's proposals
   (`review_step_proposals()` / `apply_proposals()`). The menu only prints and asks.
 - `src/utils/common/normalizer.py` — the one canonical string `normalize()` / `compare()`. Never
-  write a second one. `composed()` is the NFC form every stored name is kept in: the models'
+  write a second one. `fold_diacritics()` is the one accent fold that keeps every other character
+  (one for one, so positions map back; YouTube scoring and sanitize's artist stripping share it). `composed()` is the NFC form every stored name is kept in: the models'
   `@validates` (`datatables.COMPOSED_FIELDS`) compose each ORM write, Clean names the older rows
   (decomposed letters from YouTube titles / macOS file names defeat MusicBrainz's search;
   `docs/data-model.md`). `sanitize.text.fix_cp1250_mojibake()` repairs Polish tags misread as Latin-1 / Windows-1252 ("Ma³pa"),
@@ -897,8 +898,9 @@ non-trivial work in that area.
   A checkbox list of items goes through `prompts.tick_items(question, items, label, checked=)`
   (the ticked items back, None on cancel); a test fakes it by patching `questionary.checkbox` on
   the `questionary` module itself, not on the review module. Filling a value in by hand after a
-  lookup found none ("copied to the clipboard, empty = skip") is `prompts.ask_typed()`, and a pick
-  from a list ending in "Back" is `prompts.choose()` (None for Back and for Esc / Ctrl+C alike).
+  lookup found none ("copied to the clipboard, empty = skip") is `prompts.ask_typed()`, typing a value
+  for each of several items in turn ("[3/12]", empty = skip, Ctrl+C = stop) is `prompts.type_each()`,
+  and a pick from a list ending in "Back" is `prompts.choose()` (None for Back and for Esc / Ctrl+C alike).
 - The app's own small JSON files (settings, start-up state, ignore lists) are read and written
   with `utils/common/json_file.read_json(path, default, what)` / `write_json(path, value,
   atomic=)` - a missing, broken or wrongly typed file reads as `default`; `atomic` for one read

@@ -3,7 +3,6 @@ step runs when, for which source and in which order is pipeline.py. Pure
 text: no settings, no database."""
 import html
 import re
-import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from config.constants import (
     SITE_NAME_TLDS,
     TITLE_JUNK_SUFFIXES,
 )
-from utils.common.normalizer import NON_DECOMPOSING_LETTER_FOLDS
+from utils.common.normalizer import fold_diacritics
 from utils.common.title_patterns import PIPE, YEAR, YOUTUBE_BRACKET_PAIRS, YOUTUBE_BRACKETED
 
 
@@ -508,20 +507,6 @@ def strip_junk_suffix(title: str) -> str:
 _ARTIST_WRAPPING_BRACKETS = YOUTUBE_BRACKET_PAIRS
 
 
-def fold_char(ch: str) -> str:
-    """Strip accents off a single character via NFKD decomposition, falling
-    back to the original character when decomposition doesn't yield exactly
-    one base character - keeps a 1:1 length correspondence with the input,
-    which strip_artist_from_title() relies on to map a match back to
-    original-string positions. "ł" / "ø", which have no decomposition, are
-    folded with the same table as the search's _fold_diacritics(), so "Łona"
-    is "Lona" here too.
-    """
-    decomposed = unicodedata.normalize("NFKD", ch)
-    base = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return (base if len(base) == 1 else ch).translate(NON_DECOMPOSING_LETTER_FOLDS)
-
-
 _LEADING_QUOTES = " \"'“”„"
 # What follows an artist name the title starts with ("" = nothing more)
 _AFTER_ARTIST = ("-", "–", "—", ":", "/", "|", '"', "“", "„", "'", "")
@@ -534,9 +519,7 @@ def strip_artist_from_title(title: str, artist: str) -> str:
     video title already includes the artist name, redundant once it's
     already stored separately as the song's artist).
 
-    Diacritic-insensitive on both sides (via fold_char - same technique as
-    manage_youtube_playlists.py's _fold_diacritics, done per-character here
-    to keep a position mapping back to the original title) since the
+    Diacritic-insensitive on both sides (fold_diacritics()) since the
     channel name and the same name embedded in a title aren't always spelled
     identically, as in the SIAMES/SIAMÉS case above. Only removes a whole
     word/phrase match (not a substring of some other word), and leaves the
@@ -545,8 +528,8 @@ def strip_artist_from_title(title: str, artist: str) -> str:
     if not title or not artist:
         return title
 
-    folded_title = "".join(fold_char(c) for c in title)
-    folded_artist = "".join(fold_char(c) for c in artist).strip()
+    folded_title = fold_diacritics(title)
+    folded_artist = fold_diacritics(artist).strip()
     if not folded_artist:
         return title
 

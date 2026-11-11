@@ -19,7 +19,7 @@ from utils.youtube.manage_youtube_playlists import (
     video_durations_via_api,
 )
 from utils.common.artist_credits import feat_credits, split_feat_credits
-from utils.common.normalizer import name_key, split_artist_title
+from utils.common.normalizer import fold_diacritics, name_key, split_artist_title
 from utils.common.soundtrack_names import soundtrack_work
 from utils.common.title_patterns import FEAT_WORD, PIPE
 from utils.discoveries.import_engine import ImportResult, find_matching_artist, run_import_batch
@@ -36,7 +36,6 @@ from utils.common.sanitize import (
     TITLE,
     VERSION_MARKER_RE,
     YOUTUBE_TITLE_JUNK_MARKER_ANYWHERE_RE,
-    fold_char,
     sanitize_field,
     sanitize_raw,
     strip_hashtags,
@@ -360,7 +359,7 @@ def _contains_whole_word(folded_haystack: str, needle: str) -> bool:
     approach as sanitize.strip_artist_from_title(), reused here to confirm a
     search result's own artist/track genuinely appear in the source title
     rather than being an unrelated same-named release."""
-    folded_needle = "".join(fold_char(c) for c in needle).strip()
+    folded_needle = fold_diacritics(needle).strip()
     if not folded_needle:
         return False
     return bool(re.search(r"\b" + re.escape(folded_needle) + r"\b", folded_haystack, re.IGNORECASE))
@@ -372,8 +371,8 @@ def _without_leading_channel(title: str, channel: str) -> str:
     Only for a title the channel's name is the artist of: sanitize's
     strip_artist_from_title() wants a separator after the name, since an
     artist's name parsed from the title may begin the song's title too."""
-    folded_title = "".join(fold_char(c) for c in title)
-    folded_channel = "".join(fold_char(c) for c in channel).strip()
+    folded_title = fold_diacritics(title)
+    folded_channel = fold_diacritics(channel).strip()
     match = re.match(re.escape(folded_channel) + r"\s+(?=\S)", folded_title, re.IGNORECASE)
     if not folded_channel or not match:
         return title
@@ -409,7 +408,7 @@ def _find_official_match_via_search(raw_title: str, max_results: int = 5) -> tup
     if not result.stdout.strip():
         return None
 
-    folded_raw_title = "".join(fold_char(c) for c in raw_title)
+    folded_raw_title = fold_diacritics(raw_title)
 
     for line in result.stdout.strip().splitlines():
         try:

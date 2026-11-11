@@ -5,7 +5,7 @@ per genre (clean_genres()); nothing the owner typed is overwritten - the
 lookup only fills songs with no genre."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, tick_items, type_each
 
 from config.constants import GENRE_LEVEL_ARTIST
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
@@ -104,21 +104,15 @@ def _type_missing(session, songs: list, known: dict) -> int:
     if not ask_yes_no(f"MusicBrainz had nothing for {len(songs)} song(s). Type their genres one by one?"):
         return 0
     show("Comma-separated, the main one first. Leave it empty to skip that song, Ctrl+C to stop.")
-    typed = 0
-    for position, song in enumerate(songs, 1):
-        show(f"\n[{position}/{len(songs)}] [yellow]{escape(_label(song))}[/yellow]  "
-              f"[dim]({escape(song.album or '—')})[/dim]")
-        value = questionary.text("Genre:").ask()
-        if value is None:
-            break
-        if not value.strip():
-            continue
+
+    def save(song, value):
         set_song_genre(session, song, value, known)
         _remember_spellings(known, song.genre)
         submit_global_database_session()
         show(f"    saved as {escape(song.genre or '—')}")
-        typed += 1
-    return typed
+
+    return type_each(songs, lambda song: f"[yellow]{escape(_label(song))}[/yellow]  "
+                                         f"[dim]({escape(song.album or '—')})[/dim]", "Genre:", save)
 
 
 def set_genre_of_songs(songs: list) -> None:

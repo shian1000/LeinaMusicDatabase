@@ -105,9 +105,7 @@ def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, e
     message = f"***Debug*** [CRASH @ {timestamp}]\n{tb_text}"
 
     print(message, file=sys.stderr)
-
-    if DEBUG_TO_FILE_ENABLED:
-        _write_to_log(message)
+    _log(message, echo=False)
 
 
 sys.excepthook = _handle_exception
@@ -132,17 +130,19 @@ def _rotate_log(path: Path, incoming: int) -> None:
     path.replace(path.with_name(f"{path.name}.1"))
 
 
-def _write_to_log(message: str) -> None:
+def _log(message: str, echo: bool = True) -> None:
     """
-    Append a message to the debug log file, rotating it first when it's full.
+    Print `message` when .debug says so (DEBUG_ENABLED, unless not `echo`) and
+    append it to the debug log file, rotating it first when it's full.
 
     A failed write (full disk, read-only folder) doesn't stop the app; it's
     reported once on stderr, so a missing log doesn't go unnoticed.
-
-    Args:
-        message: Message text to log
     """
     global _write_failure_reported
+    if echo and DEBUG_ENABLED:
+        print(message)
+    if not DEBUG_TO_FILE_ENABLED:
+        return
     try:
         line = message + "\n"
         _rotate_log(DEBUG_LOG_FILE, len(line.encode("utf-8")))
@@ -211,39 +211,16 @@ def slog(var: Any = None, name: Optional[str] = None, priority: int = 0) -> None
     if name is None:
         name = "<unknown>"
 
-    message = f"***Debug*** [{_stamp()}] [{file_info}] {name} ({type(var).__name__}): {repr(var)}"
-
-    if DEBUG_ENABLED:
-        print(message)
-
-    if DEBUG_TO_FILE_ENABLED:
-        _write_to_log(message)
+    _log(f"***Debug*** [{_stamp()}] [{file_info}] {name} ({type(var).__name__}): {repr(var)}")
 
 
 def mlog(message: str, priority: int = 0) -> None:
-    """
-    Log a simple message string.
-    
-    A message that passes the verbosity check goes to debug.log with a
-    timestamp, and to the console too when .debug says so (DEBUG_ENABLED).
-    The import's trace (utils.common.trace: phases, every yt-dlp / YouTube
-    API / MusicBrainz call) goes through here.
-    
-    Args:
-        message: Message text to log
-        priority: same scale as slog(): logged only when
-            priority >= 3 - VERBOSITY_LEVEL (3 always, 0 only at verbosity 3)
-    
-    Example:
-        >>> mlog("Application started")  # Logs if debug enabled
-    """
-    if not debug_on(priority):
-        return
-    line = f"***Debug*** [{_stamp()}] {message.strip(chr(10))}"
-    if DEBUG_ENABLED:
-        print(line)
-    if DEBUG_TO_FILE_ENABLED:
-        _write_to_log(line)
+    """Log a message with a timestamp when `priority` passes the verbosity
+    check (the same scale as slog(): 3 always, 0 only at verbosity 3). The
+    import's trace (utils.common.trace: phases, every yt-dlp / YouTube API /
+    MusicBrainz call) goes through here."""
+    if debug_on(priority):
+        _log(f"***Debug*** [{_stamp()}] {message.strip(chr(10))}")
 
 
 def flog(message: str) -> None:
@@ -257,8 +234,4 @@ def flog(message: str) -> None:
     so an intermittent failure - a page that didn't load in time, a yt-dlp
     error - can still be diagnosed later. slog() is for looking at values
     while debugging, mlog() for progress notes; neither is for the user."""
-    line = f"***Lookup*** [{datetime.now():%Y-%m-%d %H:%M:%S}] {message}"
-    if DEBUG_ENABLED:
-        print(line)
-    if DEBUG_TO_FILE_ENABLED:
-        _write_to_log(line)
+    _log(f"***Lookup*** [{datetime.now():%Y-%m-%d %H:%M:%S}] {message}")

@@ -250,11 +250,10 @@ that kind of real subtitle anywhere in a title.
 artist name - whether that's outside any bracket (real case: channel `"SIAMES"`, video titled
 `'SIAMÉS "Summer Nights" [Official Animated Video]'`) or wrapped in one that exists only to enclose
 it (real case: `"Ado - 【Ado】 unravel 歌いました"` - splitting on `" - "` leaves the song title as
-`"【Ado】 unravel 歌いました"`). Diacritic-insensitive on both sides via `_fold_char()` (NFKD-fold one
+`"【Ado】 unravel 歌いました"`). Diacritic-insensitive on both sides via `normalizer.fold_diacritics()` (NFKD-fold one
 character at a time, so the folded string stays the same length and position-maps 1:1 back onto the
-original for slicing - a from-scratch position-preserving variant of the whole-string
-`_fold_diacritics()` already used in `manage_youtube_playlists.py`, needed here because *removing* a
-match requires knowing where it was in the un-folded original). Also unwraps a now-orphaned
+original for slicing - the search's scoring uses the same function; *removing* a match requires
+knowing where it was in the un-folded original). Also unwraps a now-orphaned
 quote/bracket pair left wrapping nothing once the artist name inside it is removed
 (`_ARTIST_WRAPPING_BRACKETS` covers `()`/`[]`/`【】`; quotes are handled separately right after) -
 without this the SIAMES case would leave an orphaned `"` and the Ado case would leave an empty
@@ -312,7 +311,7 @@ channels that skip `build_metadata_from_item()`'s normal parsing entirely and go
    release rather than *scoring* a candidate against an already-known artist/title) **and** the
    candidate's own `artist`/`track` both appear whole-word in the source title
    (`_contains_whole_word()`, same diacritic-folding approach as `strip_artist_from_title()`'s
-   `_fold_char()`) - this guards against an unrelated same-named official track winning search
+   `normalizer.fold_diacritics()`) - this guards against an unrelated same-named official track winning search
    relevance by coincidence.
 2. If search finds nothing, `_parse_quoted_title_by_artist()` looks for a `'"<title>" by <artist>'`
    credit embedded directly in the video's own title (`_TITLE_QUOTED_BY_RE` - matches a
@@ -834,7 +833,7 @@ observed.
 - `_collapse_repeated_letters()` folds runs of 2+ identical letters to one (`"Pompeii"` →
   `"Pompei"`). Real case: `Bastille - Pompei` (DB) scored relevance `0.50` against the real
   `"Pompeii"` — needed `0.85` for a title this short — purely from the missing second "i".
-- `_fold_diacritics()` strips accents via Unicode NFKD decomposition + dropping combining marks —
+- `normalizer.fold_diacritics()` strips accents via Unicode NFKD decomposition + dropping combining marks —
   the same technique `normalizer.normalize()` already uses elsewhere in the app, reused here rather
   than pulling in that function's other transformations (full punctuation removal, lowercasing
   done elsewhere already). Real case: `ABRADAB - Niesmiertelnosc` (DB, ASCII) against the real
@@ -1159,15 +1158,15 @@ upload, no official-release metadata at all) despite both tying on relevance/art
 alone: `"club edit"` joined `LQ_KEYWORDS` (same category as `"remix"`), and the bonus itself is now
 gated by `and not lq_hits and not strong_lq_hits`, mirroring the HQ bonus's existing gate exactly.
 
-## Polish "ł" doesn't NFKD-decompose — `_fold_diacritics()` needed a direct substitution for it
+## Polish "ł" doesn't NFKD-decompose — `normalizer.fold_diacritics()` needed a direct substitution for it
 
 Same non-decomposing-letter shape already documented above for Belarusian "і" (`NIZKIZ - Правілы`)
 — Polish "ł" (U+0142) is a genuinely separate base letter in Unicode, not a base letter plus a
 combining mark, so NFKD folding leaves it untouched. Unlike the Belarusian case, though, there's no
 cross-script ambiguity here: an ASCII-typed DB title dropping "ł" always means plain "l" was
 intended, so a direct substitution table (`NON_DECOMPOSING_LETTER_FOLDS` in `normalizer.py`, applied inside
-`_fold_diacritics()` after the NFKD pass, and by `sanitize.fold_char()` too, so the
-title clean-up's `strip_artist_from_title()` folds "Łona" the same way) closes this gap safely, the same "only ever adds a way to
+`normalizer.fold_diacritics()` after the NFKD pass, which the
+title clean-up's `strip_artist_from_title()` uses too, so it folds "Łona" the same way) closes this gap safely, the same "only ever adds a way to
 match" guarantee the rest of this diacritic-tolerance machinery already relies on.
 
 Real case: `Krzysztof Zalewski - Milosc Milosc` (DB, ASCII) vs the real `"Miłość Miłość"` — NFKD
@@ -1182,7 +1181,7 @@ correctly penalized `"(Live)"` — decides instead.
 
 ## `artist_relevance` needed diacritic folding too — it was only ever applied to title relevance
 
-`_fold_diacritics()` existed for years before this was ever applied inside `_artist_relevance_for()`
+`normalizer.fold_diacritics()` existed for years before this was ever applied inside `_artist_relevance_for()`
 — an oversight, not a deliberate scope limit. Real case: `La Vida Bohème - Radio Capital` (DB has
 the accented "è"). The real official upload is hosted on a *label* channel ("Nacional Records",
 contributing nothing to artist_relevance on its own), so its only artist-match signal was a
