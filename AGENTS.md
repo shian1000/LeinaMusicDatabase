@@ -251,6 +251,21 @@ non-trivial work in that area.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
   instead of renaming the shared row, removing an artist left without songs (album rows go to its
   heir, so album ids stay stable), and the swapped "Title - Artist" fixes; see Coding conventions.
+  Swapped songs across the whole catalog: Manage database → "Find songs with artist and title
+  swapped" (`artist_identity.find_swapped_in_catalog()`, `utils/ui/swapped_song_review.py`, also a
+  Run all step): a title that is another artist's name by an artist with no other song; exact name
+  keys only (fuzzy against every artist is too slow), unticked ones remembered on a yes
+  (`data/swapped_song_ignore.json`). Most hits on the real catalog are one-song artists with a
+  title that happens to be a band's name - it only asks, never fixes unticked.
+  Artist rows nothing uses (no credit, no cover of them, no song on their albums - left by song
+  deletions, `set_primary_artist()` / Leina Radio's corrections that keep the old row, a "Keep" in
+  Change artist): Manage database → "Remove artists without songs"
+  (`artist_identity.find_songless_artists()` / `remove_songless_artist()`,
+  `utils/ui/songless_artist_review.py`, a Run all step after covers), deleted with their empty
+  albums (`albums.delete_empty_album()`), or merged into an artist with songs they look like
+  (`artists_look_same()`, unticked; "Pan" → "Span" is one such false look-alike), kept ones
+  remembered in `data/songless_artist_ignore.json`. `artists_look_same()` costs ~2 ms a pair, so a
+  scan against every artist gates it (`_may_reach()`, shared words) first.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
@@ -662,8 +677,8 @@ non-trivial work in that area.
   instead (see `tests/test_resolve_duplicates.py`, `tests/test_review_screens.py`).
 - Manage database → "Run all clean-ups and lookups in order" (`run_all_steps()` in
   `manage_database/__init__.py`) runs `RUN_ALL_STEPS`, the whole-catalog steps of that menu, in an
-  order explained in the comment above it (requests → names → duplicates → spell check → what a
-  song is → albums → years / genres / Latin forms). Their order and labels are
+  order explained in the comment above it (requests → names → duplicates → swapped songs → spell
+  check → what a song is → artists without songs → albums → years / genres / Latin forms). Their order and labels are
   `constants.RUN_ALL_STEP_LABELS` (same keys); Settings → "Run all: steps"
   (`menu/main_menu/settings/run_all_steps.py`) turns them off, saved by key in `run_all_config.json`
   (`utils/common/run_all_settings.py`, only the ones off, so a new step starts on). A new

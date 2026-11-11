@@ -61,11 +61,13 @@ RUN_ALL_STEP_LABELS = {
     "clean_names": "Clean names",
     "split_artists": "Split joined artist names",
     "duplicated_artists": "Resolve duplicated artists",
+    "swapped_songs": "Find songs with artist and title swapped",
     "spell_check": "Spell check existing data",
     "duplicated_songs": "Resolve duplicated songs",
     "full_albums": "Find full albums",
     "projects": "Projects: find songs to mark",
     "covers": "Find covers",
+    "songless_artists": "Remove artists without songs",
     "albums": "Fill missing albums",
     "soundtracks": "Resolve soundtrack album names",
     "shared_albums": "Resolve albums with several artists",
@@ -346,6 +348,12 @@ FULL_ALBUM_IGNORE_FILE = PROJECT_ROOT / "data/full_album_ignore.json"
 # Groups of songs the owner left unticked in "Resolve duplicated songs" and
 # asked to remember: never offered again while no new song joins them
 SONG_DUPLICATE_IGNORE_FILE = PROJECT_ROOT / "data/song_duplicate_ignore.json"
+# Songs the owner said don't have artist and title swapped, left out of
+# Manage database -> "Find songs with artist and title swapped"
+SWAPPED_SONG_IGNORE_FILE = PROJECT_ROOT / "data/swapped_song_ignore.json"
+# Artists without songs the owner chose to keep in Manage database ->
+# "Remove artists without songs"
+SONGLESS_ARTIST_IGNORE_FILE = PROJECT_ROOT / "data/songless_artist_ignore.json"
 
 # album_covers (migration 0008)
 ALBUM_COVER_SOURCE_FILE = "file"  # embedded in the user's mp3s (APIC)

@@ -12,6 +12,8 @@ from menu.main_menu.enter_database.manage_database.clean_names import clean_name
 from utils.common.text_utils import check_spelling, similarity
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.artist_split_review import review_artist_splits
+from utils.ui.swapped_song_review import review_swapped_songs
+from utils.ui.songless_artist_review import review_songless_artists
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.soundtrack_review import review_soundtrack_names
 from utils.ui.inbox_request_review import resolve_new_requests
@@ -199,11 +201,14 @@ def _duplicates_after_spell_check():
 # - the requests first: the songs they add get every later step too;
 # - names cleaned and joined artists split before anything compares names,
 #   then the silent duplicate merges, so spell check doesn't ask MusicBrainz
-#   about one song twice; its corrections can make new duplicates, so those
-#   are looked at again (and the reviewed ones asked) only after it;
+#   about one song twice; songs stored "Title - Artist" turned round before
+#   spell check too (a fixed one may duplicate its artist's song); its
+#   corrections can make new duplicates, so those are looked at again (and
+#   the reviewed ones asked) only after it;
 # - what a song is (a full album, a project's recording, a cover) before the
 #   album lookup: it skips projects' recordings, and a full album is filed
-#   under its own title;
+#   under its own title; then the artists every step so far left without a
+#   song removed (covers and projects are the last to move songs);
 # - albums found, then their names settled (soundtracks, titles shared by
 #   several artists - which also gives those songs their album rows);
 # - years after albums (Years looks only at songs with an album and shares a
@@ -216,11 +221,13 @@ RUN_ALL_STEPS = {
     "clean_names": clean_names,
     "split_artists": review_artist_splits,
     "duplicated_artists": resolve_duplicated_artists,
+    "swapped_songs": review_swapped_songs,
     "spell_check": check_spelling_menu,
     "duplicated_songs": _duplicates_after_spell_check,
     "full_albums": review_full_albums,
     "projects": review_project_proposals,
     "covers": review_covers,
+    "songless_artists": review_songless_artists,
     "albums": fill_missing_albums,
     "soundtracks": review_soundtrack_names,
     "shared_albums": review_multi_artist_albums,
@@ -280,6 +287,8 @@ def manage_database():
         "Merge artists": merge_artists_menu,
         "Divide artists": divide_artists_menu,
         "Split joined artist names": review_artist_splits,
+        "Find songs with artist and title swapped": review_swapped_songs,
+        "Remove artists without songs": review_songless_artists,
         "Find full albums": review_full_albums,
         "Projects": manage_projects,
         "Find covers": review_covers,

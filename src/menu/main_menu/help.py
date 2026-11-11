@@ -238,8 +238,9 @@ Server -> "Index music library" to link the files.
     "Keeping the catalog clean": """
 All in Enter database -> Manage database:
   - Run all clean-ups and lookups in order: the steps below that need no folder or pick, one after
-    another - requests, clean names, split and merge artists, spell check, songs' duplicates, full
-    albums, projects, covers, albums, their names, years, genres, Latin forms. A list first lets
+    another - requests, clean names, split and merge artists, swapped artist and title, spell
+    check, songs' duplicates, full albums, projects, covers, artists without songs, albums, their
+    names, years, genres, Latin forms. A list first lets
     you leave some out this time; which ones are ticked there is set in Settings -> "Run all:
     steps". Ctrl+C stops the step running and asks whether to go on.
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names
@@ -248,6 +249,11 @@ All in Enter database -> Manage database:
     title credited to two different artists who share another artist or a link.
   - Merge artists / Divide artists: by hand, when one artist row is really two, or two are one.
   - Split joined artist names: 'A & B' stored as one artist.
+  - Find songs with artist and title swapped: 'Renegade - Styx' - a title that is another artist's
+    name, by an artist with no other song - in one list to tick.
+  - Remove artists without songs: artists left over from deleted songs or songs credited to another
+    artist, in one list to tick; one spelt like an artist with songs is merged into it. Artists only
+    covered by a song stay.
   - Find full albums: songs that are a whole album in one recording.
   - Projects: the series recordings were made for (Tiny Desk, Like a Version): a song keeps its
     real artist and is shown "Project: Artist - Title". The dictionary, and stored songs to mark.

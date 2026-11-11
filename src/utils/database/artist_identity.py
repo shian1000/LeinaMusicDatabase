@@ -3,19 +3,29 @@ swapped - found among the songs of one album title in "Resolve albums with
 several artists" (utils/ui/album_resolution_review.py), where they're most of
 what makes a title look shared: "björk" next to "Вjörk" (Cyrillic В),
 "Men I Trust" next to "Man I Trust", "Renegade - Styx" next to Styx's own
-songs. Pure lookups plus the one repair the review needs (fix_swapped_song());
+songs; swapped songs also across the whole catalog (find_swapped_in_catalog(),
+Manage database -> "Find songs with artist and title swapped",
+utils/ui/swapped_song_review.py) - and artist rows left without any song
+(find_songless_artists(), "Remove artists without songs"). Pure lookups plus
+the repairs the reviews need (fix_swapped_song(), remove_songless_artist());
 merging two artists stays database_management.merge_artists_in_db()."""
 
 import re
+from collections import Counter
+from difflib import SequenceMatcher
 from itertools import combinations
 
-from config.constants import SAME_ARTIST_SIMILARITY_THRESHOLD
+from config.constants import (
+    SAME_ARTIST_SIMILARITY_THRESHOLD, SONGLESS_ARTIST_IGNORE_FILE, SPELLING_CHECK_THRESHOLD, SWAPPED_SONG_IGNORE_FILE)
+from utils.common.json_file import read_json, write_json
 from utils.common.normalizer import name_key, normalize
-from utils.common.script_utils import scripts_in
+from utils.common.script_utils import matching_key, scripts_in
 from utils.common.text_utils import resembles_across_scripts, similarity
-from utils.database.artist_reassignment import artists_named, move_swapped_song, swap_names_of_artist
+from utils.database.albums import delete_empty_album
+from utils.database.artist_reassignment import (
+    artists_named, move_swapped_song, remove_unused_artist, swap_names_of_artist)
 from utils.common.artist_credits import propose_artist_split
-from utils.database.datatables import Artist, Song
+from utils.database.datatables import AdditionalSongArtist, Album, Artist, Song
 from utils.database.latin_names import artist_synonyms
 from utils.database.song_artists import count_artist_songs, song_all_artists
 
@@ -132,6 +142,115 @@ def find_swapped_songs(songs: list[Song]) -> list[tuple[Song, Artist]]:
             flagged.append((song, artist))
             break
     return flagged
+
+
+def _name_keys(name: str) -> set[str]:
+    name = _fix_lookalikes(name or "")
+    return {key for key in (normalize(name), name_key(name)) if key}
+
+
+def find_swapped_in_catalog(session) -> list[tuple[Song, Artist, bool]]:
+    """The whole catalog's songs that may be stored "Title - Artist": the
+    title is another artist's name (or synonym, any spelling _names_match()'s
+    exact keys catch) who has songs - a row left without any proves nothing -
+    and the song's own artist has no other song - the rule
+    of may_be_swapped(), so "Ed Sheeran - Perfect" next to the band Perfect
+    isn't asked about. Returns (song, the artist its title names, whether
+    that artist already has a song titled like this song's artist - the
+    song entered both ways, nearly surely swapped). Songs remembered as not
+    swapped (SWAPPED_SONG_IGNORE_FILE) are left out. Exact keys only: fuzzy
+    matching every title against every artist is too slow for the catalog."""
+    by_key = {}
+    for artist in session.query(Artist).all():
+        for name in (artist.name, *artist_synonyms(artist)):
+            for key in _name_keys(name):
+                by_key.setdefault(key, {})[artist.id] = artist
+    credits = Counter(artist_id for artist_id, in session.query(Song.artist_id))
+    credits.update(artist_id for artist_id, in session.query(AdditionalSongArtist.artist_id))
+    ignored = read_ids(SWAPPED_SONG_IGNORE_FILE)
+
+    flagged = []
+    for song in session.query(Song).order_by(Song.id).all():
+        own = song.artist
+        if (own is None or song.id in ignored or credits[own.id] != 1 or song.additional_artist_links
+                or normalize(song.title or "") == normalize(own.name or "")):
+            continue
+        named = {a.id: a for key in _name_keys(song.title) for a in by_key.get(key, {}).values()
+                 if a.id != own.id and credits[a.id] and not _names_match(own.name, a.name)}
+        if not named:
+            continue
+        artist = max(named.values(), key=lambda a: credits[a.id])
+        both_ways = any(_names_match(other.title, own.name) for other in artist.songs)
+        flagged.append((song, artist, both_ways))
+    return flagged
+
+
+def find_songless_artists(session) -> list[tuple[Artist, Artist | None]]:
+    """Artist rows nothing uses: no song credits them, none is a cover of
+    them (those stay, is_unused()) and no song is on an album of theirs -
+    leftovers of deleted songs, songs credited to another artist with the
+    old row kept, and older fixes. Returns (artist, the artist with songs it
+    looks like - artists_look_same() - to merge it into, or None). Artists
+    remembered as kept (SONGLESS_ARTIST_IGNORE_FILE) are left out."""
+    used = {artist_id for artist_id, in session.query(Song.artist_id)}
+    used |= {artist_id for artist_id, in session.query(Song.covered_artist_id)}
+    used |= {artist_id for artist_id, in session.query(AdditionalSongArtist.artist_id)}
+    used |= {artist_id for artist_id, in session.query(Album.artist_id).join(Song, Song.album_id == Album.id)}
+    kept = read_ids(SONGLESS_ARTIST_IGNORE_FILE)
+    artists = session.query(Artist).order_by(Artist.id).all()
+    songless = [a for a in artists if a.id not in used and a.id not in kept]
+    if not songless:
+        return []
+    rough = {a.id: _rough_names(a) for a in artists}
+    with_songs = [a for a in artists if a.id in used]
+
+    def look_alike(artist):
+        # artists_look_same() costs ~2 ms a pair: only for the pairs a word or
+        # SequenceMatcher's upper bound (below any threshold it uses) lets through
+        words, names = rough[artist.id]
+        return next((other for other in with_songs
+                     if (words & rough[other.id][0]
+                         or any(_may_reach(x, y) for x in names for y in rough[other.id][1]))
+                     and artists_look_same(artist, other)), None)
+
+    return [(artist, look_alike(artist)) for artist in songless]
+
+
+def _may_reach(a: str, b: str) -> bool:
+    """Can similarity(a, b) reach SPELLING_CHECK_THRESHOLD? Length first
+    (real_quick_ratio() without building a matcher), then quick_ratio()."""
+    return (2 * min(len(a), len(b)) / (len(a) + len(b)) >= SPELLING_CHECK_THRESHOLD
+            and SequenceMatcher(None, a, b).quick_ratio() >= SPELLING_CHECK_THRESHOLD)
+
+
+def _rough_names(artist: Artist) -> tuple[set[str], list[str]]:
+    """The artist's names (and synonyms) lowercased and romanized, and their words."""
+    names = [n for n in (artist.name, *artist_synonyms(artist)) if n]
+    forms = [n.lower() for n in names] + [matching_key(n) for n in names]
+    return {w for n in names for w in matching_key(n).split()}, [f for f in forms if f]
+
+
+def remove_songless_artist(session, artist: Artist, heir: Artist | None) -> None:
+    """Delete an artist find_songless_artists() found, with its albums (no
+    song is on them); merged into `heir` instead when given, its names kept
+    as heir's synonyms. Caller commits."""
+    for album in list(artist.albums):
+        delete_empty_album(session, album)
+    if heir is not None:
+        remove_unused_artist(session, artist, heir, keep_names=True)
+    else:
+        session.delete(artist)
+        session.flush()
+
+
+def read_ids(path) -> set[int]:
+    """The ids an ignore list (SWAPPED_SONG_IGNORE_FILE,
+    SONGLESS_ARTIST_IGNORE_FILE) holds."""
+    return {i for i in read_json(path, []) if isinstance(i, int)}
+
+
+def remember_ids(path, ids: list[int]) -> None:
+    write_json(path, sorted(read_ids(path) | set(ids)))
 
 
 def may_be_swapped(session, song: Song) -> bool:

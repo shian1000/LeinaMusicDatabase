@@ -590,6 +590,19 @@ def merge_albums(session, keep: Album, drop: Album) -> None:
     session.flush()
 
 
+def delete_empty_album(session, album: Album) -> None:
+    """Delete an album no song is on (ValueError otherwise), its cover files
+    once the session commits. Caller commits."""
+    if album.songs:
+        raise ValueError(f"'{album.title}' still has songs")
+    for cover in list(album.covers):
+        if cover.path:
+            _after_commit(session, covers_dir() / cover.path, None)
+        album.covers.remove(cover)
+    session.delete(album)
+    session.flush()
+
+
 def reassign_artist_albums(session, from_id: int, to_id: int) -> None:
     """Point `from_id`'s albums at `to_id` when merging two artists. Run it
     *after* songs.artist_id has been reassigned (raw SQL, which the flush
