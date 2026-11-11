@@ -1,5 +1,5 @@
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, choose
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.database.database_sessions import submit_global_database_session
 from utils.ui.menu_utils import pick_from_db_objects, search_and_pick_db_object
@@ -99,8 +99,8 @@ def edit_additional_artists_menu(song: Song):
 def edit_entry_menu(mode: str = None, db_object = None):
     if db_object is None:
         if mode not in ("Artist", "Song"):
-            choice = questionary.select("Do you wish to make changes in artist or song?", choices=["Artist", "Song", "Back"]).ask()
-            if choice == "Back":
+            choice = choose("Do you wish to make changes in artist or song?", ["Artist", "Song"])
+            if choice is None:
                 return
             edit_entry_menu(choice)
             return

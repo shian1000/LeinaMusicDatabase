@@ -2,6 +2,7 @@
 answers (ignore lists): read with a fallback, written whole."""
 import json
 
+from musicdatabase_core.file_tools import write_atomically
 from utils.common.debug import flog
 
 
@@ -30,9 +31,7 @@ def write_json(path, value, atomic: bool = False) -> None:
     cut short must not leave half a file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(value, indent=2, ensure_ascii=False)
-    if not atomic:
+    if atomic:
+        write_atomically(path, text)
+    else:
         path.write_text(text, encoding="utf-8")
-        return
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)

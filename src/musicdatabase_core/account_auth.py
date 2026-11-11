@@ -43,14 +43,14 @@ import fcntl
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import threading
 import unicodedata
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
+
+from .file_tools import now_iso, write_atomically
 
 # Must match config.constants (tests/test_account_auth.py checks they do)
 USERNAME_PATTERN = r"^[a-z0-9][a-z0-9_-]{1,31}$"
@@ -164,9 +164,7 @@ def _write_tokens(folder: Path, tokens: list) -> None:
     if not tokens:
         path.unlink(missing_ok=True)
         return
-    tmp = folder / f".{TOKENS_FILENAME}.tmp"
-    tmp.write_text(json.dumps({"tokens": tokens}, indent=2) + "\n")
-    os.replace(tmp, path)
+    write_atomically(path, json.dumps({"tokens": tokens}, indent=2) + "\n", tmp_name=f".{TOKENS_FILENAME}.tmp")
 
 
 def _user_folders(users_dir) -> list[Path]:
@@ -184,7 +182,7 @@ def issue_token(users_dir, username: str, device=None) -> str:
     token = secrets.token_urlsafe(TOKEN_BYTES)
     folder = Path(users_dir) / username
     entry = {"hash": _token_hash(token),
-             "created_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+             "created_at": now_iso()}
     device = clean_device_name(device)
     if device is not None:
         entry["device"] = device

@@ -80,6 +80,7 @@ from config.constants import (
 )
 from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.project_names import search_title
+from musicdatabase_core.file_tools import now_iso  # noqa: F401 - the inbox modules import it from here
 from utils.common.debug import flog, mlog
 from utils.common.json_file import write_json
 from utils.common.normalizer import normalize
@@ -91,6 +92,7 @@ from utils.database.song_references import load_changes
 from utils.database.playlist_sync import follow_song_id_changes
 from utils.database.song_kinds import is_full_album
 from config.constants import NO_VIDEO_SENTINEL
+from musicdatabase_core.file_tools import connect_read_only
 
 INBOX_DIR = Path(str(Settings.phone_inbox_dir)) if Settings.phone_inbox_dir else None
 INBOX_DRIVE_MOUNT = Path(str(Settings.sharing_drive_mount)) if Settings.sharing_drive_mount else None
@@ -379,8 +381,7 @@ def read_request_file(path: Path) -> RequestFile:
     RequestFile.error says what's wrong."""
     request = RequestFile(path=path, package=package_entry(path.name))
     try:
-        # immutable: no locks, journal or -shm next to a file we only read
-        conn = sqlite3.connect(f"{path.as_uri()}?mode=ro&immutable=1", uri=True)
+        conn = connect_read_only(path, immutable=True)
         # Someone else's file: its views and triggers may not call functions
         # with side effects
         conn.execute("PRAGMA trusted_schema=OFF")
@@ -560,10 +561,6 @@ def _load_json(name: str, default, for_update: bool = False):
 
 def _save_json(name: str, value) -> None:
     write_json(INBOX_DIR / name, value, atomic=True)
-
-
-def now_iso() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def load_decisions() -> dict:

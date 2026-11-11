@@ -20,7 +20,6 @@ are Windows Media Player leftovers per playlist folder, not album covers,
 and are ignored."""
 
 import io
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +38,7 @@ from config.constants import (
     ALBUM_COVER_STATUS_FOUND,
     ID3_PICTURE_TYPE_FRONT_COVER,
 )
+from musicdatabase_core.file_tools import write_atomically
 from utils.common.debug import flog
 from utils.database.albums import cover_filename, covers_dir
 from utils.database.datatables import Album, AlbumCover
@@ -152,9 +152,7 @@ def save_file_cover(session, album: Album, data: bytes, directory: Path) -> Albu
     jpeg, width, height = encode_cover(data)
     directory.mkdir(parents=True, exist_ok=True)
     name = cover_filename(album.id, ALBUM_COVER_SOURCE_FILE)
-    tmp = directory / f"{name}.tmp"
-    tmp.write_bytes(jpeg)
-    os.replace(tmp, directory / name)
+    write_atomically(directory / name, jpeg)
 
     cover = session.get(AlbumCover, (album.id, ALBUM_COVER_SOURCE_FILE))
     if cover is None:

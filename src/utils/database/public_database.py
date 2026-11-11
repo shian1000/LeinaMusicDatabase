@@ -41,6 +41,7 @@ from utils.common.json_file import read_json, write_json
 from utils.database.backup import DB_FILES
 from utils.database.github_release import GithubError, GithubReleaseClient
 from utils.database.public_export import ExportError, export_public_databases
+from musicdatabase_core.file_tools import now_iso
 
 PUBLISHED = "published"
 UNCHANGED = "unchanged"
@@ -93,7 +94,7 @@ def last_result() -> dict | None:
 
 def _record(result: PublishResult) -> PublishResult:
     state = _load_state()
-    state["last"] = {"at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    state["last"] = {"at": now_iso(),
                      "status": result.status, "message": result.message}
     _save_state(state)
     return result

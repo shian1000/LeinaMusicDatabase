@@ -1,10 +1,9 @@
 """Picking one of Leina Radio's users - one version for Users and Users ->
 Moods, so the same question behaves the same in both menus."""
 
-import questionary
-
 from utils.database import users as users_db
 from utils.common.output import RED, RESET
+from utils.ui.prompts import choose
 
 BACK = "Back"
 
@@ -31,5 +30,4 @@ def pick_user(question: str) -> str | None:
     names = usernames_or_explain()
     if not names:
         return None
-    picked = questionary.select(question, choices=names + [BACK]).ask()
-    return None if picked in (None, BACK) else picked
+    return choose(question, names, back=BACK)

@@ -8,7 +8,7 @@ import questionary
 
 from utils.database.request_packages import PackageError, import_package
 from utils.ui.inbox_request_review import resolve_new_requests
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, choose
 from utils.common.output import error, warn
 
 _TYPE_PATH = "Type a path"
@@ -29,9 +29,9 @@ def _pick_package() -> Path | None:
     recent = _recent_zips()
     if recent:
         choices = [questionary.Choice(title=p.name, value=p) for p in recent]
-        choices += [questionary.Choice(title=_TYPE_PATH, value=_TYPE_PATH), questionary.Choice(title=_BACK, value=_BACK)]
-        picked = questionary.select("Request package (newest in Downloads first):", choices=choices).ask()
-        if picked is None or picked == _BACK:
+        choices.append(questionary.Choice(title=_TYPE_PATH, value=_TYPE_PATH))
+        picked = choose("Request package (newest in Downloads first):", choices, back=_BACK)
+        if picked is None:
             return None
         if picked != _TYPE_PATH:
             return picked

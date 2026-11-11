@@ -28,6 +28,8 @@ import shutil
 import time
 from pathlib import Path
 
+from .file_tools import write_atomically
+
 # Must match migrations/user/ - the newest migration the sync code reads
 REQUIRED_MIGRATION = "0006_covers.sql"
 COVERS_SUBDIR = Path("covers")
@@ -119,17 +121,7 @@ def store_blob(user_folder, sha: str, data: bytes, content_type: str) -> bool:
         return False
     folder = Path(user_folder) / COVERS_SUBDIR
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{sha}{ext}"
-    part = folder / f"{_PART_PREFIX}{sha}{ext}.part"
-    try:
-        with open(part, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(part, target)
-    finally:
-        if part.exists():
-            part.unlink()
+    write_atomically(folder / f"{sha}{ext}", data, tmp_name=f"{_PART_PREFIX}{sha}{ext}.part", fsync=True)
     return True
 
 

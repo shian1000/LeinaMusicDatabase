@@ -4,6 +4,7 @@ be is checked before this (request_format.py); who settles it is another matter.
 import os
 import threading
 
+from .file_tools import write_atomically
 from .request_format import REQUEST_NAME_RE
 from .server_rules import ANONYMOUS_INBOX_SHARE
 
@@ -85,14 +86,5 @@ class Inbox:
             if unsigned and (sum(_unsigned_size(folder) for folder in waiting) + len(data)
                              > self.limit_bytes * ANONYMOUS_INBOX_SHARE):
                 return FULL_FOR_UNSIGNED
-            part = os.path.join(new_dir, f"{_PART_PREFIX}{name}{_PART_SUFFIX}")
-            try:
-                with open(part, "wb") as f:
-                    f.write(data)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(part, target)
-            finally:
-                if os.path.exists(part):
-                    os.unlink(part)
+            write_atomically(target, data, tmp_name=f"{_PART_PREFIX}{name}{_PART_SUFFIX}", fsync=True)
         return STORED

@@ -8,10 +8,10 @@ import secrets
 import shutil
 import sqlite3
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 from . import account_auth, song_id_replay, user_schema
+from .file_tools import now_iso
 
 # Must match config.constants (tests/test_musicdatabase_core.py checks they do)
 USER_PASSWORD_MIN_LENGTH = 6
@@ -81,7 +81,7 @@ def create_account(users_dir: Path, username: str, password: str, latest_change_
         account = {
             "username": name,
             "password": hash_password(password),
-            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "created_at": now_iso(),
         }
         (tmp_dir / account_auth.ACCOUNT_FILENAME).write_text(json.dumps(account, indent=2) + "\n")
         os.rename(tmp_dir, final_dir)

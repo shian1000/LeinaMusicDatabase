@@ -47,6 +47,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import user_covers
+from .file_tools import connect_read_only
 
 # Must match config.constants (tests/test_playlist_sync.py checks they do)
 USER_DB_FILENAME = "user.db"
@@ -324,9 +325,7 @@ def resolve_song_ids(tracks: list, music_db_path) -> int:
     playlists.song_ids_checked_to - 0 when the copy can't be read, so the
     app replays the whole log for this playlist."""
     try:
-        # as_uri() escapes "?", "#" and "%" in the folder names
-        conn = sqlite3.connect(f"{Path(music_db_path).absolute().as_uri()}?mode=ro", uri=True,
-                               timeout=BUSY_TIMEOUT_SECONDS)
+        conn = connect_read_only(music_db_path, timeout=BUSY_TIMEOUT_SECONDS)
     except sqlite3.Error:
         return 0
     try:

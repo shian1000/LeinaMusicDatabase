@@ -23,7 +23,6 @@ import os
 import stat
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from config.constants import (
@@ -35,6 +34,7 @@ from config.constants import (
 from utils.common.debug import mlog
 from utils.database import inbox_requests
 from utils.database.sharing_server import INBOX_KEPT_FOLDERS, REQUEST_NAME_RE, SQLITE_HEADER
+from musicdatabase_core.file_tools import now_iso
 
 
 class PackageError(Exception):
@@ -138,7 +138,7 @@ def import_package(path: Path) -> ImportResult:
         raise PackageError("the inbox is full - resolve the waiting requests first")
     new_dir = inbox_requests.INBOX_DIR / inbox_requests.NEW
     new_dir.mkdir(parents=True, exist_ok=True)
-    imported_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    imported_at = now_iso()
     # Recorded before the files appear: a file must never be read as sent by an account
     inbox_requests.record_package_files({f.name: {"sender": f.sender, "package": path.name,
                                                   "imported_at": imported_at} for f in fresh})

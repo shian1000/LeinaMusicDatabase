@@ -8,6 +8,7 @@ import questionary
 
 from utils.ui.menu_utils import clear_screen, execute_menu_item
 from utils.common.output import BOLD, RESET
+from utils.ui.prompts import choose
 
 
 # What each library the program imports itself is for - the same text is in
@@ -301,8 +302,8 @@ def _show(title: str) -> None:
     print()
     actions = TOPIC_ACTIONS.get(title)
     while actions:
-        picked = questionary.select(title, choices=[*actions, "Back"]).ask()
-        if picked in (None, "Back"):
+        picked = choose(title, list(actions))
+        if picked is None:
             return
         actions[picked]()
 

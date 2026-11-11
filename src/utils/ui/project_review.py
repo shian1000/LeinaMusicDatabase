@@ -21,7 +21,7 @@ from utils.database.projects import (
 )
 from utils.database.tags_management import add_tag_to_songs, clear_tag, song_ids_with_tag
 from utils.ui.display_utils import display_songs
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, choose, tick_items
 from utils.ui.song_colors import song_tokens
 
 _BACK = "Back"
@@ -63,9 +63,8 @@ def _ask_new_project(session) -> Project | None:
 def _edit_project(session, project: Project) -> None:
     while True:
         print(f"\n{project.name}\n  Other spellings: {project.aliases or '—'}\n  Channels: {project.channels or '—'}")
-        choice = questionary.select("What do you want to do?",
-                                    choices=[_SHOW, _NAME, _ALIASES, _CHANNELS, _DELETE, _BACK]).ask()
-        if choice in (None, _BACK):
+        choice = choose("What do you want to do?", [_SHOW, _NAME, _ALIASES, _CHANNELS, _DELETE], back=_BACK)
+        if choice is None:
             return
         if choice == _SHOW:
             songs = session.query(Song).filter(Song.project_id == project.id).all()
@@ -130,11 +129,10 @@ def manage_projects() -> None:
     while True:
         counts = project_song_counts(session)
         projects = sorted(session.query(Project).all(), key=lambda p: p.name.lower())
-        choice = questionary.select("Projects", choices=[
+        choice = choose("Projects", [
             *[questionary.Choice(f"{p.name} ({counts.get(p.id, 0)})", value=p) for p in projects],
-            questionary.Choice(_ADD, value=_ADD), questionary.Choice(_FIND, value=_FIND),
-            questionary.Choice(_BACK, value=_BACK)]).ask()
-        if choice in (None, _BACK):
+            questionary.Choice(_ADD, value=_ADD), questionary.Choice(_FIND, value=_FIND)], back=_BACK)
+        if choice is None:
             return
         if choice == _ADD:
             _ask_new_project(session)

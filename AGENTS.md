@@ -367,7 +367,9 @@ non-trivial work in that area.
   `migrations/user/`), `song_id_replay.py` (replaying `song_id_changes` on a plain connection, the
   rules behind `song_references.py`), `request_format.py`, `certificates.py`, `server_rules.py` (limits,
   the Host check, the login and upload limiters), `sync_collections.py` (the synced collections both
-  servers serve, above) and `inbox_files.py` (storing a request). Standard library
+  servers serve, above), `file_tools.py` (`connect_read_only()` - every read-only SQLite open,
+  `write_atomically()` - every whole-file write through a temporary one, `now_iso()` - the time
+  stamp stored in JSON, with the offset) and `inbox_files.py` (storing a request). Standard library
   only, nothing from this program (`tests/test_musicdatabase_core.py`), so a value it shares with
   `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
   modules are redirects (`sys.modules`) to the same module, so `utils.database.playlist_sync` still
@@ -869,7 +871,8 @@ non-trivial work in that area.
   A checkbox list of items goes through `prompts.tick_items(question, items, label, checked=)`
   (the ticked items back, None on cancel); a test fakes it by patching `questionary.checkbox` on
   the `questionary` module itself, not on the review module. Filling a value in by hand after a
-  lookup found none ("copied to the clipboard, empty = skip") is `prompts.ask_typed()`.
+  lookup found none ("copied to the clipboard, empty = skip") is `prompts.ask_typed()`, and a pick
+  from a list ending in "Back" is `prompts.choose()` (None for Back and for Esc / Ctrl+C alike).
 - The app's own small JSON files (settings, start-up state, ignore lists) are read and written
   with `utils/common/json_file.read_json(path, default, what)` / `write_json(path, value,
   atomic=)` - a missing, broken or wrongly typed file reads as `default`; `atomic` for one read

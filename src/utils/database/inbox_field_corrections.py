@@ -72,7 +72,6 @@ offered on its own.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG, SONG_KINDS
 from utils.common.debug import mlog
@@ -649,7 +648,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
     save_decision(case.key, {
         "decision": decision,
         "value": value if decision != REJECT else case.new_value,
-        "decided_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
         **({"old_video_wrong": old} if old_video_wrong and decision != REJECT else {}),

@@ -32,11 +32,11 @@ Standard-library only: the sharing server imports it.
 
 import json
 import os
-import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
+from .file_tools import connect_read_only, write_atomically
 
 PENDING_SUBDIR = "pending"
 HISTORY_FILENAME = "history.jsonl"
@@ -80,12 +80,8 @@ def record_change(changes_dir, user: str, action: str, mood_id: int, mood_name: 
     pending.mkdir(parents=True, exist_ok=True)
     # Zero-padded so the file names sort in the order the changes arrived
     name = f"{received_at:015d}_{record['id']}.json"
-    tmp = pending / f"{_TMP_PREFIX}{name}.tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(record, f, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, pending / name)
+    write_atomically(pending / name, json.dumps(record, ensure_ascii=False), tmp_name=f"{_TMP_PREFIX}{name}.tmp",
+                     fsync=True)
     return record
 
 
@@ -142,8 +138,7 @@ def global_mood_name(tag_db_path, mood_id: int) -> str | None:
     or a copy from before tags.kind. Raises sqlite3.Error when the copy can't
     be read (missing, locked, damaged): the server answers 503 then, not "no
     such mood", or the phone would drop a mood that still exists."""
-    # as_uri() escapes "?", "#" and "%" in the folder names
-    conn = sqlite3.connect(f"{Path(tag_db_path).absolute().as_uri()}?mode=ro", uri=True, timeout=15)
+    conn = connect_read_only(tag_db_path, timeout=15)
     try:
         if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(tags)")}:
             return None

@@ -6,7 +6,7 @@ password (docs/runbooks/database.md -> "Moods on the phone")."""
 from datetime import datetime
 
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, choose
 from utils.common.output import console
 from rich.table import Table
 
@@ -196,8 +196,8 @@ def global_moods() -> None:
                    for mood_id, name, count in moods]
         if not moods:
             print("No global moods yet.")
-        picked = questionary.select("Global moods:", choices=choices + [_CREATE, _BACK]).ask()
-        if picked is None or picked == _BACK:
+        picked = choose("Global moods:", choices + [_CREATE], back=_BACK)
+        if picked is None:
             return
         if picked == _CREATE:
             _create()
@@ -246,7 +246,7 @@ def _user_mood_menu(username: str, mood_id: int, name: str, count: int) -> None:
 
 def users_moods() -> None:
     username = _pick_user("Whose moods?")
-    if not username or username == _BACK:
+    if not username:
         return
     while True:
         try:
@@ -260,8 +260,8 @@ def users_moods() -> None:
         choices = [questionary.Choice(title=f"{name} - {count} song(s)" + (", cover" if cover else ""),
                                       value=(mood_id, name, count))
                    for mood_id, _, name, count, cover in moods]
-        picked = questionary.select(f"{username}'s moods:", choices=choices + [_BACK]).ask()
-        if picked is None or picked == _BACK:
+        picked = choose(f"{username}'s moods:", choices, back=_BACK)
+        if picked is None:
             return
         _user_mood_menu(username, *picked)
 
@@ -334,7 +334,7 @@ def moods_menu() -> None:
 def permissions_menu() -> None:
     """Tick what a user may do; it takes effect on their phone's next request."""
     username = _pick_user("Whose permissions?")
-    if not username or username == _BACK:
+    if not username:
         return
     try:
         current = set(user_permissions(username))

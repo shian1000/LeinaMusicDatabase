@@ -40,6 +40,7 @@ from settings import Settings
 from utils.common.debug import flog, mlog
 from utils.database.backup import DB_FILES as BACKED_UP_DB_FILES, backup_databases
 from utils.database.users import user_db_files
+from musicdatabase_core.file_tools import connect_read_only
 
 # migrations/user/ - applied to every user's own user.db (utils/database/users.py)
 USER_TRACK = "user"
@@ -179,7 +180,7 @@ def has_pending_migrations(db_name: str) -> bool:
     files = _migration_files(db_name)
     if not db_path.exists() or not files:
         return False
-    conn = sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)
+    conn = connect_read_only(db_path)
     try:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'").fetchone():
             return True

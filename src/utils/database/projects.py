@@ -15,6 +15,7 @@ from settings import Settings
 from utils.common.debug import slog
 from utils.common.project_names import ProjectName, name_key, read_project, split_names
 from utils.database.datatables import Artist, Project, Song
+from musicdatabase_core.file_tools import connect_read_only
 
 _known = {}  # database path -> [ProjectName]
 
@@ -26,7 +27,7 @@ def known_projects() -> list[ProjectName]:
     path = Settings.database_dir / "music.db"
     if path not in _known:
         try:
-            connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            connection = connect_read_only(path)
             try:
                 rows = connection.execute("SELECT name, aliases, channels FROM projects ORDER BY id").fetchall()
             finally:

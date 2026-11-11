@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from settings import Settings
+from musicdatabase_core.file_tools import connect_read_only
 
 MIGRATIONS_ROOT = Path(__file__).resolve().parents[3] / "migrations"
 
@@ -116,7 +117,7 @@ def build_public_database(source: Path, dest: Path, spec: DatabaseSpec) -> None:
     """Copy `source` into `dest` (SQLite's backup API, safe while the app has
     it open) and cut it down to `spec`. `source` is only read."""
     dest.unlink(missing_ok=True)
-    src_conn = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)
+    src_conn = connect_read_only(source)
     conn = sqlite3.connect(str(dest))
     try:
         src_conn.backup(conn)
@@ -168,7 +169,7 @@ def check_public_database(path: Path, spec: DatabaseSpec, local_paths=None) -> l
         local_paths = _local_path_strings()
     problems = []
     try:
-        conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+        conn = connect_read_only(path)
     except sqlite3.Error as exc:
         return [f"{spec.name}: can't open: {exc}"]
     try:
@@ -218,7 +219,7 @@ def content_digest(path: Path) -> str:
     the same data however the file's pages are laid out, so "changed since
     the last publish" doesn't depend on SQLite writing identical bytes."""
     digest = hashlib.sha256()
-    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    conn = connect_read_only(path)
     try:
         for kind, name, sql in conn.execute(
                 "SELECT type, name, sql FROM sqlite_master ORDER BY type, name"):

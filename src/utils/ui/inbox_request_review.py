@@ -15,7 +15,7 @@ skipped stays in review/ for next time. The screen also lists what the
 automatic pass changed."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, choose
 from utils.ui.song_colors import as_rich_markup, song_tokens
 
 from config.constants import INBOX_CHECK_MAX_AGE_HOURS, SONG_KIND_FULL_ALBUM
@@ -207,10 +207,8 @@ def _ask_several(case):
     choices = [questionary.Choice(_video_label(case, v), v) for v in videos]
     if case.dead_video_id and case.song.youtube_video_id == case.dead_video_id and case.dead_still_plays is not False:
         choices.append(questionary.Choice(f"{_KEEP_AS_MAIN} ({case.dead_video_id})", _KEEP_AS_MAIN))
-    choices.append(questionary.Choice(_BACK, _BACK))
-    main = questionary.select("Which one is the song's main link? The rest are saved as additional videos.",
-                              choices=choices).ask()
-    if main is None or main == _BACK:
+    main = choose("Which one is the song's main link? The rest are saved as additional videos.", choices, back=_BACK)
+    if main is None:
         return None
     if main == _KEEP_AS_MAIN:
         return KEEP, None, videos

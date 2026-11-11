@@ -32,3 +32,12 @@ def ask_typed(label: str, question: str, shown: str | None = None) -> str | None
     if not value:
         print(f"Skipped {label}")
     return value or None
+
+
+def choose(question: str, choices: list, back: str = "Back"):
+    """questionary.select with `back` as the last entry; the picked value, or
+    None for `back` and Esc / Ctrl+C. `choices`: texts or questionary.Choice."""
+    # The same kind of entry as the rest: a text among texts, else a Choice
+    back_entry = back if all(isinstance(c, str) for c in choices) else questionary.Choice(title=back, value=back)
+    picked = questionary.select(question, choices=[*choices, back_entry]).ask()
+    return None if picked in (None, back) else picked

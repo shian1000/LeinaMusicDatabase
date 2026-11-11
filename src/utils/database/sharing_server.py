@@ -180,7 +180,6 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import urllib.parse
 from urllib.parse import parse_qs, urlsplit
 
 # Run as a script by the systemd service: src/ isn't on sys.path then
@@ -190,6 +189,7 @@ if _SRC not in sys.path:
 
 from musicdatabase_core import (account_auth, global_mood_log, inbox_files, listen_sync,  # noqa: E402
                                 mood_sync, playlist_sync, sync_collections, user_covers)
+from musicdatabase_core.file_tools import connect_read_only  # noqa: E402
 from musicdatabase_core.certificates import (TLS_CERT_FILE, TLS_KEY_FILE, certificate_code,  # noqa: E402
                                              ensure_tls_certificate, tls_certificate_code)
 from musicdatabase_core.inbox_files import (DEFAULT_INBOX_LIMIT_BYTES, DEFAULT_MAX_REQUEST_BYTES,  # noqa: E402
@@ -298,8 +298,7 @@ def library_file_path(files_db: str, library_dir: str, file_id: int) -> str | No
     sqlite3.Error when files.db can't be read."""
     # The shared copy is only ever swapped in with os.replace(), never
     # written in place: immutable, so nothing (-shm, locks) is created beside it
-    uri = "file:" + urllib.parse.quote(os.path.abspath(files_db)) + "?mode=ro&immutable=1"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = connect_read_only(files_db, immutable=True)
     try:
         row = conn.execute("SELECT path FROM files WHERE id = ?", (file_id,)).fetchone()
     finally:

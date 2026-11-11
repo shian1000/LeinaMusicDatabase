@@ -16,7 +16,6 @@ first_run_prompt.py) whether to download the public catalog or start empty.
 """
 
 import hashlib
-import json
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from config.constants import (
 )
 from settings import Settings
 from utils.common.debug import flog, mlog
+from musicdatabase_core.file_tools import connect_read_only
 
 CATALOG_FILES = ("music.db", "tag.db")
 _PARTIAL_SUFFIX = ".download"
@@ -141,7 +141,7 @@ def _check_sqlite(path: Path, name: str) -> None:
     with open(path, "rb") as f:
         if f.read(len(SQLITE_HEADER)) != SQLITE_HEADER:
             raise CatalogDownloadError(f"{name} isn't an SQLite database")
-    conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    conn = connect_read_only(path)
     try:
         result = conn.execute("PRAGMA integrity_check").fetchone()[0]
     except sqlite3.Error as exc:

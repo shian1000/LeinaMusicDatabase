@@ -5,7 +5,7 @@ owner's view of moods and permissions (moods.py next to this file)."""
 from pathlib import Path
 
 import questionary
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, choose
 
 from config.constants import FILE_BEST_GUESSES_MAX, FILE_PAIR_VIDEO_CHOICES_MAX, USER_PLAYLIST_SOURCE_FOLDER
 from settings import settings
@@ -147,9 +147,8 @@ def _pick_by_title(music_session, track):
         return None
 
     choices = _song_choices(songs)
-    picked = questionary.select("Which song is this file?",
-                                choices=choices + [_SEARCH_INSTEAD, _BACK_TO_OPTIONS]).ask()
-    if picked is None or picked == _BACK_TO_OPTIONS:
+    picked = choose("Which song is this file?", choices + [_SEARCH_INSTEAD], back=_BACK_TO_OPTIONS)
+    if picked is None:
         return None
     if picked == _SEARCH_INSTEAD:
         return _pick_by_search()
@@ -762,8 +761,8 @@ def _show_playlists(username: str) -> None:
             )
             for playlist_id, name, tracks, missing, cover in playlists
         ]
-        picked = questionary.select("Playlists:", choices=choices + [_BACK]).ask()
-        if picked is None or picked == _BACK:
+        picked = choose("Playlists:", choices, back=_BACK)
+        if picked is None:
             return
         _playlist_menu(username, *picked)
 

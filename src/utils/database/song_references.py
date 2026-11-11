@@ -56,6 +56,7 @@ from utils.database.backup import DB_FILES
 from utils.database.datatables import Song, SongIdChange
 from utils.database.user_datatables import user_db_session
 from utils.database.users import user_db_files
+from musicdatabase_core.file_tools import connect_read_only
 
 # Set when a committed transaction logged a change, so the frequent
 # submit_global_database_session() only replays when there's something new
@@ -274,7 +275,7 @@ def _count(path, query: str, song_id: int) -> int:
     """`query`'s count (parameters: the song id, then TAG_KIND_MOOD if it asks)
     in the SQLite file `path`, read-only; 0 when it can't be read."""
     try:
-        conn = sqlite3.connect(f"{Path(path).absolute().as_uri()}?mode=ro", uri=True, timeout=5)
+        conn = connect_read_only(path)
         try:
             params = (song_id, TAG_KIND_MOOD)[:query.count("?")]
             return conn.execute(query, params).fetchone()[0] or 0

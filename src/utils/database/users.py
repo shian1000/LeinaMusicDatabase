@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config.constants import USER_ACCOUNT_FILENAME, USER_DB_FILENAME
+from musicdatabase_core.file_tools import now_iso, write_atomically
 from musicdatabase_core.accounts import (
     InvalidAccountError,
     account_name,
@@ -145,9 +146,7 @@ def _existing_user_dir(username: str) -> Path:
 
 
 def _write_account(folder: Path, account: dict) -> None:
-    tmp = folder / f"{USER_ACCOUNT_FILENAME}.tmp"
-    tmp.write_text(json.dumps(account, indent=2) + "\n")
-    os.replace(tmp, folder / USER_ACCOUNT_FILENAME)
+    write_atomically(folder / USER_ACCOUNT_FILENAME, json.dumps(account, indent=2) + "\n")
 
 
 def _read_account(folder: Path) -> dict:
@@ -179,7 +178,7 @@ def change_password(username: str, new_password: str) -> None:
     check_password(new_password)
     account = _read_account(folder)
     account["password"] = hash_password(new_password)
-    account["password_changed_at"] = datetime.now().isoformat(timespec="seconds")
+    account["password_changed_at"] = now_iso()
     _write_account(folder, account)
     revoke_all_tokens(folder)
 
