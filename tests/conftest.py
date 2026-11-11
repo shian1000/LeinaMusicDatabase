@@ -49,6 +49,11 @@ from utils.common.sanitize import settings as sanitize_settings  # noqa: E402
 
 sanitize_settings.CONFIG_PATH = _ISOLATED_DIR / "sanitize_config.json"
 sanitize_settings.forget_cache()
+
+# Settings -> "Run all: steps": every step on, never the owner's choice
+from utils.common import run_all_settings  # noqa: E402
+
+run_all_settings.CONFIG_PATH = _ISOLATED_DIR / "run_all_config.json"
 _link_log = logging.getLogger("youtube_link_cache")
 _link_log.addHandler(logging.FileHandler(_ISOLATED_DIR / "youtube_link_cache.log", encoding="utf-8"))
 _link_log.setLevel(logging.INFO)

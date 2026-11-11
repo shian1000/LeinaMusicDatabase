@@ -51,6 +51,29 @@ DISCOVERY_STATS_YEAR_FILE = PROJECT_ROOT / "discovery_fetcher_stats_years.json"
 FETCH_DATA_CONFIG_FILE = PROJECT_ROOT / "fetch_data_config.json"
 DEFAULT_MAX_SONGS_PER_FETCH = 50
 
+# Manage database -> "Run all clean-ups and lookups in order": its steps by
+# key, in the order they run, with their labels (the functions are in
+# manage_database's RUN_ALL_STEPS, same keys). Settings -> "Run all: steps"
+# turns them off and on; only the ones turned off are saved, by key.
+RUN_ALL_CONFIG_FILE = PROJECT_ROOT / "run_all_config.json"
+RUN_ALL_STEP_LABELS = {
+    "requests": "Resolve new requests",
+    "clean_names": "Clean names",
+    "split_artists": "Split joined artist names",
+    "duplicated_artists": "Resolve duplicated artists",
+    "spell_check": "Spell check existing data",
+    "duplicated_songs": "Resolve duplicated songs",
+    "full_albums": "Find full albums",
+    "projects": "Projects: find songs to mark",
+    "covers": "Find covers",
+    "albums": "Fill missing albums",
+    "soundtracks": "Resolve soundtrack album names",
+    "shared_albums": "Resolve albums with several artists",
+    "years": "Fill missing years",
+    "genres": "Fill missing genres",
+    "latin_forms": "Fill in Latin forms of names in other alphabets",
+}
+
 # "Create playlist from folder": a file whose title matches a song exactly but
 # whose tag artist is only spelt like the song's ("Liiquid tension experiment",
 # 0.98) is matched without asking when the artist similarity reaches this;

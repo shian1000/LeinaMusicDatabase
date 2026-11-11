@@ -198,7 +198,8 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
   in MusicDatabase.
 Statistics - how often each lookup module (albums, years) found something.
 Settings - lookup modules and their order, matching thresholds, which name clean-ups run
-  ("Name cleanup"), the start-up tasks, how much goes into debug.log ("Debug log": every step
+  ("Name cleanup"), the steps "Run all clean-ups and lookups in order" runs ("Run all: steps"),
+  the start-up tasks, how much goes into debug.log ("Debug log": every step
   and call of an import from 1 up), and Server: the database folder, backups, this PC's folders
   and network, indexing the music library, sharing with Leina Radio, and the public copy on GitHub.
 Help - this.
@@ -236,6 +237,11 @@ Server -> "Index music library" to link the files.
 """,
     "Keeping the catalog clean": """
 All in Enter database -> Manage database:
+  - Run all clean-ups and lookups in order: the steps below that need no folder or pick, one after
+    another - requests, clean names, split and merge artists, spell check, songs' duplicates, full
+    albums, projects, covers, albums, their names, years, genres, Latin forms. A list first lets
+    you leave some out this time; which ones are ticked there is set in Settings -> "Run all:
+    steps". Ctrl+C stops the step running and asks whether to go on.
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names
     differ only in case, apostrophes or look-alike letters, without asking. "Resolve duplicated
     songs": near duplicates ('feat.', '(Visualiser)') in one list to tick, and - unticked - one

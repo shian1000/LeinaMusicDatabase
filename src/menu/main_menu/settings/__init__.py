@@ -59,6 +59,7 @@ from config.constants import BEST_GUESS_MIN_SCORE_RANGE, CLOSEST_AUTO_ACCEPT_SCO
 from settings import drive_unavailable_message, listen_addresses, settings, sharing_dir_available
 from menu.main_menu.settings.public_database import public_database_menu
 from menu.main_menu.settings.name_cleanup import name_cleanup_menu
+from menu.main_menu.settings.run_all_steps import run_all_steps_menu
 from utils.common.output import BOLD, RED, RESET, YELLOW, error, warn
 
 
@@ -71,6 +72,7 @@ def settings_menu():
         "Closest songs: minimum score": set_best_guess_min_score,
         "Closest songs: auto-accept score": set_closest_auto_accept_score,
         "Name cleanup": name_cleanup_menu,
+        "Run all: steps": run_all_steps_menu,
         "Reset statistics records": reset_statistics_records,
         "Start-up tasks": startup_tasks_menu,
         "Debug log": debug_log_menu,

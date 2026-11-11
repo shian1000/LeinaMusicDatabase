@@ -658,6 +658,15 @@ non-trivial work in that area.
   binds the function, not the submodule; tests that need the submodule (to monkeypatch something
   in it) must `importlib.import_module("menu.main_menu.enter_database.manage_database.clean_names")`
   instead (see `tests/test_resolve_duplicates.py`, `tests/test_review_screens.py`).
+- Manage database → "Run all clean-ups and lookups in order" (`run_all_steps()` in
+  `manage_database/__init__.py`) runs `RUN_ALL_STEPS`, the whole-catalog steps of that menu, in an
+  order explained in the comment above it (requests → names → duplicates → spell check → what a
+  song is → albums → years / genres / Latin forms). Their order and labels are
+  `constants.RUN_ALL_STEP_LABELS` (same keys); Settings → "Run all: steps"
+  (`menu/main_menu/settings/run_all_steps.py`) turns them off, saved by key in `run_all_config.json`
+  (`utils/common/run_all_settings.py`, only the ones off, so a new step starts on). A new
+  whole-catalog step of that menu goes into both at its place, and into Help's "Keeping the
+  catalog clean" text.
 - `src/menu/main_menu/enter_database/manage_database/clean_names.py` (Manage database → "Clean names") — per-field song
   cleanup rules are sanitize steps run by `name_cleanup.apply_step()` (each one skipped when its
   step is off for the "stored" source). Add a rule as a step there, not another per-field loop.
@@ -940,7 +949,7 @@ non-trivial work in that area.
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
   with "unable to open database file". It also sends `debug.log`, `youtube_link_cache.log` and the
   spell-check cache (written at exit) to that temp folder, and Settings → "Name cleanup"'s file
-  (`sanitize_settings.CONFIG_PATH`), so tests run the steps' defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  (`sanitize_settings.CONFIG_PATH`) and Settings → "Run all: steps"' (`run_all_settings.CONFIG_PATH`), so tests run the defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
   path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
   default bound at import would keep pointing at the real `.env`.
 - The Selenium fetchers are tested through `tests/fake_browser.FakeBrowser` (pages as HTML by URL,

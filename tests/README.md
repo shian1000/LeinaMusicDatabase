@@ -12,7 +12,7 @@ No test may touch the owner's real databases or `.env`: `conftest.py` points `Se
 at a folder that doesn't exist and `.env` at an empty temp folder before anything imports
 `settings.py`, so a test that forgets to patch a module-level engine (`song_references._music_engine`,
 `tag_db_manager`, ...) fails every time with "unable to open database file" instead of reading the
-real `music.db` / `tag.db` and failing only when the app or the inbox timer had them locked. `debug.log`, `youtube_link_cache.log`, the spell-check cache (saved when the process exits) and Settings → "Name cleanup"'s `sanitize_config.json` go to the same temp folder.
+real `music.db` / `tag.db` and failing only when the app or the inbox timer had them locked. `debug.log`, `youtube_link_cache.log`, the spell-check cache (saved when the process exits) Settings → "Name cleanup"'s `sanitize_config.json` and Settings → "Run all: steps"' `run_all_config.json` go to the same temp folder.
 
 ## What each file covers
 

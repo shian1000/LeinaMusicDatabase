@@ -1,11 +1,12 @@
-from utils.common.output import GREEN, RED, RESET, review_header, say
+from utils.common.output import GREEN, RED, RESET, error, review_header, say, warn
 from utils.ui.cover_review import review_covers
 from utils.ui.project_review import manage_projects
 from utils.ui.menu_utils import execute_menu_item
 from utils.common.debug import slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
-from menu.main_menu.enter_database.manage_database.resolve_duplicates import resolve_duplicated_artists
+from menu.main_menu.enter_database.manage_database.resolve_duplicates import (
+    remove_duplicate_artists, remove_duplicate_songs, resolve_duplicated_artists)
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu, divide_artists_menu
 from menu.main_menu.enter_database.manage_database.clean_names import clean_names
 from utils.common.text_utils import check_spelling, similarity
@@ -16,18 +17,24 @@ from utils.ui.soundtrack_review import review_soundtrack_names
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.request_package_import import import_request_package
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_for_import
+from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_albums import fill_missing_albums
+from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_years import fill_missing_years
+from utils.ui.genre_review import fill_missing_genres
+from utils.ui.project_review import review_project_proposals
 from utils.ui.latin_forms_review import fill_latin_forms
 from utils.ui.file_fix_review import fix_file_names_and_tags
 from utils.ui.song_duplicate_review import resolve_duplicated_songs
 from utils.database.song_kinds import is_full_album
 from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, tick_items
 from utils.ui.artist_change import has_artist_twin, rename_artist
-from utils.database.database_sessions import submit_global_database_session
+from utils.database.database_sessions import (
+    DatabaseCommitError, get_global_database_sessions, submit_global_database_session)
 from utils.common.normalizer import rule_apostrophe_and_common_word_diff, rule_all_caps_correction, normalize
 from utils.database.tags_management import add_tag_to_song, song_ids_with_tag
-from config.constants import SPELLING_CHECK_THRESHOLD
+from config.constants import RUN_ALL_STEP_LABELS, SPELLING_CHECK_THRESHOLD
+from utils.common.run_all_settings import steps_turned_off
 
 
 AUTO_CONFIRM_RULES = [
@@ -178,9 +185,91 @@ def check_spelling_menu():
         submit_global_database_session()
         
 
+def _duplicates_after_spell_check():
+    """A spelling corrected can make two artists or songs alike: the silent
+    merges again (quietly - they already ran once), then the reviewed ones."""
+    while remove_duplicate_songs(report_none=False) + remove_duplicate_artists(report_none=False):
+        pass
+    resolve_duplicated_songs()
+
+
+# Every Manage database step that works on the whole catalog without being
+# given a folder, a file or a pick, by its key in constants.RUN_ALL_STEP_LABELS,
+# whose order "Run all" goes through:
+# - the requests first: the songs they add get every later step too;
+# - names cleaned and joined artists split before anything compares names,
+#   then the silent duplicate merges, so spell check doesn't ask MusicBrainz
+#   about one song twice; its corrections can make new duplicates, so those
+#   are looked at again (and the reviewed ones asked) only after it;
+# - what a song is (a full album, a project's recording, a cover) before the
+#   album lookup: it skips projects' recordings, and a full album is filed
+#   under its own title;
+# - albums found, then their names settled (soundtracks, titles shared by
+#   several artists - which also gives those songs their album rows);
+# - years after albums (Years looks only at songs with an album and shares a
+#   year across one), genres, and Latin forms last, for every name by then.
+# Left out: imports and "Import a request package" (they need a source),
+# "Fix names and tags for mp3 files ..." (a folder; it rewrites files),
+# Manual management and Merge / Divide artists (the user picks the rows).
+RUN_ALL_STEPS = {
+    "requests": lambda: resolve_new_requests(after_import=fill_missing_for_import),
+    "clean_names": clean_names,
+    "split_artists": review_artist_splits,
+    "duplicated_artists": resolve_duplicated_artists,
+    "spell_check": check_spelling_menu,
+    "duplicated_songs": _duplicates_after_spell_check,
+    "full_albums": review_full_albums,
+    "projects": review_project_proposals,
+    "covers": review_covers,
+    "albums": fill_missing_albums,
+    "soundtracks": review_soundtrack_names,
+    "shared_albums": review_multi_artist_albums,
+    "years": fill_missing_years,
+    "genres": fill_missing_genres,
+    "latin_forms": fill_latin_forms,
+}
+
+
+def _undo_unsaved_changes():
+    """What a step interrupted with Ctrl+C left unsaved is undone, so the next
+    step's commit doesn't save half of it."""
+    sessions = get_global_database_sessions()
+    if sessions is not None:
+        for session in sessions:
+            session.rollback()
+
+
+def run_all_steps():
+    """RUN_ALL_STEPS in RUN_ALL_STEP_LABELS' order, after one checkbox list to
+    leave some out this time (ticked: the steps on in Settings -> "Run all:
+    steps"). Ctrl+C during a step stops it (its unsaved part undone) and asks
+    whether to go on; a step whose save failed is reported, the rest still run."""
+    turned_off = steps_turned_off()
+    picked = tick_items("Which steps should run, in this order? (space toggles, enter confirms)",
+                        list(RUN_ALL_STEP_LABELS), RUN_ALL_STEP_LABELS.get,
+                        checked=lambda key: key not in turned_off)
+    if not picked:
+        say("Nothing picked.")
+        return
+    for position, key in enumerate(picked, 1):
+        label = RUN_ALL_STEP_LABELS[key]
+        review_header(f"STEP {position}/{len(picked)}: {label}")
+        try:
+            RUN_ALL_STEPS[key]()
+        except DatabaseCommitError as exc:
+            error(f"{exc}")
+        except KeyboardInterrupt:
+            _undo_unsaved_changes()
+            warn(f"{label} stopped, its unsaved changes undone.")
+            if position < len(picked) and not ask_yes_no("Go on with the next step?"):
+                return
+    say("All picked steps done.")
+
+
 def manage_database():
     waiting = count_new_requests()
     action_map = {
+        "Run all clean-ups and lookups in order": run_all_steps,
         # Songs added from the requests: offered their missing data right after
         f"Resolve new requests{f' ({waiting})' if waiting else ''}":
             lambda: resolve_new_requests(after_import=fill_missing_for_import),
