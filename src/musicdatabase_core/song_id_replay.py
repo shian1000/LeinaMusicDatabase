@@ -62,53 +62,38 @@ def replay(conn, changes: list, has_playlists: bool = False, has_tags: bool = Tr
     return touched
 
 
-def _catch_up_server_playlists(conn, changes: list, changed_playlists: set) -> int:
-    """Playlists the sharing server stored, resolved against the shared copy
-    of music.db up to song_ids_checked_to: replay what came after that, up
-    to this file's cursor, for their tracks only (what's past the cursor
-    follows in replay() for every track)."""
+def _catch_up_server_rows(conn, changes: list, changed: set, table: str, apply) -> int:
+    """Playlists or moods (`table`) the sharing server stored, resolved
+    against the shared copy of music.db up to song_ids_checked_to: replay
+    what came after that, up to this file's cursor, for their songs only
+    (what's past the cursor follows in replay() for every row).
+    `apply(row id, old song id, new song id)` returns the rows it changed."""
     last = cursor(conn) or 0
     touched = 0
-    pending = conn.execute(
-        "SELECT id, song_ids_checked_to FROM playlists WHERE song_ids_checked_to IS NOT NULL").fetchall()
-    for playlist_id, checked_to in pending:
+    pending = conn.execute(f"SELECT id, song_ids_checked_to FROM {table} WHERE song_ids_checked_to IS NOT NULL")
+    for row_id, checked_to in pending.fetchall():
         for change_id, old_id, new_id in changes:
-            if checked_to < change_id <= last:
-                rows = conn.execute(
-                    "UPDATE playlist_tracks SET song_id = :new WHERE playlist_id = :p AND song_id = :old",
-                    {"new": new_id, "old": old_id, "p": playlist_id}).rowcount
-                if rows:
-                    touched += rows
-                    changed_playlists.add(playlist_id)
+            if checked_to < change_id <= last and (rows := apply(row_id, old_id, new_id)):
+                touched += rows
+                changed.add(row_id)
         # Only if the server hasn't stored it again meanwhile
-        conn.execute("UPDATE playlists SET song_ids_checked_to = NULL WHERE id = :p "
-                     "AND song_ids_checked_to = :c", {"p": playlist_id, "c": checked_to})
+        conn.execute(f"UPDATE {table} SET song_ids_checked_to = NULL WHERE id = ? AND song_ids_checked_to = ?",
+                     (row_id, checked_to))
     return touched
 
 
-def _catch_up_server_moods(conn, changes: list, changed_tags: set) -> int:
-    """_catch_up_server_playlists() for moods: the songs of a mood the
-    sharing server stored, checked up to song_ids_checked_to."""
-    last = cursor(conn) or 0
-    touched = 0
-    pending = conn.execute(
-        "SELECT id, song_ids_checked_to FROM tags WHERE song_ids_checked_to IS NOT NULL").fetchall()
-    for tag_id, checked_to in pending:
-        for change_id, old_id, new_id in changes:
-            if checked_to < change_id <= last:
-                params = {"new": new_id, "old": old_id, "t": tag_id}
-                rows = 0
-                if new_id is not None:
-                    rows += conn.execute("UPDATE OR IGNORE song_tags SET song_id = :new "
-                                         "WHERE tag_id = :t AND song_id = :old", params).rowcount
-                rows += conn.execute("DELETE FROM song_tags WHERE tag_id = :t AND song_id = :old",
-                                     params).rowcount
-                if rows:
-                    touched += rows
-                    changed_tags.add(tag_id)
-        conn.execute("UPDATE tags SET song_ids_checked_to = NULL WHERE id = :t "
-                     "AND song_ids_checked_to = :c", {"t": tag_id, "c": checked_to})
-    return touched
+def _replace_track_song(conn, playlist_id: int, old_id: int, new_id: int | None) -> int:
+    return conn.execute("UPDATE playlist_tracks SET song_id = ? WHERE playlist_id = ? AND song_id = ?",
+                        (new_id, playlist_id, old_id)).rowcount
+
+
+def _replace_mood_song(conn, tag_id: int, old_id: int, new_id: int | None) -> int:
+    params = {"new": new_id, "old": old_id, "t": tag_id}
+    rows = 0
+    if new_id is not None:
+        rows += conn.execute("UPDATE OR IGNORE song_tags SET song_id = :new WHERE tag_id = :t AND song_id = :old",
+                             params).rowcount
+    return rows + conn.execute("DELETE FROM song_tags WHERE tag_id = :t AND song_id = :old", params).rowcount
 
 
 def replay_user_db(conn, changes: list) -> int:
@@ -117,9 +102,11 @@ def replay_user_db(conn, changes: list) -> int:
         return replay(conn, changes, has_playlists=True)
     has_moods = playlist_sync.is_migrated(conn, mood_sync.REQUIRED_MIGRATION)
     changed_playlists, changed_tags = set(), set()
-    touched = _catch_up_server_playlists(conn, changes, changed_playlists)
+    touched = _catch_up_server_rows(conn, changes, changed_playlists, "playlists",
+                                    lambda *change: _replace_track_song(conn, *change))
     if has_moods:
-        touched += _catch_up_server_moods(conn, changes, changed_tags)
+        touched += _catch_up_server_rows(conn, changes, changed_tags, "tags",
+                                         lambda *change: _replace_mood_song(conn, *change))
     touched += replay(conn, changes, has_playlists=True, changed_playlists=changed_playlists,
                       changed_tags=changed_tags if has_moods else None)
     # A new revision, so the phones fetch the new song ids

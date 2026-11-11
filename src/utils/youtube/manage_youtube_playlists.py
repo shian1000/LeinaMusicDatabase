@@ -1398,22 +1398,26 @@ def search_video_ytdlp(
     (if any) is kept — it's still better than nothing. `title_latin` (the
     owner's Latin form of the title) is retried the same way, after it.
     """
-    video_id, best_relevance, is_official = _search_video_ytdlp_once(
-        artist, title, max_results, artist_synonyms, max_attempts, artist_credits, full_album
-    )
+    return _search_with_alternative_titles(
+        lambda t: _search_video_ytdlp_once(artist, t, max_results, artist_synonyms, max_attempts, artist_credits,
+                                           full_album),
+        title, language, title_latin, "yt-dlp")
+
+
+def _search_with_alternative_titles(search_once, title: str, language: str | None, title_latin: str | None,
+                                    how: str) -> str | None:
+    """`search_once(title)` -> (video_id, relevance, is_official) for the
+    title, then for each of its other spellings until one finds an official
+    release; else the first video found, None when none was."""
+    video_id, _, is_official = search_once(title)
     if video_id and is_official:
         return video_id
-
     for alt_title in _alternative_titles(title, language, title_latin):
-        print(f"  ↩ Retrying yt-dlp with the title written as: {alt_title}")
-        alt_video_id, _, alt_official = _search_video_ytdlp_once(
-            artist, alt_title, max_results, artist_synonyms, max_attempts, artist_credits, full_album
-        )
+        print(f"  ↩ Retrying {how} with the title written as: {alt_title}")
+        alt_video_id, _, alt_official = search_once(alt_title)
         if alt_video_id and alt_official:
             return alt_video_id
-        if alt_video_id and not video_id:
-            video_id = alt_video_id
-
+        video_id = video_id or alt_video_id
     return video_id
 
 
@@ -1494,19 +1498,9 @@ def search_video(
 
     # Fallback: YouTube Data API
     print("  ↩ Falling back to YouTube API...")
-    video_id, best_relevance, is_official = _search_video_api_once(youtube, artist, title, artist_synonyms, artist_credits)
-    if video_id and is_official:
-        return video_id
-
-    for alt_title in _alternative_titles(title, language, title_latin):
-        print(f"  ↩ Retrying YouTube API with the title written as: {alt_title}")
-        alt_video_id, _, alt_official = _search_video_api_once(youtube, artist, alt_title, artist_synonyms, artist_credits)
-        if alt_video_id and alt_official:
-            return alt_video_id
-        if alt_video_id and not video_id:
-            video_id = alt_video_id
-
-    return video_id
+    return _search_with_alternative_titles(
+        lambda t: _search_video_api_once(youtube, artist, t, artist_synonyms, artist_credits),
+        title, language, title_latin, "YouTube API")
 
 
 # yt-dlp ERROR lines that mean YouTube didn't answer the question at all -
@@ -1590,6 +1584,23 @@ def _region_blocked(regions: dict) -> bool:
     return "allowed" in regions and YOUTUBE_REGION not in regions["allowed"]
 
 
+def _videos_list(video_ids, part: str, what: str):
+    """(ids, videos.list response) for each batch of the given videos, asked
+    as it's iterated (an error comes from the loop); None when the API can't
+    be used."""
+    ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
+    service = _read_only_youtube_service() if ids else None
+    if ids and service is None:
+        return None
+
+    def batches():
+        for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
+            chunk = ids[start:start + _API_VIDEOS_PER_CALL]
+            yield chunk, trace.api_call(service.videos().list(part=part, id=",".join(chunk), maxResults=50),
+                                        f"videos.list {what} of {len(chunk)} video(s)")
+    return batches()
+
+
 def videos_exist_via_api(video_ids) -> dict | None:
     """{video id: False if YouTube's Data API says the video is gone (not
     listed at all = deleted, private or channel terminated; private; upload
@@ -1601,19 +1612,12 @@ def videos_exist_via_api(video_ids) -> dict | None:
     or bot wall, but it can't see everything: a video YouTube refuses to
     play ("UNPLAYABLE" Topic uploads, 2026-10-12) may still be listed as
     fine, so True isn't proof that it plays - only False is final."""
-    ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
-    if not ids:
-        return {}
-    service = _read_only_youtube_service()
-    if service is None:
+    batches = _videos_list(video_ids, "status,contentDetails", "status")
+    if batches is None:
         return None
     result = {}
     try:
-        for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
-            chunk = ids[start:start + _API_VIDEOS_PER_CALL]
-            response = trace.api_call(service.videos().list(
-                part="status,contentDetails", id=",".join(chunk), maxResults=50),
-                f"videos.list status of {len(chunk)} video(s)")
+        for chunk, response in batches:
             listed = {item["id"]: item for item in response.get("items", [])}
             for video_id in chunk:
                 item = listed.get(video_id)
@@ -1640,18 +1644,12 @@ def video_durations_via_api(video_ids, on_found=None) -> dict | None:
     when the API can't be used. `on_found` gets each batch's lengths as they
     come, so what came before an error isn't lost
     (utils/database/video_durations.py stores them)."""
-    ids = list(dict.fromkeys(v for v in video_ids if v and v != NO_VIDEO_SENTINEL))
-    if not ids:
-        return {}
-    service = _read_only_youtube_service()
-    if service is None:
+    batches = _videos_list(video_ids, "contentDetails", "lengths")
+    if batches is None:
         return None
     result = {}
     try:
-        for start in range(0, len(ids), _API_VIDEOS_PER_CALL):
-            chunk = ids[start:start + _API_VIDEOS_PER_CALL]
-            response = trace.api_call(service.videos().list(part="contentDetails", id=",".join(chunk), maxResults=50),
-                                      f"videos.list lengths of {len(chunk)} video(s)")
+        for _chunk, response in batches:
             batch = {}
             for item in response.get("items", []):
                 match = _ISO_DURATION.match(item.get("contentDetails", {}).get("duration") or "")
@@ -1682,23 +1680,15 @@ def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
     return video_playability(video_id, timeout) is not False
 
 
-def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | None:
-    """Year a video was released, read via yt-dlp (no download, no API quota).
-
-    Prefers `release_date`/`release_year` - YouTube Music's "Released on" for
-    an official upload, the real release date - over `upload_date`, which for
-    anything else (a live session, a reupload) is only when the video went up.
-    None if the video doesn't resolve or carries no date at all.
-    """
+def _ytdlp_print(video_id: str | None, template: str, what: str, timeout: int) -> str | None:
+    """The last line yt-dlp prints for `template` about a video (no download),
+    None when there's no video or yt-dlp gives nothing (`what` it was after
+    goes into debug.log)."""
     if not video_id or video_id == NO_VIDEO_SENTINEL:
         return None
     try:
         result = run_ytdlp(
-            [
-                "--skip-download", "--no-warnings",
-                "--print", "%(release_date)s|%(release_year)s|%(upload_date)s",
-                f"https://www.youtube.com/watch?v={video_id}",
-            ],
+            ["--skip-download", "--no-warnings", "--print", template, f"https://www.youtube.com/watch?v={video_id}"],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -1708,10 +1698,21 @@ def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | Non
         flog(f"[yt-dlp] unavailable: {e}")
         return None
     if result.returncode != 0 or not result.stdout.strip():
-        flog(f"[yt-dlp] no date for video {video_id}: {ytdlp_errors(result) or 'no output'}")
+        flog(f"[yt-dlp] no {what} for video {video_id}: {ytdlp_errors(result) or 'no output'}")
         return None
+    return result.stdout.strip().splitlines()[-1]
 
-    for value in result.stdout.strip().splitlines()[-1].split("|"):
+
+def get_video_release_year(video_id: str | None, timeout: int = 30) -> int | None:
+    """Year a video was released, read via yt-dlp (no download, no API quota).
+
+    Prefers `release_date`/`release_year` - YouTube Music's "Released on" for
+    an official upload, the real release date - over `upload_date`, which for
+    anything else (a live session, a reupload) is only when the video went up.
+    None if the video doesn't resolve or carries no date at all.
+    """
+    line = _ytdlp_print(video_id, "%(release_date)s|%(release_year)s|%(upload_date)s", "date", timeout)
+    for value in (line or "").split("|"):
         match = re.match(r"(\d{4})", value)
         if match:
             return int(match.group(1))
@@ -1723,30 +1724,11 @@ def get_video_album(video_id: str | None, timeout: int = 30) -> tuple[str, str, 
     via yt-dlp. Only official "Provided to YouTube" uploads carry it; None for
     any other video, or one that doesn't resolve. `artist` may list several
     names ("Zlypni, Данило Грицак")."""
-    if not video_id or video_id == NO_VIDEO_SENTINEL:
+    line = _ytdlp_print(video_id, "%(album)s\t%(track)s\t%(artist)s", "album", timeout)
+    if line is None:
         return None
-    try:
-        result = run_ytdlp(
-            [
-                "--skip-download", "--no-warnings",
-                "--print", "%(album)s\t%(track)s\t%(artist)s",
-                f"https://www.youtube.com/watch?v={video_id}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        print(f"  ✖ yt-dlp unavailable: {e}")
-        flog(f"[yt-dlp] unavailable: {e}")
-        return None
-    if result.returncode != 0 or not result.stdout.strip():
-        flog(f"[yt-dlp] no album for video {video_id}: {ytdlp_errors(result) or 'no output'}")
-        return None
-
-    fields = result.stdout.strip().splitlines()[-1].split("\t")
     # yt-dlp prints "NA" for a field the video doesn't have
-    album, track, artist = [("" if f == "NA" else f.strip()) for f in (fields + ["", "", ""])[:3]]
+    album, track, artist = [("" if f == "NA" else f.strip()) for f in (line.split("\t") + ["", "", ""])[:3]]
     if not album:
         flog(f"[yt-dlp] video {video_id} carries no album (not an official upload)")
         return None

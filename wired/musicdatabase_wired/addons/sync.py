@@ -49,16 +49,6 @@ def add_routes(app, route: Callable, config: Config, authorize: Callable) -> Non
             print(f"{log_name}: {exc}", flush=True)
             raise Refuse(HTTPStatus.SERVICE_UNAVAILABLE) from None
 
-    def clean_up_covers(conn, folder: str, username: str) -> None:
-        """Inside covers_lock. A failure here never fails the request."""
-        try:
-            removed = user_covers.clean_up(conn, folder)
-        except (OSError, sqlite3.Error) as exc:
-            print(f"Cleaning up the covers of {username} failed: {exc}", flush=True)
-            return
-        if removed:
-            print(f"Removed {len(removed)} unused cover(s) of {username}", flush=True)
-
     def require_cover(folder: str, cover) -> None:
         if cover is playlist_sync.KEEP_COVER:
             return
@@ -150,7 +140,7 @@ def add_routes(app, route: Callable, config: Config, authorize: Callable) -> Non
                         else:
                             applied, stored, *_ = spec.delete(conn, folder, uid, base_revision, deleted_at)
                         if spec.uses_covers:
-                            clean_up_covers(conn, folder, user)
+                            user_covers.clean_up_quietly(conn, folder, user)
                 except spec.bad_error as exc:
                     raise Refuse(HTTPStatus.BAD_REQUEST, str(exc)) from None
                 except (OSError, sqlite3.Error) as exc:
@@ -260,7 +250,7 @@ def add_routes(app, route: Callable, config: Config, authorize: Callable) -> Non
                     require_cover(folder, change["cover"])
                     applied, stored = mood_sync.store_global_cover(conn, mood_id, change["cover"],
                                                                    change["base_revision"], change["updated_at"])
-                    clean_up_covers(conn, folder, user)
+                    user_covers.clean_up_quietly(conn, folder, user)
             except (OSError, sqlite3.Error) as exc:
                 print(f"Covers of {user}: PUT global mood failed: {exc}", flush=True)
                 raise Refuse(HTTPStatus.SERVICE_UNAVAILABLE) from None

@@ -6,6 +6,7 @@ from urllib.parse import parse_qs
 
 from fastapi import Request, Response
 
+from musicdatabase_core import server_rules
 from musicdatabase_core.server_rules import host_allowed, plain_int
 
 
@@ -56,12 +57,7 @@ async def read_json_body(request: Request, limit: int):
 
 
 def bearer_token(request: Request) -> str | None:
-    value = request.headers.get("authorization")
-    if value is None:
-        return None
-    scheme, _, token = value.partition(" ")
-    # A malformed header is a bad token (401), not "no token"
-    return token.strip() if scheme.lower() == "bearer" else ""
+    return server_rules.bearer_token(request.headers.get("authorization"))
 
 
 def query_int(request: Request, name: str, default: int | None = None) -> int:

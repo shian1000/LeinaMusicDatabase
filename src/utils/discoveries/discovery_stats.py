@@ -48,35 +48,22 @@ def save_year_discovery_stats(stats: dict) -> None:
     write_json(_year_stats_path(), stats)
 
 
-def _get_cache() -> dict:
+def _bump(module_id: str, field: str, year: bool = False) -> None:
     # Loaded once per process and kept in memory so a busy import (many
     # invocations per song) doesn't re-read the file on every single bump;
     # every mutation is still written straight back to disk.
-    global _cache
-    if _cache is None:
-        _cache = load_discovery_stats()
-    return _cache
-
-
-def _get_year_cache() -> dict:
-    global _year_cache
-    if _year_cache is None:
-        _year_cache = load_year_discovery_stats()
-    return _year_cache
-
-
-def _bump(module_id: str, field: str) -> None:
-    stats = _get_cache()
+    global _cache, _year_cache
+    if year:
+        if _year_cache is None:
+            _year_cache = load_year_discovery_stats()
+        stats, save = _year_cache, save_year_discovery_stats
+    else:
+        if _cache is None:
+            _cache = load_discovery_stats()
+        stats, save = _cache, save_discovery_stats
     entry = stats.setdefault(module_id, {"invocations": 0, "successes": 0})
     entry[field] += 1
-    save_discovery_stats(stats)
-
-
-def _bump_year(module_id: str, field: str) -> None:
-    stats = _get_year_cache()
-    entry = stats.setdefault(module_id, {"invocations": 0, "successes": 0})
-    entry[field] += 1
-    save_year_discovery_stats(stats)
+    save(stats)
 
 
 def record_invocation(module_id: str) -> None:
@@ -91,12 +78,12 @@ def record_success(module_id: str) -> None:
 
 def record_year_invocation(module_id: str) -> None:
     """Call each time a module's get_release_year() is about to run."""
-    _bump_year(module_id, "invocations")
+    _bump(module_id, "invocations", year=True)
 
 
 def record_year_success(module_id: str) -> None:
     """Call each time a module's release-year result survives validation."""
-    _bump_year(module_id, "successes")
+    _bump(module_id, "successes", year=True)
 
 
 def reset_discovery_stats() -> None:

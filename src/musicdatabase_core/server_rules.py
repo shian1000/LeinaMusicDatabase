@@ -44,6 +44,15 @@ def plain_int(text: str | None) -> int | None:
     return int(text) if text is not None and PLAIN_INT_RE.fullmatch(text) else None
 
 
+def bearer_token(authorization: str | None) -> str | None:
+    """The token of an Authorization header, None when there's none."""
+    if authorization is None:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    # A malformed header is a bad token (401), not "no token"
+    return token.strip() if scheme.lower() == "bearer" else ""
+
+
 def host_allowed(host: str | None, names: set[str]) -> bool:
     """
     Whether a Host header is one this server answers: any IP address (DNS

@@ -46,8 +46,8 @@ def test_removing_a_tag_keeps_the_others(tags):
     assert tm.remove_tag_from_song(_song(1), "workout")
     assert tm.remove_tag_from_song(_song(1), "workout")       # already gone: still fine
     assert tm.remove_tag_from_song(_song(1), "never-existed")
-    assert not tm.has_tag_on_song(_song(1), "workout")
-    assert tm.has_tag_on_song(_song(1), "chill")
+    assert tm.song_ids_with_tag("workout") == set()
+    assert tm.song_ids_with_tag("chill") == {1}
 
 
 def test_a_tag_goes_on_many_songs_once_and_comes_off_all(tags):
@@ -67,7 +67,6 @@ def test_a_tag_goes_on_many_songs_once_and_comes_off_all(tags):
 ])
 def test_an_invalid_song_or_tag_changes_nothing(tags, song, tag):
     assert not tm.add_tag_to_song(song, tag)
-    assert not tm.has_tag_on_song(song, tag)
     assert not tm.remove_tag_from_song(song, tag)
     assert tags.query(Tag).count() == 0
 

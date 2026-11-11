@@ -90,7 +90,7 @@ def _find_local_spellcheck_match(song):
 
 def check_spelling_menu():
 
-    # One query for every checked song: has_tag_on_song() per song took
+    # One query for every checked song: a tag check per song took
     # two queries each, seconds of waiting when everything was checked
     checked = song_ids_with_tag("spellchecked")
     # MusicBrainz is asked about recordings; a whole album's title isn't one

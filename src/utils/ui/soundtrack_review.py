@@ -6,23 +6,17 @@ spelt several ways ticked; a lone title, maybe its official name, not)."""
 from utils.common.output import ok, review_header, say
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.soundtrack_albums import apply_soundtrack_variants, find_soundtrack_variants
+from utils.ui.album_guess_review import tick_album_pairs
 from utils.ui.prompts import tick_items
-from utils.ui.song_colors import song_tokens
 
 
 def review_soundtrack_guesses(found: list) -> list:
     """Ask about these (song, album) pairs. Returns the pairs ticked; the
     caller saves their albums and commits."""
-    if not found:
-        return []
-    review_header(f"{len(found)} song(s) whose artist may be the name of a game or film",
-                  "Ticked: the album is saved.",
-                  "Unticked: the song stays without an album.")
-    picked = tick_items("Save which albums?", found,
-                        lambda pair: song_tokens(pair[0].title, pair[0].artist.name, f"album: {pair[1]}"))
-    if not picked:
-        say("No soundtrack album saved.")
-    return picked or []
+    return tick_album_pairs(found, [f"{len(found)} song(s) whose artist may be the name of a game or film",
+                                    "Ticked: the album is saved.",
+                                    "Unticked: the song stays without an album."],
+                            "Save which albums?", "No soundtrack album saved.", album=lambda pair: pair[1])
 
 
 def review_soundtrack_names() -> int:

@@ -33,12 +33,11 @@ from config.constants import (
 )
 from settings import Settings
 from utils.common.debug import flog, mlog
-from musicdatabase_core.file_tools import connect_read_only
+from musicdatabase_core.file_tools import sqlite_problem
 
 CATALOG_FILES = ("music.db", "tag.db")
 _PARTIAL_SUFFIX = ".download"
 _CHUNK = 1024 * 1024
-SQLITE_HEADER = b"SQLite format 3\x00"
 
 
 class CatalogDownloadError(Exception):
@@ -138,18 +137,9 @@ def _download(session, url: str, target: Path, expected: dict) -> None:
 
 
 def _check_sqlite(path: Path, name: str) -> None:
-    with open(path, "rb") as f:
-        if f.read(len(SQLITE_HEADER)) != SQLITE_HEADER:
-            raise CatalogDownloadError(f"{name} isn't an SQLite database")
-    conn = connect_read_only(path)
-    try:
-        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    except sqlite3.Error as exc:
-        raise CatalogDownloadError(f"{name}: {exc}") from exc
-    finally:
-        conn.close()
-    if result != "ok":
-        raise CatalogDownloadError(f"{name} failed SQLite's integrity check: {result}")
+    problem = sqlite_problem(path)
+    if problem:
+        raise CatalogDownloadError(name + problem)
 
 
 def download_public_catalog(directory: Path | None = None, base_url: str | None = None,

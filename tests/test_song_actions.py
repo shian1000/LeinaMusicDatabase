@@ -56,7 +56,7 @@ def test_a_failed_tag_write_is_rolled_back_and_tagging_goes_on(tag_session, caps
     tag_session.commit()
     assert [t.name for t in tag_session.query(Tag)] == ["workout"]
     assert [st.song_id for st in tag_session.query(SongTag)] == [2]
-    assert tags_management.has_tag_on_song(_songs(2)[0], "workout")
+    assert tags_management.song_ids_with_tag("workout") == {2}
 
 
 def test_songs_with_tags_shows_the_given_songs_and_leaves_the_sessions_open(tag_session, monkeypatch, capsys):

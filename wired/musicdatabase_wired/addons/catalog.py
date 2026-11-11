@@ -5,12 +5,11 @@ ones. MDW never changes the catalog itself."""
 import hashlib
 import json
 import os
-import sqlite3
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from musicdatabase_core.request_format import SQLITE_HEADER
+from musicdatabase_core.file_tools import sqlite_problem
 
 from ..config import Config
 
@@ -75,19 +74,9 @@ def _download(url: str, target: Path, name: str, expected: dict) -> None:
 
 
 def _check_sqlite(path: Path, name: str) -> None:
-    with open(path, "rb") as file:
-        if file.read(len(SQLITE_HEADER)) != SQLITE_HEADER:
-            raise CatalogError(f"{name} isn't an SQLite database")
-    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
-    try:
-        conn.execute("PRAGMA trusted_schema=OFF")
-        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
-    except sqlite3.Error as exc:
-        raise CatalogError(f"{name}: {exc}") from exc
-    finally:
-        conn.close()
-    if result != "ok":
-        raise CatalogError(f"{name} failed SQLite's integrity check: {result}")
+    problem = sqlite_problem(path)
+    if problem:
+        raise CatalogError(name + problem)
 
 
 def _installed_version(config: Config) -> dict:

@@ -166,9 +166,10 @@ class PrivateSongTag(UserBase):
 
 
 @contextmanager
-def user_db_session(db_path: Path):
-    """A session on one user.db; its engine is disposed afterwards, so no
-    connection to the file on the data drive stays open. The caller commits."""
+def sqlite_session(db_path: Path):
+    """A session on one SQLite file (a user.db, files.db); its engine is
+    disposed afterwards, so no connection to the file stays open. The caller
+    commits."""
     engine = create_engine(f"sqlite:///{db_path}")
     session = sessionmaker(bind=engine)()
     try:
@@ -176,3 +177,6 @@ def user_db_session(db_path: Path):
     finally:
         session.close()
         engine.dispose()
+
+
+user_db_session = sqlite_session

@@ -13,7 +13,7 @@ Added from "Create playlist from folder and compare with YT playlist" (the
 video paired with a file whose song already had a link; a song without a
 link gets the video as its own), by song merges (the dropped song's link)
 and by "Resolve new requests" (several links marked correct, one the main
-one: inbox_requests.save_additional_videos()). Every function works in the session it's given; the caller commits.
+one: inbox_requests.record_link_decision()). Every function works in the session it's given; the caller commits.
 """
 
 from dataclasses import dataclass, field

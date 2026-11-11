@@ -25,6 +25,7 @@ import hashlib
 import os
 import re
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -174,3 +175,15 @@ def clean_up(conn, user_folder, grace_seconds: int = CLEAN_UP_GRACE_SECONDS, now
             continue
         removed.append(path)
     return removed
+
+
+def clean_up_quietly(conn, user_folder, username: str) -> None:
+    """clean_up() for a server request: what it removed, or why it failed,
+    printed to the server's log - a failure never fails the request."""
+    try:
+        removed = clean_up(conn, user_folder)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"Cleaning up the covers of {username} failed: {exc}", flush=True)
+        return
+    if removed:
+        print(f"Removed {len(removed)} unused cover(s) of {username}", flush=True)

@@ -42,34 +42,40 @@ def _search_url(text: str, kind: str) -> str:
     return f"https://open.spotify.com/search/{quote(text, safe='')}/{kind}"
 
 
-def _find_matching_track(soup: BeautifulSoup, artist: str, title: str):
-    """Scan the '/tracks' search results grid and return (href, matched_title,
-    matched_artist) for the best-matching row, or None if nothing clears the
-    similarity threshold for both title and artist."""
+def _best_match(candidates, artist: str, title: str):
+    """The value of the (value, title, artists) candidate whose title and
+    artist both clear the similarity threshold, the best of them; None when
+    none does."""
     best = None
     best_score = 0.0
-
-    for row in soup.select('[data-testid="tracklist-row"]'):
-        track_link = row.select_one('a[href^="/track/"]')
-        if not track_link:
+    for value, found_title, found_artists in candidates:
+        if not found_artists:
             continue
-        row_title = track_link.get_text(strip=True)
-
-        row_artists = [a.get_text(strip=True) for a in row.select('a[href^="/artist/"]')]
-        if not row_artists:
-            continue
-
-        title_sim = similarity(title, row_title)
-        artist_sim = max(similarity(artist, a) for a in row_artists)
+        title_sim = similarity(title, found_title)
+        artist_sim = max(similarity(artist, a) for a in found_artists)
         if title_sim < SPELLING_CHECK_THRESHOLD or artist_sim < SPELLING_CHECK_THRESHOLD:
             continue
-
-        score = min(title_sim, artist_sim)
-        if score > best_score:
-            best_score = score
-            best = (track_link["href"], row_title, row_artists[0])
-
+        if min(title_sim, artist_sim) > best_score:
+            best_score = min(title_sim, artist_sim)
+            best = value
     return best
+
+
+def _artist_names(element) -> list[str]:
+    return [a.get_text(strip=True) for a in element.select('a[href^="/artist/"]')]
+
+
+def _find_matching_track(soup: BeautifulSoup, artist: str, title: str):
+    """(href, matched_title, matched_artist) of the best-matching row of the
+    '/tracks' search results grid, None if nothing clears the threshold."""
+    def rows():
+        for row in soup.select('[data-testid="tracklist-row"]'):
+            link = row.select_one('a[href^="/track/"]')
+            if link:
+                artists = _artist_names(row)
+                row_title = link.get_text(strip=True)
+                yield (link["href"], row_title, artists[0] if artists else None), row_title, artists
+    return _best_match(rows(), artist, title)
 
 
 def _extract_album_from_track_page(soup: BeautifulSoup):
@@ -170,34 +176,15 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
 
 
 def _find_matching_album(soup: BeautifulSoup, artist: str, album: str):
-    """Scan the '/albums' search result cards and return the href of the
-    best-matching album, or None if nothing clears the similarity threshold
-    for both album title and artist."""
-    best = None
-    best_score = 0.0
-
-    for card in soup.select('[data-encore-id="card"]'):
-        album_link = card.select_one('a[href^="/album/"]')
-        title_el = card.select_one('[data-encore-id="cardTitle"]')
-        if not album_link or not title_el:
-            continue
-        card_title = title_el.get("title") or title_el.get_text(strip=True)
-
-        card_artists = [a.get_text(strip=True) for a in card.select('a[href^="/artist/"]')]
-        if not card_artists:
-            continue
-
-        title_sim = similarity(album, card_title)
-        artist_sim = max(similarity(artist, a) for a in card_artists)
-        if title_sim < SPELLING_CHECK_THRESHOLD or artist_sim < SPELLING_CHECK_THRESHOLD:
-            continue
-
-        score = min(title_sim, artist_sim)
-        if score > best_score:
-            best_score = score
-            best = album_link["href"]
-
-    return best
+    """The href of the best-matching '/albums' search result card, None if
+    nothing clears the threshold."""
+    def cards():
+        for card in soup.select('[data-encore-id="card"]'):
+            link = card.select_one('a[href^="/album/"]')
+            title_el = card.select_one('[data-encore-id="cardTitle"]')
+            if link and title_el:
+                yield link["href"], title_el.get("title") or title_el.get_text(strip=True), _artist_names(card)
+    return _best_match(cards(), artist, album)
 
 
 def _load(driver, url: str, wait_selector: str) -> BeautifulSoup | None:

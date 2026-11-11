@@ -188,7 +188,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from musicdatabase_core import (account_auth, global_mood_log, inbox_files, listen_sync,  # noqa: E402
-                                mood_sync, playlist_sync, sync_collections, user_covers)
+                                mood_sync, playlist_sync, server_rules, sync_collections, user_covers)
 from musicdatabase_core.file_tools import connect_read_only  # noqa: E402
 from musicdatabase_core.certificates import (TLS_CERT_FILE, TLS_KEY_FILE, certificate_code,  # noqa: E402
                                              ensure_tls_certificate, tls_certificate_code)
@@ -528,12 +528,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                     self.close_connection = True
 
         def _bearer_token(self) -> str | None:
-            value = self.headers.get("Authorization")
-            if value is None:
-                return None
-            scheme, _, token = value.partition(" ")
-            # A malformed header is a bad token (401), not "no token"
-            return token.strip() if scheme.lower() == "bearer" else ""
+            return server_rules.bearer_token(self.headers.get("Authorization"))
 
         def do_POST(self):
             if self._route_users("POST"):
@@ -752,7 +747,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                         applied, stored, *rest = spec.delete(conn, folder, uid, base_revision, deleted_at)
                         archived = rest[0] if rest else None
                     if spec.uses_covers:
-                        self._clean_up_covers(conn, folder, username)
+                        user_covers.clean_up_quietly(conn, folder, username)
             except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
@@ -824,17 +819,6 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
         def _require_cover(folder: str, cover) -> None:
             if cover is not playlist_sync.KEEP_COVER:
                 user_covers.require_blob(folder, cover)
-
-        @staticmethod
-        def _clean_up_covers(conn, folder: str, username: str) -> None:
-            """Inside covers_lock. A failure here never fails the request."""
-            try:
-                removed = user_covers.clean_up(conn, folder)
-            except (OSError, sqlite3.Error) as exc:
-                print(f"Cleaning up the covers of {username} failed: {exc}", flush=True)
-                return
-            if removed:
-                print(f"Removed {len(removed)} unused cover(s) of {username}", flush=True)
 
         def _cover_blob(self, method: str, match: re.Match):
             username, sha = match.group("user"), match.group("sha")
@@ -921,7 +905,7 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                     user_covers.require_blob(folder, change["cover"])
                     applied, stored = mood_sync.store_global_cover(conn, mood_id, change["cover"],
                                                                    change["base_revision"], change["updated_at"])
-                    self._clean_up_covers(conn, folder, username)
+                    user_covers.clean_up_quietly(conn, folder, username)
             except user_covers.CoverMissingError as exc:
                 self._reply_json(HTTPStatus.BAD_REQUEST, {"error": "cover_missing", "cover": exc.cover})
                 return
@@ -1121,10 +1105,8 @@ def interface_ipv4(interface: str) -> str | None:
     or None if it has none (yet). A public or Tailscale-range address is
     rejected - this socket is meant for the home LAN only.
     """
-    for address in _interface_addresses(interface):
-        if address.is_private and not address.is_loopback and address not in TAILSCALE_NETWORK:
-            return str(address)
-    return None
+    return next((str(a) for a in _interface_addresses(interface)
+                 if a.is_private and not a.is_loopback and a not in TAILSCALE_NETWORK), None)
 
 
 def vpn_interface_ipv4(interface: str) -> str | None:
@@ -1133,10 +1115,8 @@ def vpn_interface_ipv4(interface: str) -> str | None:
     if it has none (yet): a private one or one from 100.64.0.0/10 (where
     Tailscale and other VPNs hand theirs out) - never a public or loopback one.
     """
-    for address in _interface_addresses(interface):
-        if not address.is_loopback and (address.is_private or address in TAILSCALE_NETWORK):
-            return str(address)
-    return None
+    return next((str(a) for a in _interface_addresses(interface)
+                 if not a.is_loopback and (a.is_private or a in TAILSCALE_NETWORK)), None)
 
 
 def _interface_addresses(interface: str) -> list:

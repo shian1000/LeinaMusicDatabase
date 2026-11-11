@@ -27,33 +27,25 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import object_session
 
-from config.constants import BAD_VIDEO_NO_VIDEO_FOR_SONG, BAD_VIDEO_WRONG_FOR_SONG
+from config.constants import BAD_VIDEO_WRONG_FOR_SONG
 from utils.common.debug import mlog
-from utils.database.datatables import Song
 from utils.database.inbox_requests import (
-    DECIDED,
     LINK_ALREADY_CHANGED,
     LINK_SET_BY_HAND,
-    NO_VIDEO,
     OPEN,
     SONG_DELETED,
     USE_VIDEO,
     LinkCase,
     Replacement,
     RequestFile,
+    group_link_reports,
     load_bad_videos,
     mark_bad_videos,
-    merged_song_ids,
-    now_iso,
     parse_time,
-    links_set_by_hand,
-    resolve_song_id,
-    save_additional_videos,
-    save_decision,
+    record_link_decision,
+    set_link_decision,
     superseded_by_hand,
-    unmark_bad_video,
 )
-from config.constants import NO_VIDEO_SENTINEL
 
 # Settled statuses of their own
 ONLY_BAD_VIDEOS = "only videos found bad before"
@@ -87,26 +79,15 @@ class FoundLinkCase(LinkCase):
 def collect_found_link_cases(session, requests: list[RequestFile]) -> list[FoundLinkCase]:
     """Group every supported file's found links by current song and settle
     what needs no answer. Order: first report first."""
-    merged_into = merged_song_ids()
+    cases, set_by_hand = group_link_reports(
+        session, requests, lambda request: request.found_links,
+        lambda song_id, r: song_id if song_id is not None else ("deleted", r.song_id),
+        lambda song_id, r: FoundLinkCase(song_id, None, []))
     bad_videos = load_bad_videos(session)
-    set_by_hand = links_set_by_hand(requests, merged_into)
-    cases: dict = {}
-    for request in requests:
-        if not request.supported:
+    for case in cases:
+        if case.status == SONG_DELETED:
             continue
-        for report in request.found_links:
-            song_id = resolve_song_id(report.song_id, merged_into)
-            key = song_id if song_id is not None else ("deleted", report.song_id)
-            case = cases.get(key)
-            if case is None:
-                case = cases[key] = FoundLinkCase(song_id, None, [])
-            case.reports.append(report)
-
-    for case in cases.values():
-        case.song = session.get(Song, case.song_id) if case.song_id is not None else None
-        if case.song is None:
-            case.status = SONG_DELETED
-        elif case.song.youtube_video_id:
+        if case.song.youtube_video_id:
             case.status = LINK_ALREADY_CHANGED
         elif superseded_by_hand(set_by_hand, case.song_id, [r.found_at for r in case.reports]):
             case.status = LINK_SET_BY_HAND
@@ -114,7 +95,7 @@ def collect_found_link_cases(session, requests: list[RequestFile]) -> list[Found
             case.find_bad(bad_videos)
             if not case.replacements:
                 case.status = ONLY_BAD_VIDEOS
-    return list(cases.values())
+    return cases
 
 
 def settle_if_none_plays(case: FoundLinkCase) -> bool:
@@ -134,30 +115,11 @@ def apply_found_link_decision(case: FoundLinkCase, decision: str, video_id: str 
     for the automatic pass). `additional`: other videos marked correct, with
     USE_VIDEO. The caller commits the music session."""
     phone_ids = [r.video_id for r in case.all_replacements()]
-    session = object_session(case.song)
-    if decision == USE_VIDEO:
-        if not video_id:
-            raise ValueError("USE_VIDEO needs a video id")
-        case.song.youtube_video_id = video_id
-        unmark_bad_video(session, video_id, case.song_id)
-    elif decision == NO_VIDEO:
-        case.song.youtube_video_id = NO_VIDEO_SENTINEL
-        mark_bad_videos(session, phone_ids, BAD_VIDEO_NO_VIDEO_FOR_SONG, case.song_id)
-    elif decision == REJECTED:
-        mark_bad_videos(session, phone_ids, BAD_VIDEO_WRONG_FOR_SONG, case.song_id)
-    else:
+    if decision == REJECTED:
+        mark_bad_videos(object_session(case.song), phone_ids, BAD_VIDEO_WRONG_FOR_SONG, case.song_id)
+    elif not set_link_decision(case, decision, video_id, phone_ids):
         raise ValueError(f"Unknown decision {decision!r}")
-    save_additional_videos(case, video_id, additional)
     named = video_id or (phone_ids[0] if phone_ids else "-")
-    save_decision(f"{case.key}:{named}", {
-        "decision": decision,
-        "video_id": video_id,
-        **({"additional_video_ids": list(additional)} if additional else {}),
-        "phone_video_ids": phone_ids,
-        "decided_at": now_iso(),
-        "files": sorted({r.file_name for r in case.reports}),
-        **({"by": by} if by else {}),
-    }, session)
-    case.status = DECIDED
+    record_link_decision(case, f"{case.key}:{named}", decision, video_id, by, additional, phone_video_ids=phone_ids)
     mlog(f"Inbox request: song {case.song_id} found link(s) {', '.join(phone_ids)} -> {decision} {video_id or ''}")
 

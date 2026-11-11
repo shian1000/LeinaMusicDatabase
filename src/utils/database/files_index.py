@@ -34,19 +34,19 @@ import contextlib
 import hashlib
 import io
 import os
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import Column, Integer, String, create_engine, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import Column, Integer, String, text
+from sqlalchemy.orm import declarative_base
 
 from config.constants import FILE_MATCH_AUTO, FILE_MATCH_MANUAL, LIBRARY_AUDIO_EXTENSIONS
 from settings import Settings
 from utils.common.debug import flog, mlog, slog
 from utils.database.backup import DB_FILES
 from utils.database.migrations import FILES_TRACK, initialize_db
+from utils.database.user_datatables import sqlite_session
 
 FILES_DB_PATH = DB_FILES[FILES_TRACK]
 # Commit this often, so an interrupted first scan keeps what it read
@@ -87,16 +87,9 @@ class IndexReport:
     unmatched: list = field(default_factory=list)  # (path, artist, title) of files still without a song
 
 
-@contextmanager
 def files_db_session(db_path: Path = None):
     """A session on files.db; its engine is disposed afterwards. The caller commits."""
-    engine = create_engine(f"sqlite:///{db_path or FILES_DB_PATH}")
-    session = sessionmaker(bind=engine)()
-    try:
-        yield session
-    finally:
-        session.close()
-        engine.dispose()
+    return sqlite_session(db_path or FILES_DB_PATH)
 
 
 def ensure_files_db(db_path: Path = None) -> Path:

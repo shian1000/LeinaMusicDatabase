@@ -804,30 +804,42 @@ def superseded_by_hand(set_at: dict, song_id, report_times) -> bool:
     return all(t is None or t <= corrected for t in (parse_time(x) for x in report_times))
 
 
-def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLinkCase]:
-    """Group every supported file's dead link reports by (current song, dead
-    video) and settle what needs no answer. Order: first report first."""
+def group_link_reports(session, requests: list[RequestFile], reports_of, key_of, new_case) -> tuple[list, dict]:
+    """Every supported file's reports (`reports_of(request)`) grouped into
+    cases by `key_of(current song id, report)`, `new_case(song id, report)`
+    making one, its song loaded - SONG_DELETED when it's gone. Order: first
+    report first. Also links_set_by_hand() of these files."""
     merged_into = merged_song_ids()
-    bad_videos = load_bad_videos(session)
-    decisions = load_decisions()
-    set_by_hand = links_set_by_hand(requests, merged_into)
-    cases: dict[tuple, DeadLinkCase] = {}
+    cases: dict = {}
     for request in requests:
         if not request.supported:
             continue
-        for report in request.dead_links:
+        for report in reports_of(request):
             song_id = resolve_song_id(report.song_id, merged_into)
-            key = (song_id, report.dead_video_id) if song_id is not None else (None, report.song_id, report.dead_video_id)
-            case = cases.get(key)
-            if case is None:
-                case = cases[key] = DeadLinkCase(song_id, report.dead_video_id, [])
-            case.reports.append(report)
-
+            key = key_of(song_id, report)
+            if key not in cases:
+                cases[key] = new_case(song_id, report)
+            cases[key].reports.append(report)
     for case in cases.values():
         case.song = session.get(Song, case.song_id) if case.song_id is not None else None
         if case.song is None:
             case.status = SONG_DELETED
-        elif case.song.youtube_video_id and case.song.youtube_video_id != case.dead_video_id:
+    return list(cases.values()), links_set_by_hand(requests, merged_into)
+
+
+def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLinkCase]:
+    """Group every supported file's dead link reports by (current song, dead
+    video) and settle what needs no answer. Order: first report first."""
+    cases, set_by_hand = group_link_reports(
+        session, requests, lambda request: request.dead_links,
+        lambda song_id, r: (song_id, r.dead_video_id) if song_id is not None else (None, r.song_id, r.dead_video_id),
+        lambda song_id, r: DeadLinkCase(song_id, r.dead_video_id, []))
+    bad_videos = load_bad_videos(session)
+    decisions = load_decisions()
+    for case in cases:
+        if case.status == SONG_DELETED:
+            continue
+        if case.song.youtube_video_id and case.song.youtube_video_id != case.dead_video_id:
             # Fixed already, or "N/A". An empty link stays open: the phone's
             # video may still be worth taking.
             case.status = LINK_ALREADY_CHANGED
@@ -838,7 +850,7 @@ def collect_dead_link_cases(session, requests: list[RequestFile]) -> list[DeadLi
             case.status = LINK_SET_BY_HAND
         else:
             case.find_bad(bad_videos)
-    return list(cases.values())
+    return cases
 
 
 def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
@@ -931,21 +943,10 @@ def videos_correct_together(case: LinkCase) -> list[str]:
     return videos
 
 
-def save_additional_videos(case: LinkCase, main_video_id: str | None, additional) -> None:
-    """After the song's link is set: the link isn't repeated among its
-    additional videos, the other videos marked correct join them."""
-    session = object_session(case.song)
-    if main_video_id:
-        drop_additional_videos(session, [main_video_id], case.song_id)
-    for video_id in additional:
-        add_additional_video(session, case.song, video_id, ADDITIONAL_VIDEO_INBOX_REVIEW)
-
-
-def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None,
-                             by: str | None = None, additional=()) -> None:
-    """Change the song's link as the user decided and record the answer
-    (`by` = "auto" for the automatic pass). `additional`: other videos marked
-    correct, with USE_VIDEO or KEEP. The caller commits the music session."""
+def set_link_decision(case: LinkCase, decision: str, video_id: str | None, bad_ids: list) -> bool:
+    """USE_VIDEO (`video_id` becomes the link) or NO_VIDEO ("N/A", `bad_ids`
+    marked bad for the song) on the case's song. False for any other
+    decision, which the caller handles."""
     session = object_session(case.song)
     if decision == USE_VIDEO:
         if not video_id:
@@ -954,24 +955,47 @@ def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | 
         unmark_bad_video(session, video_id, case.song_id)
     elif decision == NO_VIDEO:
         case.song.youtube_video_id = NO_VIDEO_SENTINEL
-        mark_bad_videos(session, [r.video_id for r in case.all_replacements()],
-                        BAD_VIDEO_NO_VIDEO_FOR_SONG, case.song_id)
-    elif decision != KEEP:
-        raise ValueError(f"Unknown decision {decision!r}")
-    if decision == KEEP:
-        unmark_bad_video(session, case.dead_video_id, case.song_id)
+        mark_bad_videos(session, bad_ids, BAD_VIDEO_NO_VIDEO_FOR_SONG, case.song_id)
     else:
-        mark_bad_videos(session, [case.dead_video_id], BAD_VIDEO_REPLACED_DEAD_LINK)
-    save_additional_videos(case, video_id, additional)
-    save_decision(case.key, {
+        return False
+    return True
+
+
+def record_link_decision(case: LinkCase, key: str, decision: str, video_id: str | None, by: str | None,
+                         additional, **extra) -> None:
+    """After the song's link is set: the link isn't repeated among its
+    additional videos, the other videos marked correct join them, and the
+    answer is saved under `key` (`extra` added to it)."""
+    session = object_session(case.song)
+    if video_id:
+        drop_additional_videos(session, [video_id], case.song_id)
+    for other in additional:
+        add_additional_video(session, case.song, other, ADDITIONAL_VIDEO_INBOX_REVIEW)
+    save_decision(key, {
         "decision": decision,
         "video_id": video_id,
         **({"additional_video_ids": list(additional)} if additional else {}),
+        **extra,
         "decided_at": now_iso(),
         "files": sorted({r.file_name for r in case.reports}),
         **({"by": by} if by else {}),
     }, session)
     case.status = DECIDED
+
+
+def apply_dead_link_decision(case: DeadLinkCase, decision: str, video_id: str | None = None,
+                             by: str | None = None, additional=()) -> None:
+    """Change the song's link as the user decided and record the answer
+    (`by` = "auto" for the automatic pass). `additional`: other videos marked
+    correct, with USE_VIDEO or KEEP. The caller commits the music session."""
+    session = object_session(case.song)
+    if decision == KEEP:
+        unmark_bad_video(session, case.dead_video_id, case.song_id)
+    elif set_link_decision(case, decision, video_id, [r.video_id for r in case.all_replacements()]):
+        mark_bad_videos(session, [case.dead_video_id], BAD_VIDEO_REPLACED_DEAD_LINK)
+    else:
+        raise ValueError(f"Unknown decision {decision!r}")
+    record_link_decision(case, case.key, decision, video_id, by, additional)
     mlog(f"Inbox request: song {case.song_id} dead link {case.dead_video_id} -> {decision} {video_id or ''}")
 
 

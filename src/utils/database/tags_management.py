@@ -5,33 +5,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from utils.common.debug import flog, slog
 
 
-def _validate_song_and_tag(song, tag: str):
-    """
-    Validate a (song, tag) pair shared by all tag CRUD helpers below.
-
-    Returns (tag_session, cleaned_tag) on success, or None if song/tag are
-    invalid or the global database sessions aren't initialized yet.
-    """
-    if not hasattr(song, 'id') or song.id is None:
-        slog("Invalid song object: missing or None id")
-        return None
-
-    if not tag or not isinstance(tag, str):
-        slog("Invalid tag: must be a non-empty string")
-        return None
-
-    tag = tag.strip()
-    if not tag:
-        slog("Tag cannot be empty after stripping whitespace")
-        return None
-
+def _tag_session():
+    """The global tag.db session, None while the menus haven't opened it."""
     sessions = get_global_database_sessions()
     if sessions is None:
         slog("Global database sessions not initialized")
         return None
+    return sessions[1]
 
-    _, tag_session = sessions
-    return tag_session, tag
+
+def _clean_tag(tag) -> str | None:
+    return (tag.strip() or None) if isinstance(tag, str) else None
+
+
+def _valid_song(song) -> bool:
+    if getattr(song, "id", None) is None:
+        slog("Invalid song object: missing or None id")
+        return False
+    return True
 
 
 def _failed(tag_session, what: str, exc: SQLAlchemyError) -> bool:
@@ -45,83 +36,17 @@ def _failed(tag_session, what: str, exc: SQLAlchemyError) -> bool:
 
 
 def add_tag_to_song(song, tag: str) -> bool:
-    """
-    Add a tag to a song, respecting all existing tags.
-    
-    Args:
-        song: Song object from music.db with an 'id' attribute
-        tag: Tag string to add (e.g., "favorite", "classic")
-    
-    Returns:
-        bool: True if tag was added/already exists, False if operation failed
-        
-    Raises:
-        ValueError: If song_id is invalid or tag is empty
-    """
-    slog("add_tag_to_song functiion activated")
-    validated = _validate_song_and_tag(song, tag)
-    if validated is None:
-        return False
-    tag_session, tag = validated
-
-    try:
-        # Get or create the tag
-        tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
-        if not tag_obj:
-            tag_obj = Tag(name=tag)
-            tag_session.add(tag_obj)
-            tag_session.flush()  # Flush to get the id without committing
-            slog(f"Created new tag: '{tag}'")
-        else:
-            slog(f"Tag already exists: '{tag}'")
-        
-        # Check if song-tag relationship already exists
-        existing_link = (
-            tag_session.query(SongTag)
-            .filter_by(song_id=song.id, tag_id=tag_obj.id)
-            .first()
-        )
-        
-        if existing_link:
-            slog(f"Song {song.id} already has tag '{tag}'")
-            return True
-        
-        # Add the new tag relationship
-        song_tag = SongTag(song_id=song.id, tag_id=tag_obj.id)
-        tag_session.add(song_tag)
-        slog(f"Added tag '{tag}' to song {song.id}")
-        
-        return True
-        
-    except SQLAlchemyError as e:
-        return _failed(tag_session, f"Adding tag '{tag}' to song {song.id}", e)
-
-
-def song_ids_with_tag(tag: str) -> set[int]:
-    """Ids of every song carrying `tag`, in one query. Use it instead of
-    has_tag_on_song() in a loop over the whole catalog (two queries per song,
-    ~13 s for 5.7k songs)."""
-    sessions = get_global_database_sessions()
-    if sessions is None or not tag or not tag.strip():
-        return set()
-    _, tag_session = sessions
-    rows = (
-        tag_session.query(SongTag.song_id)
-        .join(Tag, SongTag.tag_id == Tag.id)
-        .filter(Tag.name == tag.strip())
-        .all()
-    )
-    return {song_id for (song_id,) in rows}
+    """`tag` on one song (Song from music.db). True when it's there now,
+    False for an invalid song or tag, or a failed write. The caller commits."""
+    return _valid_song(song) and add_tag_to_songs([song.id], tag)
 
 
 def add_tag_to_songs(song_ids, tag: str) -> bool:
-    """`tag` on every one of `song_ids`, in one query: add_tag_to_song() takes
-    two per song. The caller commits."""
-    sessions = get_global_database_sessions()
-    if sessions is None or not tag or not tag.strip():
+    """`tag` on every one of `song_ids`, the tag created when new, in two
+    queries however many songs. The caller commits."""
+    tag_session, tag = _tag_session(), _clean_tag(tag)
+    if tag_session is None or tag is None:
         return False
-    _, tag_session = sessions
-    tag = tag.strip()
     try:
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
         if not tag_obj:
@@ -132,15 +57,39 @@ def add_tag_to_songs(song_ids, tag: str) -> bool:
         tag_session.add_all(SongTag(song_id=song_id, tag_id=tag_obj.id) for song_id in set(song_ids) - tagged)
         return True
     except SQLAlchemyError as e:
-        return _failed(tag_session, f"Adding tag '{tag}' to many songs", e)
+        return _failed(tag_session, f"Adding tag '{tag}'", e)
+
+
+def remove_tag_from_song(song, tag: str) -> bool:
+    """`tag` off one song, its other tags kept. True also when it wasn't
+    there. The caller commits."""
+    tag_session, tag = _tag_session(), _clean_tag(tag)
+    if tag_session is None or tag is None or not _valid_song(song):
+        return False
+    try:
+        tag_ids = tag_session.query(Tag.id).filter_by(name=tag)
+        tag_session.query(SongTag).filter(SongTag.song_id == song.id, SongTag.tag_id.in_(tag_ids)) \
+            .delete(synchronize_session=False)
+        return True
+    except SQLAlchemyError as e:
+        return _failed(tag_session, f"Removing tag '{tag}' from song {song.id}", e)
+
+
+def song_ids_with_tag(tag: str) -> set[int]:
+    """Ids of every song carrying `tag`, in one query - also for one song's
+    check, instead of a query per song in a loop over the catalog."""
+    tag_session, tag = _tag_session(), _clean_tag(tag)
+    if tag_session is None or tag is None:
+        return set()
+    rows = tag_session.query(SongTag.song_id).join(Tag, SongTag.tag_id == Tag.id).filter(Tag.name == tag).all()
+    return {song_id for (song_id,) in rows}
 
 
 def clear_tag(tag: str) -> bool:
     """`tag` off every song, the tag itself staying. The caller commits."""
-    sessions = get_global_database_sessions()
-    if sessions is None:
+    tag_session = _tag_session()
+    if tag_session is None:
         return False
-    _, tag_session = sessions
     try:
         tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
         if tag_obj:
@@ -153,103 +102,13 @@ def clear_tag(tag: str) -> bool:
 def tag_names_by_song(song_ids) -> dict[int, list[str]]:
     """The tag names of each of `song_ids` that has any, sorted, in one query
     on the global tag.db session (left open)."""
-    sessions = get_global_database_sessions()
+    tag_session = _tag_session()
     ids = set(song_ids)
-    if sessions is None or not ids:
+    if tag_session is None or not ids:
         return {}
-    _, tag_session = sessions
     names = {}
     for song_id, name in (tag_session.query(SongTag.song_id, Tag.name)
                           .join(Tag, SongTag.tag_id == Tag.id).all()):
         if song_id in ids:
             names.setdefault(song_id, []).append(name)
     return {song_id: sorted(tags) for song_id, tags in names.items()}
-
-
-def has_tag_on_song(song, tag: str) -> bool:
-    slog("has_tag_on_song activatd")
-    """
-    Check if a song has a specific tag.
-    
-    Args:
-        song: Song object from music.db with an 'id' attribute
-        tag: Tag string to check (e.g., "favorite", "classic")
-    
-    Returns:
-        bool: True if song has the tag, False otherwise
-    """
-    validated = _validate_song_and_tag(song, tag)
-    if validated is None:
-        return False
-    tag_session, tag = validated
-
-    try:
-        # Query for the tag
-        tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
-        if not tag_obj:
-            # Tag doesn't exist, so song can't have it
-            slog("tag doesn't exist")
-            return False
-        
-        # Check if song-tag relationship exists
-        song_tag = (
-            tag_session.query(SongTag)
-            .filter_by(song_id=song.id, tag_id=tag_obj.id)
-            .first()
-        )
-        
-        slog(song_tag)
-        slog(song_tag is not None)
-        return song_tag is not None
-        
-    except SQLAlchemyError as e:
-        return _failed(tag_session, f"Checking tag '{tag}' on song {song.id}", e)
-
-
-def remove_tag_from_song(song, tag: str) -> bool:
-    """
-    Remove a specific tag from a song, keeping all other tags intact.
-    
-    Args:
-        song: Song object from music.db with an 'id' attribute
-        tag: Tag string to remove (e.g., "favorite", "classic")
-    
-    Returns:
-        bool: True if tag was removed or didn't exist, False if operation failed
-        
-    Raises:
-        ValueError: If song_id is invalid or tag is empty
-    """
-    validated = _validate_song_and_tag(song, tag)
-    if validated is None:
-        return False
-    tag_session, tag = validated
-
-    try:
-        # Query for the tag
-        tag_obj = tag_session.query(Tag).filter_by(name=tag).first()
-        if not tag_obj:
-            # Tag doesn't exist, so nothing to remove
-            slog(f"Tag '{tag}' does not exist")
-            return True
-        
-        # Find and delete the song-tag relationship
-        song_tag = (
-            tag_session.query(SongTag)
-            .filter_by(song_id=song.id, tag_id=tag_obj.id)
-            .first()
-        )
-        
-        if not song_tag:
-            # Song doesn't have this tag, nothing to remove
-            slog(f"Song {song.id} does not have tag '{tag}'")
-            return True
-        
-        # Delete the relationship (keeps other tags intact)
-        tag_session.delete(song_tag)
-        slog(f"Removed tag '{tag}' from song {song.id}")
-        
-        return True
-        
-    except SQLAlchemyError as e:
-        return _failed(tag_session, f"Removing tag '{tag}' from song {song.id}", e)

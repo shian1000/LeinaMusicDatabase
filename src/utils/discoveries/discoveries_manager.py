@@ -95,82 +95,61 @@ def _module_defines_function(script_path: Path, func_name: str) -> bool:
     )
 
 
-def load_discovery_modules():
-    """Import and return the *enabled* discovery modules, in the user's
-    configured order (see discovery_settings.py), ready to be passed to
-    discover_album_name()."""
-    module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
-    config = reconcile_discovery_config(module_files.keys())
+def _module_files() -> dict:
+    return {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
 
+
+def _enabled_modules(module_files: dict, config: dict) -> list:
+    """[(module_id, display name, module), ...] of the enabled modules, imported, in
+    the configured order."""
     modules = []
     for module_id in config["order"]:
-        if not config["enabled"].get(module_id, True):
-            continue
-        module = _import_module(module_files[module_id])
-        module_name = getattr(module, "MODULE_NAME", module_id)  # fallback to filename if missing
-        modules.append((module_id, module_name, module))
-
+        if config["enabled"].get(module_id, True):
+            module = _import_module(module_files[module_id])
+            modules.append((module_id, getattr(module, "MODULE_NAME", module_id), module))
     return modules
 
 
-def load_all_discovery_modules_metadata():
-    """Return [(module_id, display_name), ...] for every discovery module file
-    (enabled or not), in the user's configured order, for use by the Settings
-    menu (enable/disable + reorder screens).
+def _modules_metadata(module_files: dict, config: dict) -> list:
+    """[(module_id, display name), ...] of every module, enabled or not, in the
+    configured order, for the Settings menu (enable/disable + reorder screens).
 
     Display names are read by statically parsing each file's ``MODULE_NAME``
     (see _read_module_name) rather than importing the modules, so opening the
     Settings menu doesn't run every module's import-time side effects."""
-    module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
-    config = reconcile_discovery_config(module_files.keys())
+    return [(module_id, _read_module_name(module_files[module_id])) for module_id in config["order"]]
 
-    return [
-        (module_id, _read_module_name(module_files[module_id]))
-        for module_id in config["order"]
-    ]
+
+def load_discovery_modules():
+    """The *enabled* album fetchers, in the user's configured order (see
+    discovery_settings.py), ready to be passed to discover_album_name()."""
+    module_files = _module_files()
+    return _enabled_modules(module_files, reconcile_discovery_config(module_files.keys()))
+
+
+def load_all_discovery_modules_metadata():
+    module_files = _module_files()
+    return _modules_metadata(module_files, reconcile_discovery_config(module_files.keys()))
 
 
 def _year_capable_module_files() -> dict:
     """Module files (by id) that statically define get_release_year() -
     the subset usable for "Fill missing data -> Years", distinct from the
     full set of album fetchers."""
-    module_files = {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
-    return {
-        module_id: path
-        for module_id, path in module_files.items()
-        if _module_defines_function(path, "get_release_year")
-    }
+    return {module_id: path for module_id, path in _module_files().items()
+            if _module_defines_function(path, "get_release_year")}
 
 
 def load_year_discovery_modules():
-    """Import and return the *enabled* year-capable discovery modules, in
-    the user's configured order (see discovery_settings.py), ready to be
-    passed to discover_release_year_result()."""
+    """The *enabled* year-capable modules, in the user's configured order,
+    ready to be passed to discover_release_year_result()."""
     module_files = _year_capable_module_files()
-    config = reconcile_year_discovery_config(module_files.keys())
-
-    modules = []
-    for module_id in config["order"]:
-        if not config["enabled"].get(module_id, True):
-            continue
-        module = _import_module(module_files[module_id])
-        module_name = getattr(module, "MODULE_NAME", module_id)
-        modules.append((module_id, module_name, module))
-
-    return modules
+    return _enabled_modules(module_files, reconcile_year_discovery_config(module_files.keys()))
 
 
 def load_all_year_discovery_modules_metadata():
-    """Return [(module_id, display_name), ...] for every year-capable
-    discovery module file (enabled or not), in the user's configured order,
-    for the Settings menu (enable/disable + reorder screens for Years)."""
     module_files = _year_capable_module_files()
-    config = reconcile_year_discovery_config(module_files.keys())
-
-    return [
-        (module_id, _read_module_name(module_files[module_id]))
-        for module_id in config["order"]
-    ]
+    return _modules_metadata(module_files, reconcile_year_discovery_config(module_files.keys()))
 
 
 def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited_artists: list[str] | None = None) -> bool:
@@ -226,9 +205,9 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
         return None
 
     if isinstance(result, DiscoveryResult):
-        album, matched_title, matched_artist = result.album, result.matched_title, result.matched_artist
+        album = result.album
     elif isinstance(result, str):
-        album, matched_title, matched_artist = result, None, None
+        album = result
     else:
         flog(f"[{module_name}] returned unexpected type {type(result).__name__}, discarding")
         return None
@@ -245,20 +224,25 @@ def _validate_result(result, queried_artist: str, queried_title: str, module_nam
     # If the module told us what it actually matched, independently verify
     # that resembles what we searched for. This is the check that catches a
     # module confidently returning data for the wrong song.
-    if matched_title:
-        threshold = scaled_similarity_threshold(queried_title, matched_title, SPELLING_CHECK_THRESHOLD)
-        title_sim = similarity(queried_title, matched_title)
-        if not title_resembles(queried_title, matched_title):
-            flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
-                 f"'{queried_title}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
-            return None
+    return album if _match_resembles(result, queried_artist, queried_title, module_name, credited_artists) else None
 
+
+def _match_resembles(result, queried_artist: str, queried_title: str, module_name: str,
+                     credited_artists: list[str] | None) -> bool:
+    """Whether the title and artist a module says it matched (when it says)
+    resemble what was searched for; what doesn't goes into debug.log."""
+    matched_title = getattr(result, "matched_title", None)
+    matched_artist = getattr(result, "matched_artist", None)
+    if matched_title and not title_resembles(queried_title, matched_title):
+        threshold = scaled_similarity_threshold(queried_title, matched_title, SPELLING_CHECK_THRESHOLD)
+        flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
+             f"'{queried_title}' (sim={similarity(queried_title, matched_title):.2f} < {threshold:.2f}), discarding")
+        return False
     if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
         flog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
              f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
-        return None
-
-    return album
+        return False
+    return True
 
 
 @dataclass
@@ -596,7 +580,7 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
     if isinstance(result, int) and not isinstance(result, bool):
         result = YearDiscoveryResult(year=result)
     if isinstance(result, YearDiscoveryResult):
-        year, matched_title, matched_artist = result.year, result.matched_title, result.matched_artist
+        year = result.year
     else:
         flog(f"[{module_name}] returned unexpected type {type(result).__name__} for a release year, discarding")
         return None
@@ -606,20 +590,7 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
         flog(f"[{module_name}] returned implausible release year '{year}', discarding")
         return None
 
-    if matched_title:
-        threshold = scaled_similarity_threshold(queried_query, matched_title, SPELLING_CHECK_THRESHOLD)
-        title_sim = similarity(queried_query, matched_title)
-        if not title_resembles(queried_query, matched_title):
-            flog(f"[{module_name}] matched title '{matched_title}' doesn't resemble query "
-                 f"'{queried_query}' (sim={title_sim:.2f} < {threshold:.2f}), discarding")
-            return None
-
-    if matched_artist and not _matched_artist_resembles(queried_artist, matched_artist, credited_artists):
-        flog(f"[{module_name}] matched artist '{matched_artist}' doesn't resemble query "
-             f"'{queried_artist}' (sim={similarity(queried_artist, matched_artist):.2f}), discarding")
-        return None
-
-    return result
+    return result if _match_resembles(result, queried_artist, queried_query, module_name, credited_artists) else None
 
 
 def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool,

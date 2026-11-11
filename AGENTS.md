@@ -143,7 +143,8 @@ non-trivial work in that area.
   via `set_primary_artist()`, never renaming the shared row; an `artists.name` rename to a name not
   resembling the old one is offered as crediting only its song first, and never saved by the
   automatic pass), `inbox_found_links.py` for links the phone found for
-  songs without one, and `inbox_song_requests.py` for songs the phone played that music.db doesn't
+  songs without one (grouped and decided with the dead links' `group_link_reports()` /
+  `set_link_decision()` / `record_link_decision()` - a new kind of link report reuses them), and `inbox_song_requests.py` for songs the phone played that music.db doesn't
   have (`song_requests`): never added automatically - the owner adds them (through
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
   `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
@@ -365,10 +366,11 @@ non-trivial work in that area.
   ([ADR-0006](docs/decisions/0006-lite-sharing-server.md)): `account_auth`, `user_covers`, the `*_sync`
   modules and `global_mood_log`, plus `accounts.py` (making an account), `user_schema.py` (applying
   `migrations/user/`), `song_id_replay.py` (replaying `song_id_changes` on a plain connection, the
-  rules behind `song_references.py`), `request_format.py`, `certificates.py`, `server_rules.py` (limits,
+  rules behind `song_references.py`), `request_format.py`, `certificates.py`, `server_rules.py` (limits, the bearer token,
   the Host check, the login and upload limiters), `sync_collections.py` (the synced collections both
   servers serve, above), `file_tools.py` (`connect_read_only()` - every read-only SQLite open,
-  `write_atomically()` - every whole-file write through a temporary one, `now_iso()` - the time
+  `write_atomically()` - every whole-file write through a temporary one, `sqlite_problem()` - the
+  header + integrity check of a downloaded database, `now_iso()` - the time
   stamp stored in JSON, with the offset) and `inbox_files.py` (storing a request). Standard library
   only, nothing from this program (`tests/test_musicdatabase_core.py`), so a value it shares with
   `constants.py` is a copy that test compares. The old `utils/database/<name>.py` files of the moved
@@ -913,7 +915,7 @@ non-trivial work in that area.
   `review_album_guesses()` (`utils/ui/album_guess_review.py`, same place: albums only a
   `needs_review` source knew - Google's panel - none ticked), and
   `review_soundtrack_guesses()` (`utils/ui/soundtrack_review.py`, same place: artist names that may
-  be a game or film, none ticked), and
+  be a game or film, none ticked; these three Albums lists are one `tick_album_pairs()`), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
