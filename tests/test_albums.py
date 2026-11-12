@@ -485,7 +485,9 @@ def test_a_real_album_with_a_common_word_is_not_blacklisted(title):
 @pytest.mark.parametrize("title", [
     "Greatest Hits", "The Very Best of ABBA", "Now That's What I Call Music! 47", "Gold", "Rock",
     "Album", "Live at Montreux 15.07.2016", "Live in Toruń", "FIFA 14 Soundtrack", "Back to Black (MBNN Remix)",
-    "Hity lata 2016", "The Essential Leonard Cohen", "Kuschelrock 25",
+    "Hity lata 2016", "The Essential Leonard Cohen", "Kuschelrock 25", "Party Hard 2000",
+    "Megahits 2010 Die Erste", "MTV History 2000", "50 Oldies Party", "Absolut Grillparty", "Now Yearbook 79",
+    "Billboard Top 100 of 1994", "WOW Gospel 2015", "Poolside Lounge 2023", "Sun of Jamaica - Super Sommerhits",
 ])
 def test_compilations_and_placeholders_are_still_blacklisted(title):
     from utils.common.text_utils import is_blacklisted_album

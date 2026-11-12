@@ -206,7 +206,10 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
   `[exact]` = the whole title, `[substring]` = whole words anywhere in it). A common word, a place
   or a name belongs in `[exact]` or nowhere, never in `[substring]`: "rock", "paris", "morrison"
   there rejected "Rock or Bust", "Paris", "Morrison Hotel" (2026-10, `tests/test_albums.py` keeps
-  a list of real titles that must pass).
+  a list of real titles that must pass). Compilation series go in by their series name
+  ("party hard", "megahits", "now yearbook"), not by a "name + year" shape: the catalog's real
+  albums have it too ("Anawa 2020", "Acoustic 1993", "Demo 2004", every "Męskie Granie 20xx";
+  checked 2026-11-12). Check a new `[substring]` entry against every stored album title first.
 - If `matched_title`/`matched_artist` were provided, independently checks their similarity against
   the *query* — not the module's own opinion of whether it matched — using
   `scaled_similarity_threshold()` (the same short-string-aware threshold used elsewhere in the
