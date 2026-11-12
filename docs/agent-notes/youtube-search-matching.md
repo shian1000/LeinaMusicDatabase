@@ -220,12 +220,15 @@ Bracket-content matching is split by **scope**, not just by exact-vs-substring:
   text after them, which the trailing-only checks above can never reach - e.g.
   `"Herr Mannelig (animation) - Żniwa - Polish version"` or
   `"Voo Voo - Nocą (Official Audio) #Zostańwdomu"`. Currently `"Animation"`, `"Official"`,
-  `"Lyrics"`, `"Lyric"`, `"Visualiser"`, `"Video"`, `"Clip"`, `"Officiel"`, `"Oryginał"`,
+  `"Lyrics"`, `"Lyric"`, `"Visualiser"`, `"Visualizer"`, `"Video"`, `"Clip"`, `"Officiel"`, `"Oryginał"`,
   `"Subtitles"`, `"4K"`, `"Remaster"`, `"Remastered"`, `"Oficial"`, `"Full Song"` (Bollywood label
   uploads: `"T-Series - Criminal (Full Song) Ra.One"`. The trailing film name and the label-as-artist
   are *not* fixed by this, so those still need manual correction). Only add a word here when it's safe to
   assume it never appears inside a genuine subtitle, since - unlike the two lists above - it isn't
   limited to the trailing bracket, so a false-positive match anywhere in the title is destructive.
+  Words match whole, so every spelling needs its own entry: with only `"Visualiser"` listed,
+  `"VANDALIST (VISUALIZER)"` was stored as the title and Leina Radio couldn't match the playlist's
+  plain "Vandalist" to it by name (`DUPLICATE_TITLE_EXTRA_JUNK` and the app's lists had both).
 
 `_TRAILING_BRACKET_RE` and `_ANY_BRACKET_RE` both also treat the CJK "lenticular bracket" pair
 `【】` as equivalent to `()`/`[]` (e.g. a trailing `"【Kan/Rom/Eng Lyrics】"` annotation), and the

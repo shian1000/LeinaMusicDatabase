@@ -213,6 +213,7 @@ def test_resolve_special_channel_metadata_returns_none_when_nothing_matches(monk
 
 def test_strip_junk_brackets_anywhere_strips_new_marker_words():
     assert sanitize.strip_junk_brackets_anywhere("Song (Visualiser)") == "Song"
+    assert sanitize.strip_junk_brackets_anywhere("VANDALIST (VISUALIZER)") == "VANDALIST"
     assert sanitize.strip_junk_brackets_anywhere("Song (Clip officiel)") == "Song"
     assert sanitize.strip_junk_brackets_anywhere("Song (Officiel)") == "Song"
     assert sanitize.strip_junk_brackets_anywhere("Song (Wersja oryginał)") == "Song"

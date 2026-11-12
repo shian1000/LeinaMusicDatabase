@@ -329,6 +329,7 @@ YOUTUBE_TITLE_JUNK_MARKER_WORDS_ANYWHERE = [
     "Lyrics",
     "Lyric",
     "Visualiser",
+    "Visualizer",
     "Video",
     "Clip",
     "Officiel",
