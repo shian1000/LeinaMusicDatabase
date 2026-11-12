@@ -119,6 +119,17 @@ def test_the_same_marker_is_tried_first(session):
     assert find_existing_song("Song (Y Remix)", [remix, other]) is other
 
 
+def test_a_marker_run_on_without_a_bracket_names_that_version(session):
+    original = _song(session, "Brodka", "Dancing Shoes")
+    remix = _song(session, "Brodka", "Dancing Shoes", version_kind="remix", version_label="Kamp! remix",
+                  version_of=original.id)
+    songs = [original, remix]
+    assert songs_for_entry(songs, "Dancing Shoes KAMP! REMIX") == [original, remix]
+    assert find_existing_song("Dancing Shoes KAMP! REMIX", songs) is remix
+    assert find_existing_song("Dancing Shoes Remix", songs) is None
+    assert songs_for_entry(songs, "Dancing Shoes") == [original]
+
+
 def test_a_plain_version_marker_narrows_nothing(session):
     bach = _song(session, "Bach", "Toccata")
     urm = _song(session, "Bach", "Toccata", version_kind="other", version_label="URM version")

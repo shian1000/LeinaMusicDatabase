@@ -28,7 +28,7 @@ from config.constants import (
     VERSION_OTHER,
 )
 from utils.common.normalizer import normalize
-from utils.common.version_names import read_version
+from utils.common.version_names import read_version, title_with_version
 from utils.common.project_names import is_project_of
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
@@ -91,7 +91,10 @@ def songs_for_entry(songs: list, title: str | None, duration_s: int | None = Non
     (songs.version_kind) only for an entry whose title marks one - of that
     kind, the same marker first - and never for an entry that doesn't: "Boję
     się (Live)" isn't the studio "Boję się". A title stored with its marker
-    still (not looked at by "Find versions" yet) counts as that version."""
+    still (not looked at by "Find versions" yet) counts as that version. A
+    title with the marker run on, no bracket or dash ("Dancing Shoes KAMP!
+    REMIX"), can't be cut by read_version(); it names the version whose title
+    and marker together read so, after the songs that aren't versions."""
     songs = [s for s in songs if is_project_of(s, project)]
     songs = _songs_of_version(songs, title)
     if project:
@@ -105,7 +108,10 @@ def songs_for_entry(songs: list, title: str | None, duration_s: int | None = Non
 def _songs_of_version(songs: list, title: str | None) -> list:
     wanted = read_version(title)
     if wanted is None:
-        return [s for s in songs if not getattr(s, "version_kind", None)]
+        key = normalize(title or "")
+        return ([s for s in songs if not getattr(s, "version_kind", None)]
+                + [s for s in songs if getattr(s, "version_kind", None) and key
+                   and normalize(title_with_version(s)) == key])
 
     def version_of(song) -> tuple:
         if getattr(song, "version_kind", None):

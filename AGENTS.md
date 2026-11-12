@@ -229,7 +229,9 @@ non-trivial work in that area.
   "Remastered", "Bonus track" name a release, not a version): a new song gets it in `create_song_entry()`,
   stored ones through Manage database → "Find versions" (`utils/ui/version_review.py`, `version_checked`
   marker), Song actions → "Set version" by hand. `song_kinds.songs_for_entry()` keeps versions and
-  originals apart for every matcher (a title still holding a marker counts as that version). A plain
+  originals apart for every matcher (a title still holding a marker counts as that version; an entry
+  with the marker run on, no bracket or dash - "Dancing Shoes KAMP! REMIX" - which `read_version()`
+  can't cut, still names the version whose `title_with_version()` normalizes to it). A plain
   "version" marker (kind `other`) never narrows a match nor marks a new song: it is often part of the
   title ("Toccata (Best Version Ever)" lost its candidates that way in a folder-playlist test);
   `song_titles()` and `find_existing_song()` compare the marked title too; duplicates are keyed by it.
