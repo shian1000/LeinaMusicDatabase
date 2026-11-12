@@ -267,6 +267,10 @@ SINGLES_MARKER = [
 # one by one by title instead of grouping them like an album.
 SINGLES_ALBUM = "Singles"
 
+# Between a song's other titles in songs.other_titles (utils/database/other_titles.py):
+# not a comma, which a title or a line of lyrics may hold
+OTHER_TITLES_SEPARATOR = ";"
+
 # Artist names of a compilation's songs, after normalize(): their real artist
 # may stand in the title ("Lao Che / Życie jest jak tramwaj")
 COMPILATION_ARTIST_NAMES = ("various", "various artists", "va")

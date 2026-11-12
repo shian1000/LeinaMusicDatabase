@@ -102,13 +102,23 @@ def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, e
     tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
     tb_text = "".join(tb_lines)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = f"***Debug*** [CRASH @ {timestamp}]\n{tb_text}"
+    message = redact_secrets(f"***Debug*** [CRASH @ {timestamp}]\n{tb_text}")
 
     print(message, file=sys.stderr)
     _log(message, echo=False)
 
 
 sys.excepthook = _handle_exception
+
+
+# A secret in a URL's query: googleapiclient's HttpError text holds the
+# request URL with "key=<YOUTUBE_API_KEY>", and flog(f"... {exc}") or a crash
+# would write it to debug.log (AGENTS.md -> Secrets)
+_SECRET_QUERY = re.compile(r"\b((?:key|access_token|refresh_token|client_secret|token)=)[^&\s\"'<>]+", re.I)
+
+
+def redact_secrets(text: str) -> str:
+    return _SECRET_QUERY.sub(r"\1REDACTED", text)
 
 
 def _rotate_log(path: Path, incoming: int) -> None:
@@ -139,6 +149,7 @@ def _log(message: str, echo: bool = True) -> None:
     reported once on stderr, so a missing log doesn't go unnoticed.
     """
     global _write_failure_reported
+    message = redact_secrets(message)
     if echo and DEBUG_ENABLED:
         print(message)
     if not DEBUG_TO_FILE_ENABLED:

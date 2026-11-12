@@ -22,6 +22,8 @@ from utils.database.song_artists import (
 from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
 from utils.database.latin_names import latin_of
 from utils.ui.latin_forms_review import edit_latin_form
+from utils.database.other_titles import other_titles, set_other_titles, split_other_titles
+from config.constants import OTHER_TITLES_SEPARATOR
 from utils.common.cover_names import covered_artist_name
 from utils.common.project_names import song_project_name
 from utils.ui.genre_review import set_genre_of_songs
@@ -98,6 +100,20 @@ def edit_additional_artists_menu(song: Song):
         print(f"Now: {song_artist_label(song)} - {song.title}")
 
 
+def edit_other_titles(song: Song) -> None:
+    """The song's other titles (utils/database/other_titles.py): other
+    languages, a wrong title it's known by, a line of its lyrics."""
+    current = f"{OTHER_TITLES_SEPARATOR} ".join(other_titles(song))
+    typed = questionary.text(f'Other titles of "{song.title}", separated by "{OTHER_TITLES_SEPARATOR}" (empty = none):',
+                             default=current).ask()
+    if typed is None or typed.strip() == current:
+        print("Aborted")
+        return
+    set_other_titles(song, split_other_titles(typed))
+    submit_global_database_session()
+    print(f"Other titles of {song.title}: {song.other_titles or '—'}")
+
+
 def edit_entry_menu(mode: str = None, db_object = None):
     if db_object is None:
         if mode not in ("Artist", "Song"):
@@ -131,6 +147,7 @@ def edit_entry_menu(mode: str = None, db_object = None):
         extras_label = ", ".join(f"{a.name} ({additional_artist_role(db_object, a)})" for a in extras) or "—"
         actions[f"additional artists ({extras_label})"] = lambda: edit_additional_artists_menu(db_object)
         latin_rows[f"title in Latin letters ({latin_of(db_object) or '—'})"] = db_object
+        actions[f"other titles ({db_object.other_titles or '—'})"] = lambda: edit_other_titles(db_object)
         album = db_object.album_entry
         # A "Singles" album copies the song's own form
         if album is not None and album.type != ALBUM_TYPE_SINGLE:

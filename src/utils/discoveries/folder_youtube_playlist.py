@@ -125,11 +125,15 @@ def link_track(track: FolderTrack, entry: YouTubeEntry, matcher: LocalSongMatche
     """Pair `track` with `entry` (`by_hand`: the user picked the video): the
     video becomes its link, and a song the video matched while the file
     didn't is suggested for the file - with how well the file's tags fit
-    it, given the `matcher`. A file with no artist takes the video's."""
+    it, given the `matcher`. A file with no artist takes the video's. The
+    link is sure (ticked when the videos are offered to their songs) for the
+    same song, or a video picked by hand whose names resemble the file's -
+    one picked under another title is asked about unticked."""
     entry_artist = entry.metadata.artist
     if track.song_id is None and not track.artist and entry_artist:
         track.artist, track.artist_from_video = entry_artist, True
-    track.link_sure = by_hand or pair_score(track, entry) == _SAME_SONG_SCORE
+    score = pair_score(track, entry)
+    track.link_sure = score == _SAME_SONG_SCORE or (by_hand and score is not None)
     track.link_song_id = entry.song.id if entry.song is not None else None
     track.youtube_link = track.youtube_video_id = entry.video_id
     if track.song_id is None and entry.song is not None:

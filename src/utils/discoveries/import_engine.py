@@ -16,6 +16,7 @@ from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.version_names import title_with_version
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
 from utils.database.latin_names import artist_synonyms, song_titles
+from utils.database.other_titles import other_titles
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.song_kinds import (
     is_full_album,
@@ -454,8 +455,8 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
     """The song among one artist's `artist_songs` that `title` already is:
     same normalized title (or the owner's Latin form of it: "Gruppa krovi"
     is "Группа крови"; or the stored title without its featured-artist
-    credits), else the first whose title contains it ("Song" vs
-    "Song (Remastered)"). A title of punctuation only (":/") has to be
+    credits), else the first whose title is it with a bracket or trailing
+    junk more ("Song" vs "Song (Remastered)"), never one only containing it. A title of punctuation only (":/") has to be
     spelt the same. Shared by resolve_song() and the cover import
     (utils/discoveries/mp3_covers.py). Full albums only for an entry that
     looks like one (`duration_s` = its length, if known) - see
@@ -475,7 +476,8 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
     # A version is compared with its marker too: "Boję się (Live)" is the live "Boję się"
     exact = next((s for s in artist_songs if key in {normalize(s.title), normalize(title_with_version(s))}), None)
     if exact is None and key:
-        exact = next((s for s in artist_songs if normalize(getattr(s, "title_latin", None) or "") == key), None)
+        exact = next((s for s in artist_songs
+                      if key in {normalize(t) for t in (getattr(s, "title_latin", None), *other_titles(s)) if t}), None)
     if exact is None:
         # A stored title still holding a featured-artist credit is the entry
         # whose credit moved out of its title: "Song (feat. X) (Remix)" is the
@@ -489,7 +491,13 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
         exact = next((s for s in artist_songs if is_full_album(s) and normalize(s.title) == album_key), None)
     if exact is not None:
         return exact
-    return next((s for s in artist_songs if key in normalize(title_with_version(s))), None)
+    # The stored title with a bracket or trailing junk more ("Song" is "Song
+    # (Remastered)"), never a title only containing it: "Drzewa" isn't
+    # "Dlaczego drzewa nic nie mówią", nor "Love" "Lovely" (2026-11-12, a
+    # folder playlist gave the first one the other's video)
+    return next((s for s in artist_songs
+                 if key in {_title_core(t, drop_feat=False, drop_the=False) for t in (s.title, title_with_version(s))}),
+                None)
 
 
 # What separates an artist from the title inside a tag's title field

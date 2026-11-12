@@ -167,12 +167,19 @@ non-trivial work in that area.
   coordinate schema or sentinel changes with the app
   ([ADR-0003](docs/decisions/0003-phone-client-fills-gaps.md)). The service also lives outside
   the repo, so record changes to it in `~/system-docs/README.md` too. Details: `docs/runbooks/database.md`.
+  `other_titles.py` — `songs.other_titles` (migration 0023, ";"-separated): a song's titles in other
+  languages, a wrong title it's known by, a line of its lyrics, an older spelling; search and every
+  matcher count them as titles (`latin_names.song_titles()`), merges keep both songs'
+  (`keep_other_titles_on_merge()`). Write them through `set_other_titles()` / `add_other_titles()`.
+  Leina Radio reads them ([handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)).
   `latin_names.py` — Latin forms of names in other alphabets (`songs.title_latin`,
   `artists.name_latin`, `albums.title_latin`, migration 0011; "Кино" → "Kino"), which Leina Radio
   shows as "Кино (Kino)" and sends as field corrections. Only the owner writes them (song/artist
   editor, Manage database → "Fill in Latin forms of names in other alphabets" =
   `utils/ui/latin_forms_review.py`, or a reviewed correction); suggestions come from
-  `utils/common/romanize.py`. Search treats them as names, matching as synonyms / second titles:
+  `utils/common/romanize.py`. A name is stored in its own alphabet (owner, 2026-11-12); a Belarusian
+  one in Cyrillic, its Latin form in Belarusian Lacinka, even when the upload is in Lacinka; what a
+  band itself writes in Latin stays, the Cyrillic as another title (data-model.md). Search treats them as names, matching as synonyms / second titles:
   code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
   `artist.synonyms` (as a list of names: `artist_synonyms(artist)`; any synonyms text is split by
   `artist_credits.split_synonyms()`, never by hand). Details: `docs/data-model.md`.
@@ -452,7 +459,10 @@ non-trivial work in that area.
   ("T03: ", `text_utils.strip_track_number_prefix()`), a leading "The" (tried after the title with it, so
   "The Man" beats "Man") and words standing for "&"
   (`TITLE_AMPERSAND_WORDS`: "and", "i", "und", ...; `normalize()` drops the "&" itself) stripped. Don't swap one
-  for the other: a loose "already exists" in the import would skip genuinely new songs.
+  for the other: a loose "already exists" in the import would skip genuinely new songs. The import's
+  `find_existing_song()` takes a stored title only with a bracket or trailing junk more ("Engel" is
+  "Engel (Remastered)"), never one merely containing it: "Drzewa" was "Dlaczego drzewa nic nie
+  mówią" until 2026-11-12, and a folder playlist gave that song another one's video.
   `folder_playlist.py` is Users → Enter user database → "Create playlist from folder". It puts
   every mp3 in alphabetical path order. Files with no song are walked through one by one (name,
   folder, what was read). For each, the user can search by title across all artists
@@ -503,11 +513,12 @@ non-trivial work in that area.
   the video better (`_readings()`; wrong tags like "Track 05" are common), or for a file with no artist the same title when
   only one video has it, the video's artist then taken for the file; the rest by hand from the unpaired ones — only the
   `FILE_PAIR_VIDEO_CHOICES_MAX` most alike listed plus a search, since a `questionary` list taller
-  than the terminal draws its hidden part as blank lines), whose
+  than the terminal draws its hidden part as blank lines; the cursor on "Keep it without a YouTube
+  link", since the most alike is often another song of the artist and an Enter took it), whose
   link becomes the track's (`FolderTrack.youtube_link`, which `assign_song()` keeps). Once the
   playlist is saved, the videos are offered to their songs in one checkbox list
-  (`utils/ui/video_link_review.py`; certain pairings ticked - the same song, picked by hand - ones
-  by resembling names not): a song without a link gets the video as its own, one with a link (or
+  (`utils/ui/video_link_review.py`; certain pairings ticked - the same song, picked by hand under a
+  resembling name - ones by resembling names or picked by hand under another title not): a song without a link gets the video as its own, one with a link (or
   "N/A") as an additional video (`utils/database/additional_videos.py`, below). A saved playlist's
   "Save its YouTube videos on the songs" offers the same, none ticked. A video
   without a file can be a track with `file` None; one whose title is a known artist and whose artist
@@ -750,7 +761,7 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
-  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `songs.other_titles` (migration 0023: more titles to search a song by, ";"-separated; [handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks
@@ -828,7 +839,9 @@ non-trivial work in that area.
   UPath as options for an `smb://` library (`file_management.library_index_path()`), never put into
   a URI, which ends up in messages and `debug.log`. Never hardcode, print, or log these.
 - `YOUTUBE_API_KEY` (optional, `.env`) — a read-only YouTube Data API key for
-  `videos_exist_via_api()`. Same rules. The OAuth token in `.secrets/token.json` (playlists) is a
+  `videos_exist_via_api()`. Same rules. A googleapiclient `HttpError`'s text holds the
+  request URL with `key=`; `debug._log()` passes everything through `redact_secrets()`, so
+  `flog(f"... {exc}")` and crashes are safe in `debug.log` - not a `print()` of the error. The OAuth token in `.secrets/token.json` (playlists) is a
   separate credential and expires; without the key and a valid token the API check is skipped.
 - `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN` (optional, `.env`) — the API
   versions of those lookups, off by default (`DISCOVERY_MODULES_NEEDING_API_KEY`). Same rules.

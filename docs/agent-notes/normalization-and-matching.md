@@ -496,7 +496,12 @@ last "contained in" step used to call ":/" the artist's first song, so the
 import skipped such songs as already there and "Add it as a new song" offered
 the wrong one. A title that normalizes to nothing is now compared by its own
 characters only (case and spaces aside). Any new "key in other_key" check
-needs the same empty-key guard.
+needs the same empty-key guard. That last step itself is no longer "contained
+in" (2026-11-12): only the stored title with a bracket or trailing junk more
+counts (`_title_core()` of it equals the entry's) - "Drzewa" had been "Dlaczego
+drzewa nic nie mówią" and a folder playlist gave that song another song's
+video. It cost 7 library files whose names are cut short ("Konik" for "Konik
+na biegunach"); their files.db rows keep the song, a new such file is asked about.
 
 ## Duplicate songs: a stricter key than the file matcher's
 

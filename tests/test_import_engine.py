@@ -135,6 +135,21 @@ def test_an_existing_song_is_skipped_and_gets_the_link_it_lacked(env, title, cap
     assert "Rammstein - Engel (reason - Song already exists)" in capsys.readouterr().out
 
 
+# Real case (2026-11-12): "Drzewa" was taken for "Dlaczego drzewa nic nie
+# mówią" - any title containing the entry's counted - and a folder playlist
+# gave the song another song's video. Only a bracket or trailing junk more counts
+@pytest.mark.parametrize("entry, stored, same", [
+    ("Engel", "Engel (Remastered)", True),
+    ("Pay Your Respect", "Pay Your Respect - Official Video", True),
+    ("Drzewa", "Dlaczego drzewa nic nie mówią", False),
+    ("Love", "Lovely", False),
+    ("Song", "Song Two", False),
+])
+def test_an_entry_is_an_existing_song_only_with_brackets_or_junk_more(entry, stored, same):
+    song = Song(title=stored, artist=Artist(name="X"))
+    assert (ie.find_existing_song(entry, [song]) is song) is same
+
+
 def test_an_existing_link_is_never_overwritten(env):
     session = env["session"]
     rammstein = _artist(session, "Rammstein")

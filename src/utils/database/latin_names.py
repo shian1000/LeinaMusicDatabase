@@ -24,6 +24,7 @@ from utils.common.script_utils import has_non_latin
 from utils.common.version_names import title_with_version
 from utils.database.datatables import Album, Artist, Song
 from utils.common.artist_credits import split_synonyms
+from utils.database.other_titles import other_titles
 
 # model -> (name column, Latin form column)
 LATIN_COLUMNS = {
@@ -88,10 +89,11 @@ def artist_synonyms(artist) -> list[str]:
 
 
 def song_titles(song) -> list[str]:
-    """The song's title, its Latin form if set, and a version's title with its
-    marker ("Boję się (Live)", version_names.title_with_version())."""
+    """The song's title, its Latin form if set, a version's title with its
+    marker ("Boję się (Live)", version_names.title_with_version()) and its
+    other titles (other_titles.py)."""
     marked = title_with_version(song) if getattr(song, "version_kind", None) else None
-    return [t for t in (song.title, getattr(song, "title_latin", None), marked) if t]
+    return [t for t in (song.title, getattr(song, "title_latin", None), marked, *other_titles(song)) if t]
 
 
 def keep_latin_on_merge(keep, drop) -> None:

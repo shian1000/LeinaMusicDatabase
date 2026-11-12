@@ -2068,3 +2068,32 @@ def test_polish_tags_misread_as_latin1_are_repaired(tmp_path):
     tags["artist"], tags["title"] = "Bajm", misread("Małpa i ja")
     tags.save(file)
     assert read_file_metadata(file)["title"] == "Małpa i ja"
+
+
+# Real case (2026-11-01): a file whose song wasn't in the YouTube playlist got
+# another song of its artist's video - the cursor stood on the most alike
+# video, and a pair picked by hand was ticked when saved. Now the cursor is on
+# "Keep it without a YouTube link" and a hand pick under another title is unticked
+def test_pairing_by_hand_starts_off_the_videos_and_an_odd_pick_is_unsure(users_env, music_session, monkeypatch):
+    from utils.discoveries import folder_youtube_playlist as fyp
+    menu = __import__("importlib").import_module("menu.main_menu.users")
+
+    matcher = fyp.LocalSongMatcher(music_session)
+    other, same = fyp.youtube_entries(matcher, [
+        {"video_id": "ytOther", "title": "Mando Diao - You Got Nothing on Me", "channel": "Mando Diao"},
+        {"video_id": "ytSame", "title": "Mando Diao - Nothing Without You (Live)", "channel": "Mando Diao"}])
+    asked = {}
+
+    def select(message, choices, **kwargs):
+        asked.update(kwargs)
+        return _Answer(kwargs.get("default"))
+    monkeypatch.setattr(menu.questionary, "select", select)
+    assert menu._pick_video([other, same]) == menu._PAIR_NO_LINK
+    assert asked["default"] == menu._PAIR_NO_LINK
+
+    track = fp.FolderTrack(file=Path("a.mp3"), title="Nothing Without You", artist="Mando Diao", song_id=7)
+    fyp.link_track(track, other, matcher, by_hand=True)
+    assert (track.youtube_link, track.link_sure) == ("ytOther", False)
+    assert fyp.video_links([track]) == [(7, "ytOther", False)]
+    fyp.link_track(track, same, matcher, by_hand=True)
+    assert (track.youtube_link, track.link_sure) == ("ytSame", True)

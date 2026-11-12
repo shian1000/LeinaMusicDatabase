@@ -636,9 +636,11 @@ doesn't cover Hangul yet either, but is the right place to add it. Should resolv
 The title-level version of the artist problem above: a song's DB title and its real YouTube
 upload's title can legitimately be written in *either* of two alphabets (native script vs. a
 romanization), and which one the real upload uses isn't predictable per song. Real cases —
-Akute's `Cicha, jak maja śmierć` and `Ihołki` — have their DB title in Lacinka (Belarusian Latin
+Akute's `Cicha, jak maja śmierć` and `Ihołki` — had their DB title in Lacinka (Belarusian Latin
 script), but the real official upload (confirmed via yt-dlp's `track` metadata, channel
-`akutemusic`) is titled in Cyrillic (`Ціха, як мая смерць`, `Іголкі`). That upload scored only
+`akutemusic`) is titled in Cyrillic (`Ціха, як мая смерць`, `Іголкі`). Since 2026-11-12 Belarusian
+titles are stored in Cyrillic with the Lacinka as `title_latin` (owner's rule, `docs/data-model.md`),
+so the retry now mostly goes the other way: a Cyrillic DB title against a Lacinka upload. That upload scored only
 0.16–0.20 relevance against the Lacinka DB title — well below the acceptance bar — so it never
 even reached the quality/official-release tiebreak; the only candidates that *did* clear relevance
 were live bootleg reuploads whose titles happened to already be in Latin script. No amount of
@@ -658,11 +660,14 @@ playlist cache entry and the inbox check); an official hit on any retry wins, ot
 pick found is kept. Artists get the same treatment: `artist_match_synonyms()` puts `name_latin`
 first in the synonyms string every matcher receives. `transliterate(title, language)` picks the
 direction automatically by detecting which script `title` is already in. The letter-level rules
-have real, non-obvious phonological gotchas — regressive softness assimilation cascades *backward*
-through a whole consonant cluster to whatever я/е/ё/ю/і/ь follows it (`сне` → `śnie`, `смерць` →
-`śmierć`: `с` softens even two letters back from `е`, across the unmarked `м`), except `л`, whose
-hard/soft split (`ł`/`l`) is always determined by its own immediate next letter and never cascades
-in from later in its cluster (`Іголкі` → `Ihołki`, not `Iholki`), and a hard apostrophe blocks the
+have real, non-obvious phonological gotchas — regressive softness assimilation runs *backward*
+through a consonant cluster to whatever я/е/ё/ю/і/ь follows it (`сне` → `śnie`, `смерць` →
+`śmierć`: `с` softens even two letters back from `е`, across the unmarked `м`), but only н/с/ц take
+it and only dentals/labials/л pass it on — a velar stops it (`Вольскі` → `Volski`, not `Volśki`);
+`л`'s hard/soft split (`ł`/`l`) is its own: soft before ь, і, я/е/ё/ю or a soft `л`
+(`Сталінград` → `Stalinhrad`; Wikipedia's "Belarusian Latin alphabet"), never taken from a later
+consonant (`Іголкі` → `Ihołki`, not `Iholki`). Doubled soft consonants mark the first, as classical
+Lacinka does (`жыцця` → `žyćcia`, though Naviband write "žyccia"). A hard apostrophe blocks the
 cascade entirely rather than triggering it the way `ь` does (`з'ява` → `zjava`, not `źjava`). See
 that file's docstrings and `tests/test_transliteration.py` for the full derivation — every rule was
 derived from a specific real-word counterexample, not assumed up front. The reverse direction

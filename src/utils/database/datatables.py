@@ -10,7 +10,7 @@ Base = declarative_base()
 # Clean names composes rows stored before (decomposed_names()).
 COMPOSED_FIELDS = {
     "artists": ("name", "origin", "synonyms", "name_latin"),
-    "songs": ("title", "title_latin", "album", "genre"),
+    "songs": ("title", "title_latin", "other_titles", "album", "genre"),
     "albums": ("title", "title_latin"),
     "projects": ("name", "aliases", "channels"),
 }
@@ -81,6 +81,8 @@ class Song(Base):
     version_kind = Column(String)
     version_label = Column(String)
     version_of = Column(Integer, index=True)
+    # Other titles, ";"-separated (migration 0023) - see utils/database/other_titles.py
+    other_titles = Column(String)
 
     artist = relationship("Artist", back_populates="songs")
     album_entry = relationship("Album", back_populates="songs")

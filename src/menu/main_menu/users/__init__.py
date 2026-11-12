@@ -497,7 +497,10 @@ def _entry_label(entry) -> str:
 def _pick_video(unpaired: list):
     """The video for a file, or one of the _PAIR_* choices: the most alike
     unpaired videos (FILE_PAIR_VIDEO_CHOICES_MAX, so the list fits the
-    terminal), and when there are more, a search through all of them."""
+    terminal), and when there are more, a search through all of them. The
+    cursor starts on keeping it without a link, not on a video: the most
+    alike one is often another song of the same artist, and an Enter gave
+    that song's video to the file (2026-11-01, Mando Diao, Nicolae Guță)."""
     limit = FILE_PAIR_VIDEO_CHOICES_MAX
     shown, search = unpaired[:limit], [_PAIR_SEARCH] if len(unpaired) > limit else []
     while True:
@@ -508,6 +511,7 @@ def _pick_video(unpaired: list):
             else "No unpaired video left in the YouTube playlist - what should happen with this file?",
             choices=[questionary.Choice(title=_entry_label(e), value=e) for e in shown]
             + search + [_PAIR_NO_LINK, _PAIR_LEAVE_OUT, _PAIR_STOP],
+            default=_PAIR_NO_LINK,
         ).ask()
         if picked != _PAIR_SEARCH:
             return picked

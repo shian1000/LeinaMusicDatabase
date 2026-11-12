@@ -18,6 +18,7 @@ Artist                          Song
 id            PK                id             PK
 name          NOT NULL          title          NOT NULL
 origin                          title_latin    (migration 0011)
+                                 other_titles   (migration 0023) "Hymn of the Cherubim; Cherubic Hymn"
 synonyms                        album
 name_latin    (migration 0011)  year
                                  language
@@ -104,7 +105,22 @@ added_at      NOT NULL, default datetime('now')
   (`find_existing_song()`, the YouTube retry `title_latin`). Merges keep the kept row's form, else
   the other's (`merge_artist_synonyms()`, `merge_albums()`, song dedup); a rename keeps it and the
   review/editor point at it. A one-song "Singles" album copies its song's form. Rules:
-  `utils/database/latin_names.py`.
+  `utils/database/latin_names.py`. The owner's rule (2026-11-12): a name is stored in its own
+  alphabet, its Latin form beside it; a Belarusian name in Cyrillic with the Latin form in
+  Belarusian Lacinka ("Сьмех у зале" / "Śmiech u zale"), whatever an upload calls it. What a
+  band itself writes in Latin, even among Cyrillic posts, stays as released, with the Cyrillic as
+  another title: names (AKUTE, PAULINN, Naviband, Litvintroll, Brutto, ONUKA, Vinsent - synonym
+  "Вінсэнт") and titles ("ONUKA - GOLOS" / "Голос", "Latexfauna - Kosmos", "Motanka - Verba",
+  "Злипні - Svit"); checked on their channels and Wikipedia, 2026-11-12.
+- Other titles (migration 0023): `songs.other_titles`, ";"-separated (`OTHER_TITLES_SEPARATOR`;
+  a title or a line of lyrics may hold a comma) - what a song is looked for by besides its title
+  and Latin form: the title in other languages ("Херувимская песнь" = "Hymn of the Cherubim"), a
+  wrong title people know it by, a line of its lyrics ("Lubiła tańczyć" for "Na jednej z dzikich
+  plaż"), an older spelling kept so files and requests naming it still find the song. Search
+  counts them (`SongSearchFilters.title`), every matcher too (`latin_names.song_titles()`,
+  `find_existing_song()`), merges keep both songs' (`merge_songs()`). Edited in the song editor
+  ("other titles"). Public (`MUSIC_SPEC`). Rules: `utils/database/other_titles.py`; Leina Radio:
+  [handoff](handoffs/other-titles-for-musicdatabaseapp.md).
 - `songs.nostalgic` / `melancholic` / `party` (baseline integer mood flags, never filled) were dropped by
   migration 0016 (2026-10-21); moods are `tags.kind = 'mood'` in tag.db.
 - `Song.artist_id` is a real SQLAlchemy `ForeignKey`, enforced within `music.db`.

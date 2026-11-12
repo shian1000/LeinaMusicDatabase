@@ -23,10 +23,11 @@ class SongSearchFilters:
 
     @staticmethod
     def title(query: str):
-        """Filter songs by title or its Latin form containing the query."""
+        """Filter songs by title, its Latin form or other titles containing the query."""
         return or_(
             func.lower(Song.title).contains(query.lower()),
             func.lower(func.coalesce(Song.title_latin, "")).contains(query.lower()),
+            func.lower(func.coalesce(Song.other_titles, "")).contains(query.lower()),
         )
 
     @staticmethod
@@ -109,7 +110,7 @@ def _artist_name_and_synonyms(artist: Artist) -> str:
 
 
 def _title_and_latin(song: Song) -> str:
-    return normalize_text(f"{song.title or ''} {song.title_latin or ''}")
+    return normalize_text(f"{song.title or ''} {song.title_latin or ''} {song.other_titles or ''}")
 
 
 def _all_artist_names(song: Song) -> str:
@@ -122,7 +123,7 @@ class SongNormalizedFields:
 
     @staticmethod
     def title(song: Song) -> str:
-        """Extract and normalize song title and its Latin form."""
+        """Extract and normalize song title, its Latin form and other titles."""
         return _title_and_latin(song)
 
     @staticmethod

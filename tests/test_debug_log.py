@@ -257,3 +257,15 @@ def test_level_0_asks_nothing_more(monkeypatch):
 @pytest.mark.parametrize("level, only_file", [(None, True), (2, None)])
 def test_a_cancelled_menu_changes_nothing(monkeypatch, level, only_file):
     assert _settings_menu(monkeypatch, level, only_file)[0] == []
+
+
+# Real case (2026-11-12): a googleapiclient HttpError's text holds the request
+# URL with the API key, and flog(f"... {exc}") / a crash wrote it to debug.log
+def test_secrets_in_urls_never_reach_debug_log(log):
+    debug.flog("videos.list failed: <HttpError 404 when requesting "
+               "https://youtube.googleapis.com/youtube/v3/videos?id=x&key=AIzaSECRET-123_x&alt=json>")
+    debug.flog("refresh: https://oauth2.googleapis.com/token?access_token=ya29.SECRET&x=1")
+    text = "\n".join(log.lines())
+    assert "SECRET" not in text
+    assert "key=REDACTED&alt=json" in text and "access_token=REDACTED&x=1" in text
+    assert debug.redact_secrets("a monkey=1 and keyboard") == "a monkey=1 and keyboard"

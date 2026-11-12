@@ -70,49 +70,44 @@ _BE_VOWELS = set(_BE_PLAIN_VOWELS) | set(_BE_IOTATED_VOWELS)
 _BE_CYRILLIC_RE = re.compile(r"[а-яёіўʼ]", re.IGNORECASE)
 
 
+# Consonants that take the softness of a soft consonant after them
+# (regressive assimilation, "сне" -> "śnie"), and those whose softness passes
+# on that way. Velars (к, г, х) and the always-hard ж/ч/ш/р/й/ў pass nothing
+# on: "Вольскі" -> "Volski", not "Volśki" (2026-11-12).
+_BE_ASSIMILATING = set("нсц")
+_BE_PASSES_SOFTNESS = set("нсзцдтлвмпбф")
+
+
 def _be_soft_consonant_flags(lowered: list[str]) -> list[bool]:
     """For each position, whether the Belarusian consonant there (if any)
     renders in its soft Latin form (_BE_CONSONANTS_SOFT) rather than the
     normal one.
 
-    Softening is a regressive assimilation that propagates backward through
-    a whole run of consecutive consonants, triggered by я/е/ё/ю, і, or ь
-    immediately after the run — but only the consonants that *don't*
-    directly touch the trigger mark themselves soft:
+    Softening is a regressive assimilation running backward through a run
+    of consecutive consonants, triggered by я/е/ё/ю, і, or ь right after
+    the run:
 
     - Before я/е/ё/ю or і: the vowel's own spelling already carries the
       palatalization for the consonant directly touching it (see
-      _BE_CONSONANTS_SOFT's docstring), so that one stays plain — but any
-      *earlier* consonant in the same run has no such vowel spelling to
-      lean on, so it must mark itself. Real cases: "сне" -> "śnie" (с, not
-      touching "е", marks itself; н, touching it, stays plain), "смерць" ->
-      "śmierć" (с marks itself two letters back from "е", across the
-      unmarked "m"), "большасці" -> "bolšaści" (і triggers the same
-      cascade as я/е/ё/ю; ц, touching it, stays plain "c").
-    - Before ь: ь has no spelling of its own to carry anything, so the
-      consonant directly touching it must mark itself soft too — same
-      cascade rule, just with the final member included instead of
-      excluded.
+      _BE_CONSONANTS_SOFT's docstring), so that one stays plain - but an
+      *earlier* н/с/ц (_BE_ASSIMILATING) has no such vowel spelling to lean
+      on, so it marks itself, as long as every consonant between it and the
+      vowel passes softness on (_BE_PASSES_SOFTNESS). Real cases: "сне" ->
+      "śnie", "смерць" -> "śmierć" (across the unmarked "m"), "большасці"
+      -> "bolšaści", "жыццё" -> "žyćcio" (a run of two ц before ё - only the
+      first marks itself); but "Вольскі" -> "Volski" (к passes nothing on).
+    - Before ь: ь has no spelling of its own, so the consonant directly
+      touching it marks itself soft too, and passes softness back the same
+      way.
     - Before a plain vowel (а/э/о/у/ы), a hard apostrophe, or nothing (end
-      of string/other text): no assimilation at all — a hard apostrophe
+      of string/other text): no assimilation at all - a hard apostrophe
       exists specifically to keep the preceding consonant hard (real case:
-      "з'ява", not "źjava"), so it blocks the cascade rather than
-      triggering it the way ь does.
+      "з'ява", not "źjava").
 
-    A same-letter cluster is not special-cased: "жыццё" -> "žyćcio" falls
-    out of the same rule (a run of two ц before ё — only the first, not
-    touching the vowel, marks itself: "ć" then plain "c").
-
-    л is excluded from all of the above and handled separately at the end:
-    unlike н/с/ц/ж/ч/ш (whose Latin form only ever changes at the very
-    letter that's directly softened — see _BE_CONSONANTS_SOFT's docstring),
-    Belarusian л has an obligatory, always-marked hard/soft split (ł vs l)
-    that's local to each л itself, not something that cascades in from
-    elsewhere in its cluster. Real case: "Іголкі" -> "Ihołki" — л sits in
-    the "лк" cluster, which (like "сн" in "сне") ends right before "і", but
-    л stays hard because ITS OWN immediate next letter is к, a consonant —
-    the cascade that would soften a leading с or н in the same position
-    does not apply to л.
+    л is handled on its own: Belarusian л has an obligatory, always-marked
+    hard/soft split (ł vs l), soft before ь, і, я/е/ё/ю, or another л that
+    is soft itself ("Сталінград" -> "Stalinhrad", "Іголкі" -> "Ihołki").
+    It never takes softness from a cluster, but passes it on.
     """
     n = len(lowered)
     soft = [False] * n
@@ -126,23 +121,25 @@ def _be_soft_consonant_flags(lowered: list[str]) -> list[bool]:
             i += 1
         end = i  # [start, end) is the maximal consonant run
         trigger = lowered[end] if end < n else ""
-        if trigger == "ь":
-            for pos in range(start, end):
-                if lowered[pos] != "л":
-                    soft[pos] = lowered[pos] in _BE_CONSONANTS_SOFT
-        elif trigger in _BE_IOTATED_VOWELS or trigger == "і":
-            for pos in range(start, end - 1):
-                if lowered[pos] != "л":
-                    soft[pos] = lowered[pos] in _BE_CONSONANTS_SOFT
+        if trigger == "ь" or trigger in _BE_IOTATED_VOWELS or trigger == "і":
+            last = lowered[end - 1]
+            if trigger == "ь" and last != "л":
+                soft[end - 1] = last in _BE_CONSONANTS_SOFT
+            passing = last in _BE_PASSES_SOFTNESS
+            for pos in range(end - 2, start - 1, -1):
+                letter = lowered[pos]
+                if passing and letter in _BE_ASSIMILATING:
+                    soft[pos] = True
+                passing = passing and letter in _BE_PASSES_SOFTNESS
         # else: plain vowel, hard apostrophe, or end of string/other text
-        # — no assimilation at all, every consonant in the run stays plain.
+        # - no assimilation at all, every consonant in the run stays plain.
 
-        # л's own rule, independent of cluster/cascade: soft only when ITS
-        # immediate next character is ь or a bare iotated vowel.
-        for pos in range(start, end):
+        # л's own rule, from the right so "лл" before a soft vowel is "ll"
+        for pos in range(end - 1, start - 1, -1):
             if lowered[pos] == "л":
                 nxt = lowered[pos + 1] if pos + 1 < n else ""
-                soft[pos] = nxt == "ь" or nxt in _BE_IOTATED_VOWELS
+                soft[pos] = (nxt == "ь" or nxt == "і" or nxt in _BE_IOTATED_VOWELS
+                             or (nxt == "л" and soft[pos + 1]))
     return soft
 
 

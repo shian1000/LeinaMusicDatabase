@@ -3,8 +3,8 @@ videos offered for their songs in one checkbox list
 (utils/database/additional_videos.py) - as the song's own link when it has
 none, else as an additional video, so Leina Radio recognises the video as
 the song even when its title names it differently. Ticked: the certain
-pairings (the same song, picked by hand); unticked: those found only by
-resembling names."""
+pairings (the same song, picked by hand under a resembling name); unticked:
+those found only by resembling names, or picked by hand under another title."""
 
 
 from config.constants import ADDITIONAL_VIDEO_FOLDER_PLAYLIST
@@ -24,7 +24,8 @@ def _choice_title(link) -> list:
                        f"{kind}: https://youtu.be/{link.video_id}", song_project_name(link.song))
 
 
-_UNSURE_NOTE = "Unticked: pairs found by resembling names only - tick them if the video is the song."
+_UNSURE_NOTE = ("Unticked: pairs found by resembling names only, or picked by hand under another title"
+                " - tick them if the video is the song.")
 
 
 def review_video_links(session, pairs, unticked_note: str = _UNSURE_NOTE) -> bool:

@@ -1,4 +1,6 @@
 import sys
+
+import pytest
 from pathlib import Path
 
 repo_root = Path(__file__).resolve().parents[1]
@@ -128,7 +130,7 @@ _LACINKA_PARAGRAPH_EXPECTED = (
     "niekatorymi vytvorcami ŭ dyzajnie ŭpakoŭki pradukcyi, karystalnikami "
     "internetu. Jość prahramy-«łacinizatary» tekstaŭ, dziakujučy jakim, "
     "naprykład, anłajn-hazietu «Naša Niva» možna čytać i na biełaruskaj "
-    "łacincy. Niaredka łacinkaj pieradajuć teksty katałickaha zmiestu — "
+    "łacincy. Niaredka łacinkaj pieradajuć teksty katalickaha zmiestu — "
     "naprykład, na pamiatnych doškach u niekatorych kaściołach, naprykład, "
     "u Čyrvonym kaściole."
 )
@@ -212,3 +214,21 @@ def test_is_transliterable_case_insensitive():
     assert is_transliterable("belarusian")
     assert not is_transliterable("Polish")
     assert not is_transliterable(None)
+
+
+# Real cases (2026-11-12): л is soft before і too ("Stałinhrad" before), and
+# softness doesn't pass back through a velar ("Volśki" before). Rules:
+# Wikipedia, "Belarusian Latin alphabet" - л is l before ь, і, е, ё, ю, я or
+# another such л.
+@pytest.mark.parametrize("cyrillic, lacinka", [
+    ("Сталінград", "Stalinhrad"),
+    ("Ліда", "Lida"),
+    ("каталіцкага", "katalickaha"),
+    ("Лявон Вольскі", "Lavon Volski"),
+    ("беларускі", "biełaruski"),
+    ("вяселле", "viasielle"),
+    ("слёзы", "ślozy"),
+    ("Гісторыя майго жыцця", "Historyja majho žyćcia"),
+])
+def test_belarusian_to_latin_soft_l_before_i_and_no_softness_through_velars(cyrillic, lacinka):
+    assert belarusian_to_latin(cyrillic) == lacinka
