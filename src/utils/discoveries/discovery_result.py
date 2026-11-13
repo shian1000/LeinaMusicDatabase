@@ -58,3 +58,26 @@ class YearDiscoveryResult:
     matched_artist: Optional[str] = None
     needs_review: bool = False
     source_url: Optional[str] = None
+
+
+@dataclass
+class LyricsDiscoveryResult:
+    """One candidate a module's get_lyrics() found. A module returns a list
+    of them (the manager picks, by title, artist and length - see
+    discoveries_manager.discover_lyrics()), or one, or None.
+
+    plain: the text, lines separated by "\\n"; synced: LRC ("[01:23.45] line");
+    instrumental: the source says the song has no words. matched_* and
+    duration_s are what the source says the text belongs to - never an echo
+    of the query. from_song_file: read from one of the song's own library
+    files (already matched to it), so nothing needs checking. source_ref:
+    the source's own id of the text, if it has one.
+    """
+    plain: Optional[str] = None
+    synced: Optional[str] = None
+    instrumental: bool = False
+    matched_title: Optional[str] = None
+    matched_artist: Optional[str] = None
+    duration_s: Optional[float] = None
+    source_ref: Optional[str] = None
+    from_song_file: bool = False

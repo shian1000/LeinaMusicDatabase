@@ -251,7 +251,7 @@ def test_database_menus_have_no_placeholder_entries(monkeypatch):
     fill_labels = _menu_labels(monkeypatch, fill_missing, fill_missing.fill_missing_data)
 
     assert {"Fetch songs", "Download YT song"} <= database_labels
-    assert fill_labels == {"Albums", "Years", "Genres"}
+    assert fill_labels == {"Albums", "Years", "Genres", "Lyrics"}
     assert (database_labels | fill_labels).isdisjoint(PLACEHOLDER_LABELS)
 
 

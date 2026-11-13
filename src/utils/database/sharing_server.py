@@ -157,6 +157,13 @@ with every path passed on the command line.
   missing. Cache-Control: no-cache - a row keeps its id when the file's
   contents change. The player drops connections on every seek or skip, so
   a client hanging up mid-body is normal and not logged.
+- Lyrics: GET / HEAD /lyrics/<songs.id> -> 200 JSON {"song_id", "plain",
+  "synced" (LRC or null), "instrumental", "source"} from <dir>/lyrics.db,
+  which is never served whole (not in SHARED_FILES). An id merged since the
+  phone's music.db is answered for the kept song ("song_id" says which).
+  No token, like the databases. 404: no lyrics, no lyrics.db or not an id -
+  the phone then looks them up itself; 503 drive not mounted or lyrics.db
+  unreadable.
 """
 
 import argparse
@@ -235,6 +242,8 @@ GLOBAL_MOOD_COVERS_PATH_RE = re.compile(r"^/users/(?P<user>[^/]+)/global-mood-co
 GLOBAL_MOOD_SONG_PATH_RE = re.compile(r"^/global-moods/(?P<mood>[^/]+)/songs/(?P<song>[^/]+)$")
 # /library/<files.id>
 LIBRARY_PATH_RE = re.compile(r"^/library/(?P<id>[1-9][0-9]{0,17})$")
+# /lyrics/<songs.id>
+LYRICS_PATH_RE = re.compile(r"^/lyrics/(?P<id>[1-9][0-9]{0,17})$")
 # The synced collections answer only these
 ITEM_METHODS = ("GET", "PUT", "DELETE")
 
@@ -312,6 +321,36 @@ def library_file_path(files_db: str, library_dir: str, file_id: int) -> str | No
     if os.path.splitext(target)[1].lower() not in LIBRARY_AUDIO_EXTENSIONS:
         return None
     return target
+
+
+def song_lyrics(lyrics_db: str, music_db: str, song_id: int) -> dict | None:
+    """The lyrics answer for `song_id`, or None when lyrics.db has none. An
+    id merged since the phone's copy of music.db is followed to the kept song
+    by the shared music.db's song_id_changes (a deleted one has none).
+    sqlite3.Error when lyrics.db can't be read."""
+    if os.path.isfile(music_db):
+        try:
+            conn = connect_read_only(music_db, immutable=True)
+            try:
+                moved = dict(conn.execute("SELECT old_song_id, new_song_id FROM song_id_changes"))
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            moved = {}  # the log can't be read: the id as asked
+        song_id = playlist_sync.follow_song_id_changes(song_id, moved)
+        if song_id is None:
+            return None
+    conn = connect_read_only(lyrics_db, immutable=True)
+    try:
+        row = conn.execute("SELECT plain, synced, instrumental, source FROM lyrics WHERE song_id = ?",
+                           (song_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    plain, synced, instrumental, source = row
+    return {"song_id": song_id, "plain": plain or None, "synced": synced or None,
+            "instrumental": bool(instrumental), "source": source}
 
 
 def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None,
@@ -423,6 +462,9 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
             if path.startswith("/library/"):
                 self._library_file(path, send_body)
                 return
+            if path.startswith("/lyrics/"):
+                self._lyrics(path)
+                return
             name = path.lstrip("/")
             if name not in SHARED_FILES:
                 self._reply(HTTPStatus.NOT_FOUND)
@@ -456,6 +498,32 @@ def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None
                     # The phone lost the network mid-download; it asks again
                     print(f"{name}: download cut off", flush=True)
                     self.close_connection = True
+
+        # ---- lyrics ----
+
+        def _lyrics(self, path: str):
+            match = LYRICS_PATH_RE.match(path)
+            if match is None:
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            if not data_available():
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            lyrics_db = os.path.join(share_dir, "lyrics.db")
+            if not os.path.isfile(lyrics_db):
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            try:
+                answer = song_lyrics(lyrics_db, os.path.join(share_dir, "music.db"), int(match.group("id")))
+            except sqlite3.Error as exc:
+                print(f"Reading {lyrics_db} failed: {exc}", flush=True)
+                self._reply(HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            if answer is None:
+                self._reply(HTTPStatus.NOT_FOUND)
+                return
+            self._send(HTTPStatus.OK, json.dumps(answer, ensure_ascii=False).encode(),
+                       "application/json; charset=utf-8", None)
 
         # ---- library files ----
 

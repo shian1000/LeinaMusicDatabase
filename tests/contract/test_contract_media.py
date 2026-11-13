@@ -1,4 +1,4 @@
-"""Cover pictures, global moods and the music library's files."""
+"""Cover pictures, global moods, the music library's files and songs' lyrics."""
 
 import hashlib
 
@@ -214,4 +214,22 @@ def test_several_ranges_answer_the_whole_file(server):
 @pytest.mark.parametrize("path", ["/library/99", "/library/2", "/library/3", "/library/4", "/library/abc",
                                   "/library/0", "/library/song.mp3", "/library/"])
 def test_only_an_indexed_audio_file_inside_the_library_is_served(server, path):
+    assert server.call("GET", path).status == 404
+
+
+# ---- lyrics ----
+
+@pytest.mark.requires("lyrics")
+@pytest.mark.parametrize("path", ["/lyrics/4", "/lyrics/2"])  # 2 was merged into 4
+def test_a_songs_lyrics(server, path):
+    answer = server.call("GET", path)
+    assert answer.status == 200 and answer.headers["Content-Type"].startswith("application/json")
+    assert answer.json == {"song_id": 4, "plain": "Raz", "synced": "[00:01.00] Raz", "instrumental": False,
+                           "source": "lrclib_fetcher"}
+
+
+@pytest.mark.requires("lyrics")
+@pytest.mark.parametrize("path", ["/lyrics/5", "/lyrics/1", "/lyrics/0", "/lyrics/abc", "/lyrics/", "/lyrics.db"])
+def test_no_lyrics_deleted_songs_and_the_whole_file_are_404(server, path):
+    # 5 was deleted after its lyrics were stored; 1 has none
     assert server.call("GET", path).status == 404

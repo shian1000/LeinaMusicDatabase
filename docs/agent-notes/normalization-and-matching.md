@@ -66,8 +66,17 @@ Video"), only a quoted title unwrapped ('Take The "A" Train'; Bowie's
 '"Heroes"' would lose its quotes), an HTML entity only with its ";"
 ("Kushi&#3"). The junk steps run once, not until nothing changes: on the
 catalog the two give the same result. A `review` step
-(`lookalike_letters`) is only proposed (`sanitize_changes()`), never applied
-by `sanitize_field()`. `feat_to_credits` (a "ft. X" moved into
+(`lookalike_letters`, `producer_credit`) is only proposed for a stored name
+(`sanitize_changes()`; Clean names' `review_step()` lists each one's fixes,
+`REVIEW_STEPS`), never applied there by `sanitize_field()`; what comes in gets it
+at once. `producer_credit` (2026-11-12, switch `junk_in_titles`, titles and
+albums) drops a bracket starting with the whole word "prod"/"prod." or
+"produced by" anywhere in the name - "Sam (prod. Gibbs)", "Одна (prod.by
+LFox)", never "(Prodigy Remix)" or "(Producer's Cut)"; the owner's choice: the
+name isn't kept anywhere. Measured first: 40 titles and 1 album of the
+catalog, no false hit (the only other "prod" title is "Bruttosozialprodukt"),
+one duplicate made ("Nostalgia (prod. Rumak)" beside "Nostalgia", left to
+"Resolve duplicated songs"). `feat_to_credits` (a "ft. X" moved into
 `metadata["feat_artists"]`, by `split_feat_credits()`) is a metadata step,
 since 2026-11-01 for the mp3 and YouTube imports as well as requests (owner:
 know what is what - how it is shown is our choice): `create_song_entry()`

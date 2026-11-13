@@ -46,6 +46,8 @@ from musicdatabase_core.file_tools import connect_read_only
 USER_TRACK = "user"
 # migrations/files/ - the music library index (utils/database/files_index.py)
 FILES_TRACK = "files"
+# migrations/lyrics/ - songs' lyrics (utils/database/lyrics_store.py)
+LYRICS_TRACK = "lyrics"
 
 MIGRATIONS_ROOT = Path(__file__).resolve().parents[3] / "migrations"
 DB_FILES = {
@@ -53,6 +55,7 @@ DB_FILES = {
     "tag": Path(str(Settings.database_dir)) / "tag.db",
     # Created by initialize_db(), never adopted: it has schema_version from the start
     FILES_TRACK: BACKED_UP_DB_FILES[FILES_TRACK],
+    LYRICS_TRACK: BACKED_UP_DB_FILES[LYRICS_TRACK],
 }
 
 

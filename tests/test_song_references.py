@@ -2,7 +2,8 @@
 song_id_changes log (deletions logged by the flush listener, merges by
 record_song_merge(), bulk deletes by record_song_deletions()), song ids never
 being reused, and replaying the log into tag.db (global tags) and a user's
-user.db (playlist tracks, private tags, saved songs following merges) - idempotent, cursor-based, with the
+user.db (playlist tracks, private tags, saved songs following merges) and
+lyrics.db - idempotent, cursor-based, with the
 first tag.db replay dropping tags of songs that no longer exist. Temp-file
 SQLite, no mocking of SQL."""
 
@@ -43,6 +44,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sr, "_changes_pending", False)
     # Never the real src/database/files.db
     monkeypatch.setattr(sr, "FILES_DB", tmp_path / "files.db")
+    monkeypatch.setattr(sr, "LYRICS_DB", tmp_path / "lyrics.db")
     return music, tag, tmp_path
 
 
@@ -336,3 +338,25 @@ def test_song_uses_count_playlists_moods_and_files(tmp_path):
     # Two live playlists (a track twice counts once, a deleted playlist not), a user and a global mood
     assert (uses.playlists, uses.moods, uses.files) == (2, 2, 1) and uses
     assert not sr.song_uses(99, user_dbs=[user], tag_db=tag, files_db=files)
+
+
+def test_lyrics_follow_merges_and_deletions(env):
+    from utils.database import lyrics_store
+
+    music, tag, tmp_path = env
+    lyrics_db = lyrics_store.ensure_lyrics_db(tmp_path / "lyrics.db")
+    with music() as session:
+        kept, dropped, deleted = _songs(session, "Kept", "Dropped", "Deleted")
+        ids = kept.id, dropped.id, deleted.id
+        with lyrics_store.lyrics_db_session(lyrics_db) as lyrics:
+            lyrics_store.save_lyrics(lyrics, dropped.id, lyrics_store.Lyrics(plain="words", source="m"))
+            lyrics_store.save_lyrics(lyrics, deleted.id, lyrics_store.Lyrics(plain="gone", source="m"))
+            lyrics.commit()
+        sr.record_song_merge(session, dropped.id, kept.id)
+        session.delete(dropped)
+        session.delete(deleted)
+        session.commit()
+    with tag() as tag_session:
+        assert "lyrics.db" in sr.apply_song_id_changes(tag_session, force=True)
+    with lyrics_store.lyrics_db_session(lyrics_db) as lyrics:
+        assert [r.song_id for r in lyrics.query(lyrics_store.SongLyrics)] == [ids[0]]

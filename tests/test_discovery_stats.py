@@ -18,11 +18,11 @@ def isolated_stats_file(tmp_path, monkeypatch):
     """Point discovery_stats at a throwaway file and reset its in-memory
     cache, so tests never touch the real discovery_fetcher_stats.json or leak
     counters between each other."""
-    stats_file = tmp_path / "discovery_fetcher_stats.json"
-    monkeypatch.setattr(discovery_stats, "_stats_path", lambda: UPath(str(stats_file)))
-    discovery_stats._cache = None
+    monkeypatch.setattr(discovery_stats, "_stats_path",
+                        lambda kind="albums": UPath(str(tmp_path / f"discovery_fetcher_stats_{kind}.json")))
+    discovery_stats._caches.clear()
     yield
-    discovery_stats._cache = None
+    discovery_stats._caches.clear()
 
 
 def test_load_discovery_stats_missing_file_returns_empty_dict():
@@ -59,7 +59,7 @@ def test_counters_accumulate_across_multiple_calls_and_modules():
 
 def test_stats_survive_the_in_memory_cache_being_dropped():
     discovery_stats.record_invocation("spotify_fetcher")
-    discovery_stats._cache = None  # simulate a fresh process picking the file back up
+    discovery_stats._caches.clear()  # simulate a fresh process picking the file back up
 
     discovery_stats.record_success("spotify_fetcher")
 
@@ -124,3 +124,14 @@ def test_discover_album_name_records_one_invocation_per_module_tried():
     assert stats["first_fetcher"]["successes"] == 0
     assert stats["second_fetcher"]["invocations"] == 1
     assert stats["second_fetcher"]["successes"] == 1
+
+
+def test_each_kind_is_counted_apart():
+    discovery_stats.record_invocation("music_brainz_fetcher")
+    discovery_stats.record_invocation("music_brainz_fetcher", "years")
+    discovery_stats.record_success("music_brainz_fetcher", "years")
+
+    assert discovery_stats.load_discovery_stats() == {"music_brainz_fetcher": {"invocations": 1, "successes": 0}}
+    assert discovery_stats.load_discovery_stats("years") == {"music_brainz_fetcher": {"invocations": 1, "successes": 1}}
+    discovery_stats.reset_discovery_stats()
+    assert all(discovery_stats.load_discovery_stats(kind) == {} for kind in ("albums", "years", "lyrics"))

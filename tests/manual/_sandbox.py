@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DB_FILES = ("music.db", "tag.db", "files.db")
+DB_FILES = ("music.db", "tag.db", "files.db", "lyrics.db")
 
 
 def _ensure_src_on_path() -> None:

@@ -59,7 +59,7 @@ def test_years_found_before_ctrl_c_are_saved(monkeypatch):
     songs = [_song("One", album="First"), _song("Two", album="Second")]
     monkeypatch.setattr(module, "get_songs_with_album_missing_year", lambda: songs)
     monkeypatch.setattr(module, "_fill_years_known_in_database", lambda songs: [])
-    monkeypatch.setattr(module, "load_year_discovery_modules", lambda: ["module"])
+    monkeypatch.setattr(module, "load_discovery_modules", lambda kind: ["module"])
     monkeypatch.setattr(module, "release_year_from_stored_link", lambda songs: None)
     monkeypatch.setattr(module, "artist_match_synonyms", lambda artist: [])
     monkeypatch.setattr(module, "cyrillic_search_variant", lambda *a: None)
@@ -93,7 +93,7 @@ def test_a_title_year_is_offered_when_no_module_finds_one(monkeypatch, capsys):
     monkeypatch.setattr(module, "get_songs_with_album_missing_year",
                         lambda: (_ for _ in ()).throw(AssertionError("the whole catalog was read")))
     monkeypatch.setattr(module, "_fill_years_known_in_database", lambda songs: [])
-    monkeypatch.setattr(module, "load_year_discovery_modules", lambda: ["module"])
+    monkeypatch.setattr(module, "load_discovery_modules", lambda kind: ["module"])
     monkeypatch.setattr(module, "release_year_from_stored_link", lambda songs: None)
     monkeypatch.setattr(module, "artist_match_synonyms", lambda artist: [])
     monkeypatch.setattr(module, "cyrillic_search_variant", lambda *a: None)

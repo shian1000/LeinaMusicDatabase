@@ -8,7 +8,7 @@ import pytest
 
 from utils.common import sanitize as s
 from utils.common.normalizer import composed, strip_format_characters
-from utils.common.sanitize.text import strip_trailing_junk_suffix
+from utils.common.sanitize.text import strip_producer_credit, strip_trailing_junk_suffix
 from utils.discoveries.import_data_from_mp3_tags import _clean_fields
 from utils.common.artist_credits import split_feat_credits
 
@@ -136,7 +136,7 @@ def test_a_step_listed_twice_runs_twice():
     assert names == ["html_entities", "cp1250_mojibake", "nfc", "media_extension", "file_name_artifacts",
                      "invisible_chars", "whitespace", "lookalike_letters",
                      "project_name", "cover_credit", "feat_to_credits", "title_year", "artist_in_title",
-                     "site_names", "pipe_suffix", "junk_brackets_anywhere", "hashtags",
+                     "site_names", "pipe_suffix", "junk_brackets_anywhere", "producer_credit", "hashtags",
                      "junk_marker_brackets", "junk_phrases_any_bracket", "junk_phrases", "title_year",
                      "junk_marker_brackets", "quote_marks", "whitespace", "edge_separators"]
 
@@ -233,6 +233,35 @@ def test_a_review_step_asks_only_in_the_database():
     assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_MP3) == "Björk"
     assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_STORED) == "Вjörk"
     assert s.sanitize_field("Вjörk", s.ARTIST, s.SOURCE_MANUAL) == "Вjörk"
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("ARMANI TOP (prod.bovskey)", "ARMANI TOP"),
+    ("Одна (prod.by LFox)", "Одна"),
+    ("PATOLOVE (PROD. AETHERBOY1)", "PATOLOVE"),
+    ("Piękny świat (prod. Gibbs x Druid)", "Piękny świat"),
+    ("Wszystko gra (prod. @atutowy)", "Wszystko gra"),
+    ("Piekarenka, ale to '96 (prod. by Own Dialect)", "Piekarenka, ale to '96"),
+    ("Song [produced by Y]", "Song"),
+    ("Kosmos (prod. Homex)[KOSMOS]", "Kosmos[KOSMOS]"),
+    ("WYTRAWNE (Z NUTĄ DESPERACJI) (prod. Catz 'n Dogz)", "WYTRAWNE (Z NUTĄ DESPERACJI)"),
+    ("A (prod. X) B", "A B"),
+    # A whole word only, and never the whole title
+    ("Bruttosozialprodukt", "Bruttosozialprodukt"),
+    ("Song (Producer's Cut)", "Song (Producer's Cut)"),
+    ("Firestarter (Prodigy Remix)", "Firestarter (Prodigy Remix)"),
+    ("(prod. X)", "(prod. X)"),
+])
+def test_strip_producer_credit(title, expected):
+    assert strip_producer_credit(title) == expected
+
+
+def test_a_producer_credit_goes_as_it_comes_in_and_is_only_offered_in_the_database():
+    assert s.sanitize_field("Sam (prod. Gibbs)", s.TITLE, s.SOURCE_REQUEST) == "Sam"
+    assert s.sanitize_field("Sam (prod. Gibbs)", s.TITLE, s.SOURCE_STORED) == "Sam (prod. Gibbs)"
+    assert s.sanitize_changes("Sam (prod. Gibbs)", s.TITLE, s.SOURCE_STORED) == \
+        [("producer_credit", "Sam (prod. Gibbs)", "Sam")]
+    assert s.sanitize_field("Sam (prod. Gibbs)", s.ARTIST, s.SOURCE_MP3) == "Sam (prod. Gibbs)"
 
 
 def test_clean_names_runs_every_step_that_is_on(settings_file):

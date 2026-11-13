@@ -143,8 +143,7 @@ def test_album_lookup_hands_modules_composed_text(monkeypatch):
             calls.append((artist, query))
             return None
 
-    monkeypatch.setattr(dm, "record_invocation", lambda module_id: None)
-    monkeypatch.setattr(dm, "record_year_invocation", lambda module_id: None)
+    monkeypatch.setattr(dm, "record_invocation", lambda *a: None)
     dm._call_module_match(Module, "m", "Module", DECOMPOSED_ARTIST, DECOMPOSED)
     dm._call_year_module(Module, "m", "Module", DECOMPOSED_ARTIST, DECOMPOSED, True)
 

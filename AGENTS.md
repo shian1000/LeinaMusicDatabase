@@ -97,6 +97,36 @@ non-trivial work in that area.
   (`utils/ui/library_link_prompt.py`). Schema only from `migrations/files/`;
   merges/deletions reach it through `song_references.apply_song_id_changes()`. Details:
   `docs/data-model.md`, `docs/runbooks/database.md`.
+- `src/utils/database/lyrics_store.py` — `lyrics.db`, songs' lyrics (a fifth file next to
+  music.db, `migrations/lyrics/`, in `DB_FILES` so backups, migrations and the sharing copy take
+  it): one row per song (plain, LRC `synced`, `instrumental`, `source`), `lyrics_module_misses`
+  per song **and module** (not found = that module asked again after `LYRICS_RETRY_DAYS`, its text
+  rejected by the owner = never; a new module asks every song once; each miss holds the name it
+  was asked by, `lyrics_key()`, so a renamed song is asked again). A module that *fails* (no
+  network, LRCLIB's 429) must raise, never return [] - [] is remembered as "doesn't know the song"
+  (it was, 2026-11-12). Songs with `language` "Instrumental" or an instrumental version are never
+  looked up; the run ends offering to mark the songs nothing had words for (ticked: those a source
+  says are instrumental). Filled by
+  Fetch database data → Fill missing data → "Lyrics" (`utils/ui/lyrics_review.py`, also the last
+  Run all step; Song actions → "Lyrics" shows one and looks it up again - `forget_lookups()` -,
+  takes a pasted text or one read from a page the owner gives - `utils/discoveries/lyrics_pages.py`,
+  a module's own reader for its site, else the page's block with the most lines; source `manual`,
+  the address in `source_ref` - or removes it). The page-reading modules share `lyrics_pages.fetch_page()` /
+  `text_lines()` (404 = no page, anything else not 200 raises) from the `get_lyrics()` discovery
+  modules (`library_tags_fetcher` = the song's own mp3 USLT tags, `lrclib_fetcher`,
+  `genius_lyrics_fetcher` = Genius's site search + lyrics page, `musixmatch_fetcher`,
+  `lyricstranslate_fetcher`, `tekstowo_fetcher`, `fajnanuta_fetcher` and `cuspajz_fetcher` = the page
+  their names make; no keys, the last six plain text only), asked `discoveries_manager._lyrics_queries()` in turn (the
+  name, synonyms, a joined name's parts, the main artists and them joined by "&" × the title, it
+  without brackets, the other titles; a cover's covered artist; last a medley's songs one by one -
+  a text of one of them is only reviewed), checked by
+  `discoveries_manager.discover_lyrics()` (same title + artist = sure, a resembling title reviewed;
+  the length - ±3 s of ours - only decides whether the synced lines are kept).
+  Not a music.db table on purpose: ~25 MB that Leina Radio would download whole; the server
+  answers one song at `GET /lyrics/<songs.id>` and the phone falls back to its own LRCLIB lookup
+  ([handoff](docs/handoffs/lyrics-for-musicdatabaseapp.md)). **Never public** (the lyrics'
+  licence): `public_export` refuses its tables. Details: `docs/data-model.md`,
+  `docs/agent-notes/discovery-modules.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;
   don't inline them. In particular the `"Singles"` album sentinel ("no real parent album" — the
   fetchers, the singles-marker fallback, Years' per-title lookup and duplicate resolution all
@@ -132,7 +162,7 @@ non-trivial work in that area.
   address, `localhost`, the machine's host name or its Tailscale MagicDNS name (read at run time,
   `tailscale_dns_name()`) gets 421 before any handler runs (`host_allowed()`, DNS rebinding); a new
   way of reaching the server by name must add that name there. The app depends on that contract, so don't change
-  the port or file names unilaterally (nor `/library/<id>`, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
+  the port or file names unilaterally (nor `/library/<id>`, nor `/lyrics/<song id>` and its JSON, nor the inbox URL, name pattern or answers, nor the playlist / mood / global-mood / cover / listens / saved-songs / later-links / `GET /users/<name>`
   endpoints and their JSON, nor the folder endpoints, nor the permission names).
   `inbox_requests.py` reads that inbox and settles dead YouTube link reports (an answer reaches
   `decisions.json` only when the music session holding its change commits: `save_decision(...,
@@ -228,12 +258,16 @@ non-trivial work in that area.
   another version. A marker is read by `utils/common/version_names.py` (`read_version()`; "Radio Edit",
   "Remastered", "Bonus track" name a release, not a version): a new song gets it in `create_song_entry()`,
   stored ones through Manage database → "Find versions" (`utils/ui/version_review.py`, `version_checked`
-  marker), Song actions → "Set version" by hand. `song_kinds.songs_for_entry()` keeps versions and
+  marker), Song actions → "Set version" by hand. A contest's or a radio's take ("Eurovision Song
+  Contest 2011", "BBC Session") is live; of several dashed suffixes the shortest naming a version is
+  the marker, and one naming only the release ("- Radio Version") stops the reading. `song_kinds.songs_for_entry()` keeps versions and
   originals apart for every matcher (a title still holding a marker counts as that version; an entry
   with the marker run on, no bracket or dash - "Dancing Shoes KAMP! REMIX" - which `read_version()`
   can't cut, still names the version whose `title_with_version()` normalizes to it). A plain
   "version" marker (kind `other`) never narrows a match nor marks a new song: it is often part of the
-  title ("Toccata (Best Version Ever)" lost its candidates that way in a folder-playlist test);
+  title ("Toccata (Best Version Ever)" lost its candidates that way in a folder-playlist test),
+  unless the rest names a genre ("Disco Version", "wersja rock": `song_kinds.sure_version()`; a
+  song request "Heart Of Glass (Disco Version)" was settled as the plain song, 2026-11-13);
   `song_titles()` and `find_existing_song()` compare the marked title too; duplicates are keyed by it.
   Merges move the versions (`move_versions()`), a deleted original is dropped from its versions
   (`song_references`' flush listener).
@@ -386,7 +420,7 @@ non-trivial work in that area.
   read by `_read_body()` / `_read_json_body()` (411 / 413 / a short body closes without an answer)
   and the user.db opened by `_open_user_db()` (503 when not migrated or unreadable).
   `song_references.py` keeps every reference to
-  `songs.id` from another file valid: tag.db's tags, files.db's library files, and users' playlist
+  `songs.id` from another file valid: tag.db's tags, files.db's library files, lyrics.db's lyrics, and users' playlist
   tracks, private tags and saved songs (a mood whose songs change gets a new revision too).
   music.db logs each id that stops existing in `song_id_changes`. Deletions are logged by a
   flush listener; merges must call `record_song_merge()` and bulk `query().delete()` must call
@@ -449,7 +483,9 @@ non-trivial work in that area.
   integrity, and moves both files in only together; or creates empty databases through the
   models. So `version.json`'s `files.<name>.size` / `sha256` and `format` are this repo's own
   contract too. Details: `docs/runbooks/database.md` → "First start without databases".
-- `src/utils/discoveries/` — external-metadata fetchers, the MP3-tag import (metadata-building only
+- `src/utils/discoveries/` — external-metadata fetchers (one kind of lookup per function a
+  module defines - albums, years, lyrics: `discovery_settings.KINDS`, each with its own config and
+  stats file; a new kind is a row there, never a copy of the functions), the MP3-tag import (metadata-building only
   now — the actual resolve/create/conflict-review engine moved to `import_engine.py`, shared with
   `utils/youtube/import_from_playlist.py`). `import_engine.LocalSongMatcher` is the read-only
   "which existing song is this file?" lookup, shared by the cover import and playlists from a
@@ -800,7 +836,8 @@ non-trivial work in that area.
   `<database_dir>/covers/`, which isn't backed up (the cover import regenerates them). Each
   user's private `user.db` is a third kind, on the data drive (`Settings.users_dir`), with its own migration
   track `migrations/user/` — see the `users.py` Module map entry. `files.db` (the music library
-  index, `migrations/files/`, next to music.db) is a fourth. Those files and tag.db point at
+  index, `migrations/files/`, next to music.db) is a fourth, `lyrics.db` (songs' lyrics,
+  `migrations/lyrics/`, never published) a fifth. Those files and tag.db point at
   `songs.id` with plain integers, so deleting or merging a song must go through the ORM (or log
   itself via `song_references.py`), and `songs.id` must never be set or reused by hand. `datatables.py` /
   `tag_db_manager.py` are the schema's source of truth for the *current* shape; schema history is
@@ -997,7 +1034,8 @@ non-trivial work in that area.
   folder, `.env` → an empty temp one), so a test that forgets to patch a DB engine fails every time
   with "unable to open database file". It also sends `debug.log`, `youtube_link_cache.log` and the
   spell-check cache (written at exit) to that temp folder, and Settings → "Name cleanup"'s file
-  (`sanitize_settings.CONFIG_PATH`) and Settings → "Run all: steps"' (`run_all_settings.CONFIG_PATH`), so tests run the defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  (`sanitize_settings.CONFIG_PATH`), Settings → "Run all: steps"' (`run_all_settings.CONFIG_PATH`)
+  and every discovery kind's config and stats file (`discovery_settings.KINDS`), so tests run the defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
   path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
   default bound at import would keep pointing at the real `.env`.
 - The Selenium fetchers are tested through `tests/fake_browser.FakeBrowser` (pages as HTML by URL,

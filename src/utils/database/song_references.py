@@ -1,7 +1,8 @@
 """
 Keeping references to songs.id valid in the files SQLite can't enforce
 them across: tag.db's song_tags (global tags), every user's user.db
-(playlist tracks, private tags, saved songs) and files.db (the music library index).
+(playlist tracks, private tags, saved songs), files.db (the music library index)
+and lyrics.db (songs' lyrics).
 
 1. music.db logs every song id that stops existing in `song_id_changes`
    (migration 0009). A merge is logged by the code that merges
@@ -10,13 +11,14 @@ them across: tag.db's song_tags (global tags), every user's user.db
    adds a "deleted" entry for every Song the session deletes. Bulk
    query(...).delete() skips the ORM and must call record_song_deletions().
 2. Each referencing file keeps its own cursor (`applied_song_changes`,
-   tag migration 0002 / user migration 0003 / files migration 0001) and
+   tag migration 0002 / user migration 0003 / files and lyrics migration 0001) and
    replays the log past it in apply_song_id_changes():
    - merged: tags move to the kept song (a tag it already has is dropped),
-     playlist tracks and library files point at the kept song;
+     playlist tracks and library files point at the kept song, lyrics move
+     to it unless it has its own;
    - deleted: tags go; playlist tracks keep their title/artist/video with
      song_id NULL, so the playlist still shows them; library files lose
-     their song too and the next scan tries to match them again.
+     their song too and the next scan tries to match them again; lyrics go.
    It runs at startup, on logging into a user database, and after commits
    that logged something (database_sessions.submit/close). A user.db on an
    unplugged data drive is simply caught up later, which is why it's a log with
@@ -68,6 +70,8 @@ _LOGGED_KEY = "song_id_changes_logged"
 _MERGED_KEY = "song_ids_merged"
 # The music library index; replayed only once a scan has created it
 FILES_DB = DB_FILES["files"]
+# Songs' lyrics; replayed only once a lookup has created it
+LYRICS_DB = DB_FILES["lyrics"]
 
 
 def record_song_merge(session, from_song_id: int, to_song_id: int) -> None:
@@ -220,7 +224,7 @@ def _replay_tag_db(tag_session, changes: list) -> int:
 
 
 def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
-    """Bring tag.db, files.db and every reachable user.db up to date with the log.
+    """Bring tag.db, files.db, lyrics.db and every reachable user.db up to date with the log.
     Without `force` it does nothing unless a commit has logged something
     since the last run. Uses (and commits) `tag_session`, else the global
     tag session if one is open - a second connection could wait on its
@@ -256,6 +260,11 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
         from utils.database.files_index import files_db_session
         with files_db_session(FILES_DB) as session:
             replay("files.db", session, lambda session: _replay(session, changes, has_tags=False, has_files=True))
+
+    if LYRICS_DB.exists():
+        from utils.database.lyrics_store import lyrics_db_session
+        with lyrics_db_session(LYRICS_DB) as session:
+            replay("lyrics.db", session, lambda session: _replay(session, changes, has_tags=False, has_lyrics=True))
 
     for username, path in user_db_files().items():
         with user_db_session(path) as session:

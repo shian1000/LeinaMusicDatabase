@@ -12,7 +12,8 @@ from config import constants
 
 STATE_FILES = [
     "RECENT_DIRS_FILE", "DISCOVERY_MODULES_CONFIG_FILE", "DISCOVERY_MODULES_YEAR_CONFIG_FILE",
-    "DATABASE_LOCATION_CONFIG_FILE", "DISCOVERY_STATS_FILE", "DISCOVERY_STATS_YEAR_FILE",
+    "DISCOVERY_MODULES_LYRICS_CONFIG_FILE", "DATABASE_LOCATION_CONFIG_FILE", "DISCOVERY_STATS_FILE",
+    "DISCOVERY_STATS_YEAR_FILE", "DISCOVERY_STATS_LYRICS_FILE",
     "FETCH_DATA_CONFIG_FILE", "FILE_MATCHING_CONFIG_FILE", "PUBLIC_DB_STATE_FILE", "STARTUP_STATE_FILE",
     "FULL_ALBUM_IGNORE_FILE", "GENRE_LOOKUP_MISSES_FILE", "SPELLCHECK_CACHE_FILE", "ARTIST_SPLIT_IGNORE_FILE",
     "SONG_DUPLICATE_IGNORE_FILE",
@@ -34,8 +35,6 @@ def test_state_file_constants_are_inside_the_project(name):
     ("utils.database.database_location", "_config_path", "database_location_config.json"),
     ("utils.database.fetch_data_settings", "_config_path", "fetch_data_config.json"),
     ("utils.discoveries.file_matching_settings", "_config_path", "file_matching_config.json"),
-    ("utils.discoveries.discovery_stats", "_stats_path", "discovery_fetcher_stats.json"),
-    ("utils.discoveries.discovery_stats", "_year_stats_path", "discovery_fetcher_stats_years.json"),
     ("utils.database.public_database", "_state_path", "data/public_database.json"),
 ])
 def test_paths_ignore_the_current_directory(module, getter, name, tmp_path, monkeypatch):

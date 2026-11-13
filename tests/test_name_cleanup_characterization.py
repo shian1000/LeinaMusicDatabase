@@ -86,6 +86,9 @@ YOUTUBE_CASES = [
     ("Some Channel", "Artist - 'Bout Time", ("Artist", "'Bout Time")),
     ("Some Channel", "The Connells - ’74–’75", ("The Connells", "’74–’75")),
     ("Some Channel", "Artist - ‘Song’ DANCE VERSION", ("Artist", "‘Song’ DANCE VERSION")),
+    # Changed 2026-11-12: a producer's credit goes (nothing keeps the name)
+    ("Some Channel", "3LNA - ARMANI TOP (prod.bovskey)", ("3LNA", "ARMANI TOP")),
+    ("Some Channel", "Taco Hemingway - Nostalgia (prod. Rumak) [Official Video]", ("Taco Hemingway", "Nostalgia")),
 ]
 
 
@@ -133,6 +136,9 @@ MP3_CASES = [
     # Changed 2026-11-01: a year after a dash goes from mp3 tags too
     ({"artist_name": "Artist", "title": "Lumea Viseaza - 2002", "album": None},
      {"artist_name": "Artist", "title": "Lumea Viseaza", "album": None}),
+    # Changed 2026-11-12: a producer's credit goes from a title and an album
+    ({"artist_name": "Sarius", "title": "Sam (prod. Gibbs)", "album": "Arab - Moon (prod. Eazy Dyonizy)"},
+     {"artist_name": "Sarius", "title": "Sam", "album": "Arab - Moon"}),
     ({"artist_name": None, "title": None, "album": None},
      {"artist_name": None, "title": None, "album": None}),
 ]

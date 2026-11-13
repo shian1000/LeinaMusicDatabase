@@ -174,6 +174,15 @@ what would be written now) and lingering, and a summary with the phone's address
     its id when the file's contents change.
   - The player drops the connection on every seek or skip; a hang-up mid-body ends that request
     quietly (nothing in the journal) and a stalled reader is cut off after 60 s.
+- **Lyrics (2026-11-12):** `GET`/`HEAD /lyrics/<songs.id>` → 200 JSON `{"song_id", "plain",
+  "synced" (LRC or null), "instrumental", "source"}` from the **shared** `lyrics.db` copy, which the
+  sharing copy makes with the others but the server never serves whole (not in `SHARED_FILES`:
+  ~25 MB, and the phone needs one song at a time). An id merged since the phone's music.db is
+  followed through the shared music.db's `song_id_changes` (`song_id` in the answer says which
+  song it is). 404: no lyrics, a deleted song, no `lyrics.db`, not an id - Leina Radio then looks
+  the lyrics up on LRCLIB itself, as before; 503 data drive not mounted or `lyrics.db` unreadable.
+  No token, like the databases. Filled by Fetch database data → Fill missing data → "Lyrics"
+  (`docs/data-model.md` → `lyrics.db`). Never published on GitHub (the lyrics' licence).
 - It listens on the addresses below, one socket each, with the same handler and port
   (`SHARING_PORT` in `.env`, default 8002, passed as `--port`):
   - **VPN** (`SHARING_VPN`, 2026-10-22, any provider): `tailscale` — the address from

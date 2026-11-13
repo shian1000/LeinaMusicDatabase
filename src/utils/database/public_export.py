@@ -105,10 +105,11 @@ def _columns(conn, table: str) -> list[tuple[str, bool]]:
 
 
 def _private_table_names() -> set[str]:
-    """Tables of users' user.db and of files.db (from their migrations), so a
-    new one is caught without being listed here."""
+    """Tables of users' user.db, of files.db and of lyrics.db (whose licence
+    forbids publishing them) - from their migrations, so a new one is caught
+    without being listed here."""
     names = set()
-    for track in ("user", "files"):
+    for track in ("user", "files", "lyrics"):
         for path in sorted((MIGRATIONS_ROOT / track).glob("*.sql")):
             names.update(re.findall(r"CREATE TABLE(?: IF NOT EXISTS)?\s+\"?(\w+)", path.read_text(), re.IGNORECASE))
     return names

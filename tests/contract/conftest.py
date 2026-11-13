@@ -52,7 +52,8 @@ def _mdw_sync_command(server: "ContractServer") -> list[str]:
 
 
 TARGETS = {
-    "mdhs": (_mdhs_command, {"library", "unsigned_uploads", "global_moods", "plain_http", "sync", "catalog"}),
+    "mdhs": (_mdhs_command, {"library", "lyrics", "unsigned_uploads", "global_moods", "plain_http", "sync",
+                             "catalog"}),
     "mdw": (_mdw_command, {"plain_http"}),
     "mdw-sync": (_mdw_sync_command, {"plain_http", "sync", "catalog"}),
 }
@@ -110,6 +111,14 @@ def _make_share(folder: Path) -> None:
         INSERT INTO files (id, path) VALUES (1, 'song.mp3'), (2, 'gone.mp3'), (3, 'notes.txt'), (4, '../outside.mp3');
     """)
     files.close()
+    lyrics = sqlite3.connect(folder / "lyrics.db")
+    lyrics.executescript("""
+        CREATE TABLE lyrics (song_id INTEGER PRIMARY KEY, plain TEXT, synced TEXT, instrumental INTEGER,
+                             source TEXT);
+        INSERT INTO lyrics VALUES (4, 'Raz', '[00:01.00] Raz', 0, 'lrclib_fetcher'),
+                                  (5, NULL, NULL, 1, 'lrclib_fetcher');
+    """)
+    lyrics.close()
     (folder / "secret.txt").write_text("not for the phone")
 
 

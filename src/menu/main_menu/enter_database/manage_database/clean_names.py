@@ -54,19 +54,27 @@ def compose_decomposed_letters(held=None):
             print(f"  {YELLOW}{change}{RESET}")
 
 
-def fix_lookalike_letters(songs, held=None):
-    """Words mixing Latin and Cyrillic look-alike letters ("Вjörk",
-    "Рiдна") in titles, artist names and albums: every fix in one checkbox
-    list (all ticked), applied after the scan. One entry per artist and per
-    album text, however many songs share it. An artist fix onto another
-    artist's name is held."""
-    if not is_enabled("lookalike_letters", SOURCE_STORED):
+# The review steps (sanitize MODE_REVIEW) Clean names asks about in one list each,
+# with the list's header: what the names have
+REVIEW_STEPS = {
+    # "Вjörk", "Рiдна" in titles, artist names and albums
+    "lookalike_letters": "mix Latin and Cyrillic look-alike letters",
+    # "Sam (prod. Gibbs)" -> "Sam", in titles and albums
+    "producer_credit": "carry a producer credit",
+}
+
+
+def review_step(songs, step_name: str, held=None):
+    """A review step's fixes in one checkbox list (all ticked), applied after
+    the scan. One entry per artist and per album text, however many songs
+    share it. An artist fix onto another artist's name is held."""
+    if not is_enabled(step_name, SOURCE_STORED):
         return
-    proposals = name_cleanup.review_step_proposals(songs, "lookalike_letters")
+    proposals = name_cleanup.review_step_proposals(songs, step_name)
     if not proposals:
         return
 
-    review_header(f"REVIEW: {len(proposals)} name(s) mix Latin and Cyrillic look-alike letters")
+    review_header(f"REVIEW: {len(proposals)} name(s) {REVIEW_STEPS[step_name]}")
     def label(proposal):
         owners = proposal.songs
         where = f"{owners[0].artist.name} - {owners[0].title}" if proposal.field == "title" else f"{len(owners)} song(s)"
@@ -244,7 +252,8 @@ def clean_names():
     # The commit expired every song: reload them all in two queries rather
     # than one per song (~20 s)
     songs, _artists = _load_songs()
-    fix_lookalike_letters(songs, held)
+    for step_name in REVIEW_STEPS:
+        review_step(songs, step_name, held)
     move_feat_credits(songs)
     submit_global_database_session()
     seek_nonsense_names(unchecked)

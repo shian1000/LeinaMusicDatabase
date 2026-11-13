@@ -547,10 +547,30 @@ def test_lookalike_letters_fix_onto_another_artists_name_is_held(session, ui, mo
     monkeypatch.setattr(questionary, "checkbox", lambda *a, **kw: _Answer([0]))
     held = {}
 
-    cn.fix_lookalike_letters([song], held)
+    cn.review_step([song], "lookalike_letters", held)
 
     assert mixed.name == "Вjörk"
     assert held[mixed.id][1] == "Björk"
+
+
+def test_producer_credits_are_offered_in_one_list_and_only_the_ticked_go(session, ui, monkeypatch):
+    cn = _clean_names_module(monkeypatch, session)
+    taco = _artist(session, "Taco Hemingway")
+    nostalgia = _song(session, "Nostalgia (prod. Rumak)", taco)
+    tango = _song(session, "POLSKIE TANGO (prod. Lanek)", taco)
+    plain = _song(session, "Bruttosozialprodukt", taco)
+    shown = []
+
+    def checkbox(question, choices, **kw):
+        shown.extend(c.title for c in choices)
+        return _Answer([0])
+
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
+    cn.review_step([nostalgia, tango, plain], "producer_credit", {})
+
+    assert len(shown) == 2
+    assert (nostalgia.title, tango.title, plain.title) == ("Nostalgia", "POLSKIE TANGO (prod. Lanek)",
+                                                          "Bruttosozialprodukt")
 
 
 def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, monkeypatch):

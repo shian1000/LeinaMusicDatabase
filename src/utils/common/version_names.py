@@ -22,12 +22,15 @@ from utils.common.normalizer import normalize
 from utils.common.title_patterns import YOUTUBE_BRACKETED
 
 _BRACKET_RE = re.compile(r"\s*" + YOUTUBE_BRACKETED)
-# " - Live at Wembley" at the end, after a spaced dash
-_DASH_SUFFIX_RE = re.compile(r"\s+[-–—]\s+([^-–—()\[\]【】（）［］]+?)\s*$")
+# A spaced dash; what follows the last ones may be a marker (" - Live at Wembley")
+_SPACED_DASH_RE = re.compile(r"\s+[-–—]\s+")
+_NO_BRACKETS_RE = re.compile(r"^[^()\[\]【】（）［］]+$")
 
 # First match wins: "na żywo, akustycznie" is live, "Extended Orchestral Version" extended
 _KIND_WORDS = (
-    (VERSION_LIVE, r"live|na zywo|koncert\w*|concert"),
+    # A contest's or a radio's performance: "Eurovision Song Contest 2011", "BBC Session"
+    # ("Eurovision Version" is its studio edit: a version, not live)
+    (VERSION_LIVE, r"live|na zywo|koncert\w*|concert|eurovision song contest|eurovision \d{4}|sessions?"),
     (VERSION_ACOUSTIC, r"acoustic|akustycz\w*|unplugged"),
     (VERSION_INSTRUMENTAL, r"instrumental|instrumentalna"),
     (VERSION_DEMO, r"demo"),
@@ -75,14 +78,23 @@ def _reading(title: str, start: int, end: int, marker: str) -> VersionReading | 
 def read_version(title: str | None) -> VersionReading | None:
     """What `title` says about being a version: its last bracket naming one
     ("Song (Live) (Remastered)" is live), else a spaced-dash suffix ("Song -
-    Acoustic Version"); None when it says nothing."""
+    Acoustic Version"), the shortest naming one: "I Love Belarus - Eurovision
+    Song Contest 2011 - BBC One" is live, "Eurovision Song Contest 2011 - BBC
+    One" its label; None when it says nothing."""
     if not title:
         return None
     for bracket in reversed(list(_BRACKET_RE.finditer(title))):
         if reading := _reading(title, bracket.start(), bracket.end(), bracket[1]):
             return reading
-    if dash := _DASH_SUFFIX_RE.search(title):
-        return _reading(title, dash.start(), dash.end(), dash[1])
+    for dash in reversed(list(_SPACED_DASH_RE.finditer(title))):
+        marker = title[dash.end():].strip()
+        if not _NO_BRACKETS_RE.match(marker):
+            break
+        if reading := _reading(title, dash.start(), len(title), marker):
+            return reading
+        key = normalize(marker)
+        if _SAME_RECORDING_RE.search(key) or _OTHER_CREDIT_RE.search(key):
+            break  # "... - Radio Version" names the release: nothing further left is a marker
     return None
 
 

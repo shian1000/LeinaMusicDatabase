@@ -22,8 +22,10 @@ Thumbs.db
 /recent_dirs.json
 /discovery_modules_config.json
 /discovery_modules_config_years.json
+/discovery_modules_config_lyrics.json
 /discovery_fetcher_stats.json
 /discovery_fetcher_stats_years.json
+/discovery_fetcher_stats_lyrics.json
 /database_location_config.json
 /file_matching_config.json
 /fetch_data_config.json

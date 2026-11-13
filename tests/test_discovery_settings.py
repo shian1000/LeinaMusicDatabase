@@ -1,3 +1,4 @@
+import dataclasses
 """Which discovery modules run and in what order (utils/discoveries/
 discovery_settings.py): the saved config reconciled against the modules that
 exist - a removed one dropped, a new one appended and on, the user's order
@@ -97,12 +98,25 @@ def test_an_unreadable_or_odd_file_falls_back_to_the_defaults(config, text):
     assert result == {"order": DEFAULT, "enabled": {m: True for m in DEFAULT}}
 
 
-def test_album_and_year_configs_are_separate_files(tmp_path, monkeypatch):
-    albums, years = tmp_path / "albums.json", tmp_path / "years.json"
-    monkeypatch.setattr(ds, "DISCOVERY_MODULES_CONFIG_FILE", str(albums))
-    monkeypatch.setattr(ds, "DISCOVERY_MODULES_YEAR_CONFIG_FILE", str(years))
+def test_each_kind_has_a_config_file_of_its_own(tmp_path, monkeypatch):
+    files = {kind: tmp_path / f"{kind}.json" for kind in ds.KINDS}
+    for kind, path in files.items():
+        monkeypatch.setitem(ds.KINDS, kind, dataclasses.replace(ds.KINDS[kind], config_file=path))
 
     ds.reconcile_discovery_config(["itunes_fetcher", "genius_fetcher"])
-    ds.reconcile_year_discovery_config(["spotify_fetcher"])
-    assert json.loads(albums.read_text())["order"] == ["itunes_fetcher", "genius_fetcher"]
-    assert ds.load_year_discovery_config()["order"] == ["spotify_fetcher"]
+    ds.reconcile_discovery_config(["spotify_fetcher"], ds.YEARS)
+    ds.reconcile_discovery_config(["lrclib_fetcher"], ds.LYRICS)
+    assert json.loads(files[ds.ALBUMS].read_text())["order"] == ["itunes_fetcher", "genius_fetcher"]
+    assert ds.load_discovery_config(ds.YEARS)["order"] == ["spotify_fetcher"]
+    assert ds.load_discovery_config(ds.LYRICS)["order"] == ["lrclib_fetcher"]
+
+
+def test_a_module_takes_part_only_in_the_kinds_whose_function_it_defines():
+    from utils.discoveries import discoveries_manager as dm
+
+    assert "lrclib_fetcher" in dm._module_files(ds.LYRICS)
+    assert "library_tags_fetcher" in dm._module_files(ds.LYRICS)
+    assert "lrclib_fetcher" not in dm._module_files(ds.ALBUMS)
+    assert "itunes_fetcher" in dm._module_files(ds.ALBUMS)
+    assert "itunes_fetcher" not in dm._module_files(ds.YEARS)
+    assert set(dm._module_files(ds.LYRICS)) == set(ds.KINDS[ds.LYRICS].default_order)

@@ -1,7 +1,7 @@
 """
-Copy music.db, tag.db and files.db (the music library index) into the
-sharing folder (Settings.sharing_dir) that the MusicDatabaseApp mobile
-client downloads from, plus installing the systemd user service that serves
+Copy music.db, tag.db, files.db (the music library index) and lyrics.db into
+the sharing folder (Settings.sharing_dir) that the MusicDatabaseApp mobile
+client downloads from (lyrics.db only one song at a time, GET /lyrics/<id>), plus installing the systemd user service that serves
 that folder over VPN (sharing_server.py) and the timer that runs the
 automatic pass over the phone's requests (auto_resolve_requests.py).
 

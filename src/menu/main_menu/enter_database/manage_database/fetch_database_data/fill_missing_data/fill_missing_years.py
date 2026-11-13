@@ -14,10 +14,11 @@ from utils.database.database_sessions import submit_global_database_session
 from utils.common.selenium_sessions import close_global_driver
 from utils.discoveries.discoveries_manager import (
     discover_release_year_result,
-    load_year_discovery_modules,
+    load_discovery_modules,
     release_year_from_stored_link,
 )
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
+from utils.discoveries.discovery_settings import YEARS
 from utils.database.latin_names import artist_match_synonyms
 from config.constants import SINGLES_ALBUM, MANUAL_YEAR_SAMPLE_SONGS
 from utils.common.normalizer import compare, normalize
@@ -86,7 +87,7 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
     review_results = []
 
     try:
-        modules = load_year_discovery_modules()
+        modules = load_discovery_modules(YEARS)
         if not modules:
             print("No discovery modules support looking up a release year yet (see Settings -> Discovery modules).")
             submit_global_database_session()  # keep the years taken from the database

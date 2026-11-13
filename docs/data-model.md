@@ -318,8 +318,8 @@ kind          NOT NULL          tag_id         NOT NULL (references Tag.id, this
 
 ## References to `songs.id` from other files
 
-`tag.db`'s `song_tags`, `files.db`'s `files` and every `user.db`'s `playlist_tracks` / `song_tags`
-point at `songs.id` with plain integers, which SQLite can't enforce across files. `src/utils/database/song_references.py`
+`tag.db`'s `song_tags`, `files.db`'s `files`, `lyrics.db`'s `lyrics` / `lyrics_misses` and every
+`user.db`'s `playlist_tracks` / `song_tags` point at `songs.id` with plain integers, which SQLite can't enforce across files. `src/utils/database/song_references.py`
 keeps them valid:
 
 - **`song_id_changes`** (music.db, migration 0009) is an append-only log of ids that stopped
@@ -328,8 +328,9 @@ keeps them valid:
   (today only `resolve_duplicates.remove_duplicate_songs()`, which keeps the lowest id), and
   bulk `query().delete()` calls `record_song_deletions()`.
 - **Each referencing file replays it** past its own cursor (`applied_song_changes`: tag migration
-  0002, user migration 0003, files migration 0001) in `apply_song_id_changes()`. Merged: tags move
-  to the kept song (one it already has is dropped), playlist tracks and library files point at it.
+  0002, user migration 0003, files and lyrics migration 0001) in `apply_song_id_changes()`. Merged:
+  tags move to the kept song (one it already has is dropped), playlist tracks and library files
+  point at it, lyrics move to it unless it has its own. Deleted: lyrics go too.
   Deleted: tags go, playlist tracks keep their title/artist/video with `song_id` NULL, so the
   playlist still shows them, and library files get `song_id` NULL (`match_source` back to
   `auto`) so the next scan can match them again.
@@ -368,6 +369,32 @@ with `music.db` / `tag.db`.
   and song titles (with their Latin forms). Old unmatched files are rematched only when it changes (~45 s for ~700 files, because
   the shared artist search reloads every artist per lookup); new or changed files always are.
 - `applied_song_changes`: the replay cursor, as in tag.db.
+
+## `lyrics.db` (songs' lyrics)
+
+`<database_dir>/lyrics.db`, written by `src/utils/database/lyrics_store.py` (Fetch database data →
+Fill missing data → "Lyrics", `utils/ui/lyrics_review.py`). Schema only from `migrations/lyrics/`
+(no bootstrap, created on the first lookup); `SongLyrics` / `LyricsMiss` mirror it. A file of its
+own, not a music.db table: ~25 MB of text for the catalog against music.db's ~2 MB, and Leina Radio
+downloads music.db whole. The sharing copy is made with the others, but the server answers only one
+song at a time (`GET /lyrics/<songs.id>`, runbook) and never serves the file; it never goes into the
+public copy either (the lyrics' licence; `public_export` refuses its tables); Leina Radio: [handoff](handoffs/lyrics-for-musicdatabaseapp.md)).
+
+- `lyrics`: one row per song. `plain` (lines by `\n`), `synced` (LRC, `[01:23.45] line`, NULL when
+  only the plain text is known), `instrumental` (1 = no words), `source` (the discovery module's id,
+  `original` = a version's original's plain text, or `manual` = pasted by the owner), `source_ref` (the source's id), `fetched_at`.
+  `synced` only when the found recording's length is within 3 s of ours (or either is unknown).
+- `lyrics_module_misses` (migration 0002, replacing 0001's per-song `lyrics_misses`, whose rows were
+  dropped: many were LRCLIB's 429s): per song and module, `not_found` (that module asked again
+  after `LYRICS_RETRY_DAYS`) or `rejected` (the owner turned its text down; never asked again).
+  A song is asked only of the enabled modules that haven't answered for it. `asked_as` (migration
+  0003) is the name it was asked by (`lyrics_key()`, artist|title normalized): a song renamed since
+  is asked again; NULL (rows from before) counts for any name. Song actions → "Lyrics" → look it
+  up again drops the song's text and every answer (`forget_lookups()`).
+- Songs without words are `songs.language` = "Instrumental" (`LANGUAGE_INSTRUMENTAL`) or an
+  instrumental version: never looked up. A source's `instrumental` answer is stored as a row with
+  `instrumental` = 1 only when the owner confirms it (the end of "Lyrics").
+- `applied_song_changes`: the replay cursor, as in files.db.
 
 ## `user.db` (one per user)
 

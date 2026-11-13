@@ -17,6 +17,7 @@ from utils.database.database_sessions import submit_global_database_session
 from utils.database.database_management import delete_db_entry
 from utils.discoveries.discovery_modules.spotify_fetcher import normalize_spotify_url
 from utils.ui.genre_review import set_genre_of_songs
+from utils.ui.lyrics_review import lyrics_of_songs
 from utils.ui.cover_review import set_covered_artist_of_songs, set_covered_title_of_songs
 from utils.ui.version_review import set_version_of_songs
 from utils.ui.project_review import set_project_of_songs
@@ -192,6 +193,7 @@ def song_actions(songs_objects):
         "Set music video link": lambda: set_music_video_link(songs_objects),
         "Set Spotify link": lambda: set_spotify_link(songs_objects),
         "Set genre": lambda: set_genre_of_songs(songs_objects),
+        "Lyrics": lambda: lyrics_of_songs(songs_objects),
         "Song or full album": lambda: set_kind_of_songs(songs_objects),
         "Set project": lambda: set_project_of_songs(songs_objects),
         "Set covered artist": lambda: set_covered_artist_of_songs(songs_objects),

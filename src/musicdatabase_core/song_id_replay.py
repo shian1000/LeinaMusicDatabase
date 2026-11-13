@@ -1,5 +1,5 @@
 """Replaying music.db's song_id_changes log into a file that points at songs.id
-(tag.db, files.db, a user.db), on a plain sqlite3 connection. The caller commits.
+(tag.db, files.db, lyrics.db, a user.db), on a plain sqlite3 connection. The caller commits.
 The rules and why: MDHS's utils/database/song_references.py."""
 
 from . import mood_sync, playlist_sync, saved_sync
@@ -19,8 +19,8 @@ def set_cursor(conn, change_id: int) -> None:
 
 
 def replay(conn, changes: list, has_playlists: bool = False, has_tags: bool = True,
-           has_files: bool = False, changed_playlists: set | None = None, changed_tags: set | None = None,
-           auto_match_source: str | None = None) -> int:
+           has_files: bool = False, has_lyrics: bool = False, changed_playlists: set | None = None,
+           changed_tags: set | None = None, auto_match_source: str | None = None) -> int:
     """Apply the log entries past this file's cursor. Returns how many rows
     changed; adds the playlists whose tracks changed to `changed_playlists`
     and the tags whose songs changed to `changed_tags`. Caller commits.
@@ -49,6 +49,12 @@ def replay(conn, changes: list, has_playlists: bool = False, has_tags: bool = Tr
             if has_files:
                 touched += conn.execute(
                     "UPDATE files SET song_id = :new WHERE song_id = :old", params).rowcount
+            if has_lyrics:
+                # The kept song's own lyrics and module answers win
+                touched += conn.execute(
+                    "UPDATE OR IGNORE lyrics SET song_id = :new WHERE song_id = :old", params).rowcount
+                conn.execute("UPDATE OR IGNORE lyrics_module_misses SET song_id = :new WHERE song_id = :old",
+                             params)
         else:
             if has_tags:
                 touched += conn.execute("DELETE FROM song_tags WHERE song_id = :old", params).rowcount
@@ -57,6 +63,10 @@ def replay(conn, changes: list, has_playlists: bool = False, has_tags: bool = Tr
                 touched += conn.execute(
                     "UPDATE files SET song_id = NULL, match_source = :auto WHERE song_id = :old",
                     params).rowcount
+        if has_lyrics:
+            # Whatever wasn't moved above: a deleted song's, or one the kept song didn't need
+            touched += conn.execute("DELETE FROM lyrics WHERE song_id = :old", params).rowcount
+            conn.execute("DELETE FROM lyrics_module_misses WHERE song_id = :old", params)
         last = change_id
     set_cursor(conn, last)
     return touched

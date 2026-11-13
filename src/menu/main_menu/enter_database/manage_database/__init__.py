@@ -23,6 +23,7 @@ from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_miss
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_albums import fill_missing_albums
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_years import fill_missing_years
 from utils.ui.genre_review import fill_missing_genres
+from utils.ui.lyrics_review import fill_missing_lyrics
 from utils.ui.project_review import review_project_proposals
 from utils.ui.latin_forms_review import fill_latin_forms
 from utils.ui.file_fix_review import fix_file_names_and_tags
@@ -213,7 +214,8 @@ def _duplicates_after_spell_check():
 # - albums found, then their names settled (soundtracks, titles shared by
 #   several artists - which also gives those songs their album rows);
 # - years after albums (Years looks only at songs with an album and shares a
-#   year across one), genres, and Latin forms last, for every name by then.
+#   year across one), genres, and Latin forms for every name by then;
+# - lyrics last: the slowest lookup, and it compares the titles fixed above.
 # Left out: imports and "Import a request package" (they need a source),
 # "Fix names and tags for mp3 files ..." (a folder; it rewrites files),
 # Manual management and Merge / Divide artists (the user picks the rows).
@@ -236,6 +238,7 @@ RUN_ALL_STEPS = {
     "years": fill_missing_years,
     "genres": fill_missing_genres,
     "latin_forms": fill_latin_forms,
+    "lyrics": fill_missing_lyrics,
 }
 
 

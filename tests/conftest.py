@@ -54,6 +54,17 @@ sanitize_settings.forget_cache()
 from utils.common import run_all_settings  # noqa: E402
 
 run_all_settings.CONFIG_PATH = _ISOLATED_DIR / "run_all_config.json"
+
+# Settings -> Discovery modules and the Statistics counters, every kind: a
+# test reconciling a config once rewrote the owner's discovery_modules_config.json
+import dataclasses  # noqa: E402
+
+from utils.discoveries import discovery_settings  # noqa: E402
+
+for _kind, _spec in discovery_settings.KINDS.items():
+    discovery_settings.KINDS[_kind] = dataclasses.replace(
+        _spec, config_file=_ISOLATED_DIR / f"discovery_modules_config_{_kind}.json",
+        stats_file=_ISOLATED_DIR / f"discovery_fetcher_stats_{_kind}.json")
 _link_log = logging.getLogger("youtube_link_cache")
 _link_log.addHandler(logging.FileHandler(_ISOLATED_DIR / "youtube_link_cache.log", encoding="utf-8"))
 _link_log.setLevel(logging.INFO)

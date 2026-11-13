@@ -8,16 +8,8 @@ from utils.common import debug
 from utils.common.debug import flog
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
-from utils.discoveries.discoveries_manager import (
-    load_all_discovery_modules_metadata,
-    load_all_year_discovery_modules_metadata,
-)
-from utils.discoveries.discovery_settings import (
-    load_discovery_config,
-    save_discovery_config,
-    load_year_discovery_config,
-    save_year_discovery_config,
-)
+from utils.discoveries.discoveries_manager import load_all_discovery_modules_metadata
+from utils.discoveries.discovery_settings import ALBUMS, LYRICS, YEARS, load_discovery_config, save_discovery_config
 from utils.common import startup_settings
 from utils.common.env_file import MACHINE_KEYS, read_env_value, save_env_value
 from utils.common.sharing_setup import (
@@ -371,55 +363,27 @@ def setup_database_sharing():
         submit_database_for_sharing()
 
 
+# The kinds of lookup, as the menu names them (discovery_settings.KINDS)
+_KIND_LABELS = {ALBUMS: "Albums", YEARS: "Years", LYRICS: "Lyrics"}
+
+
 def discovery_modules_menu():
-    action_map = {
-        "Albums: Enable/disable modules": toggle_discovery_modules,
-        "Albums: Set modules order": reorder_discovery_modules,
-        "Years: Enable/disable modules": toggle_year_discovery_modules,
-        "Years: Set modules order": reorder_year_discovery_modules,
-    }
+    action_map = {}
+    for kind, label in _KIND_LABELS.items():
+        action_map[f"{label}: Enable/disable modules"] = lambda kind=kind: toggle_discovery_modules(kind)
+        action_map[f"{label}: Set modules order"] = lambda kind=kind: reorder_discovery_modules(kind)
     execute_menu_item("Discovery modules", action_map, exit_label="Back")
 
 
-NO_YEAR_MODULES_MESSAGE = "No discovery modules implement release-year lookups yet."
+def toggle_discovery_modules(kind: str = ALBUMS):
+    """Tick/untick which discovery modules a kind of lookup uses (only
+    modules that implement its function)."""
+    label = _KIND_LABELS[kind]
+    modules = load_all_discovery_modules_metadata(kind)  # [(id, display_name), ...] in configured order
+    config = load_discovery_config(kind)
 
-
-def toggle_discovery_modules():
-    """Tick/untick which discovery modules are used when searching for songs."""
-    _toggle_modules(load_all_discovery_modules_metadata, load_discovery_config, save_discovery_config,
-                    question_suffix="", saved_message="Discovery module settings saved.")
-
-
-def reorder_discovery_modules():
-    """Rearrange the priority order discovery modules are tried in."""
-    _reorder_modules(load_all_discovery_modules_metadata, load_discovery_config, save_discovery_config,
-                     header="Set modules order", saved_message="Module order saved.")
-
-
-def toggle_year_discovery_modules():
-    """Tick/untick which discovery modules are used when searching for a
-    release year (only modules that implement get_release_year())."""
-    _toggle_modules(load_all_year_discovery_modules_metadata, load_year_discovery_config,
-                    save_year_discovery_config, question_suffix=" for Years",
-                    saved_message="Year discovery module settings saved.",
-                    empty_message=NO_YEAR_MODULES_MESSAGE)
-
-
-def reorder_year_discovery_modules():
-    """Rearrange the priority order release-year discovery modules are tried in."""
-    _reorder_modules(load_all_year_discovery_modules_metadata, load_year_discovery_config,
-                     save_year_discovery_config, header="Set modules order for Years",
-                     saved_message="Year module order saved.", empty_message=NO_YEAR_MODULES_MESSAGE)
-
-
-def _toggle_modules(load_modules, load_config, save_config, *, question_suffix, saved_message,
-                    empty_message=None):
-    """The checkbox list behind both "Enable/disable modules" entries (albums, years)."""
-    modules = load_modules()  # [(id, display_name), ...] in configured order
-    config = load_config()
-
-    if not modules and empty_message:
-        print(empty_message)
+    if not modules:
+        print(f"No discovery modules implement {label.lower()} lookups yet.")
         return
 
     choices = [
@@ -432,7 +396,7 @@ def _toggle_modules(load_modules, load_config, save_config, *, question_suffix, 
     ]
 
     selected_ids = questionary.checkbox(
-        f"Select modules to enable{question_suffix} (space to toggle, enter to confirm)",
+        f"Select modules to enable for {label} (space to toggle, enter to confirm)",
         choices=choices,
     ).ask()
 
@@ -440,18 +404,18 @@ def _toggle_modules(load_modules, load_config, save_config, *, question_suffix, 
         return
 
     config["enabled"] = {module_id: module_id in selected_ids for module_id, _ in modules}
-    save_config(config)
-    print(saved_message)
+    save_discovery_config(config, kind)
+    print(f"{label} discovery module settings saved.")
 
 
-def _reorder_modules(load_modules, load_config, save_config, *, header, saved_message,
-                     empty_message=None):
-    """The move-up/down loop behind both "Set modules order" entries (albums, years)."""
-    modules = load_modules()
-    config = load_config()
+def reorder_discovery_modules(kind: str = ALBUMS):
+    """Rearrange the priority order a kind of lookup tries its modules in."""
+    label = _KIND_LABELS[kind]
+    modules = load_all_discovery_modules_metadata(kind)
+    config = load_discovery_config(kind)
 
-    if not modules and empty_message:
-        print(empty_message)
+    if not modules:
+        print(f"No discovery modules implement {label.lower()} lookups yet.")
         return
 
     order = [module_id for module_id, _ in modules]
@@ -459,7 +423,7 @@ def _reorder_modules(load_modules, load_config, save_config, *, header, saved_me
 
     while True:
         clear_screen()
-        print(f"{header} (top = tried first)\n")
+        print(f"Set modules order for {label} (top = tried first)\n")
         for i, module_id in enumerate(order, start=1):
             marker = "" if config["enabled"].get(module_id, True) else " (disabled)"
             print(f"{i}. {names[module_id]}{marker}")
@@ -493,8 +457,8 @@ def _reorder_modules(load_modules, load_config, save_config, *, header, saved_me
         # "Cancel" or a dismissed prompt: no change
 
     config["order"] = order
-    save_config(config)
-    print(saved_message)
+    save_discovery_config(config, kind)
+    print(f"{label} module order saved.")
 
 
 def database_location_menu():

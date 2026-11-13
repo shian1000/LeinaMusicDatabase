@@ -28,6 +28,12 @@ from utils.discoveries.import_engine import create_song_entry, find_existing_son
     ("Crazy in Love (URM version)", ("Crazy in Love", "other", "URM version")),
     ("Song - Acoustic Version", ("Song", "acoustic", "Acoustic Version")),
     ("Song (Live) (Remastered 2011)", ("Song (Remastered 2011)", "live", None)),
+    # A contest's or a radio's performance, the shortest dashed suffix naming one
+    ("I Love Belarus - Eurovision Song Contest 2011 - BBC One",
+     ("I Love Belarus", "live", "Eurovision Song Contest 2011 - BBC One")),
+    ("Crazy In Love (BBC Session)", ("Crazy In Love", "live", "BBC Session")),
+    ("Lose Control - The Village Sessions", ("Lose Control", "live", "The Village Sessions")),
+    ("Song - Part 2 - Live", ("Song - Part 2", "live", None)),
 ])
 def test_read_version(title, expected):
     reading = read_version(title)
@@ -38,6 +44,8 @@ def test_read_version(title, expected):
     "Dziwny jest ten świat (Bonus track)", "Song (Radio Edit)", "Song (Album Version)", "Song (2015 Remastered)",
     "Town Theme 3 (Original version)", "Teenage Dirtbag - Explicit Album Version", "Twinz (Deep Cover ’98)",
     "Mix Tape", "Rasputin (Boney M cover - acoustic / live)", "Song (feat. Live)", "(Live)", None,
+    # "Radio Version" names the release: nothing left of it is read as a marker
+    "Dreamland - One and One - Radio Version",
 ])
 def test_not_a_version(title):
     assert read_version(title) is None
@@ -138,6 +146,17 @@ def test_a_plain_version_marker_narrows_nothing(session):
     assert songs_for_entry([bach, urm, live], "Toccata (URM version)") == [urm, bach]
     song = create_song_entry({"title": "Fugue (Best Version Ever)"}, bach.artist, session)
     assert (song.title, song.version_kind) == ("Fugue (Best Version Ever)", None)
+
+
+def test_a_genre_version_is_kept_apart_from_the_original(session):
+    # A song request "Heart Of Glass (Disco Version)" was settled as the plain song
+    original = _song(session, "Blondie", "Heart of Glass")
+    assert songs_for_entry([original], "Heart Of Glass (Disco Version)") == []
+    assert find_existing_song("Heart Of Glass (Disco Version)", [original]) is None
+    song = create_song_entry({"title": "Heart Of Glass (Disco Version)"}, original.artist, session)
+    assert (song.title, song.version_kind, song.version_label, song.version_of) == (
+        "Heart Of Glass", "other", "Disco Version", original.id)
+    assert songs_for_entry([original, song], "Heart of Glass (wersja disco)") == [song]
 
 
 def test_a_new_song_gets_its_version_and_original(session):

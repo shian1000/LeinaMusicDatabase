@@ -366,6 +366,23 @@ def strip_junk_brackets_anywhere(title: str) -> str:
     return re.sub(r"\s+", " ", title).strip()
 
 
+# A producer's credit in a bracket: "Sam (prod. Gibbs)", "Одна (prod.by LFox)",
+# "PATOLOVE (PROD. AETHERBOY1)", "(produced by X)" - "prod" a whole word, so
+# "(Prodigy Remix)" and "(Producer's Cut)" stay. Nothing keeps the name (owner,
+# 2026-11-12): LRCLIB and Genius don't have it in their titles, Leina Radio
+# shouldn't show it as one
+_PRODUCER_CREDIT_RE = re.compile(r"^\s*(?:prod\b\.?|produced\s+by\b)", re.IGNORECASE)
+
+
+def strip_producer_credit(title: str) -> str:
+    """`title` without its producer credits, wherever they stand; a title that
+    is nothing but one stays."""
+    if not any(_PRODUCER_CREDIT_RE.match(m.group(1)) for m in ANY_BRACKET_RE.finditer(title or "")):
+        return title
+    stripped = ANY_BRACKET_RE.sub(lambda m: "" if _PRODUCER_CREDIT_RE.match(m.group(1)) else m.group(0), title)
+    return re.sub(r"\s+", " ", stripped).strip() or title
+
+
 # A "|" in a YouTube title is routinely used to tack on channel/label
 # branding after the actual song info (e.g. "OMNIMAR - The Matrix (Official
 # Video) | darkTunes Music Group") - never part of the song title itself, so

@@ -8,19 +8,17 @@ from utils.common.text_utils import (
     scaled_similarity_threshold,
     title_resembles,
     resembles_across_scripts,
+    remove_brackets,
 )
-from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
-from utils.discoveries.discovery_settings import (
-    reconcile_discovery_config,
-    reconcile_year_discovery_config,
+from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, LyricsDiscoveryResult, YearDiscoveryResult
+from utils.discoveries.discovery_settings import ALBUMS, KINDS, LYRICS, YEARS, reconcile_discovery_config
+from utils.discoveries.discovery_stats import record_invocation, record_success
+from config.constants import (
+    LYRICS_DURATION_TOLERANCE_S,
+    MIN_PLAUSIBLE_RELEASE_YEAR,
+    SINGLES_ALBUM,
+    SPELLING_CHECK_THRESHOLD,
 )
-from utils.discoveries.discovery_stats import (
-    record_invocation,
-    record_success,
-    record_year_invocation,
-    record_year_success,
-)
-from config.constants import SPELLING_CHECK_THRESHOLD, MIN_PLAUSIBLE_RELEASE_YEAR, SINGLES_ALBUM
 from datetime import datetime
 import ast
 import inspect
@@ -30,13 +28,15 @@ from pathlib import Path
 from utils.common.debug import flog, mlog, slog
 from utils.common.normalizer import composed, name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_match_synonyms, artist_synonyms, song_titles
+from utils.database.other_titles import other_titles
 from utils.common.artist_credits import propose_artist_split, split_synonyms
 from utils.common.script_utils import cyrillic_search_variant, has_non_latin
 from utils.common.romanize import suggest_latin
+from utils.common.version_names import read_version
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 import re
 
@@ -82,8 +82,7 @@ def _module_defines_function(script_path: Path, func_name: str) -> bool:
     func_name, without importing it (same reasoning as _read_module_name:
     importing every file just to check for an optional function would run
     disabled/unrelated modules' import-time side effects). Used to find
-    which discovery modules implement get_release_year(), since not every
-    album fetcher supports year lookups."""
+    which modules take part in each kind of lookup (discovery_settings.KINDS)."""
     try:
         tree = ast.parse(script_path.read_text(encoding="utf-8"), filename=str(script_path))
     except (OSError, SyntaxError):
@@ -95,8 +94,11 @@ def _module_defines_function(script_path: Path, func_name: str) -> bool:
     )
 
 
-def _module_files() -> dict:
-    return {p.stem: p for p in _discovery_modules_dir().glob("*.py")}
+def _module_files(kind: str) -> dict:
+    """Module files (by id) that statically define the kind's function."""
+    function = KINDS[kind].function
+    return {p.stem: p for p in sorted(_discovery_modules_dir().glob("*.py"))
+            if _module_defines_function(p, function)}
 
 
 def _enabled_modules(module_files: dict, config: dict) -> list:
@@ -120,36 +122,17 @@ def _modules_metadata(module_files: dict, config: dict) -> list:
     return [(module_id, _read_module_name(module_files[module_id])) for module_id in config["order"]]
 
 
-def load_discovery_modules():
-    """The *enabled* album fetchers, in the user's configured order (see
-    discovery_settings.py), ready to be passed to discover_album_name()."""
-    module_files = _module_files()
-    return _enabled_modules(module_files, reconcile_discovery_config(module_files.keys()))
+def load_discovery_modules(kind: str = ALBUMS):
+    """The *enabled* modules of a kind of lookup, in the user's configured
+    order (see discovery_settings.py), ready to be passed to
+    discover_album_name() / discover_release_year_result() / discover_lyrics()."""
+    module_files = _module_files(kind)
+    return _enabled_modules(module_files, reconcile_discovery_config(module_files.keys(), kind))
 
 
-def load_all_discovery_modules_metadata():
-    module_files = _module_files()
-    return _modules_metadata(module_files, reconcile_discovery_config(module_files.keys()))
-
-
-def _year_capable_module_files() -> dict:
-    """Module files (by id) that statically define get_release_year() -
-    the subset usable for "Fill missing data -> Years", distinct from the
-    full set of album fetchers."""
-    return {module_id: path for module_id, path in _module_files().items()
-            if _module_defines_function(path, "get_release_year")}
-
-
-def load_year_discovery_modules():
-    """The *enabled* year-capable modules, in the user's configured order,
-    ready to be passed to discover_release_year_result()."""
-    module_files = _year_capable_module_files()
-    return _enabled_modules(module_files, reconcile_year_discovery_config(module_files.keys()))
-
-
-def load_all_year_discovery_modules_metadata():
-    module_files = _year_capable_module_files()
-    return _modules_metadata(module_files, reconcile_year_discovery_config(module_files.keys()))
+def load_all_discovery_modules_metadata(kind: str = ALBUMS):
+    module_files = _module_files(kind)
+    return _modules_metadata(module_files, reconcile_discovery_config(module_files.keys(), kind))
 
 
 def _matched_artist_resembles(queried_artist: str, matched_artist: str, credited_artists: list[str] | None = None) -> bool:
@@ -603,7 +586,7 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
     reuse a stored youtube_video_id. Everything else keeps the plain
     (artist, query, is_single) contract."""
     artist, query = composed(artist), composed(query)
-    record_year_invocation(module_id)
+    record_invocation(module_id, YEARS)
     try:
         if songs and "songs" in inspect.signature(module.get_release_year).parameters:
             result = module.get_release_year(artist, query, is_single, songs=songs)
@@ -617,7 +600,7 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
         flog(f"[{module_name}] found no release year for '{artist} - {query}' (is_single={is_single})")
     result = _validate_year_result(result, artist, query, module_name, credited_artists)
     if result:
-        record_year_success(module_id)
+        record_success(module_id, YEARS)
     return result
 
 
@@ -717,3 +700,166 @@ def release_year_from_stored_link(songs) -> YearDiscoveryResult | None:
             return result
         flog(f"[Spotify link] no release year on {song.spotify_url} stored for '{song.artist.name} - {song.title}'")
     return None
+
+
+@dataclass
+class LyricsMatch:
+    """Lyrics a module found for a song. sure: the same title (one of the
+    song's titles) and a resembling artist, or read from the song's own file;
+    a title that only resembles one is the owner's to confirm. synced_fits:
+    the found recording's length is within LYRICS_DURATION_TOLERANCE_S of
+    ours (or one of them is unknown), so its synced lines fit our recording -
+    otherwise only the plain text is worth keeping (a music video's intro, a
+    radio edit). duration_s: ours and the found one's, for showing them."""
+    result: LyricsDiscoveryResult
+    module_id: str
+    sure: bool
+    duration_s: float | None = None
+    found_duration_s: float | None = None
+    synced_fits: bool = True
+
+
+@dataclass
+class LyricsSearch:
+    """What discover_lyrics() found: the best match (None = nothing), the
+    modules that answered without a fitting text (`missed`, worth
+    remembering) and those that couldn't be asked (`failed`: no network,
+    rate limited - asked again next time)."""
+    match: LyricsMatch | None = None
+    missed: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+
+
+def _has_text(result) -> bool:
+    return isinstance(result, LyricsDiscoveryResult) and bool(
+        result.instrumental or (result.plain or "").strip() or (result.synced or "").strip())
+
+
+def _lyrics_match(result: LyricsDiscoveryResult, song, queried_artist: str, module_id: str, module_name: str,
+                  duration_s: float | None, credited: list[str] | None) -> LyricsMatch | None:
+    """The candidate checked against the song, or None when it's another song."""
+    if not _has_text(result):
+        return None
+    if result.from_song_file:
+        return LyricsMatch(result, module_id, True, duration_s, result.duration_s)
+    if not (result.matched_title and result.matched_artist):
+        flog(f"[{module_name}] lyrics without the title/artist they belong to, discarding")
+        return None
+    titles = [*song_titles(song), *([song.covered_title] if getattr(song, "covered_title", None) else [])]
+    # A bracket on either side is a credit or a note, not other words: "ARMANI TOP
+    # (prod.bovskey)" is LRCLIB's and Genius's "Armani Top" (a version's marker
+    # isn't in its title any more - songs.version_kind)
+    keys = {key for t in titles for key in (normalize(t), normalize(remove_brackets(t))) if key}
+    # ... and so is a dashed one: Genius's "Nazywali go Marynarz – szanta narciarska" -
+    # unless it names a version ours isn't: "最果て (Instrumental)" isn't "最果て"
+    found_keys = {normalize(result.matched_title)}
+    found_version = read_version(result.matched_title)
+    if found_version is None or found_version.kind == getattr(song, "version_kind", None):
+        found_keys |= {normalize(remove_brackets(result.matched_title)),
+                       normalize(_DASHED_NOTE.sub("", result.matched_title))}
+    exact = bool(found_keys & keys)
+    # One song of a medley: its words are only part of ours - the owner decides
+    parts = [part for t in titles for part in _medley_parts(t)]
+    if not exact and not any(title_resembles(t, result.matched_title) for t in [*titles, *parts]):
+        slog(f"[{module_name}] lyrics of '{result.matched_title}' aren't '{song.title}'")
+        return None
+    if not _matched_artist_resembles(queried_artist, result.matched_artist, credited):
+        slog(f"[{module_name}] lyrics by '{result.matched_artist}' aren't by '{queried_artist}'")
+        return None
+    fits = not (duration_s and result.duration_s) or abs(duration_s - result.duration_s) <= LYRICS_DURATION_TOLERANCE_S
+    return LyricsMatch(result, module_id, exact, duration_s, result.duration_s, fits)
+
+
+def _match_rank(match: LyricsMatch) -> tuple:
+    """Higher is better: sure, then words over a claim of none (LRCLIB holds "Jump Up" both
+    with its text and as "instrumental"), then synced lines that fit, then the closest length."""
+    difference = (abs(match.duration_s - match.found_duration_s)
+                  if match.duration_s and match.found_duration_s else float("inf"))
+    return match.sure, not match.result.instrumental, match.synced_fits and bool(match.result.synced), -difference
+
+
+def _call_lyrics_module(module, module_id: str, module_name: str, artist: str, title: str,
+                        duration_s: float | None, song) -> list | None:
+    """Run a module's get_lyrics(), isolated from crashes; its candidates as a
+    list, None when the module failed (it raised: no network, rate limited)."""
+    artist, title = composed(artist), composed(title)
+    record_invocation(module_id, LYRICS)
+    try:
+        result = module.get_lyrics(artist, title, duration_s, songs=[song])
+    except Exception as e:
+        flog(f"[{module_name}] failed while looking up lyrics for '{artist} - {title}': {e}")
+        print(f"{module_name} failed, it's asked again next time")
+        return None
+    candidates = [] if result is None else result if isinstance(result, list) else [result]
+    if not candidates:
+        flog(f"[{module_name}] found no lyrics for '{artist} - {title}'")
+    return candidates
+
+
+def _lyrics_queries(song) -> list[tuple[str, str]]:
+    """(artist, title) to ask a lyrics module, in order, until one fits: the
+    artist's name, synonyms, the parts of a joined name ("Alice Cooper & Bee
+    Gees"), the song's main artists and all of them joined by "&", each with the title, the title without
+    its brackets ("(prod. X)") and the other titles ("W moim ogródecku" for
+    "Studzianki") and its Latin form (LyricsTranslate's addresses are in Latin);
+    then for a cover, the covered artist with the original's
+    title - a cover sings its words ("Where Is My Mind" by Pixies)."""
+    proposal = propose_artist_split(song.artist.name)
+    mains = [artist.name for artist in song_main_artists(song)]
+    # A duet as the sites write it: "Anna Maria Jopek & Branford Marsalis"
+    names = [song.artist.name, *artist_synonyms(song.artist), *(proposal.main if proposal else []), *mains,
+             *([" & ".join(mains)] if len(mains) > 1 else [])]
+    titles = [song.title, remove_brackets(song.title), getattr(song, "title_latin", None), *other_titles(song)]
+    queries = [(artist, title) for title in dict.fromkeys(titles) if title for artist in dict.fromkeys(names)]
+    covered = getattr(song, "covered_artist", None)
+    if covered is not None:
+        queries.append((covered.name, getattr(song, "covered_title", None) or song.title))
+    # A medley's songs one by one, last: "Steel for Humans / Lazare"
+    queries += [(artist, part) for artist, title in list(queries) for part in _medley_parts(title)]
+    return list(dict.fromkeys(queries))
+
+
+_DASHED_NOTE = re.compile(r"\s+[-–—]\s+[^-–—]+$")
+
+
+def _medley_parts(title: str) -> list[str]:
+    """"Steel for Humans / Lazare" -> both songs; [] for a title of one."""
+    parts = [part.strip() for part in title.split(" / ")]
+    return parts if len(parts) > 1 and all(parts) else []
+
+
+def discover_lyrics(song, modules, duration_s: float | None = None) -> LyricsSearch:
+    """The best lyrics the given get_lyrics() modules find for `song`, in
+    their order: the first sure match wins; one that isn't sure is kept
+    while the next modules may still find a sure one. Each module is asked
+    _lyrics_queries() in order until it has a candidate that fits.
+    `duration_s` is our length of the song (None = unknown)."""
+    credited, _ = _multi_artist_query(song)
+    queries = _lyrics_queries(song)
+    search = LyricsSearch()
+    for module_id, module_name, module in modules:
+        print(f"Looking for lyrics in {module_name} module")
+        found = None
+        for artist, title in queries:
+            candidates = _call_lyrics_module(module, module_id, module_name, artist, title, duration_s, song)
+            if candidates is None:
+                break
+            matches = [m for m in (_lyrics_match(c, song, artist, module_id, module_name, duration_s, credited)
+                                   for c in candidates) if m]
+            if matches:
+                found = max(matches, key=_match_rank)
+                break
+        if candidates is None and found is None:
+            search.failed.append(module_id)
+            continue
+        if found is None:
+            search.missed.append(module_id)
+            continue
+        record_success(module_id, LYRICS)
+        if search.match is None or _match_rank(found) > _match_rank(search.match):
+            search.match = found
+        if search.match.sure:
+            return search
+    if search.match is None:
+        flog(f"No module found lyrics for '{song.artist.name} - {song.title}'")
+    return search

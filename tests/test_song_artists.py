@@ -269,8 +269,8 @@ def _transient_collab(feat=False):
 
 @pytest.fixture
 def no_discovery_stats(monkeypatch):
-    for name in ("record_invocation", "record_success", "record_year_invocation", "record_year_success"):
-        monkeypatch.setattr(dm, name, lambda module_id: None)
+    for name in ("record_invocation", "record_success"):
+        monkeypatch.setattr(dm, name, lambda *a: None)
 
 
 def test_matched_artist_crediting_the_whole_collab_is_accepted():

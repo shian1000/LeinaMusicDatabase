@@ -1,11 +1,9 @@
 """Statistics menu: shows how often each discovery fetcher has been invoked
-and how often it actually found a usable album/year (see discovery_stats.py
+and how often it actually found a usable album/year/lyrics (see discovery_stats.py
 for what "success" means)."""
-from utils.discoveries.discoveries_manager import (
-    load_all_discovery_modules_metadata,
-    load_all_year_discovery_modules_metadata,
-)
-from utils.discoveries.discovery_stats import load_discovery_stats, load_year_discovery_stats
+from utils.discoveries.discoveries_manager import load_all_discovery_modules_metadata
+from utils.discoveries.discovery_settings import ALBUMS, LYRICS, YEARS
+from utils.discoveries.discovery_stats import load_discovery_stats
 
 
 def _print_stats_table(modules, stats) -> None:
@@ -23,14 +21,11 @@ def _print_stats_table(modules, stats) -> None:
 
 def show_discovery_stats():
     """Print each discovery module's invocation/success counts and success
-    rate, in the user's configured order (enabled or not), for both album
-    and release-year lookups."""
-    print("Discovery fetcher statistics - Albums\n")
-    _print_stats_table(load_all_discovery_modules_metadata(), load_discovery_stats())
-    print()
-
-    year_modules = load_all_year_discovery_modules_metadata()
-    if year_modules:
-        print("Discovery fetcher statistics - Years\n")
-        _print_stats_table(year_modules, load_year_discovery_stats())
-        print()
+    rate, in the user's configured order (enabled or not), for album,
+    release-year and lyrics lookups."""
+    for kind, label in ((ALBUMS, "Albums"), (YEARS, "Years"), (LYRICS, "Lyrics")):
+        modules = load_all_discovery_modules_metadata(kind)
+        if modules:
+            print(f"Discovery fetcher statistics - {label}\n")
+            _print_stats_table(modules, load_discovery_stats(kind))
+            print()

@@ -29,6 +29,8 @@ DISCOVERY_MODULES_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config.json"
 # get_release_year(), so the set of available modules (and a sensible order)
 # differs from the album fetchers.
 DISCOVERY_MODULES_YEAR_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_years.json"
+# The same for "Fill missing data -> Lyrics" (modules with get_lyrics())
+DISCOVERY_MODULES_LYRICS_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_lyrics.json"
 
 # Optional override for Settings.database_dir (the folder holding music.db /
 # tag.db), persisted as JSON. Read once at startup, so a change made through
@@ -44,6 +46,7 @@ DISCOVERY_STATS_FILE = PROJECT_ROOT / "discovery_fetcher_stats.json"
 # lookups, kept separate so they don't conflate with the album fetchers'
 # invocation/success rates in the Statistics menu.
 DISCOVERY_STATS_YEAR_FILE = PROJECT_ROOT / "discovery_fetcher_stats_years.json"
+DISCOVERY_STATS_LYRICS_FILE = PROJECT_ROOT / "discovery_fetcher_stats_lyrics.json"
 
 # Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
 # albums) processes at once, persisted as JSON. Keeps a single run from
@@ -75,6 +78,7 @@ RUN_ALL_STEP_LABELS = {
     "years": "Fill missing years",
     "genres": "Fill missing genres",
     "latin_forms": "Fill in Latin forms of names in other alphabets",
+    "lyrics": "Fill missing lyrics",
 }
 
 # "Create playlist from folder": a file whose title matches a song exactly but
@@ -164,10 +168,12 @@ BAD_VIDEO_REASONS = {
 ADDITIONAL_VIDEO_FOLDER_PLAYLIST = "folder_playlist"  # paired with a file of a song that had a link
 ADDITIONAL_VIDEO_SONG_MERGE = "song_merge"  # the link of a song merged into this one
 ADDITIONAL_VIDEO_INBOX_REVIEW = "inbox_review"  # found correct too when reviewing a request's link
+ADDITIONAL_VIDEO_MANUAL = "manual"  # set by the owner (a wrongly named upload of the song)
 ADDITIONAL_VIDEO_SOURCES = {
     ADDITIONAL_VIDEO_FOLDER_PLAYLIST: "paired with a file in a playlist compared with YouTube",
     ADDITIONAL_VIDEO_SONG_MERGE: "the link of a duplicate merged into this song",
     ADDITIONAL_VIDEO_INBOX_REVIEW: "marked correct along with another link in Resolve new requests",
+    ADDITIONAL_VIDEO_MANUAL: "set by hand",
 }
 
 # `Song.youtube_video_id` value meaning "confirmed: this song has no video on
@@ -214,7 +220,7 @@ DISCOVERY_MODULES_NEEDING_API_KEY = frozenset({"spotify_api_fetcher", "genius_ap
 
 # Seed order for the subset of modules that implement get_release_year().
 # Like DEFAULT_DISCOVERY_MODULE_ORDER, only used the first time the config
-# file is created; reconcile_year_discovery_config() auto-adds any other
+# file is created; reconcile_discovery_config(..., YEARS) auto-adds any other
 # module that later gains a get_release_year() of its own.
 DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
     "music_brainz_fetcher",
@@ -223,6 +229,19 @@ DEFAULT_DISCOVERY_MODULE_YEAR_ORDER = [
     "spotify_fetcher",
     # Last on purpose: its upload-date years need the user's review.
     "youtube_fetcher",
+]
+
+# The same for the modules with get_lyrics(): the library's own files first
+# (no network)
+DEFAULT_DISCOVERY_MODULE_LYRICS_ORDER = [
+    "library_tags_fetcher",
+    "lrclib_fetcher",
+    "genius_lyrics_fetcher",
+    "musixmatch_fetcher",
+    "lyricstranslate_fetcher",
+    "tekstowo_fetcher",
+    "fajnanuta_fetcher",
+    "cuspajz_fetcher",
 ]
 
 # A fetched release year outside this range is treated as implausible (e.g. a
@@ -496,6 +515,53 @@ LIBRARY_AUDIO_EXTENSIONS = (".mp3",)
 # no song; "manual" rows are left alone
 FILE_MATCH_AUTO = "auto"
 FILE_MATCH_MANUAL = "manual"
+
+# ==================== Song lyrics (utils/database/lyrics_store.py) ====================
+
+# Next to music.db, never downloaded whole: the sharing server answers one
+# song's lyrics at GET /lyrics/<song id>. Never part of the public copy - the
+# lyrics' licence doesn't allow republishing them.
+LYRICS_DB_FILENAME = "lyrics.db"
+# lyrics_module_misses.reason, per song and module: "not_found" is asked again
+# after LYRICS_RETRY_DAYS (the sources keep growing), "rejected" (the owner
+# said that module's text was wrong) never. A module failing (LRCLIB's 429, no
+# network) records nothing: the song is simply asked again next time.
+LYRICS_MISS_NOT_FOUND = "not_found"
+LYRICS_MISS_REJECTED = "rejected"
+LYRICS_RETRY_DAYS = 180
+# lyrics.source of text not from a discovery module (those store their module id)
+LYRICS_SOURCE_ORIGINAL = "original"  # a version's lyrics, the plain text of its original
+LYRICS_SOURCE_MANUAL = "manual"  # pasted by the owner (Song actions -> "Lyrics")
+# songs.language of a song without words: never looked up, offered after a lookup
+LANGUAGE_INSTRUMENTAL = "Instrumental"
+# A found song whose length differs from ours by at most this is the same
+# recording, so its synced lines fit; otherwise only its plain text is kept
+# (a music video's intro, a radio edit: the words are the same, the times not)
+LYRICS_DURATION_TOLERANCE_S = 3
+LRCLIB_API_URL = "https://lrclib.net/api"
+LRCLIB_TIMEOUT = 15
+# LRCLIB publishes no limit, but answered 429 to one search every 0.3 s
+# within a minute (2026-11-12); a 429 waits its Retry-After, this many times
+LRCLIB_MIN_INTERVAL = 1.0
+LRCLIB_RETRIES = 3
+LRCLIB_RETRY_WAIT_S = 10
+# Genius's own site search (JSON, no key - unlike genius_api_fetcher's API)
+# and its lyrics pages; only the hits resembling the song are opened
+GENIUS_SITE_SEARCH_URL = "https://genius.com/api/search/song"
+GENIUS_SITE_MIN_INTERVAL = 1.0
+GENIUS_LYRICS_PAGES_MAX = 2
+# Musixmatch and LyricsTranslate: a song's page by its names (their searches
+# can't be used: Musixmatch answers 403, LyricsTranslate's is a web form)
+MUSIXMATCH_LYRICS_URL = "https://www.musixmatch.com/lyrics"
+MUSIXMATCH_MIN_INTERVAL = 1.0
+LYRICSTRANSLATE_LYRICS_URL = "https://lyricstranslate.com/en"
+LYRICSTRANSLATE_MIN_INTERVAL = 1.0
+TEKSTOWO_URL = "https://www.tekstowo.pl"
+TEKSTOWO_MIN_INTERVAL = 1.0
+FAJNANUTA_LYRICS_URL = "https://fajnanuta.pl/tekst-piosenki-tlumaczenie"
+FAJNANUTA_MIN_INTERVAL = 1.0
+CUSPAJZ_LYRICS_URL = "https://cuspajz.com/tekstovi-pjesama/pjesma"
+CUSPAJZ_MIN_INTERVAL = 1.0
 
 # ==================== API Constants ====================
 
@@ -782,8 +848,8 @@ SANITIZE_SWITCH_LABELS = {
     "band_word": ("Removing", "'Zespół' before an artist",
                   "'Zespół Hurt' -> 'Hurt' (a YouTube channel's name); 'Zespół Pieśni i Tańca Śląsk' stays."),
     "junk_in_titles": ("Removing", "Junk in titles",
-                       "'(Official Video)', '(Visualiser)', '(Remastered)', 'Lyric Video', 'HD', '| Label', "
-                       "'#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),
+                       "'(Official Video)', '(Visualiser)', '(Remastered)', '(prod. Rumak)', 'Lyric Video', 'HD', "
+                       "'| Label', '#hashtags'. A bracket naming a version ('(Live at ...)', '(Remix)') always stays."),
     "quote_marks": ("Removing", "Quote marks around a title",
                     "'“Golden”' -> 'Golden', \"'Hydrogen'\" -> 'Hydrogen'; quotes inside a title stay "
                     "('Take The \"A\" Train', \"Rock 'n' Roll\")."),

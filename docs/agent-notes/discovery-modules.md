@@ -275,18 +275,22 @@ add or drop one.
 
 **Capability is detected statically, like `MODULE_NAME`, for the same reason**: `discoveries_manager._module_defines_function()`
 parses each file's AST looking for a top-level `def get_release_year`, so Settings' Years toggle/
-reorder screens and `load_year_discovery_modules()` never import a module that doesn't have it (or
+reorder screens and `load_discovery_modules(YEARS)` never import a module that doesn't have it (or
 a disabled one) just to check. Consequence for anyone adding this to a new fetcher: it must be a
 plain top-level `def`, not something assigned dynamically or wrapped — the static parser won't see it.
 
-**Separate config and stats from the album fetchers.** `discovery_settings.py`'s
-`load/save/reconcile_year_discovery_config()` persist to `discovery_modules_config_years.json`
-(gitignored, like the album one) instead of sharing `discovery_modules_config.json` — deliberate,
-since the set of year-capable modules differs from the album-capable set, and enabling/disabling a
-fetcher for Albums shouldn't silently also toggle it for Years. Same story for stats:
-`record_year_invocation()`/`record_year_success()` write to `discovery_fetcher_stats_years.json`,
-kept apart from `discovery_fetcher_stats.json` so a fetcher's year success rate doesn't blend into
-its album success rate in the Statistics menu.
+**One config and one stats file per kind of lookup.** `discovery_settings.KINDS` lists the kinds
+(`ALBUMS` → `get_album_name`, `YEARS` → `get_release_year`, `LYRICS` → `get_lyrics`), each with its
+own config file (`discovery_modules_config[_years|_lyrics].json`, gitignored) and stats file
+(`discovery_fetcher_stats[_years|_lyrics].json`). `load/save/reconcile_discovery_config(...,
+kind)`, `record_invocation/record_success(module_id, kind)` and `load_discovery_modules(kind)` take
+the kind (default albums). A module takes part in a kind only when it defines the kind's function,
+also for albums since 2026-11-12 (a lyrics-only module mustn't be called for an album). Kept apart
+on purpose: enabling a fetcher for Albums shouldn't toggle it for Years, and a fetcher's year
+success rate shouldn't blend into its album one. A new kind is a row of `KINDS` plus its constants,
+never a third copy of the functions. `tests/conftest.py` points every kind's files at its temp
+folder: a test that patched the old module-level constants once rewrote the owner's real album
+config (2026-11-12).
 
 **`fill_missing_years.py` batch-writes a year to every song sharing an album — unlike
 `fill_missing_albums.py`'s one-write-per-song.** It only looks at songs that already have an
@@ -390,6 +394,106 @@ via `discover_release_year_result(album_songs=...)`) to any `get_release_year()`
 contract. For an album the first stored link that resolves wins. A stored link that no longer
 resolves falls back to a search (for an album: "artist + album name"), and a single marked
 `NO_VIDEO_SENTINEL` is skipped.
+
+## Lyrics lookups ("Fill missing data -> Lyrics") and `get_lyrics()`
+
+```python
+def get_lyrics(artist: str, title: str, duration_s: float | None = None, songs=None) -> list[LyricsDiscoveryResult]
+```
+
+Unlike albums and years, a lyrics module hands back **every** candidate it found (a list; one result
+or None also work) and `discoveries_manager.discover_lyrics()` picks: LRCLIB's search order isn't by
+fit. A module that **can't be asked** (no network, rate limited) must **raise**: `discover_lyrics()`
+returns a `LyricsSearch` with `match`, `missed` (modules that answered without a fitting text -
+remembered per song and module in lyrics.db) and `failed` (raised - remembered nowhere, asked again
+next run). On 2026-11-12 LRCLIB answered 429 to searches every 0.3 s and the module returned [],
+so ~25 songs it knows were stored as "not found"; it now waits out a 429 (`Retry-After`) and
+searches once a second.
+
+A candidate counts when its `matched_title` is one of `song_titles(song)` (other titles, the Latin
+form and the version's marked title included) and its `matched_artist` passes
+`_matched_artist_resembles()` (synonyms, credited artists): that's **sure**, saved at once. A
+title that only resembles one (`title_resembles()`, a bracketed subtitle allowed) is for the
+owner's review at the end (`utils/ui/lyrics_review._review_unsure()`, equal titles ticked). The
+length (ours: `youtube_video_durations` by the song's link, else its longest `files.db` file -
+`lyrics_store.song_durations()`) does **not** decide whether a text is the song's: it's mostly a
+music video's length (AC/DC "Touch Too Much": video 326 s, the recording 266 s), and the words are
+the same. It decides only `synced_fits` (within `LYRICS_DURATION_TOLERANCE_S` = 3 s, or a length
+unknown): otherwise the synced lines are dropped and the plain text kept. Ranking: sure, then a
+text over an "instrumental" flag (LRCLIB flagged a vocal remix of "Crookers - Jump Up" so), then
+fitting synced lines, then the closest length. The first sure match ends the search. Each module
+is asked `_lyrics_queries()` in turn until a candidate fits: the artist's name, each synonym, the
+parts of a joined name ("Alice Cooper & Bee Gees": Genius has "Alice Cooper") and the song's main
+artists, each with the title, the title without its brackets and each other title ("Studzianki" is
+"W moim ogródecku" on Tekstowo); for a cover, last, the covered artist with the original's title
+(`covered_title`, else the title) - its words, and since the recording differs, rarely its times.
+A cover sung in another language gets the original's words that way ("Dav1d - It's My Life", a
+Russian cover, got Bon Jovi's English text): the owner rejects them, every module marked rejected
+for that song, so a cover is marked only once its language is known.
+A duet is also asked as the sites write it, its main artists joined by "&" ("Anna Maria Jopek &
+Branford Marsalis" - Fajnanuta's address holds both), and last a medley's songs one by one
+("Steel for Humans / Lazare"); a text found for one of them is only reviewed, being part of ours.
+On the title without its brackets: a credit like "ARMANI TOP (prod.bovskey)" finds nothing on LRCLIB or Genius, which have
+"Armani Top" (40 such titles on 2026-11-12). Titles are compared with and without brackets on
+either side too - a version's marker isn't in its title any more (`songs.version_kind`), so what's
+left in brackets is a credit or a note, not other words.
+
+`from_song_file=True` (the `library_tags_fetcher`, USLT frames of the song's own mp3 files via
+`files.db`) needs no check: the file is already matched to the song. A version with nothing found
+gets its original's plain text (`lyrics_store.original_lyrics()`, never the synced lines). A
+candidate with `instrumental` (LRCLIB and Genius both say so) isn't saved at once: the run ends
+with a checkbox list of those (ticked) and the songs nothing had words for (unticked), and the
+ticked ones get `language` "Instrumental", never looked up again. MusicBrainz was tried for this
+and doesn't help (instrumental recordings mostly have no work at all); Spotify's
+"instrumentalness" (audio features) is closed to new apps since November 2024.
+
+Modules: `library_tags_fetcher` (local, first), `lrclib_fetcher` (`/api/search`, no key, synced
+lines and lengths), `genius_lyrics_fetcher` (Genius's own site search `genius.com/api/search/song`
+- JSON, no key, unlike `genius_api_fetcher` - then the lyrics page of at most
+`GENIUS_LYRICS_PAGES_MAX` hits resembling the song: `div[data-lyrics-container]` without its
+`data-exclude-from-selection` header and the "[Verse 1]" labels; a title's appended Latin
+spelling, "Гасі (Hasi)", dropped; with no resembling hit, searched again as "Artist (POL) Title",
+then "Artist (PL) Title", the country from `artists.origin` as ISO alpha-3, then alpha-2 - Genius
+writes either ("Arab (POL)", "Dorina (HU)") to tell apart artists of one name:
+"Arab Moon" finds only "Arab Money"), `musixmatch_fetcher` (the page `musixmatch.com/lyrics/<artist>/<title>`,
+names as `slug()` makes them - letters of any alphabet kept - then without diacritics, the site
+redirecting a near spelling; the text and the names in `__NEXT_DATA__`'s `trackInfo`; its search
+answers 403, so there is none) and `lyricstranslate_fetcher` (`lyricstranslate.com/en/<Artist>-<Title>-lyrics.html`,
+no diacritics, words capitalized; a song with only a translation has no such page, so then
+`<artist>-<title>-english` in lowercase, whose `#original-lyrics` holds the original; names from
+`og:title`, stanzas from `#song-body div.par`; strong
+for Balkan / Slavic songs; non-Latin titles get transliterated slugs there, which it can't guess).
+None of the scraped ones has lengths or synced lines; their terms don't allow reading the pages -
+added at the owner's choice (2026-11-12) for the private catalog. `tekstowo_fetcher`
+(`tekstowo.pl/<artist>/<title>`, lowercase, no diacritics, "ł" -> "l"; names from its `h1`, the
+text from `#songText .inner-text`; a Cyrillic name also as the site writes it in Latin letters,
+`latin_slug()`: "Крутится Земля" -> "krutitsa-zemla" - its search needs JavaScript) is the Polish one. `fajnanuta_fetcher`
+(`fajnanuta.pl/tekst-piosenki-tlumaczenie/<artists>-<title>.html`, Tekstowo's slugs; names from
+`<title>`, the text from the first `div.arttxt` - a translation may follow) has Polish songs
+Tekstowo lacks. `cuspajz_fetcher` (`cuspajz.com/tekstovi-pjesama/pjesma/<artist>/<title>.html`,
+Tekstowo's slugs with "đ" as "d"; a page it lacks redirects to its index, which has no `<title>` "A — T —
+Tekst", so that counts as nothing found; the text in `article p.text`) is for the songs of the former
+Yugoslavia. Not added: Boomplay (403 without a browser). For what no module finds, Song actions → "Lyrics" takes a pasted text, or reads a page the owner
+found (`lyrics_pages.lyrics_from_page()`): a site a module reads goes through that module's
+`page_lyrics()` / `track_data()`, any other the page's block holding the most lines with no block
+inside it (`<br>` and newlines alike: lyricsondemand's `div.lcontent`, altwall's Windows-1251 `<p>`,
+eggs.mu's `whitespace-pre-wrap` paragraph) - a one-off, never a site the lookup asks. Cloudflare's
+wall (versuri.ro) and lyricfind (403) can't be read without a browser: paste those. The
+page-reading modules share `fetch_page()` / `text_lines()`; the lookup also asks the title's Latin
+form (LyricsTranslate's addresses are Latin), and a found title's dashed note ("... – szanta
+narciarska") counts like a bracket - unless it names a version the song isn't (`read_version()`: "最果て
+(Instrumental)" isn't "最果て"). A page of one `<p>` per stanza (spiewnikniepodleglosci.pl) gives the
+largest block with the blocks of its kind right beside it. A poem of one `<div>` per line, an empty one between stanzas
+(poetryfoundation.org), is read as that block's lines; the longer of the two readings wins. Sites whose page the generic reading gets wrong have a reader of their
+own in `lyrics_pages._readers()`: pesna.org (`div[id^=lang-]`), sonichits.com (`#dLyrics`),
+teksty-pesenok.pro (`#music__text`, its translation beside it), alternatifim.com (`.sarkisozu`), tekstovi.net
+(`section.lyrics`) and any
+Blogger blog (`blogspot.com`: `.post-body`, else the sidebar's tag cloud wins) - keyed by the domain a
+site is under (`_reader_for()`); their `<br>`s become new lines
+(`_text_of()`), and a text whose every "stanza" is one line was only spaced out
+(`text_lines()` joins it). In a 40-song sample (2026-11-12)
+LRCLIB knew 29 (27 synced); the misses were game soundtracks (instrumental), niche Ukrainian /
+Polish songs and data errors (a swapped artist and title).
 
 ## Multi-artist songs (`additional_song_artists`)
 
