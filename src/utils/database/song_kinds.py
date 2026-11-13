@@ -32,10 +32,12 @@ from utils.common.version_names import read_version, title_with_version
 from utils.common.project_names import is_project_of
 from utils.database.albums import is_singles
 from utils.database.datatables import Song
+from utils.database.genres import is_known_genre
 from utils.common.json_file import read_json, write_json
 
 _IGNORE_PATH = FULL_ALBUM_IGNORE_FILE
 
+_PLAIN_VERSION_WORD_RE = re.compile(r"(?:^| )(?:version|wersja)(?: |$)")
 _NORMALIZED_MARKERS = sorted({normalize(m) for m in FULL_ALBUM_TITLE_MARKERS}, key=len, reverse=True)
 # Raw-title forms, for cutting a marker out: longest first, so "full album
 # stream" goes whole rather than leaving "stream"
@@ -123,11 +125,21 @@ def _songs_of_version(songs: list, title: str | None) -> list:
     same_kind = [(song, version_of(song)) for song in songs]
     same_kind = [(song, version[1]) for song, version in same_kind if version[0] == wanted.kind]
     same_marker = [song for song, own in same_kind if own == label]
-    if wanted.kind == VERSION_OTHER:
+    if not sure_version(wanted):
         # A plain "version" may be anything ("Best Version Ever"): such a version
         # first, then every song that isn't one
         return same_marker + [s for s in songs if not getattr(s, "version_kind", None) and s not in same_marker]
     return same_marker + [song for song, own in same_kind if own != label]
+
+
+def sure_version(reading) -> bool:
+    """Whether a version_names.VersionReading surely names another recording:
+    every kind but a plain "version", which may be the title itself ("Best
+    Version Ever") - unless it names a genre ("Disco Version", "wersja rock")."""
+    if reading.kind != VERSION_OTHER:
+        return True
+    style = _PLAIN_VERSION_WORD_RE.sub(" ", normalize(reading.label or "")).strip()
+    return bool(style) and is_known_genre(style)
 
 
 def set_song_kind(songs: list[Song], kind: str | None, file_under_album: bool = True) -> list[Song]:

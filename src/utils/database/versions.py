@@ -16,10 +16,11 @@ utils/ui/version_review.py). Matching keeps versions and originals apart
 """
 from dataclasses import dataclass
 
-from config.constants import VERSION_KINDS, VERSION_OTHER
+from config.constants import VERSION_KINDS
 from utils.common.normalizer import normalize
 from utils.common.version_names import read_version
 from utils.database.datatables import Song
+from utils.database.song_kinds import sure_version
 
 
 @dataclass
@@ -27,7 +28,7 @@ class VersionProposal:
     """A stored song whose title says it's a version: `title` without the
     marker, `original` the song it's a version of when the artist has exactly
     one of that title. `certain`: a marker naming a clear kind (not just
-    "version")."""
+    "version", song_kinds.sure_version())."""
     song: Song
     title: str
     kind: str
@@ -54,7 +55,7 @@ def find_versions(session, skip_ids=frozenset()) -> list[VersionProposal]:
         if song.id in skip_ids or (reading := read_version(song.title)) is None:
             continue
         proposals.append(VersionProposal(song, reading.title, reading.kind, reading.label,
-                                         original_of(session, song, reading.title), reading.kind != VERSION_OTHER))
+                                         original_of(session, song, reading.title), sure_version(reading)))
     return sorted(proposals, key=lambda p: ((p.song.artist.name or "").lower(), p.title.lower()))
 
 
@@ -87,7 +88,7 @@ def mark_new_song_version(session, song: Song) -> None:
     """A song just created whose title says it's a version: marked, the marker
     cut, its original found among the artist's songs. The caller commits."""
     # A plain "version" is left to "Find versions": it may be the title itself
-    if (reading := read_version(song.title)) is None or reading.kind == VERSION_OTHER:
+    if (reading := read_version(song.title)) is None or not sure_version(reading):
         return
     set_version([song], reading.kind, reading.label, original_of(session, song, reading.title))
     song.title = reading.title
