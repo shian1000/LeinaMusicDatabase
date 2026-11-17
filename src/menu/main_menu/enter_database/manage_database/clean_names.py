@@ -1,7 +1,7 @@
 from utils.common.output import RESET, YELLOW, review_header
 from utils.database.database_getter import get_songs_from_db_session
-from utils.common.text_utils import is_blacklisted_album
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.common.text_utils import is_blacklisted_album, similarity
+from utils.ui.prompts import ask_yes_no, tick_items, unattended_now
 from utils.database.song_artists import song_artist_label
 from utils.database.artist_reassignment import credit_unknown_artist_song, split_title_artists
 from utils.database.database_management import edit_db_entry
@@ -79,7 +79,10 @@ def review_step(songs, step_name: str, held=None):
         owners = proposal.songs
         where = f"{owners[0].artist.name} - {owners[0].title}" if proposal.field == "title" else f"{len(owners)} song(s)"
         return f"[{proposal.field}] {proposal.old}  ->  {proposal.new}  ({where})"
-    selected = tick_items("Select the names to fix (space toggles, enter confirms):", proposals, label, checked=True)
+    selected = tick_items("Select the names to fix (space toggles, enter confirms):", proposals, label, checked=True,
+                          rule=f"clean_names_{step_name}",
+                          facts=lambda p: {"field": p.field, "songs": len(p.songs),
+                                           "similarity": round(similarity(p.old, p.new), 3)})
     if selected is None:
         print("Aborted, nothing fixed.")
         return
@@ -103,7 +106,9 @@ def move_feat_credits(songs):
         names = ", ".join(f"{name} ({'existing' if move.known[name] else 'new'})" for name in move.names)
         return f"{move.song.artist.name} - {move.song.title}  ->  {move.title}  + feat. {names}"
     selected = tick_items("Select the titles to change (space toggles, enter confirms):", moves, label,
-                          checked=lambda move: not move.suspicious)
+                          checked=lambda move: not move.suspicious, rule="clean_names_feat",
+                          facts=lambda move: {"names": len(move.names), "all_known": all(move.known.values()),
+                                              "suspicious": move.suspicious})
     if selected is None:
         print("Aborted, nothing changed.")
         return
@@ -124,6 +129,7 @@ def seek_nonsense_names(songs):
     auto_fixed_titles = []
     strip_junk = is_enabled("junk_phrases_any_bracket", SOURCE_STORED)
     for song in songs:
+        queued = len(pending_corrections)
         if is_blacklisted_album(song.album):
             pending_corrections.append({
                 "song": song,
@@ -143,13 +149,15 @@ def seek_nonsense_names(songs):
                 "field": "title",
                 "old_value": song.title,
             })
-        add_tag_to_song(song, "album_checked")
+        # Unattended, a junk field waits unmarked for someone to answer it
+        if not (unattended_now() and len(pending_corrections) > queued):
+            add_tag_to_song(song, "album_checked")
 
     if auto_fixed_titles:
         review_header(f"Auto-stripped junk suffixes from {len(auto_fixed_titles)} title(s):",
                       *(f"  {change}" for change in auto_fixed_titles))
 
-    if not pending_corrections:
+    if not pending_corrections or unattended_now():
         return
 
     review_header(f"REVIEW: {len(pending_corrections)} field(s) look like junk and need your review")

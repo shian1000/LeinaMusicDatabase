@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import questionary
 
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
@@ -25,7 +26,7 @@ def _song(title, album=None):
 def _common(monkeypatch, module, edits):
     monkeypatch.setattr(module, "close_global_driver", lambda: None)
     monkeypatch.setattr(module, "load_max_songs_per_fetch", lambda: 100)
-    monkeypatch.setattr(module, "ask_yes_no", lambda q: False)
+    monkeypatch.setattr(module, "ask_yes_no", lambda q, **k: False)
     monkeypatch.setattr(module, "submit_global_database_session", lambda: None)
     monkeypatch.setattr(module, "edit_db_entry", lambda song, category, value: edits.append((song.title, category, value)))
 
@@ -101,7 +102,7 @@ def test_a_title_year_is_offered_when_no_module_finds_one(monkeypatch, capsys):
     found = {"Found": SimpleNamespace(year=1999, needs_review=False, source_url=None)}
     monkeypatch.setattr(module, "discover_release_year_result", lambda artist, query, *a, **k: found.get(query))
     shown = []
-    monkeypatch.setattr(module.questionary, "checkbox",
+    monkeypatch.setattr(questionary, "checkbox",
                         lambda message, choices: shown.extend(c.title for c in choices) or SimpleNamespace(ask=lambda: [0]))
 
     def read(title):

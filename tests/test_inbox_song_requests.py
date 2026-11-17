@@ -491,7 +491,7 @@ def test_a_file_missing_a_required_column_is_rejected(env):
     assert request.error == "song_requests lacks source, requested_at"
 
 
-def test_the_automatic_pass_never_adds_a_song(env):
+def test_the_automatic_pass_adds_no_song_without_a_rule_of_the_owners(env):
     _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Unseen", "artist": "Elise Trouw"}])
     _request(env["inbox"], "2026-10-18_10-00-01_002.db", [{"title": "Chromatic", "artist": "Elise Trouw"}])
 
@@ -506,7 +506,44 @@ def test_the_automatic_pass_never_adds_a_song(env):
     [request] = pr.read_review_requests()
     [case] = sr.collect_song_request_cases(env["session"], [request], matcher=env["matcher"])
     pr.load_case_checks([case], 24)
-    assert case.auto_note == "adding a song waits for your approval"
+    assert case.auto_note.startswith("adding a song waits for your approval")
+
+
+@pytest.mark.parametrize("threshold, added", [(0.9, True), (0.99, False)])
+def test_a_rule_of_the_owners_adds_a_requested_song_unattended(env, monkeypatch, threshold, added):
+    from utils.common import automation_settings
+    from utils.discoveries import import_engine
+    from utils.ui import prompts
+
+    automation_settings.save_user_rules([{
+        "name": "MusicBrainz agrees", "question": "song_request", "on": True,
+        "conditions": [{"fact": "musicbrainz_title_similarity", "op": ">=", "value": threshold},
+                       {"fact": "artist_known", "op": "is", "value": True}]}])
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": True, "title_similarity": 0.95, "artist_similarity": 1.0, "mb_score": 100})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    imported = []
+
+    def fake_import(entries):
+        assert prompts.unattended_now()  # nobody is asked during the automatic pass
+        imported.extend((e.artist, e.title) for e in entries)
+    monkeypatch.setattr(import_engine, "run_import_batch", fake_import)
+    _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Unseen", "artist": "Elise Trouw"}])
+
+    result = ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    assert imported == ([("Elise Trouw", "Unseen")] if added else [])
+    assert result.to_review == (0 if added else 1)
+    if added:
+        assert 'your rule "MusicBrainz agrees"' in result.changes[0]["text"]
+        assert pr.load_decisions()["song:" + sr.song_key("Elise Trouw", "Unseen")]["by"] == "auto"
+    else:
+        [request] = pr.read_review_requests()
+        [case] = sr.collect_song_request_cases(env["session"], [request], matcher=env["matcher"])
+        pr.load_case_checks([case], 24)
+        assert "no rule of yours" in case.auto_note
+    automation_settings.CONFIG_PATH.unlink()
 
 
 def test_migration_matches_the_model(tmp_path):

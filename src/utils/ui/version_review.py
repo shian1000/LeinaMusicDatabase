@@ -12,7 +12,7 @@ from utils.database.datatables import Song
 from utils.database.tags_management import add_tag_to_songs, song_ids_with_tag
 from utils.database.versions import apply_version_proposal, find_versions, original_of, set_version
 from utils.ui.display_utils import display_songs
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, decided, tick_items
 from utils.ui.song_colors import song_tokens
 
 
@@ -43,13 +43,14 @@ def review_versions() -> None:
                   "Unticked: the title only says \"version\" - which one is a guess.",
                   "Songs left unticked aren't offered again; Song actions -> \"Set version\" marks one by hand.")
     picked = tick_items("Which songs do you want to mark?", proposals, _proposal_title,
-                        checked=lambda proposal: proposal.certain)
+                        checked=lambda proposal: proposal.certain, rule="versions",
+                        facts=lambda p: {"certain": p.certain, "kind": p.kind, "has_original": p.original is not None})
     if picked is None:
         say("Cancelled, nothing marked as checked.")
         return
     for proposal in picked:
         apply_version_proposal(session, proposal)
-    add_tag_to_songs([proposal.song.id for proposal in proposals], VERSION_CHECKED_TAG)
+    add_tag_to_songs([proposal.song.id for proposal in decided(proposals, picked)], VERSION_CHECKED_TAG)
     submit_global_database_session()
     say(f"Marked {len(picked)} song(s)." if picked else "Nothing picked.")
 

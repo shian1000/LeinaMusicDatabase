@@ -92,6 +92,7 @@ from utils.database.inbox_requests import (
     parse_time,
     reported_title_differs,
     resolve_song_id,
+    AUTO,
     save_decision,
     unmark_bad_video,
 )
@@ -414,7 +415,7 @@ def _record_already_set(decisions: dict, case: FieldCorrectionCase) -> None:
     if previous_time is not None and previous_time >= made:
         return
     entry = {"decision": ALREADY_SET, "value": case.new_value, "decided_at": when,
-             "files": sorted({r.file_name for r in case.reports})}
+             "files": sorted({r.file_name for r in case.reports}), "by": AUTO}
     decisions[case.key] = entry
     save_decision(case.key, entry)
 

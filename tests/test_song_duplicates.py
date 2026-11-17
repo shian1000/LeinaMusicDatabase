@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import questionary
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -160,7 +161,7 @@ def test_review_merges_only_the_ticked_groups(session, monkeypatch, capsys):
         offered.extend((c.title, c.checked) for c in choices)
         return _Answer([c.value for c in choices if c.checked])
 
-    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
     monkeypatch.setattr(review, "ask_yes_no", lambda *a, **k: False)  # don't remember the unticked cover
     from utils.database import database_sessions
     database_sessions.set_global_database_sessions((session, None))  # find_matching_artist() reads it
@@ -192,7 +193,7 @@ def test_review_remembers_the_unticked_groups_until_a_new_song_joins(session, mo
         offered.append(len(choices))
         return _Answer([])
 
-    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
     asked = []
     monkeypatch.setattr(review, "ask_yes_no", lambda question: asked.append(question) or True)
     review.resolve_duplicated_songs()
@@ -254,7 +255,7 @@ def test_review_offers_cross_artist_groups_unticked_and_removes_the_emptied_arti
         offered.extend((c.title, c.checked) for c in choices)
         return _Answer([c.value for c in choices])  # tick it
 
-    monkeypatch.setattr(review.questionary, "checkbox", checkbox)
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
     review.resolve_duplicated_songs()
 
     assert [checked for _, checked in offered] == [False]
@@ -311,7 +312,7 @@ def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
     from utils.discoveries import import_engine
 
     artist = SimpleNamespace(id=7, name="Bob Marley")
-    similar = SimpleNamespace(title="Is This Love (Live)", artist=artist, kind=None)
+    similar = SimpleNamespace(title="Is This Love (Live)", artist=artist, artist_id=artist.id, kind=None)
     created = []
 
     def create(metadata, artist_obj):
@@ -320,7 +321,7 @@ def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
         return song
 
     monkeypatch.setattr(import_engine, "create_song_entry", create)
-    monkeypatch.setattr(import_engine, "ask_yes_no", lambda question: False)  # "add it as a new one"
+    monkeypatch.setattr(import_engine, "ask_yes_no", lambda question, **k: False)  # "add it as a new one"
     monkeypatch.setattr(import_engine, "_backfill_youtube_link", lambda metadata, song: None)
     conflict = {"metadata": {"title": "Is This Love", "artist_name": "Bob Marley"},
                 "artist_obj": artist, "existing_song": similar}

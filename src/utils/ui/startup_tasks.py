@@ -57,15 +57,16 @@ def _apply_mood_changes() -> None:
 
 
 def _publish_to_github() -> None:
-    from utils.database.public_database import PUBLISHED, UNCHANGED, daily_publish_enabled, missing_setup, publish_daily
+    from utils.database.public_database import PUBLISHED, UNCHANGED, publish_due, publish_if_due
 
     # The public copy on GitHub for phones without the server - uploads only
-    # when the catalog changed; any failure is tried again tomorrow. Not set
-    # up at all (a fresh install: no GITHUB_DB_TOKEN) is no news
-    if not daily_publish_enabled() or missing_setup():
+    # when the catalog changed; any failure is tried again an interval later
+    # (Settings -> Automation). Not set up at all (a fresh install: no
+    # GITHUB_DB_TOKEN) is no news
+    if not publish_due():
         return
     print("Checking the public database on GitHub...")
-    published = publish_daily()
+    published = publish_if_due()
     if published is not None and published.status != UNCHANGED:
         colour = "" if published.status == PUBLISHED else YELLOW
         print(f"{colour}Public database: {published.message}{RESET}")
@@ -89,7 +90,8 @@ def _show_messages() -> None:
     try:
         changes = auto_report(unshown_only=True)
         if changes:
-            print(f"Changed automatically from Leina Radio's requests ({len(changes)}):")
+            print(f"Changed automatically - Leina Radio's requests and the clean-ups, Settings -> "
+                  f"Automation ({len(changes)}):")
             show_auto_changes(changes)
             mark_auto_report_shown()
     except InboxFileError as exc:
@@ -127,8 +129,9 @@ def run_startup_tasks() -> None:
             _index_library()
         if switches.enabled(switches.SHARE_COPY):
             _share_databases()
-        _publish_to_github()
-        if switches.enabled(switches.YTDLP_UPDATE):
-            _offer_ytdlp_update()
+    # When its interval is up (a day by default), also between the timer's runs
+    _publish_to_github()
+    if daily and switches.enabled(switches.YTDLP_UPDATE):
+        _offer_ytdlp_update()
     if switches.enabled(switches.MESSAGES):
         _show_messages()

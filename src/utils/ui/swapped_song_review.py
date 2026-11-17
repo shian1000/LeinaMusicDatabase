@@ -28,7 +28,8 @@ def review_swapped_songs() -> int:
                   "Their title is another artist's name and their artist has no other song.",
                   "Pre-selected: the other artist already has a song titled like this one's artist.")
     picked = tick_items("Tick the songs whose artist and title are swapped (space toggles, enter confirms):",
-                        flagged, _describe, checked=lambda f: f[2])
+                        flagged, _describe, checked=lambda f: f[2], rule="swapped_songs",
+                        facts=lambda f: {"both_ways": f[2]})
     if picked is None:
         show("Aborted, nothing changed.")
         return 0

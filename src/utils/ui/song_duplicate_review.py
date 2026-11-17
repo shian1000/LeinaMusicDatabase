@@ -5,8 +5,8 @@ then one title credited to two main artists, unticked; the ticked groups are
 merged into the song with the most data, and the unticked ones can be
 remembered so they aren't offered again."""
 
-import questionary
 
+from utils.common.text_utils import similarity
 from utils.database.artist_reassignment import is_unused, remove_unused_artist
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.song_artists import song_artist_label
@@ -22,7 +22,7 @@ from utils.database.song_duplicates import (
     missing_feat_artists,
     remember_not_duplicates,
 )
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, decided, tick_items
 
 
 def _label(group: list) -> str:
@@ -49,8 +49,9 @@ def _ask_feat_credits(groups: list) -> dict | None:
     print("\nThe songs folded away credit featured artists the kept ones don't:")
     picked = tick_items("Credit which on the kept song?", offers,
                         lambda offer: f"{song_artist_label(offer[0])} - {clean_title(offer[0].title)}:  + {offer[1]} (feat.)",
-                        checked=True)
-    if picked is None:
+                        checked=True, rule="duplicated_songs_feat", facts=lambda offer: {"name": offer[1]})
+    # Unattended without that rule nothing is merged: the names would be lost with the titles
+    if picked is None or len(decided(offers, picked)) < len(offers):
         return None
     credits = {}
     for kept, name in picked:
@@ -87,14 +88,20 @@ def resolve_duplicated_songs() -> None:
         print(f"Also unticked, last: {len(cross)} title(s) credited to different main artists who share another")
         print("artist or a link - tick one only if it's the same recording; the main artist of the song kept")
         print("stays, the other one's credit goes (use Song actions -> Change artist first to keep the other).")
-    choices = [questionary.Choice(title=_label(g), value=i, checked=not looks_like_versions(g))
-               for i, g in enumerate(same_artist)]
-    choices += [questionary.Choice(title=_cross_label(g), value=len(same_artist) + i, checked=False)
-                for i, g in enumerate(cross)]
-    picked = questionary.checkbox("Merge which?", choices=choices).ask()
-    if picked is None:
+    # Cross-artist groups never ticked at first, so never merged unattended
+    cross_ids = {id(g) for g in cross}
+    picked_groups = tick_items("Merge which?", groups,
+                               lambda g: _cross_label(g) if id(g) in cross_ids else _label(g),
+                               checked=lambda g: id(g) not in cross_ids and not looks_like_versions(g),
+                               rule="duplicated_songs",
+                               facts=lambda g: {"songs": len(g), "cross_artist": id(g) in cross_ids,
+                                                "looks_like_versions": looks_like_versions(g),
+                                                "title_similarity": round(min((similarity(g[0].title, s.title)
+                                                                               for s in g[1:]), default=1.0), 3)})
+    if picked_groups is None:
         print("Nothing merged.")
         return
+    picked = [i for i, g in enumerate(groups) if any(g is p for p in picked_groups)]
     unticked = [g for i, g in enumerate(groups) if i not in set(picked)]
     if not picked:
         print("Nothing merged.")

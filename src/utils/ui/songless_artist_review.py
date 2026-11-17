@@ -7,6 +7,7 @@ artist."""
 
 from config.constants import SONGLESS_ARTIST_IGNORE_FILE
 from utils.common.output import escape, review_header, show
+from utils.common.text_utils import similarity
 from utils.database.artist_identity import find_songless_artists, remember_ids, remove_songless_artist
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.ui.prompts import ask_yes_no, tick_items
@@ -17,6 +18,12 @@ def _describe(found) -> str:
     albums = f", {len(artist.albums)} empty album(s)" if artist.albums else ""
     action = f'merge into "{heir.name}" (name kept as its synonym)' if heir else "delete"
     return f"{artist.name}  ->  {action}{albums}"
+
+
+def _facts(found) -> dict:
+    artist, heir = found
+    return {"merge": heir is not None, "name_similarity": round(similarity(artist.name, heir.name), 3) if heir else None,
+            "empty_albums": len(artist.albums)}
 
 
 def review_songless_artists() -> int:
@@ -32,7 +39,7 @@ def review_songless_artists() -> int:
                   "deleted songs and songs credited to another artist.",
                   "Unticked at first: the merges - check the artists are one artist.")
     picked = tick_items("Tick the artists to remove (space toggles, enter confirms):", found, _describe,
-                        checked=lambda f: f[1] is None)
+                        checked=lambda f: f[1] is None, rule="songless_artists", facts=_facts)
     if picked is None:
         show("Aborted, nothing removed.")
         return 0

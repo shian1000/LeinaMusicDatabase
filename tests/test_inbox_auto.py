@@ -3,7 +3,8 @@ it relies on: a dead link replaced only when Leina Radio's suggestion and our
 search agree and the video plays; a field correction saved only from a user
 with the apply_corrections permission and when nothing conflicts; the rest
 moved to review/ with a note and its YouTube check (reloaded while fresh);
-the report main.py shows; the app lock (utils/database/app_lock.py) and
+the report main.py shows; a rule of Settings -> "Automation" turned off and the
+decision log of the owner's answers; the app lock (utils/database/app_lock.py) and
 has_pending_migrations(). Temp-file SQLite; YouTube is faked."""
 
 import json
@@ -138,6 +139,85 @@ def test_dead_link_replaced_when_both_searches_agree_and_it_plays(env):
     assert [e["text"] for e in pr.auto_report(unshown_only=True)] == [change["text"]]
     pr.mark_auto_report_shown()
     assert pr.auto_report(unshown_only=True) == [] and len(pr.auto_report()) == 1
+
+
+def test_a_rule_turned_off_leaves_its_case_to_the_owner_and_logs_their_answer(env):
+    from utils.common import automation_settings, decision_log
+
+    automation_settings.save_rules_on(["found_link_same_video", "field_correction_permitted"])
+    env["youtube"]["ours"]["dead1"] = "good1"
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", links=[(1, "Chromatic", "dead1", "good1")])
+
+    result = _run(env)
+
+    assert env["songs"][0].youtube_video_id == "dead1" and result.changes == []
+    [case] = pr.collect_dead_link_cases(env["session"], pr.read_review_requests())
+    pr.load_case_checks([case], max_age_hours=24)
+    assert "is off in Settings -> Automation" in case.auto_note
+    # The owner's answer goes into the decision log with the pass's note; the pass's own don't
+    decision_log.LOG_PATH.unlink(missing_ok=True)
+    pr.apply_dead_link_decision(case, pr.USE_VIDEO, "good1")
+    env["session"].commit()
+    [entry] = [json.loads(line) for line in decision_log.LOG_PATH.read_text().splitlines()]
+    assert entry["kind"] == "request" and entry["case"] == "1:dead1" and entry["decision"] == pr.USE_VIDEO
+    assert "is off in Settings -> Automation" in entry["auto_note"]
+    automation_settings.CONFIG_PATH.unlink()
+
+
+def test_a_rule_of_the_owners_takes_a_dead_link_the_built_in_rule_doesnt(env):
+    from utils.common import automation_settings
+
+    automation_settings.save_user_rules([{
+        "name": "plays and named alike", "question": "dead_link_same_video", "on": True,
+        "conditions": [{"fact": "plays", "op": "is", "value": True},
+                       {"fact": "same_video", "op": "is", "value": False}]}])
+    env["youtube"]["ours"]["dead1"] = "ours1"  # our search found another video
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", links=[(1, "Chromatic", "dead1", "good1")])
+
+    result = _run(env)
+
+    assert env["songs"][0].youtube_video_id == "good1"  # Leina Radio's suggestion, which plays
+    assert 'your rule "plays and named alike"' in result.changes[0]["text"]
+    automation_settings.CONFIG_PATH.unlink()
+
+
+@pytest.mark.parametrize("name, taken", [("bob_2026-10-14_10-00-00_001.db", True),
+                                         ("2026-10-14_10-00-00_001.db", False)])
+def test_a_rule_of_the_owners_saves_a_correction_without_the_permission(env, name, taken):
+    from utils.common import automation_settings
+
+    automation_settings.save_user_rules([{
+        "name": "years from logged-in users", "question": "field_correction_permitted", "on": True,
+        "conditions": [{"fact": "field", "op": "is", "value": "year"},
+                       {"fact": "logged_in", "op": "is", "value": True}]}])
+    _request(env["inbox"], name, corrections=[_year()])
+
+    result = _run(env)
+
+    assert env["songs"][0].year == (2020 if taken else 2019)
+    if taken:
+        assert "corrected by bob" in result.changes[0]["text"]
+    else:
+        [case] = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
+        pr.load_case_checks([case], max_age_hours=24)
+        assert "sent without logging in" in case.auto_note
+    automation_settings.CONFIG_PATH.unlink()
+
+
+def test_a_blocker_stops_a_rule_of_the_owners(env):
+    from utils.common import automation_settings
+
+    automation_settings.save_user_rules([{
+        "name": "anything", "question": "field_correction_permitted", "on": True,
+        "conditions": [{"fact": "reports", "op": ">=", "value": 0}]}])
+    env["session"].delete(env["songs"][0])
+    env["session"].commit()
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db", corrections=[_year()])
+
+    result = _run(env)
+
+    assert result.changes == []
+    automation_settings.CONFIG_PATH.unlink()
 
 
 @pytest.mark.parametrize("ours, suggested, plays, note", [

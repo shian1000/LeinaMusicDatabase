@@ -12,7 +12,8 @@ from utils.ui.startup_tasks import run_startup_tasks
 def main():
     # The background request check (auto_resolve_requests.py) never writes
     # while the app is open; one that's running now finishes first
-    hold_app_lock(on_wait=lambda: print("Waiting for the automatic request check to finish..."))
+    hold_app_lock(on_wait=lambda: print("The automation is working - asked it to stop after the song it's on, "
+                                        "waiting for it..."))
     # A fresh install: download the public catalog or start empty (asked
     # until one of them is done) - before the backup and the migrations
     if not ensure_databases():

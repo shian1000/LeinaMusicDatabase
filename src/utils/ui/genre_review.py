@@ -5,7 +5,8 @@ per genre (clean_genres()); nothing the owner typed is overwritten - the
 lookup only fills songs with no genre."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no, tick_items, type_each
+from utils.common.automation_settings import recent_misses, remember_misses
+from utils.ui.prompts import ask_yes_no, stop_requested, tick_items, type_each, unattended_now
 
 from config.constants import GENRE_LEVEL_ARTIST
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
@@ -38,8 +39,10 @@ def fill_missing_genres() -> None:
         show("Every song has a genre.")
         return
     misses = load_misses()
+    # The automation also leaves out the songs it left without a genre lately
+    left_lately = recent_misses("genres") if unattended_now() else set()
     skipped = [s for s in songs if s.id in misses]
-    songs = [s for s in songs if s.id not in misses]
+    songs = [s for s in songs if s.id not in misses and s.id not in left_lately]
     show(f"{len(songs) + len(skipped)} song(s) without a genre.")
     if skipped:
         show(f"[dim]{len(skipped)} of them had nothing on MusicBrainz before and are skipped "
@@ -55,6 +58,9 @@ def fill_missing_genres() -> None:
     saved, artist_level, not_found = 0, [], []
     try:
         for position, song in enumerate(songs, 1):
+            if stop_requested():  # the automation: its time is up, or the app waits
+                show("Stopped - what was found so far is kept.")
+                break
             show(f"[{position}/{len(songs)}] Checking genre for [yellow]{escape(_label(song))}[/yellow]")
             result = lookup.lookup(song)
             if result is None:
@@ -78,6 +84,8 @@ def fill_missing_genres() -> None:
     show(MBStats.format_summary())
 
     saved_artist = _review_artist_genres(session, artist_level, known)
+    if unattended_now():
+        remember_misses("genres", [song.id for song, _ in artist_level if not song.genre])
     typed = _type_missing(session, not_found, known) if not_found else 0
     if saved_artist or typed:
         show(f"Saved {saved_artist + typed} more.")
@@ -90,7 +98,9 @@ def _review_artist_genres(session, artist_level: list, known: dict) -> int:
         return 0
     review_header(f"{len(artist_level)} song(s) only got their artist's genres from MusicBrainz.", "Untick the ones that don't fit the song (space toggles, enter confirms).")
     selected = tick_items("Save these genres:", artist_level,
-                          lambda pair: f"{_label(pair[0])}: {pair[1].genres}", checked=True)
+                          lambda pair: f"{_label(pair[0])}: {pair[1].genres}", checked=True, rule="genres_artist",
+                          facts=lambda pair: {"genres": pair[1].genres,
+                                              "genre_count": len([g for g in pair[1].genres.split(",") if g.strip()])})
     if not selected:
         return 0
     for song, result in selected:

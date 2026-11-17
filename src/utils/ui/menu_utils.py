@@ -8,6 +8,7 @@ from typing import Callable, Dict, Optional, Union, Any
 import questionary
 import os
 from upath import UPath
+from utils.common import decision_log
 from utils.common.debug import slog
 from utils.common.json_file import read_json, write_json
 from utils.database.database_getter import extract_db_object_info
@@ -98,7 +99,8 @@ def execute_menu_item(
         action: Optional[Callable[[], Optional[str]]] = action_map.get(choice)
         if action:
             try:
-                action_name: Optional[str] = action()
+                with decision_log.step(choice):
+                    action_name: Optional[str] = action()
             except DatabaseCommitError as exc:
                 # Rolled back already: the menu goes on with the saved state
                 error(f"{exc}")

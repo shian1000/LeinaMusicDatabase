@@ -81,6 +81,7 @@ from config.constants import (
 from settings import Settings, drive_unavailable_message, sharing_dir_available
 from utils.common.project_names import search_title
 from musicdatabase_core.file_tools import now_iso  # noqa: F401 - the inbox modules import it from here
+from utils.common import decision_log
 from utils.common.debug import flog, mlog
 from utils.common.json_file import write_json
 from utils.common.normalizer import normalize
@@ -103,6 +104,8 @@ REVIEW = "review"
 PROCESSED = "processed"
 REJECTED = "rejected"
 DECISIONS_FILE = "decisions.json"
+# `by` of an answer the automatic pass gave (inbox_auto.py); the owner's have none
+AUTO = "auto"
 CHECKS_FILE = "auto_checks.json"
 REPORT_FILE = "auto_report.json"
 PACKAGES_FILE = "packages.json"
@@ -592,6 +595,15 @@ def _write_decisions(entries: dict) -> None:
     decisions = _load_json(DECISIONS_FILE, {}, for_update=True)
     decisions.update(entries)
     _save_json(DECISIONS_FILE, decisions)
+    # The owner's answers, with why the automatic pass left each one
+    owners = {key: entry for key, entry in entries.items() if not entry.get("by")}
+    if owners:
+        checks = _load_json(CHECKS_FILE, {})
+        for key, entry in owners.items():
+            # A found link's answer is keyed by the case and the video
+            check = checks.get(key) or checks.get(key.rsplit(":", 1)[0]) or {}
+            decision_log.record("request", case=key, auto_note=check.get("note"),
+                                **({"facts": check["facts"]} if check.get("facts") else {}), **entry)
 
 
 def _write_pending_decisions(session) -> None:
@@ -622,6 +634,8 @@ def save_case_checks(cases: list) -> None:
     checks = _load_json(CHECKS_FILE, {})
     for case in cases:
         entry = {"note": getattr(case, "auto_note", None)}
+        if getattr(case, "auto_facts", None):
+            entry["facts"] = case.auto_facts  # for the decision log, with the owner's answer
         if getattr(case, "checked_at", None):
             entry.update(checked_at=case.checked_at, plays=case.plays)
         if isinstance(case, LinkCase) and case.checked_at:
@@ -653,8 +667,9 @@ def load_case_checks(cases: list, max_age_hours: float) -> None:
 
 def add_auto_report(entries: list[dict], shown: bool = False) -> None:
     """Append what the automatic pass changed (each {"text", ...});
-    `shown` = the owner has seen it already (the pass ran in the app)."""
-    if not entries:
+    `shown` = the owner has seen it already (the pass ran in the app). Also
+    what the automation's clean-ups changed (auto_resolve_requests.py)."""
+    if not entries or INBOX_DIR is None:
         return
     report = _load_json(REPORT_FILE, [], for_update=True)
     report += [{**entry, "shown": shown} for entry in entries]

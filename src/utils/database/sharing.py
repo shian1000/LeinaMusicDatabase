@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from config.constants import (
-    INBOX_AUTO_INTERVAL,
+    INBOX_AUTO_TICK,
     INBOX_AUTO_SERVICE_NAME,
     INBOX_AUTO_STARTUP_DELAY,
     PHONE_INBOX_LIMIT_BYTES,
@@ -206,7 +206,7 @@ def _inbox_service_unit(python: str) -> str:
     # The venv's bin first: the YouTube checks run its yt-dlp (and deno)
     path = f"{Path(python).parent}:/usr/local/bin:/usr/bin:/bin"
     return f"""[Unit]
-Description=MusicDatabase - settle new requests from the phone on its own where it safely can
+Description=MusicDatabase automation - settle Leina Radio's new requests where its rules allow, share the databases, publish them on GitHub
 
 [Service]
 Type=oneshot
@@ -219,11 +219,11 @@ Nice=10
 
 def _inbox_timer_unit() -> str:
     return f"""[Unit]
-Description=Run the MusicDatabase automatic request check every {INBOX_AUTO_INTERVAL}
+Description=Run the MusicDatabase automation every {INBOX_AUTO_TICK} - each run does what Settings -> Automation makes due
 
 [Timer]
 OnStartupSec={INBOX_AUTO_STARTUP_DELAY}
-OnUnitActiveSec={INBOX_AUTO_INTERVAL}
+OnUnitActiveSec={INBOX_AUTO_TICK}
 Unit={INBOX_AUTO_SERVICE_NAME}.service
 
 [Install]
@@ -295,7 +295,8 @@ def install_sharing_service() -> list[str]:
     _systemctl("restart", f"{SHARING_SERVICE_NAME}.service")
     steps.append(f"Started {SHARING_SERVICE_NAME}.service now")
     _systemctl("enable", "--now", f"{INBOX_AUTO_SERVICE_NAME}.timer")
-    steps.append(f"Enabled {INBOX_AUTO_SERVICE_NAME}.timer (checks new requests every {INBOX_AUTO_INTERVAL})")
+    steps.append(f"Enabled {INBOX_AUTO_SERVICE_NAME}.timer (wakes every {INBOX_AUTO_TICK}: new requests and the "
+                 "GitHub publish, as often as Settings -> Automation says)")
     return steps
 
 

@@ -293,10 +293,46 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
 - Anyone on the home network can send a request, the same trust as downloading. That's why the
   name, size and header checks are there, and why a request only ever reaches the database through
   the review below, or through the automatic pass in the narrow cases it may settle.
-- **Automatic pass (2026-10-14)** — `utils/database/inbox_auto.py`, run every `INBOX_AUTO_INTERVAL`
-  (15 min) by the `musicdatabase-inbox` systemd user timer (`auto_resolve_requests.py` at the repo
-  root, the venv's python with `venv/bin` on PATH for yt-dlp/deno; installed with the sharing
-  service by `install_sharing_service()`), and by "Resolve new requests" itself before asking.
+- **Automatic pass (2026-10-14)** — `utils/database/inbox_auto.py`, run by the `musicdatabase-inbox`
+  systemd user timer (`auto_resolve_requests.py` at the repo root, the venv's python with
+  `venv/bin` on PATH for yt-dlp/deno; installed with the sharing service by
+  `install_sharing_service()`), and by "Resolve new requests" itself before asking. Since
+  2026-11-13 the timer wakes every `INBOX_AUTO_TICK` (5 min) and each run does only what
+  Settings → "Automation" makes due (`utils/common/automation_settings.py`: new requests every
+  15 min, the GitHub publish every 24 h by default, both in minutes; last runs in
+  `data/automation_state.json`, GitHub's from `public_database.json`'s last attempt), so an
+  interval changes without rewriting the unit. Order: the pass; the clean-ups (Run all's
+  `UNATTENDED_STEPS`, nobody asked - each checkbox list takes what it ticks at first when its rule
+  is on, see AGENTS.md → Run all; only when music.db, tag.db or the automation / Run all / name
+  cleanup settings changed since their last run, `files_changed()`; ~10 s on the catalog), and
+  the lookups (spell check, albums, years, genres, lyrics; their own interval, default 15 min,
+  skipped while musicbrainz.org can't be reached; at most "Max songs to process per fetch" songs
+  and Settings → "Automation"'s minutes per step - 3 by default -, a song left without a value
+  not looked up by the timer for 14 days); an app starting during a run waits only for the song
+  a step is on (it holds `.musicdatabase.waiting` while it waits, the steps ask
+  `app_lock.app_waiting()` per song and stop, the GitHub publish is left to the app);
+  the copy for Leina Radio when a database file changed during the run; then `publish_if_due()`; everything skipped while the app is open (the app
+  publishes at start when due). Each kind of change the pass makes on its own is a rule there
+  (`constants.AUTOMATION_RULE_LABELS`: dead link, found link, field correction - on by default -
+  then one or two per clean-up step, off by default; `rules` in `automation_config.json`); a
+  request rule turned off leaves its cases in `review/` with a note saying so. Besides the
+  built-in rules, "My rules" holds the owner's own (`user_rules` in `automation_config.json`):
+  for one question of `constants.AUTOMATION_QUESTIONS`, blocks "fact operator value" (numbers
+  `>= <= = !=`, yes/no `is`, texts `is / is not / contains / doesn't contain`, normalized), all of
+  which must hold; a fact unknown for an item never holds, a rule without blocks never does. The
+  request pass asks its own questions there (2026-11-13): a dead link, a found link, a field
+  correction and a song to add (`song_request`), each case's facts kept in `auto_checks.json` and
+  logged with the owner's answer. A blocker no rule overrides: for links nothing checked or no
+  video to put in; for corrections a value that can't be stored, the song gone, the row no longer
+  the song's, several artists of that name or one credited already, a rename that merges artists
+  or albums, a video found bad or not checked. A song a rule takes is added through
+  `run_import_batch()` inside `prompts.unattended()`: its "use the similar song / artist?"
+  questions are `import_existing_song` / `import_existing_artist`, answered by the owner's rules
+  for them, else no (a new song or artist - require `closest_song_score` / `artist_known` in the
+  `song_request` rule to keep that from happening). The `add_songs` permission is only a fact. The owner's answers (no `by` in `decisions.json`) go into the decision log with the
+  pass's note, `data/decision_log.jsonl` (`utils/common/decision_log.py`), as do every
+  `tick_items()` / `ask_yes_no()` answer, under the menu entry or "Run all" step they were asked
+  in - the material for new rules; only appended, the app never reads it.
   A readable file first moves from `new/` to `valid/` (`read_new_requests()`, ADR-0006), and only what's in
   `valid/` goes further. The pass settles what needs no answer, replaces a dead link only when the
   phone's suggestion and our own search found the same video and it plays here, and saves a field

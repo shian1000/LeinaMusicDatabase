@@ -6,9 +6,12 @@ played that music.db doesn't have - a YouTube video, a Spotify track or a file
 on the phone - by its title and artist as the phone showed them. Nothing here
 asks anything (ADR-0001); the review is utils/ui/inbox_request_review.py.
 
-Adding a song is never automatic (the owner's decision, 2026-10-18): the
-owner adds it (through the import, run_import_batch(), which looks it up like
-any other import), skips it for later, or rejects it. A rejected song goes to
+Adding a song was never automatic (the owner's decision, 2026-10-18) until
+the owner's own rules (2026-11-13): the automatic pass (inbox_auto.py) adds
+one only when a rule of the owner's for "song_request" (Settings ->
+Automation -> "My rules") holds for its facts (song_request_facts()). Else
+the owner adds it (through the import, run_import_batch(), which looks it up
+like any other import), skips it for later, or rejects it. A rejected song goes to
 music.db's rejected_song_requests (migration 0015), which the phone reads, so
 it doesn't ask for that song again.
 
@@ -597,10 +600,38 @@ def reject_song_request(session, case: SongRequestCase) -> None:
     _decided(case, REJECT, session=session)
 
 
-def mark_song_added(case: SongRequestCase, artist: str | None, title: str) -> None:
+def mark_song_added(case: SongRequestCase, artist: str | None, title: str, by: str | None = None) -> None:
     """The song went through the import (added, or found there after all),
-    as `artist` - `title`."""
-    _decided(case, ADD, added_as={"artist": artist, "title": title})
+    as `artist` - `title`. `by` = "auto" for the automatic pass."""
+    _decided(case, ADD, added_as={"artist": artist, "title": title}, **({"by": by} if by else {}))
+
+
+def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: dict, matcher,
+                       sender_may_add: bool) -> dict:
+    """What the owner's rules for adding a requested song compare
+    (constants.AUTOMATION_QUESTIONS["song_request"]), for the song as it
+    would be added (`artist` - `title`). Asks MusicBrainz (check_spelling(),
+    cached on disk)."""
+    from utils.common.text_utils import check_spelling
+
+    spelling = check_spelling(artist, title)
+    found = bool(spelling.get("found"))
+    guesses = matcher.best_guesses(case.metadata(artist, title), 1, 0.0)
+    users = {senders.get(r.file_name) for r in case.reports} - {None}
+    return {
+        "musicbrainz_found": found,
+        "musicbrainz_title_similarity": spelling.get("title_similarity") if found else None,
+        "musicbrainz_artist_similarity": spelling.get("artist_similarity") if found else None,
+        "musicbrainz_score": spelling.get("mb_score") if found else None,
+        "artist_known": _known_exactly(artist, matcher) is not None,
+        "closest_song_score": round(guesses[0][1], 3) if guesses else 0.0,
+        "has_youtube_video": bool(case.youtube_video_ids),
+        "names_from": case.suggested_from if case.suggested == (artist, title) else "the request",
+        "requests": len(case.reports),
+        "users": len(users),
+        "logged_in": senders.get(case.latest.file_name) is not None,
+        "sender_may_add_songs": sender_may_add,
+    }
 
 
 def _decided(case: SongRequestCase, decision: str, session=None, **extra) -> None:

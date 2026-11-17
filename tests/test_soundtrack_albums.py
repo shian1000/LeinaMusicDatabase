@@ -381,3 +381,23 @@ def test_albums_does_not_guess_for_a_song_found_swapped(session, run_fill):
     run_fill([song], lambda choices: pytest.fail("asked"), swapped=dm.AlbumMatch("Album"))
 
     assert song.album is None
+
+
+@pytest.mark.parametrize("rule_on", [True, False])
+def test_names_review_unattended_takes_the_ticked_ones_only_by_its_rule(monkeypatch, session, rule_on):
+    from utils.common import automation_settings
+    from utils.ui import prompts
+
+    _names_review(monkeypatch, session)
+    several = _song(session, "A", "One", "Yakuza Soundtrack")
+    _song(session, "A", "Two", "Yakuza OST")
+    lone = _song(session, "B", "Three", "Hohokum Soundtrack")
+    _answer(monkeypatch, lambda choices: pytest.fail("asked"))
+    monkeypatch.setattr(automation_settings, "rule_on", lambda key: rule_on and key == "soundtracks")
+    monkeypatch.setattr(prompts, "rule_on", automation_settings.rule_on)
+
+    with prompts.unattended() as taken:
+        assert review.review_soundtrack_names() == (1 if rule_on else 0)
+
+    assert several.album == ("Yakuza OST" if rule_on else "Yakuza Soundtrack")
+    assert lone.album == "Hohokum Soundtrack" and len(taken) == (1 if rule_on else 0)

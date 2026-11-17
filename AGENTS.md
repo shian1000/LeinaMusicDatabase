@@ -54,7 +54,9 @@ When this file disagrees with the code, trust the code and fix this file.
   without databases asks to download the public catalog or start empty
   (`utils/database/first_run.py`; runbook → "First start without databases").
 - Run the app: `python main.py`
-- The automatic pass over the phone's requests, by hand: `venv/bin/python auto_resolve_requests.py`
+- The automation by hand (the phone's requests, Run all's clean-ups and lookups, the copy for
+  the phone, the GitHub publish - each only when Settings → "Automation" makes it due):
+  `venv/bin/python auto_resolve_requests.py`
   (normally the `musicdatabase-inbox` timer runs it; it does nothing while the app is open)
 - Test tools (pytest): `pip install -r requirements-dev.txt` — kept out of `requirements.txt`,
   which lists only what the app itself needs (every package pinned, the transitive ones too; a
@@ -175,22 +177,39 @@ non-trivial work in that area.
   automatic pass), `inbox_found_links.py` for links the phone found for
   songs without one (grouped and decided with the dead links' `group_link_reports()` /
   `set_link_decision()` / `record_link_decision()` - a new kind of link report reuses them), and `inbox_song_requests.py` for songs the phone played that music.db doesn't
-  have (`song_requests`): never added automatically - the owner adds them (through
+  have (`song_requests`): added automatically only by a rule of the owner's for
+  `song_request` (owner's choice 2026-11-13, ending "never automatically";
+  `song_request_facts()`, the import run unattended) - else the owner adds them (through
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
   `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
   `feat_to_credits`), skips or rejects them; a rejected one goes to music.db's
   `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
-  table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: every 15 min a
+  table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: a
   systemd user timer (`musicdatabase-inbox`, `auto_resolve_requests.py` at the repo root, installed
-  with the sharing service) moves each readable file from `Inbox/new/` to `Inbox/valid/` (`read_new_requests()`, the only way on) and works from there. It replaces a dead link, or fills a missing one the phone
+  with the sharing service, waking every `INBOX_AUTO_TICK` and doing only what Settings →
+  "Automation"'s intervals make due - `utils/common/automation_settings.py`, so an interval never
+  needs a new unit) moves each readable file from `Inbox/new/` to `Inbox/valid/` (`read_new_requests()`, the only way on) and works from there. It replaces a dead link, or fills a missing one the phone
   found, only when the phone's and our search agree and the video plays. It saves a correction only from a user with the
-  `apply_corrections` permission and when nothing conflicts. The rest goes to `Inbox/review/` with
+  `apply_corrections` permission and when nothing conflicts. Each of those three is a built-in
+  rule of Settings → "Automation" (`constants.AUTOMATION_RULE_LABELS`, all on; a new one gets a
+  key there and a `_rule_off()` check at its place in the pass). The owner's own rules ("My
+  rules", `constants.AUTOMATION_QUESTIONS`: the three plus `song_request`) take a case by its
+  facts (`link_facts()`, `field_correction_facts()`, `song_request_facts()`, kept in
+  `auto_checks.json` and logged with the owner's answer) - except what a blocker stops
+  (`link_blocker()`, `field_correction_blocker()`: a value that can't be stored, a song or row
+  gone, an artist that can't be told apart, a merge, a bad or unchecked video), which no rule
+  overrides. A user's `add_songs` permission is only such a fact. The rest goes to `Inbox/review/` with
   a note why. Manage database → "Resolve new requests" (`utils/ui/inbox_request_review.py`) runs the
-  same pass, then asks about `review/`. Otherwise a phone's value never lands without review. The
+  same pass, then asks about `review/`. Otherwise a phone's value never lands without review or a
+  rule the owner made. The
   pass never runs while the app is open (`app_lock.py`: `main.py` holds an flock shared, the pass
-  needs it exclusive). What it changed is printed at the next start (`Inbox/auto_report.json`).
+  needs it exclusive); an app starting during a run holds a second flock while it waits
+  (`.musicdatabase.waiting`), and the run's steps stop at their next song (`prompts.stop_requested()`,
+  `app_lock.app_waiting()`), as they do after Settings → "Automation"'s minutes per lookup step
+  (`prompts.time_limit()`; a run of 106 songs a step took 13-15 min every 15 min and the app
+  waited each time, 2026-11-13). A new long loop in a step asks `stop_requested()` per item. What it changed is printed at the next start (`Inbox/auto_report.json`).
   Details: `docs/runbooks/database.md` → "Requests from the phone". The app also depends on the `songs` / `artists` /
   `additional_song_artists` schema and on `songs.youtube_video_id`'s values (video id = linked,
   `"N/A"` = confirmed no video, NULL/`""` = unknown, which the phone may search for itself) —
@@ -250,7 +269,10 @@ non-trivial work in that area.
   (`name_cover()`, "-" = not a cover, marked checked) - and Song actions → "Set covered artist" by hand. No `ForeignKey`
   in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
   ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
-  `reassign_additional_artist_links()`.
+  `reassign_additional_artist_links()`. Every matcher keeps covers apart (`song_kinds.songs_for_entry(...,
+  cover)`, `SongEntry.is_cover`, `song_kinds.is_cover()`): a cover entry - credit moved out or still in the
+  title - matches only covers, the rest try covers last ("Oktobar 1864 - Nadji me (Band Cover)", a song request,
+  was settled as the original until 2026-11-17).
   `versions.py` — `songs.version_kind` / `version_label` / `version_of` (migration 0022,
   [ADR-0007](docs/decisions/0007-song-versions.md)): a live / remix / acoustic... version stays a row of
   its own, titled without the marker, shown "Title (Marker)" (`version_names.title_with_version()`, also
@@ -467,8 +489,9 @@ non-trivial work in that area.
 - `src/utils/database/public_export.py` / `public_database.py` / `github_release.py` — the public
   copy of music.db / tag.db for Leina Radio phones without the sharing server, as the assets of one
   GitHub Release (fixed tag `database` in `GITHUB_DB_REPO`; `music.db`, `tag.db`, then
-  `version.json` last), daily after the backup when changed (switch in Settings → Server → "Public
-  database on GitHub") and from that menu. **Allow-list:** a table or column reaches the public
+  `version.json` last), when changed, once Settings → "Automation"'s interval (a day) is up since the
+  last attempt - at the app's start and from the automation timer (`publish_if_due()`; switch in
+  Settings → Server → "Public database on GitHub") - and from that menu. **Allow-list:** a table or column reaches the public
   file only when listed in `MUSIC_SPEC` / `TAG_SPEC` (other columns stay, NULLed — same schema as
   the server's copy); a new migration's data stays private until someone lists it on purpose, and
   `check_public_database()` refuses the publish otherwise (user / files.db tables, withheld values,
@@ -612,6 +635,11 @@ non-trivial work in that area.
   name read as several (`propose_artist_split()`, `SplitProposal`; `utils/database/artist_splitting.py`
   turns a proposal into rows after the review) and a title's featured artists (`feat_credits()`,
   `split_feat_credits()`, `strip_feat_credits()`). No database - import it from anywhere.
+- `src/utils/common/decision_log.py` — every answer the owner gives (`prompts.tick_items()` /
+  `ask_yes_no()`, the request review's decisions without `by`, with the pass's note) as one JSON
+  line in `data/decision_log.jsonl`, under the menu entry (`execute_menu_item()`) or "Run all"
+  step it was asked in (`decision_log.step()`): the material the owner asks new automation rules
+  from. Only appended, never read by the app.
 - `src/utils/common/song_entry.py` — `SongEntry`, one song as an import or a request reads it: for
   now a `dict` of the import's metadata keys (also attributes: `entry.artist` = `"artist_name"`)
   plus where it came from (`source`, `raw_text`, `originals`, `parsed_by`, `channel`, `file`) and what
@@ -747,7 +775,26 @@ non-trivial work in that area.
   (`menu/main_menu/settings/run_all_steps.py`) turns them off, saved by key in `run_all_config.json`
   (`utils/common/run_all_settings.py`, only the ones off, so a new step starts on). A new
   whole-catalog step of that menu goes into both at its place, and into Help's "Keeping the
-  catalog clean" text.
+  catalog clean" text. The automation timer runs `CLEAN_UP_STEPS` (no internet, when the
+  databases or settings changed) and `LOOKUP_STEPS` (spell check, albums, years, genres, lyrics;
+  their own interval, only while MusicBrainz answers) - steps asking only through `prompts` -
+  through `run_unattended_steps(keys)` inside `prompts.unattended()`: a checkbox list takes what
+  it ticks at first when its `rule=` (a key of `constants.AUTOMATION_RULE_LABELS`, Settings →
+  "Automation"; step rules start off, `AUTOMATION_RULES_ON_BY_DEFAULT`) is on, plus every item
+  whose `facts=` (a dict per item of the facts `constants.AUTOMATION_QUESTIONS[rule]` lists,
+  None = unknown) make one of the owner's own rules hold ("My rules": blocks "fact op value", all
+  must hold, `automation_settings.user_rule_taking()`); a yes/no question answers yes the same two
+  ways, else no; typing and picking return nothing, and a step marks as looked at only `prompts.decided()` items, so
+  the rest is asked at the next Run all. A lookup run unattended leaves out the songs it left
+  without a value within `AUTOMATION_LOOKUP_RETRY_DAYS` (`automation_settings.recent_misses()` /
+  `remember_misses()`, `data/automation_misses.json`), so it doesn't ask the same sites every few
+  minutes; the menu's own runs still try them. So such a step never calls `questionary` or `input()`
+  outside a guard, and a new list in it passes a `rule=` (with a label saying which items it
+  ticks) and `facts=` (the question and its facts in `AUTOMATION_QUESTIONS`, each of a kind of
+  `FACT_OPERATORS` - a test checks) or nothing is ever taken unattended. The facts also go into the decision
+  log with the owner's answers - what the owner reads to set a block's threshold - so they're
+  computed for every item a list shows, and must not fail on any of them. What the lists took goes into
+  `Inbox/auto_report.json` (kind `clean_up`), shown at the next start.
 - `src/menu/main_menu/enter_database/manage_database/clean_names.py` (Manage database → "Clean names") — per-field song
   cleanup rules are sanitize steps run by `name_cleanup.apply_step()` (each one skipped when its
   step is off for the "stored" source). Add a rule as a step there, not another per-field loop.
@@ -776,7 +823,10 @@ non-trivial work in that area.
   `tests/manual/` holds manual diagnostic scripts (real imports + live network), excluded from
   collection via its own `conftest.py`. Each calls `_sandbox.enter_sandbox()` before importing the
   app: the databases are copied into a temp folder and the app (database folder, `.env`, `debug.log`,
-  `youtube_link_cache.log`, verbosity) is pointed there - a new script must do the same.
+  `youtube_link_cache.log`, verbosity) is pointed there - a new script must do the same. Not
+  redirected: `data/` and the settings files at the repo root - a script running lookups writes
+  the real spell check cache and `genre_lookup_misses.json` (song ids of the copy are the real
+  ones), so point those at the sandbox too when that matters.
 
 ## Architecture boundaries
 
@@ -852,7 +902,8 @@ non-trivial work in that area.
 - Start-up (`utils/ui/startup_tasks.py`, called by `main.py`): switchable, one `.env` key each
   (`utils/common/startup_settings.py`, empty = on, `off` = skipped, read from the file at start):
   the daily backup, applying phones' global mood changes, the daily library index, the daily copy
-  for phones, the daily yt-dlp offer, the start-up messages; the daily GitHub publish keeps its own
+  for phones, the daily yt-dlp offer, the start-up messages; the GitHub publish (once Settings →
+  "Automation"'s interval is up) keeps its own
   switch in `public_database.py`'s state, shown on the same screen. With the backup off, "the day's
   first start" comes from `data/startup_state.json`. Never switchable: the app lock wait, the
   fresh-install database choice, migrations, the album backfill after its migration, applying song
@@ -1035,7 +1086,10 @@ non-trivial work in that area.
   with "unable to open database file". It also sends `debug.log`, `youtube_link_cache.log` and the
   spell-check cache (written at exit) to that temp folder, and Settings → "Name cleanup"'s file
   (`sanitize_settings.CONFIG_PATH`), Settings → "Run all: steps"' (`run_all_settings.CONFIG_PATH`)
-  and every discovery kind's config and stats file (`discovery_settings.KINDS`), so tests run the defaults. Give it temp-file databases; never undo the isolation. A function taking the `.env`
+  and every discovery kind's config and stats file (`discovery_settings.KINDS`), Settings →
+  "Automation"'s config, state and misses (`automation_settings.*_PATH`) and the decision log
+  (`decision_log.LOG_PATH`), so tests run the defaults; a test that saves rules or intervals
+  deletes the file again, or every later test runs them. Give it temp-file databases; never undo the isolation. A function taking the `.env`
   path defaults to `None` (resolved to `env_file.ENV_FILE` when it runs), never `= ENV_FILE`: a
   default bound at import would keep pointing at the real `.env`.
 - The Selenium fetchers are tested through `tests/fake_browser.FakeBrowser` (pages as HTML by URL,

@@ -15,9 +15,10 @@ sharing server (app ADR 0014, handoff musicdatabase-public-database.md).
   (public_export.content_digest()); an export whose digests equal the
   published ones uploads nothing. Asked from the menu, the owner can publish
   anyway.
-- Two call sites: main.py once a day after the backup when the daily publish
-  is on (publish_daily()), and Settings -> Server -> "Public database on
-  GitHub" (publish()).
+- Three call sites: main.py at start and the automation timer
+  (auto_resolve_requests.py) when the automatic publish is on and its
+  Settings -> "Automation" interval is up (publish_if_due()), and Settings ->
+  Server -> "Public database on GitHub" (publish()).
 - The switch and the last result are in PUBLIC_DB_STATE_FILE.
 """
 
@@ -36,6 +37,7 @@ from config.constants import (
     PUBLIC_DB_VERSION_FILE,
 )
 from settings import Settings
+from utils.common.automation_settings import due
 from utils.common.debug import flog, mlog
 from utils.common.json_file import read_json, write_json
 from utils.database.backup import DB_FILES
@@ -201,11 +203,21 @@ def publish(force: bool = False, client=None, sources=None, now=None) -> Publish
     return _record(PublishResult(PUBLISHED, f"published {sizes}", release.html_url))
 
 
-def publish_daily() -> PublishResult | None:
-    """The daily publish (main.py, after the daily backup): None when it's
-    switched off; otherwise any failure is recorded and returned, never
-    raised, so it never blocks opening the app. Tried again the next day."""
-    if not daily_publish_enabled():
+def publish_due() -> bool:
+    """Whether the automatic publish should run now: switched on, set up, and
+    Settings -> "Automation"'s interval up since the last attempt (a failed
+    one too - tried again an interval later)."""
+    if not daily_publish_enabled() or missing_setup():
+        return False
+    last = last_result()
+    return due("github", last.get("at") if last else None)
+
+
+def publish_if_due() -> PublishResult | None:
+    """The automatic publish (main.py at start, and the automation timer):
+    None when it isn't due (publish_due()); otherwise any failure is recorded
+    and returned, never raised, so it never blocks opening the app."""
+    if not publish_due():
         return None
     try:
         return publish()

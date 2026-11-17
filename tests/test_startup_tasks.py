@@ -36,7 +36,9 @@ def test_everything_on_runs_every_step_in_order(run):
 
 
 def test_not_the_first_start_of_the_day_skips_the_daily_steps(run):
-    assert run(daily=False) == ["_keep_data_consistent", "_apply_mood_changes", "_show_messages"]
+    # The GitHub publish follows its own interval (Settings -> Automation)
+    assert run(daily=False) == ["_keep_data_consistent", "_apply_mood_changes", "_publish_to_github",
+                                "_show_messages"]
 
 
 @pytest.mark.parametrize("switch, step", [
@@ -54,16 +56,15 @@ def test_the_data_consistency_steps_run_with_everything_off(run):
     assert run(off=set(switches.SWITCHES)) == ["_keep_data_consistent", "_publish_to_github"]
 
 
-def test_the_github_publish_follows_its_own_switch(monkeypatch):
+def test_the_github_publish_runs_only_when_due(monkeypatch):
     from utils.database import public_database
 
     published = []
-    monkeypatch.setattr(public_database, "missing_setup", lambda: [])
-    monkeypatch.setattr(public_database, "publish_daily", lambda: published.append(True))
-    monkeypatch.setattr(public_database, "daily_publish_enabled", lambda: False)
+    monkeypatch.setattr(public_database, "publish_if_due", lambda: published.append(True))
+    monkeypatch.setattr(public_database, "publish_due", lambda: False)
     startup._publish_to_github()
     assert published == []
-    monkeypatch.setattr(public_database, "daily_publish_enabled", lambda: True)
+    monkeypatch.setattr(public_database, "publish_due", lambda: True)
     startup._publish_to_github()
     assert published == [True]
 
@@ -256,7 +257,7 @@ def test_the_settings_screen_saves_the_ticks_and_the_github_switch(monkeypatch, 
     assert all(checked for _, checked in offered)
     assert read_env_value("STARTUP_BACKUP", env) == "off" and github["on"] is False
     out = capsys.readouterr().out
-    assert "Changed: Daily backup, Daily publish to GitHub." in out
+    assert "Changed: Daily backup, Publish to GitHub." in out
     assert "The daily backup is off" in out
 
 

@@ -55,6 +55,15 @@ from utils.common import run_all_settings  # noqa: E402
 
 run_all_settings.CONFIG_PATH = _ISOLATED_DIR / "run_all_config.json"
 
+# Settings -> "Automation" (the rules' defaults, the default intervals) and the
+# decision log every prompt appends to: never the owner's files
+from utils.common import automation_settings, decision_log  # noqa: E402
+
+automation_settings.CONFIG_PATH = _ISOLATED_DIR / "automation_config.json"
+automation_settings.STATE_PATH = _ISOLATED_DIR / "automation_state.json"
+automation_settings.MISSES_PATH = _ISOLATED_DIR / "automation_misses.json"
+decision_log.LOG_PATH = _ISOLATED_DIR / "decision_log.jsonl"
+
 # Settings -> Discovery modules and the Statistics counters, every kind: a
 # test reconciling a config once rewrote the owner's discovery_modules_config.json
 import dataclasses  # noqa: E402

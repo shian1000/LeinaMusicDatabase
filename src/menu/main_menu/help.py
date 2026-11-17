@@ -68,7 +68,7 @@ def _startup_text() -> str:
     first = "the day's first start"
     # (always: why it can't be switched off, or optional: (label, on now, when)), in start-up order
     steps = [
-        ("Waiting for the automatic request check to finish",
+        ("Waiting for the automation to stop (it finishes the song it's on, then stops)",
          "two programs writing one database at once could lose changes."),
         ("On a fresh install: the public catalog or an empty database", "nothing can run without one."),
         (switches.BACKUP, first),
@@ -80,8 +80,8 @@ def _startup_text() -> str:
         (switches.MOOD_CHANGES, "every start"),
         (switches.LIBRARY_INDEX, first),
         (switches.SHARE_COPY, first),
-        ("Daily publish to GitHub (when set up)", None),
         (switches.YTDLP_UPDATE, first),
+        ("Publish to GitHub (when set up)", None),
         (switches.MESSAGES, "every start"),
         ("Continuing the sharing setup after its restart",
          "only after the setup restarted the program, which you agreed to."),
@@ -94,7 +94,8 @@ def _startup_text() -> str:
             optional.append(f"{number:>3}. [{'ON ' if on else 'OFF'}] {what.label} - {detail}")
         elif detail is None:
             on = daily_publish_enabled()
-            optional.append(f"{number:>3}. [{'ON ' if on else 'OFF'}] {what} - {first}")
+            optional.append(f"{number:>3}. [{'ON ' if on else 'OFF'}] {what} - once its interval is up "
+                            f'(Settings -> "Automation")')
         else:
             always.append(textwrap.fill(f"{number:>3}. {what} - {detail}", width=100, subsequent_indent="     "))
     return "\n".join(always + [""] + optional + [
@@ -124,17 +125,30 @@ musicdatabase-share.service + musicdatabase-share.timer - the server for Leina R
   its external drive) is missing it keeps running and answers 503 (unavailable), so Leina Radio
   just tries again later. If it stops, systemd starts it again after 10 seconds.
 
-musicdatabase-inbox.service + musicdatabase-inbox.timer - the automatic request check
-  The timer runs auto_resolve_requests.py 5 minutes after your systemd starts and then every 15
-  minutes. It looks at new requests from Leina Radio and settles only what is safe: a dead YouTube
-  link is replaced when Leina Radio's suggestion and its own search found the same video and it
-  plays here, a found link is saved by the same rule, and a correction is saved when a user with
-  that permission sent it and nothing about it needs a judgement. It never adds a song - you approve
-  each one. Everything else is left for Enter database -> Manage database -> "Resolve new
-  requests", with a note why. It never runs while MusicDatabase is open (MusicDatabase waits for it
-  to finish when it starts), nor while the databases wait for an upgrade. What it changed is shown
-  at the next start (unless Start-up tasks hide the messages) and in "Resolve new requests"; its
-  output is in the journal. After a change it refreshes the copy for Leina Radio.
+musicdatabase-inbox.service + musicdatabase-inbox.timer - the automation
+  The timer runs auto_resolve_requests.py 5 minutes after your systemd starts and then every 5
+  minutes; each run does only what Settings -> "Automation" makes due (new requests and the
+  clean-ups every 15 minutes, the GitHub publish once a day, unless you set other times there).
+  The clean-ups are the steps of "Run all clean-ups and lookups in order" that need no internet,
+  the lookups (on their own interval) spell check, albums, years, genres and lyrics: with nobody
+  to ask, each list takes only what it ticks at first, and only when you turned its rule on there
+  (all off at first) or one of your own rules there holds for it (if similarity >= 0.9 and ...);
+  the rest waits for your next Run all. A song the timer's lookups found
+  nothing for is left out of them for two weeks (your own runs still try it). It looks at new
+  requests from Leina Radio and settles only what its rules allow (each one can be turned off
+  there): a dead YouTube link is replaced when Leina Radio's suggestion and its own search found
+  the same video and it plays here, a found link is saved by the same rule, and a correction is
+  saved when a user with that permission sent it and nothing about it needs a judgement. Your own
+  rules there may take more - a song to add too (if MusicBrainz agrees >= 0.99 and ...); a few
+  changes no rule may make (a merge, a song that is gone, a video found bad). Everything else is
+  left for Enter database -> Manage database -> "Resolve new requests", with a note why. It never
+  runs while MusicDatabase is open - started during a run, MusicDatabase asks it to stop and
+  waits for the song it's on - nor while the databases wait for an upgrade. Each lookup also
+  stops after a few minutes (Settings -> "Automation"), keeping what it found. What it changed is
+  shown at the next start (unless Start-up tasks hide the messages) and in "Resolve new
+  requests"; its output is in the journal. After a change it refreshes the copy for Leina Radio.
+  Your own answers (in the request review and in every checkbox list or yes/no question) go into
+  data/decision_log.jsonl, the material for new rules.
 
 When they run: systemd runs a user's units only while that user is logged in - with lingering on
 (loginctl enable-linger, offered by the setup) from boot, logged in or not.
@@ -199,15 +213,17 @@ Users - the accounts Leina Radio logs in with: create, rename, passwords, permis
 Statistics - how often each lookup module (albums, years) found something.
 Settings - lookup modules and their order, matching thresholds, which name clean-ups run
   ("Name cleanup"), the steps "Run all clean-ups and lookups in order" runs ("Run all: steps"),
-  the start-up tasks, how much goes into debug.log ("Debug log": every step
-  and call of an import from 1 up), and Server: the database folder, backups, this PC's folders
-  and network, indexing the music library, sharing with Leina Radio, and the public copy on GitHub.
+  what the automation does by itself and how often ("Automation"), the start-up tasks, how much
+  goes into debug.log ("Debug log": every step and call of an import from 1 up), and Server: the
+  database folder, backups, this PC's folders and network, indexing the music library, sharing
+  with Leina Radio, and the public copy on GitHub.
 Help - this.
 
 On the day's first start MusicDatabase backs the databases up, indexes the music library,
-refreshes the copy Leina Radio downloads, publishes the public copy to GitHub (when set up) and
-offers a newer yt-dlp; every start applies global mood changes from Leina Radio and shows what the
-automatic request check did and how many requests wait. Each can be switched off in Settings ->
+refreshes the copy Leina Radio downloads and offers a newer yt-dlp; it publishes the public copy to
+GitHub (when set up) once Settings -> "Automation"'s interval is up; every start applies global
+mood changes from Leina Radio and shows what the automatic request check did and how many requests
+wait. Each can be switched off in Settings ->
 "Start-up tasks" (all on by default).
 """,
     "Adding songs": """

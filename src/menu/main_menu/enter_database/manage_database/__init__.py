@@ -3,7 +3,8 @@ from utils.ui.cover_review import review_covers
 from utils.ui.version_review import review_versions
 from utils.ui.project_review import manage_projects
 from utils.ui.menu_utils import execute_menu_item
-from utils.common.debug import slog
+from utils.common import decision_log
+from utils.common.debug import flog, slog
 from menu.main_menu.enter_database.manage_database.fetch_database_data import fetch_database_data
 from menu.main_menu.enter_database.manage_database.manual_management import manual_management
 from menu.main_menu.enter_database.manage_database.resolve_duplicates import (
@@ -31,7 +32,9 @@ from utils.ui.song_duplicate_review import resolve_duplicated_songs
 from utils.database.song_kinds import is_full_album
 from utils.ui.full_album_review import review_full_albums
 from utils.database.inbox_requests import count_new_requests
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import (app_is_waiting, ask_yes_no, stop_requested, tick_items, time_limit, unattended,
+                              unattended_now)
+from utils.common.automation_settings import interval_minutes
 from utils.ui.artist_change import has_artist_twin, rename_artist
 from utils.database.database_sessions import (
     DatabaseCommitError, get_global_database_sessions, submit_global_database_session)
@@ -92,6 +95,11 @@ def _find_local_spellcheck_match(song):
     return None
 
 
+def _spelling_facts(old: str, new: str) -> dict:
+    """What the owner's rules for a spell check correction compare (constants.AUTOMATION_QUESTIONS)."""
+    return {"similarity": round(similarity(old, new), 3), "same_when_normalized": normalize(old) == normalize(new)}
+
+
 def check_spelling_menu():
 
     # One query for every checked song: a tag check per song took
@@ -115,6 +123,9 @@ def check_spelling_menu():
     pending_title_corrections = []
 
     for song in songs:
+        if stop_requested():  # the automation: its time is up, or the app waits
+            print("Stopped - the songs checked so far are kept.")
+            break
         if local_match := _find_local_spellcheck_match(song):
             slog(f"[LOCAL MATCH] Skipping remote spell check for {song.artist.name} - {song.title} because {local_match.artist.name} - {local_match.title} already exists locally", priority=1)
             add_tag_to_song(song, "spellchecked")
@@ -143,6 +154,7 @@ def check_spelling_menu():
                 song.artist.name = new_artist
             elif song.artist.id not in pending_artist_corrections:
                 pending_artist_corrections[song.artist.id] = {
+                    "song": song,
                     "artist": song.artist,
                     "old_name": song.artist.name,
                     "new_name": new_artist,
@@ -161,7 +173,9 @@ def check_spelling_menu():
                     "new_title": new_title,
                 })
 
-        add_tag_to_song(song, "spellchecked")
+        # A correction waiting for an answer: marked once it's answered
+        if not any(c["song"] is song for c in [*pending_artist_corrections.values(), *pending_title_corrections]):
+            add_tag_to_song(song, "spellchecked")
         submit_global_database_session()
     submit_global_database_session()
 
@@ -171,20 +185,41 @@ def check_spelling_menu():
     if pending_artist_corrections or pending_title_corrections:
         review_header(f"REVIEW: {len(pending_artist_corrections)} artist name(s) and {len(pending_title_corrections)} song title(s) need review")
 
+        # Unattended, a correction its rule didn't take (or a merge) stays
+        # unanswered: its song isn't marked, so it's asked the next time
+        answered = []
         for correction in pending_artist_corrections.values():
             print(f"{RED}{correction['old_name']}{RESET} -> {GREEN}{correction['new_name']}{RESET}")
-            if ask_yes_no("Do you wish to correct this artist name?"):
+            if ask_yes_no("Do you wish to correct this artist name?", rule="spell_check_artist",
+                          about=f"{correction['old_name']} -> {correction['new_name']}",
+                          facts=_spelling_facts(correction["old_name"], correction["new_name"])):
                 # An artist with that name already: merge into it instead
                 if not rename_artist(correction["artist"], correction["new_name"]):
                     print("Confirmed")
                     correction["artist"].name = correction["new_name"]
+                elif unattended_now():
+                    continue
+                answered.append(correction)
+            elif not unattended_now():
+                answered.append(correction)
 
         for correction in pending_title_corrections:
             song = correction["song"]
             print(f"{RED}{correction['old_title']}{RESET} -> {GREEN}{correction['new_title']}{RESET}")
-            if ask_yes_no("Do you wish to correct this song title?"):
+            if ask_yes_no("Do you wish to correct this song title?", rule="spell_check_title",
+                          about=f"{song.artist.name} - {correction['old_title']} -> {correction['new_title']}",
+                          facts=_spelling_facts(correction["old_title"], correction["new_title"])):
                 print("Confirmed")
                 song.title = correction["new_title"]
+                answered.append(correction)
+            elif not unattended_now():
+                answered.append(correction)
+        # A song with both corrections waits until both are answered
+        waiting = {id(c["song"]) for c in [*pending_artist_corrections.values(), *pending_title_corrections]
+                   if c not in answered}
+        for song in {id(c["song"]): c["song"] for c in answered}.values():
+            if id(song) not in waiting:
+                add_tag_to_song(song, "spellchecked")
 
         submit_global_database_session()
         
@@ -267,7 +302,8 @@ def run_all_steps():
         label = RUN_ALL_STEP_LABELS[key]
         review_header(f"STEP {position}/{len(picked)}: {label}")
         try:
-            RUN_ALL_STEPS[key]()
+            with decision_log.step(label):
+                RUN_ALL_STEPS[key]()
         except DatabaseCommitError as exc:
             error(f"{exc}")
         except KeyboardInterrupt:
@@ -276,6 +312,46 @@ def run_all_steps():
             if position < len(picked) and not ask_yes_no("Go on with the next step?"):
                 return
     say("All picked steps done.")
+
+
+# The steps the automation timer runs with nobody to ask (prompts.unattended()),
+# those that ask only through prompts' checkbox lists and yes/no questions:
+# the clean-ups, which look nothing up on the internet, and the lookups, on an
+# interval of their own. Left out: the requests (the timer's own pass runs
+# right before), "Resolve albums with several artists" (a pick per album) and
+# the Latin forms (nothing ticked at first).
+CLEAN_UP_STEPS = ("clean_names", "split_artists", "duplicated_artists", "swapped_songs", "duplicated_songs",
+                  "full_albums", "projects", "covers", "versions", "songless_artists", "soundtracks")
+LOOKUP_STEPS = ("spell_check", "albums", "years", "genres", "lyrics")
+
+
+def run_unattended_steps(keys) -> list[tuple[str, str]]:
+    """The steps of `keys` (CLEAN_UP_STEPS / LOOKUP_STEPS) that are on in
+    Settings -> "Run all: steps", in RUN_ALL_STEPS' order, nothing asked: each
+    checkbox list takes what its rule in Settings -> "Automation" allows, the
+    steps' silent work runs as always. Returns what the lists took, (step,
+    item) each. A failing step is rolled back and logged, its items dropped;
+    the rest still run."""
+    turned_off = steps_turned_off()
+    with unattended() as taken:
+        for key in RUN_ALL_STEP_LABELS:
+            if key not in keys or key in turned_off:
+                continue
+            if app_is_waiting():
+                say("MusicDatabase is starting - the remaining steps wait for the next run.")
+                break
+            label = RUN_ALL_STEP_LABELS[key]
+            before = len(taken)
+            # A lookup stops after its minutes (Settings -> Automation), keeping what it found
+            limit = interval_minutes("lookup_step") * 60 if key in LOOKUP_STEPS else float("inf")
+            try:
+                with decision_log.step(label), time_limit(limit):
+                    RUN_ALL_STEPS[key]()
+            except Exception as exc:
+                _undo_unsaved_changes()
+                del taken[before:]
+                flog(f"Automation: {label} failed: {exc!r}")
+    return taken
 
 
 def manage_database():

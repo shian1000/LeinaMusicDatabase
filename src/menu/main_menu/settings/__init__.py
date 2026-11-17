@@ -52,6 +52,7 @@ from settings import drive_unavailable_message, listen_addresses, settings, shar
 from menu.main_menu.settings.public_database import public_database_menu
 from menu.main_menu.settings.name_cleanup import name_cleanup_menu
 from menu.main_menu.settings.run_all_steps import run_all_steps_menu
+from menu.main_menu.settings.automation import automation_menu
 from utils.common.output import BOLD, RED, RESET, YELLOW, error, warn
 
 
@@ -65,6 +66,7 @@ def settings_menu():
         "Closest songs: auto-accept score": set_closest_auto_accept_score,
         "Name cleanup": name_cleanup_menu,
         "Run all: steps": run_all_steps_menu,
+        "Automation": automation_menu,
         "Reset statistics records": reset_statistics_records,
         "Start-up tasks": startup_tasks_menu,
         "Debug log": debug_log_menu,
@@ -103,18 +105,20 @@ _GITHUB_PUBLISH = "__github__"
 
 def startup_tasks_menu():
     """Which of the start-up tasks run (all on by default). The GitHub one
-    is the daily publish's own switch, shared with Public database on GitHub."""
+    is the automatic publish's own switch, shared with Public database on
+    GitHub, which the automation timer follows too."""
     from utils.database import public_database
 
     print("What MusicDatabase does when it starts - all on by default, a change counts from the next start:\n")
     for switch in startup_settings.SWITCHES:
         print(f"{BOLD}{switch.label}{RESET} - {switch.explanation}")
-    print(f"{BOLD}Daily publish to GitHub{RESET} - once a day, when the catalog changed: the public copy "
-          "Leina Radio downloads without the server (Settings -> Server -> Public database on GitHub).")
+    print(f"{BOLD}Publish to GitHub{RESET} - as often as Settings -> Automation says (a day by default), when "
+          "the catalog changed: the public copy Leina Radio downloads without the server (Settings -> Server -> "
+          "Public database on GitHub). Also from the automation timer while MusicDatabase is closed.")
     print(f"\nAlways done, not switchable: {startup_settings.ALWAYS}.\n")
     choices = [questionary.Choice(title=switch.label, value=switch.key, checked=startup_settings.enabled(switch))
                for switch in startup_settings.SWITCHES]
-    choices.append(questionary.Choice(title="Daily publish to GitHub", value=_GITHUB_PUBLISH,
+    choices.append(questionary.Choice(title="Publish to GitHub", value=_GITHUB_PUBLISH,
                                       checked=public_database.daily_publish_enabled()))
     picked = questionary.checkbox("Start-up tasks (space to tick or untick, Enter to save):", choices=choices).ask()
     if picked is None:
@@ -124,7 +128,7 @@ def startup_tasks_menu():
     github = _GITHUB_PUBLISH in picked
     if github != public_database.daily_publish_enabled():
         public_database.set_daily_publish(github)
-        changed.append("Daily publish to GitHub")
+        changed.append("Publish to GitHub")
     if not changed:
         print("Nothing changed.")
         return

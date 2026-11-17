@@ -14,7 +14,7 @@ from utils.database.database_sessions import require_global_database_sessions, s
 from utils.database.datatables import Song
 from utils.database.tags_management import add_tag_to_songs, song_ids_with_tag
 from utils.ui.display_utils import display_songs
-from utils.ui.prompts import ask_yes_no, tick_items
+from utils.ui.prompts import ask_yes_no, decided, tick_items
 from utils.ui.song_colors import song_tokens
 
 
@@ -37,13 +37,15 @@ def review_covers() -> None:
                       "Unticked: the name isn't an artist in the database yet, or is only a guess.",
                       "Songs left unticked aren't offered again.")
         picked = tick_items("Which songs do you want to mark?", proposals, _proposal_title,
-                            checked=lambda proposal: proposal.certain)
+                            checked=lambda proposal: proposal.certain, rule="covers",
+                            facts=lambda p: {"certain": p.certain, "covered_artist_exists": p.covered is not None,
+                                             "performer_differs": bool(p.performer)})
         if picked is None:
             say("Cancelled, nothing marked as checked.")
             return
         for proposal in picked:
             apply_cover_proposal(session, proposal)
-        add_tag_to_songs([proposal.song.id for proposal in proposals], COVER_CHECKED_TAG)
+        add_tag_to_songs([proposal.song.id for proposal in decided(proposals, picked)], COVER_CHECKED_TAG)
         submit_global_database_session()
         say(f"Marked {len(picked)} song(s)." if picked else "Nothing picked.")
     else:

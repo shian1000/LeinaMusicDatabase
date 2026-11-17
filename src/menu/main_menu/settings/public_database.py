@@ -6,6 +6,7 @@ import questionary
 
 from config.constants import PUBLIC_DB_RELEASE_TAG
 from settings import Settings
+from utils.common.automation_settings import interval_minutes, minutes_text
 from utils.common.env_file import read_env_value, save_env_value
 from utils.database import public_database
 from utils.database.moods import apply_global_mood_changes_quietly
@@ -26,8 +27,8 @@ def _status_lines() -> list[str]:
     repo = Settings.github_db_repo or "(not set)"
     token = "set" if Settings.github_db_token else "not set"
     lines = [f"Repository: {repo}, token: {token}",
-             f"Daily publish (after the daily backup, only when the catalog changed): "
-             f"{'on' if public_database.daily_publish_enabled() else 'off'}"]
+             f"Automatic publish (every {minutes_text(interval_minutes('github'))} - Settings -> Automation -, only when the catalog "
+             f"changed): {'on' if public_database.daily_publish_enabled() else 'off'}"]
     last = public_database.last_result()
     lines.append(f"Last publish: {last['at']} - {last['status']}: {last['message']}" if last
                  else "Last publish: never")
@@ -42,7 +43,8 @@ def public_database_menu():
         print()
         for line in _status_lines():
             print(line)
-        daily = "Turn the daily publish off" if public_database.daily_publish_enabled() else "Turn the daily publish on"
+        daily = ("Turn the automatic publish off" if public_database.daily_publish_enabled()
+                 else "Turn the automatic publish on")
         action = questionary.select("Public database on GitHub:", choices=[
             "Publish now", daily, "Set the repository", "Enter the token", "How to set it up", "Back",
         ]).ask()

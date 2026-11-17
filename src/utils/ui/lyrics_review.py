@@ -9,13 +9,16 @@ import pyperclip
 import questionary
 
 from config.constants import LYRICS_MISS_REJECTED, LYRICS_SOURCE_MANUAL
+from utils.common.automation_settings import recent_misses, remember_misses
 from utils.common.normalizer import normalize
+from utils.common.text_utils import similarity
 from utils.common.output import escape, ok, review_header, show
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from utils.database.lyrics_store import (
     Lyrics,
     forget_lookups,
+    is_instrumental,
     lyrics_db_session,
     mark_instrumental,
     original_lyrics,
@@ -29,7 +32,7 @@ from utils.database.lyrics_store import (
 from utils.discoveries.discoveries_manager import discover_lyrics, load_discovery_modules
 from utils.discoveries.lyrics_pages import lyrics_from_page
 from utils.discoveries.discovery_settings import LYRICS
-from utils.ui.prompts import ask_yes_no, choose, tick_items
+from utils.ui.prompts import ask_yes_no, choose, decided, stop_requested, tick_items, unattended_now
 
 
 def _label(song) -> str:
@@ -59,6 +62,9 @@ def fill_missing_lyrics() -> None:
         return
     with lyrics_db_session() as lyrics_session:
         pending = songs_missing_lyrics(session, lyrics_session, [module_id for module_id, _, _ in modules])
+        if unattended_now():  # the automation: not the songs it left without lyrics lately
+            missed = recent_misses("lyrics")
+            pending = [(song, module_ids) for song, module_ids in pending if song.id not in missed]
         if not pending:
             show("Every song has lyrics, is instrumental, or every module was asked about it recently.")
             return
@@ -67,16 +73,25 @@ def fill_missing_lyrics() -> None:
         if len(pending) > max_songs:
             show(f"Looking up the first {max_songs} (see Settings to change this).")
             pending = pending[:max_songs]
-        _look_up(session, lyrics_session, modules, pending)
+        looked_at = _look_up(session, lyrics_session, modules, pending)
+        if unattended_now():
+            remember_misses("lyrics", [song.id for song in looked_at
+                                       if stored_lyrics(lyrics_session, song.id) is None and not is_instrumental(song)])
 
 
-def _look_up(session, lyrics_session, modules, pending: list) -> None:
+def _look_up(session, lyrics_session, modules, pending: list) -> list:
     """Look `pending` ([(song, module ids to ask)]) up, saving as it goes;
-    the unsure ones and the songs without words are asked about at the end."""
+    the unsure ones and the songs without words are asked about at the end.
+    Returns the songs looked up (not those left by a stop)."""
+    looked_at = []
     durations = song_durations(session, [song for song, _ in pending])
     saved, unsure, wordless, unasked = 0, [], [], 0
     try:
         for position, (song, module_ids) in enumerate(pending, 1):
+            if stop_requested():  # the automation: its time is up, or the app waits
+                show("Stopped - what was found so far is kept.")
+                break
+            looked_at.append(song)
             show(f"[{position}/{len(pending)}] Looking for lyrics of [yellow]{escape(_label(song))}[/yellow]")
             search = discover_lyrics(song, [m for m in modules if m[0] in module_ids], durations.get(song.id))
             for module_id in search.missed:
@@ -112,6 +127,7 @@ def _look_up(session, lyrics_session, modules, pending: list) -> None:
     if confirmed:
         show(f"Saved {confirmed} more.")
     _offer_instrumental(lyrics_session, wordless)
+    return looked_at
 
 
 def _offer_instrumental(lyrics_session, wordless: list) -> None:
@@ -128,11 +144,13 @@ def _offer_instrumental(lyrics_session, wordless: list) -> None:
         song, match = pair
         return f"{_label(song)}" + (f"  [instrumental, says {match.module_id}]" if match else "")
 
-    selected = tick_items("Mark as instrumental:", wordless, label, checked=lambda pair: pair[1] is not None)
+    selected = tick_items("Mark as instrumental:", wordless, label, checked=lambda pair: pair[1] is not None,
+                          rule="lyrics_instrumental", facts=lambda pair: {"source_says_instrumental": pair[1] is not None})
     if selected is None:
         return
     ticked = {id(pair) for pair in selected}
-    for pair in wordless:
+    # Unattended, an untaken "instrumental" isn't turned down: it's offered again
+    for pair in decided(wordless, selected):
         song, match = pair
         if match is not None and id(pair) in ticked:
             save_lyrics(lyrics_session, song.id, _as_lyrics(match))
@@ -143,6 +161,16 @@ def _offer_instrumental(lyrics_session, wordless: list) -> None:
         mark_instrumental([song for song, _ in selected])
         submit_global_database_session()
         show(f"Marked {len(selected)} song(s) instrumental.")
+
+
+def _unsure_facts(pair) -> dict:
+    song, match = pair
+    found = match.result
+    return {"title_similarity": round(similarity(found.matched_title or "", song.title), 3),
+            "artist_similarity": round(similarity(found.matched_artist or "", song.artist.name), 3),
+            "same_title": normalize(found.matched_title) == normalize(song.title),
+            "length_difference_s": (round(abs(match.duration_s - match.found_duration_s))
+                                    if match.duration_s and match.found_duration_s else None)}
 
 
 def _review_unsure(lyrics_session, unsure: list) -> int:
@@ -162,7 +190,8 @@ def _review_unsure(lyrics_session, unsure: list) -> int:
                 f"{_length(match.found_duration_s)}) · {first[:60]}")
 
     selected = tick_items("Save these lyrics:", unsure, label,
-                          checked=lambda pair: normalize(pair[1].result.matched_title) == normalize(pair[0].title))
+                          checked=lambda pair: normalize(pair[1].result.matched_title) == normalize(pair[0].title),
+                          rule="lyrics_same_title", facts=_unsure_facts)
     if selected is None:
         return 0
     for song, match in selected:

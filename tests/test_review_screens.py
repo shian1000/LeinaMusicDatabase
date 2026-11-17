@@ -145,7 +145,8 @@ def test_set_genre_of_several_songs_and_clearing_it(session, monkeypatch):
 
 def _candidate(song, title_says_so, cleaned=None):
     return SimpleNamespace(song=song, reasons=["title"] if title_says_so else ["long video"],
-                           title_says_so=title_says_so, cleaned_title=cleaned or song.title)
+                           title_says_so=title_says_so, cleaned_title=cleaned or song.title,
+                           file_duration_s=None, video_duration_s=None)
 
 
 @pytest.fixture
@@ -159,7 +160,7 @@ def albums(session, monkeypatch):
     monkeypatch.setattr(far, "find_full_album_candidates", lambda s, files, videos: state.candidates)
     monkeypatch.setattr(far, "set_song_kind", lambda songs, kind: state.kinds.append([s.title for s in songs]) or [])
     monkeypatch.setattr(far, "add_to_full_album_ignore_list", state.ignored.extend)
-    monkeypatch.setattr(far, "ask_yes_no", lambda q: state.answers.pop(0))
+    monkeypatch.setattr(far, "ask_yes_no", lambda q, **k: state.answers.pop(0))
     monkeypatch.setattr(far, "song_artist_label", lambda song: song.artist.name)
     return state
 
@@ -340,7 +341,7 @@ def test_divide_artists_shows_square_brackets_in_titles(monkeypatch, capsys):
     monkeypatch.setattr(md, "artist_primary_songs", lambda a: [
         SimpleNamespace(id=1, title="Teksański [live]", album="[sic]", year=None),
         SimpleNamespace(id=2, title="Cisza", album=None, year=1999)])
-    monkeypatch.setattr(md, "ask_yes_no", lambda q: False)
+    monkeypatch.setattr(md, "ask_yes_no", lambda q, **k: False)
 
     md.divide_artists_menu()
     out = capsys.readouterr().out

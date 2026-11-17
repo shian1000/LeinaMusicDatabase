@@ -4,7 +4,7 @@ turns it off, so a .env from before the switches behaves as it did. Read when
 the app starts, from the file (not the environment), so a change counts from
 the next start without a restart in between.
 
-The daily publish to GitHub keeps its own switch (public_database.py's state
+The publish to GitHub keeps its own switch (public_database.py's state
 file, also in Settings -> Server -> Public database on GitHub); the start-up
 screen shows and changes that one instead of adding a second.
 

@@ -125,7 +125,7 @@ PUBLIC_DB_RELEASE_TAG = "database"
 PUBLIC_DB_RELEASE_NAME = "Public database"
 PUBLIC_DB_VERSION_FILE = "version.json"
 PUBLIC_DB_FORMAT = 1
-# The daily publish switch and the last publish's time and result
+# The automatic publish switch and the last publish's time and result
 PUBLIC_DB_STATE_FILE = PROJECT_ROOT / "data/public_database.json"
 # The day main.py last ran its once-a-day tasks (utils/common/startup_settings.py)
 STARTUP_STATE_FILE = PROJECT_ROOT / "data/startup_state.json"
@@ -139,12 +139,222 @@ PUBLIC_CATALOG_MAX_BYTES = 512 * 1024 * 1024
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_API_TIMEOUT = 20
 GITHUB_UPLOAD_TIMEOUT = 120
-# The automatic pass over new requests (utils/database/inbox_auto.py), run by
-# a systemd user timer (auto_resolve_requests.py) this often, while the app
-# isn't open
+# The automatic pass over new requests (utils/database/inbox_auto.py) and the
+# rest of the automation, run by a systemd user timer (auto_resolve_requests.py)
+# every INBOX_AUTO_TICK while the app isn't open. Each run does only what
+# Settings -> "Automation"'s intervals make due, so changing one needs no new
+# timer unit
 INBOX_AUTO_SERVICE_NAME = "musicdatabase-inbox"
-INBOX_AUTO_INTERVAL = "15min"
+INBOX_AUTO_TICK = "5min"
 INBOX_AUTO_STARTUP_DELAY = "5min"
+# Settings -> "Automation" (utils/common/automation_settings.py): the
+# intervals and the rules turned off; when each task last ran
+AUTOMATION_CONFIG_FILE = PROJECT_ROOT / "automation_config.json"
+AUTOMATION_STATE_FILE = PROJECT_ROOT / "data/automation_state.json"
+# How often each automatic task runs, and how long a lookup step may take:
+# key -> (label, the minutes shown after it; default, minimum), in minutes.
+# Nothing runs more often than INBOX_AUTO_TICK
+AUTOMATION_INTERVALS = {
+    "requests": ("Check new requests from Leina Radio every", 15, 5),
+    "clean_ups": ("Run the clean-ups (Run all steps without lookups) every", 15, 5),
+    "lookups": ("Look up missing data on the internet (spell check, albums, years, genres, lyrics) every", 15, 5),
+    # A step stops there, keeping what it found: a run of 106 songs a step
+    # took 13-15 min, every 15 min, and the app waited for it each time
+    "lookup_step": ("Stop each of those lookups (and save what it found) after", 3, 1),
+    "github": ("Publish the public database on GitHub every", 24 * 60, 60),
+}
+# A run is due this long before its interval is up: the timer's own start
+# times wander by up to a minute (AccuracySec)
+AUTOMATION_SLACK_SECONDS = 120
+# The rules the automation settles a case or a proposal by on its own; what no
+# rule that is on settles waits for the owner. Key -> label, in the order of
+# Settings -> "Automation". A step's rule takes what its checkbox list ticks at
+# first (prompts.tick_items(rule=...)), its label says which those are
+AUTOMATION_RULE_LABELS = {
+    "dead_link_same_video": "Requests - dead link: replace it when Leina Radio's suggestion and our search "
+                            "found the same video and it plays here",
+    "found_link_same_video": "Requests - song without a link: save the one Leina Radio found when our search "
+                             "found the same video and it plays here",
+    "field_correction_permitted": "Requests - field correction: save it when its sender may save corrections "
+                                  "without review and nothing about it conflicts",
+    "clean_names_lookalike_letters": "Clean names: fix names mixing Latin and Cyrillic look-alike letters",
+    "clean_names_producer_credit": "Clean names: take producer credits out of titles and albums",
+    "clean_names_feat": "Clean names: move featured artists from titles to the songs' artists (not a name "
+                        "that looks like several)",
+    "split_artists": "Split joined artist names: a name with a feat. / x credit, or whose every part is an "
+                     "artist already",
+    "swapped_songs": "Artist and title swapped: fix a song when the other artist already has a song titled "
+                     "like this one's artist",
+    "duplicated_songs": "Resolve duplicated songs: merge an artist's songs whose titles differ only in a "
+                        "\"feat.\" credit, spelling or a junk bracket - not ones looking like versions",
+    "duplicated_songs_feat": "Resolve duplicated songs: credit on the kept song the featured artists only a "
+                             "merged title named",
+    "full_albums": "Find full albums: mark a song whose title says it's a whole album, and take those words "
+                   "out of its title",
+    "projects": "Projects: mark a song whose names settle the project and who plays it",
+    "covers": "Find covers: mark a cover whose title names exactly an artist of the database",
+    "versions": "Find versions: mark a version whose title names a clear kind (live, remix, acoustic...)",
+    "songless_artists": "Remove artists without songs: delete one nothing uses (never the merges into a "
+                        "look-alike)",
+    "soundtracks": "Resolve soundtrack album names: bring one soundtrack spelt several ways to \"Title OST\"",
+    "spell_check_artist": "Spell check: rename an artist as MusicBrainz spells it (never onto another "
+                          "artist's name)",
+    "spell_check_title": "Spell check: retitle a song as MusicBrainz spells it",
+    "years_unsure": "Fill missing years: save a year only an unsure source gave (a YouTube video's date, a "
+                    "year in the title)",
+    "genres_artist": "Fill missing genres: give a song its artist's genres when MusicBrainz has none for the "
+                     "song or its album",
+    "lyrics_same_title": "Fill missing lyrics: save lyrics found for a song of the same title whose length "
+                         "doesn't confirm it",
+    "lyrics_instrumental": "Fill missing lyrics: mark a song instrumental when a source says it has no words",
+}
+# Settings -> "Automation" -> "My rules": the owner's own rules, "if these
+# facts hold, take it", one question each: key -> (what is asked, {fact:
+# (label, kind)}). A question with a built-in rule has that rule's key; its
+# facts come from prompts' facts=... or, for Leina Radio's requests, from
+# inbox_auto.py. A fact that is None for an item (unknown) never holds
+FACT_NUMBER, FACT_YES_NO, FACT_TEXT = "number", "yes/no", "text"
+_SIMILARITY = " (0-1, 1 = the same)"
+_SENDER_FACTS = {
+    "logged_in": ("sent by a logged-in user", FACT_YES_NO),
+    "sender_may_correct": ("its sender may save corrections (Users -> Permissions)", FACT_YES_NO),
+    "reports": ("how many reports ask for it", FACT_NUMBER),
+}
+_LINK_FACTS = {
+    "same_video": ("Leina Radio's suggestion and our search found the same video", FACT_YES_NO),
+    "suggested_by_leina_radio": ("Leina Radio suggested a video", FACT_YES_NO),
+    "our_search_found": ("our search found a video", FACT_YES_NO),
+    "plays": ("the video plays here", FACT_YES_NO),
+    "video_title_similarity": ("the video's title and the song's alike" + _SIMILARITY, FACT_NUMBER),
+    "channel_is_artist": ("the video's channel names the song's artist", FACT_YES_NO),
+    **_SENDER_FACTS,
+}
+AUTOMATION_QUESTIONS = {
+    "dead_link_same_video": ("Requests: a dead YouTube link to replace", _LINK_FACTS),
+    "found_link_same_video": ("Requests: a link Leina Radio found for a song without one", _LINK_FACTS),
+    "field_correction_permitted": ("Requests: a field correction", {
+        "field": ("which field (title, year, artist, album, ...)", FACT_TEXT),
+        "similarity": ("the old and new value alike" + _SIMILARITY, FACT_NUMBER),
+        "changed_since": ("the database's value changed since Leina Radio's copy", FACT_YES_NO),
+        "other_values_asked": ("other reports asked for other values", FACT_YES_NO),
+        "title_changed": ("the song has another title now", FACT_YES_NO),
+        "new_artist": ("a new artist would be made", FACT_YES_NO),
+        "old_artist_left_empty": ("the old artist would be left without songs", FACT_YES_NO),
+        "looks_like_spelling_fix": ("a new artist name looks like a spelling fix of the old", FACT_YES_NO),
+        "whole_album_could_be_renamed": ("the song's whole album could be renamed instead", FACT_YES_NO),
+        "latin_form_to_check": ("the name has a Latin form that may need changing too", FACT_YES_NO),
+        "video_plays": ("a YouTube link set plays here", FACT_YES_NO),
+        **_SENDER_FACTS}),
+    "song_request": ("Requests: a song Leina Radio asked to add", {
+        "musicbrainz_found": ("MusicBrainz knows a recording for it", FACT_YES_NO),
+        "musicbrainz_title_similarity": ("its title and MusicBrainz's alike" + _SIMILARITY, FACT_NUMBER),
+        "musicbrainz_artist_similarity": ("its artist and MusicBrainz's alike" + _SIMILARITY, FACT_NUMBER),
+        "musicbrainz_score": ("MusicBrainz's own score of the match (0-100)", FACT_NUMBER),
+        "artist_known": ("its artist is in the database (by that name)", FACT_YES_NO),
+        "closest_song_score": ("how alike the closest song of the database is" + _SIMILARITY, FACT_NUMBER),
+        "has_youtube_video": ("Leina Radio named its YouTube video", FACT_YES_NO),
+        "names_from": ("where the names come from (the request, or read from a video's title...)", FACT_TEXT),
+        "requests": ("how many reports ask for it", FACT_NUMBER),
+        "users": ("how many logged-in users asked for it", FACT_NUMBER),
+        "logged_in": ("asked by a logged-in user", FACT_YES_NO),
+        "sender_may_add_songs": ("its sender may have songs added (Users -> Permissions)", FACT_YES_NO)}),
+    "import_existing_song": ("Import: use the similar song the database has instead of adding one", {
+        "title_similarity": ("the titles alike" + _SIMILARITY, FACT_NUMBER),
+        "same_when_normalized": ("only case, accents or punctuation differ", FACT_YES_NO),
+        "same_artist": ("the same artist", FACT_YES_NO)}),
+    "import_existing_artist": ("Import: use the similar artist the database has instead of a new one", {
+        "name_similarity": ("the names alike" + _SIMILARITY, FACT_NUMBER),
+        "same_when_normalized": ("only case, accents or punctuation differ", FACT_YES_NO)}),
+    "clean_names_lookalike_letters": ("Clean names: a name mixing Latin and Cyrillic look-alike letters", {
+        "field": ("which name (title / artist / album)", FACT_TEXT),
+        "songs": ("how many songs have it", FACT_NUMBER),
+        "similarity": ("old and new name alike" + _SIMILARITY, FACT_NUMBER)}),
+    "clean_names_producer_credit": ("Clean names: a producer credit in a title or album", {
+        "field": ("which name (title / album)", FACT_TEXT),
+        "songs": ("how many songs have it", FACT_NUMBER),
+        "similarity": ("old and new name alike" + _SIMILARITY, FACT_NUMBER)}),
+    "clean_names_feat": ("Clean names: featured artists in a title", {
+        "names": ("how many featured artists", FACT_NUMBER),
+        "all_known": ("every one is an artist of the database already", FACT_YES_NO),
+        "suspicious": ("a name looks like more than one", FACT_YES_NO)}),
+    "split_artists": ("Split joined artist names: a name that looks like several artists", {
+        "confident": ('joined by "feat." / " x "', FACT_YES_NO),
+        "parts": ("how many artists it splits into", FACT_NUMBER),
+        "all_parts_exist": ("every part is an artist already", FACT_YES_NO),
+        "songs": ("how many songs the artist has", FACT_NUMBER)}),
+    "swapped_songs": ("Artist and title swapped", {
+        "both_ways": ("the other artist already has a song titled like this one's artist", FACT_YES_NO)}),
+    "duplicated_songs": ("Resolve duplicated songs: songs that look like one song", {
+        "songs": ("how many songs in the group", FACT_NUMBER),
+        "title_similarity": ("the titles alike (the least alike pair)" + _SIMILARITY, FACT_NUMBER),
+        "looks_like_versions": ("the titles name different versions (remix, live...)", FACT_YES_NO),
+        "cross_artist": ("credited to different main artists", FACT_YES_NO)}),
+    "duplicated_songs_feat": ("Resolve duplicated songs: a featured artist only a merged title named", {
+        "name": ("the artist's name", FACT_TEXT)}),
+    "full_albums": ("Find full albums: a song that may be a whole album", {
+        "title_says_so": ("its title says it's a full album", FACT_YES_NO),
+        "minutes": ("its length in minutes (file or video)", FACT_NUMBER)}),
+    "projects": ("Projects: a song naming a project", {
+        "guessed": ("who plays it is only a guess", FACT_YES_NO),
+        "artist_unknown": ("the names don't say who plays it", FACT_YES_NO),
+        "whole": ("a whole set, not one song", FACT_YES_NO)}),
+    "covers": ("Find covers: a song whose title says it's a cover", {
+        "certain": ("the title names exactly an artist of the database", FACT_YES_NO),
+        "covered_artist_exists": ("the covered artist is in the database", FACT_YES_NO),
+        "performer_differs": ('the title names who plays it ("cover by X")', FACT_YES_NO)}),
+    "versions": ("Find versions: a song whose title says it's a version", {
+        "certain": ("the marker names a clear kind", FACT_YES_NO),
+        "kind": ("the kind (live, remix, acoustic, ...)", FACT_TEXT),
+        "has_original": ("the original is in the database", FACT_YES_NO)}),
+    "songless_artists": ("Remove artists without songs", {
+        "merge": ("merged into a look-alike artist (not deleted)", FACT_YES_NO),
+        "name_similarity": ("its name and the look-alike's alike" + _SIMILARITY, FACT_NUMBER),
+        "empty_albums": ("how many empty albums it has", FACT_NUMBER)}),
+    "soundtracks": ("Resolve soundtrack album names", {
+        "spellings": ("how many spellings of the album", FACT_NUMBER),
+        "songs": ("how many songs", FACT_NUMBER)}),
+    "spell_check_artist": ("Spell check: an artist name MusicBrainz spells otherwise", {
+        "similarity": ("old and new name alike" + _SIMILARITY, FACT_NUMBER),
+        "same_when_normalized": ("only case, accents or punctuation differ", FACT_YES_NO)}),
+    "spell_check_title": ("Spell check: a title MusicBrainz spells otherwise", {
+        "similarity": ("old and new title alike" + _SIMILARITY, FACT_NUMBER),
+        "same_when_normalized": ("only case, accents or punctuation differ", FACT_YES_NO)}),
+    "years_unsure": ("Fill missing years: a year only an unsure source gave", {
+        "year": ("the year", FACT_NUMBER),
+        "from_title": ("read from the title", FACT_YES_NO),
+        "from_youtube": ("a YouTube video's date", FACT_YES_NO),
+        "songs": ("how many songs get it", FACT_NUMBER)}),
+    "genres_artist": ("Fill missing genres: only the artist's genres found", {
+        "genres": ("the genres", FACT_TEXT),
+        "genre_count": ("how many genres", FACT_NUMBER)}),
+    "lyrics_same_title": ("Fill missing lyrics: lyrics found for a song only resembling ours", {
+        "title_similarity": ("the titles alike" + _SIMILARITY, FACT_NUMBER),
+        "artist_similarity": ("the artists alike" + _SIMILARITY, FACT_NUMBER),
+        "same_title": ("the same title", FACT_YES_NO),
+        "length_difference_s": ("the recordings' lengths differ by (seconds)", FACT_NUMBER)}),
+    "lyrics_instrumental": ("Fill missing lyrics: a song nothing had words for", {
+        "source_says_instrumental": ("a source says it has no words", FACT_YES_NO)}),
+}
+# The comparisons a condition may make, by the fact's kind
+FACT_OPERATORS = {
+    FACT_NUMBER: (">=", "<=", "=", "!="),
+    FACT_YES_NO: ("is",),
+    FACT_TEXT: ("is", "is not", "contains", "doesn't contain"),
+}
+# On until the owner turns them off: what the request pass always did. Every
+# other rule starts off - turning one on is the owner's trust in it
+AUTOMATION_RULES_ON_BY_DEFAULT = frozenset({"dead_link_same_video", "found_link_same_video",
+                                            "field_correction_permitted"})
+# Songs a lookup run by the automation found nothing for are left out of its
+# later runs this long (data/automation_misses.json), so a lookup every few
+# minutes doesn't ask the same sites about them again and again; the menu's
+# own lookups still try them
+AUTOMATION_MISSES_FILE = PROJECT_ROOT / "data/automation_misses.json"
+AUTOMATION_LOOKUP_RETRY_DAYS = 14
+# Every answer the owner gives in a checkbox list, a yes/no question or the
+# request review, one JSON line each (utils/common/decision_log.py) - the
+# material for new rules
+DECISION_LOG_FILE = PROJECT_ROOT / "data/decision_log.jsonl"
 # The review reuses the automatic pass's YouTube check while it's this fresh
 INBOX_CHECK_MAX_AGE_HOURS = 24
 # Why a video is in music.db's bad_youtube_videos (migration 0010). The codes
@@ -465,9 +675,12 @@ VERSION_CHECKED_TAG = "version_checked"
 # (utils/database/account_auth.PERMISSIONS must match); the label is the menu's.
 PERMISSION_EDIT_GLOBAL_MOODS = "edit_global_moods"
 PERMISSION_APPLY_CORRECTIONS = "apply_corrections"
+PERMISSION_ADD_SONGS = "add_songs"
 PERMISSION_LABELS = {
     PERMISSION_EDIT_GLOBAL_MOODS: "Edit global moods from Leina Radio (add and remove songs)",
     PERMISSION_APPLY_CORRECTIONS: "Field corrections from Leina Radio are saved without review (when nothing conflicts)",
+    PERMISSION_ADD_SONGS: "Songs asked for from Leina Radio may be added without review (by your rules in "
+                          "Settings -> Automation)",
 }
 
 # ==================== Genres (utils/database/genres.py, songs.genre) ====================

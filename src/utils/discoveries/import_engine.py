@@ -130,7 +130,7 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
     # Full albums only for an entry that looks like one, as in find_existing_song():
     # a track "Migration" is never offered the full album "Migration".
     existing_artists_songs = songs_for_entry(get_songs_from_db_session(artist_categories[2], artist_obj.id),
-                                             new_title, metadata.duration_s, metadata.project)
+                                             new_title, metadata.duration_s, metadata.project, metadata.is_cover)
 
     # Try to find similar songs using local similarity comparison (no API call).
     # Bracketed annotations like "(prod. X)" or "(feat. Y)" are stripped first
@@ -451,7 +451,7 @@ def _with_feats(artist_songs: list, feat_artists) -> list:
 
 
 def find_existing_song(title: str, artist_songs: list, duration_s: int | None = None,
-                       feat_artists=None, project: str | None = None) -> Song | None:
+                       feat_artists=None, project: str | None = None, cover: bool = False) -> Song | None:
     """The song among one artist's `artist_songs` that `title` already is:
     same normalized title (or the owner's Latin form of it: "Gruppa krovi"
     is "Группа крови"; or the stored title without its featured-artist
@@ -464,9 +464,9 @@ def find_existing_song(title: str, artist_songs: list, duration_s: int | None = 
     entry's `project`. With `feat_artists` (the entry's, moved out of its title)
     the songs crediting them are tried first (_with_feats())."""
     if credited := _with_feats(artist_songs, feat_artists):
-        if (song := find_existing_song(title, credited, duration_s, project=project)) is not None:
+        if (song := find_existing_song(title, credited, duration_s, project=project, cover=cover)) is not None:
             return song
-    artist_songs = songs_for_entry(artist_songs, title, duration_s, project)
+    artist_songs = songs_for_entry(artist_songs, title, duration_s, project, cover)
     key = normalize(title)
     if not key:
         # Only punctuation (":/", "?!"): normalize() leaves nothing, and ""
@@ -529,7 +529,7 @@ def _title_core(title: str, drop_feat: bool = True, drop_the: bool = True) -> st
 
 
 def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = None,
-                      feat_artists=None, project: str | None = None) -> Song | None:
+                      feat_artists=None, project: str | None = None, cover: bool = False) -> Song | None:
     """find_existing_song(), else the song whose title is `title` without
     brackets, trailing junk or a track number on either side - first keeping
     a trailing "feat. X", then without it: "No Scrubs (Official Video)" is
@@ -539,10 +539,10 @@ def find_song_loosely(title: str, artist_songs: list, duration_s: int | None = N
     Out", but "The Man (Official Video)" is "The Man" when "Man" is beside it.
     With `feat_artists`, all that among the songs crediting them first."""
     if credited := _with_feats(artist_songs, feat_artists):
-        if (song := find_song_loosely(title, credited, duration_s, project=project)) is not None:
+        if (song := find_song_loosely(title, credited, duration_s, project=project, cover=cover)) is not None:
             return song
-    song = find_existing_song(title, artist_songs, duration_s, project=project)
-    artist_songs = songs_for_entry(artist_songs, title, duration_s, project)
+    song = find_existing_song(title, artist_songs, duration_s, project=project, cover=cover)
+    artist_songs = songs_for_entry(artist_songs, title, duration_s, project, cover)
     for drop_the in (False, True):
         for drop_feat in (False, True):
             if song is None and (core := _title_core(title, drop_feat, drop_the)):
@@ -633,9 +633,9 @@ class LocalSongMatcher:
         if artist is None:
             return None
         songs, duration, feats = self._artist_songs(artist), metadata.duration_s, metadata.feat_artists
-        song = find_song_loosely(title, songs, duration, feats, metadata.project)
+        song = find_song_loosely(title, songs, duration, feats, metadata.project, metadata.is_cover)
         if song is None and (rest := title_after_artists(title, name)):
-            song = find_song_loosely(rest, songs, duration, feats, metadata.project)
+            song = find_song_loosely(rest, songs, duration, feats, metadata.project, metadata.is_cover)
         return song
 
     def without_project(self, metadata: dict) -> Song | None:
@@ -662,7 +662,7 @@ class LocalSongMatcher:
         name, title = metadata.artist, metadata.title
         if not name or not title or self._artist(name) is not None:
             return None
-        found = [s for s in self._songs_by_title_core(title, metadata.duration_s, metadata.project)
+        found = [s for s in self._songs_by_title_core(title, metadata.duration_s, metadata.project, metadata.is_cover)
                  if any(similarity(name, known) >= scaled_similarity_threshold(name, known, min_artist_similarity)
                         for known in _artist_names(s, split_parts=False))]
         return found[0] if len(found) == 1 else None
@@ -683,31 +683,34 @@ class LocalSongMatcher:
         name, title = metadata.artist, metadata.title
         if not title:
             return None
-        duration_s, project = metadata.duration_s, metadata.project
+        duration_s, project, cover = metadata.duration_s, metadata.project, metadata.is_cover
         if not name:
-            found = self._songs_by_title_core(title, duration_s, project) if title_guesses else []
+            found = self._songs_by_title_core(title, duration_s, project, cover) if title_guesses else []
             if len(found) > 1:
                 # The brackets tell them apart: "Dragostea Din Tei (Numa Numa)
                 # (Medieval Cover)" is the one titled exactly so, not O-Zone's
                 whole = normalize(title)
                 found = [s for s in found if whole in map(normalize, song_titles(s))]
             return found[0] if len(found) == 1 else None
-        swapped = self.match_exact({"artist_name": title, "title": name, "duration_s": duration_s, "project": project})
+        swapped = self.match_exact({"artist_name": title, "title": name, "duration_s": duration_s, "project": project,
+                                    "covered_artist": metadata.covered_artist})
         if swapped is not None:
             return swapped
         artist = self._artist(name)
         if artist is not None:
             if not title_guesses:
                 return None
-            song = (self._similar_title(artist, title, duration_s, project)
-                    or self._title_prefix(artist, title, duration_s, project))
+            song = (self._similar_title(artist, title, duration_s, project, cover)
+                    or self._title_prefix(artist, title, duration_s, project, cover))
         else:
-            found = [s for s in self._songs_by_title_core(title, duration_s, project) if _artist_resembles(name, s)]
+            found = [s for s in self._songs_by_title_core(title, duration_s, project, cover)
+                     if _artist_resembles(name, s)]
             song = found[0] if len(found) == 1 else None
         if song is None and title_guesses and (whole := metadata.unsplit_title or self.joined_title(metadata)):
             # A file name split on a bare hyphen, or an unknown artist that is
             # the start of the title: the whole name as the title
-            song = self.match_similar({"title": whole, "duration_s": duration_s, "project": project})
+            song = self.match_similar({"title": whole, "duration_s": duration_s, "project": project,
+                                       "covered_artist": metadata.covered_artist})
         return song
 
     def joined_title(self, metadata: dict) -> str | None:
@@ -758,7 +761,8 @@ class LocalSongMatcher:
         if self._scoring is None:
             self._scoring = [(song, self._title_forms(song)) for song in self.session.query(Song).all()]
         allowed = set(map(id, songs_for_entry([song for song, _ in self._scoring],
-                                               metadata.title, metadata.duration_s, metadata.project)))
+                                               metadata.title, metadata.duration_s, metadata.project,
+                                               metadata.is_cover)))
         with_reading, as_tagged = self._with_reading(metadata), self._wanted(metadata)
         scored = [(song, score) for song, forms in self._scoring
                   if id(song) in allowed
@@ -899,12 +903,13 @@ class LocalSongMatcher:
         metadata = as_entry(metadata)
         if metadata.artist or not metadata.title:
             return []
-        found = self._songs_by_title_core(metadata.title, metadata.duration_s, metadata.project)
+        found = self._songs_by_title_core(metadata.title, metadata.duration_s, metadata.project, metadata.is_cover)
         if not 2 <= len(found) <= limit:
             return []
         return sorted(found, key=lambda s: ((s.artist.name or "").lower(), s.id))
 
-    def _songs_by_title_core(self, title: str, duration_s: int | None = None, project: str | None = None) -> list:
+    def _songs_by_title_core(self, title: str, duration_s: int | None = None, project: str | None = None,
+                             cover: bool = False) -> list:
         """Every song, any artist, whose title core is `title`'s (full
         albums only for an entry that looks like one)."""
         core = _title_core(title)
@@ -915,30 +920,30 @@ class LocalSongMatcher:
             for song in self.session.query(Song).all():
                 for song_core in {c for c in map(_title_core, song_titles(song)) if c}:
                     self._by_title.setdefault(song_core, []).append(song)
-        return songs_for_entry(self._by_title.get(core, []), title, duration_s, project)
+        return songs_for_entry(self._by_title.get(core, []), title, duration_s, project, cover)
 
     def _similar_title(self, artist: Artist, title: str, duration_s: int | None = None,
-                       project: str | None = None) -> Song | None:
+                       project: str | None = None, cover: bool = False) -> Song | None:
         """The one song of `artist` whose whole title, bracket text
         included, is at least FILE_TITLE_SIMILARITY_THRESHOLD similar to
         `title`."""
         wanted = normalize(title)
         found = [
-            song for song in songs_for_entry(self._artist_songs(artist), title, duration_s, project)
+            song for song in songs_for_entry(self._artist_songs(artist), title, duration_s, project, cover)
             if any(similarity(wanted, known) >= scaled_similarity_threshold(wanted, known, FILE_TITLE_SIMILARITY_THRESHOLD)
                    for known in map(normalize, song_titles(song)))
         ]
         return found[0] if len(found) == 1 else None
 
     def _title_prefix(self, artist: Artist, title: str, duration_s: int | None = None,
-                      project: str | None = None) -> Song | None:
+                      project: str | None = None, cover: bool = False) -> Song | None:
         """The song of `artist` whose title (core) the file's title starts
         with, as whole words - junk the cleanup lists don't know trailing it
         ("Tubthumping  Officiel official Soundtrack World Cup 98"). The
         longest such title wins ("Song 2" over "Song"); None on a tie."""
         wanted = _title_core(title)
         found = []
-        for song in songs_for_entry(self._artist_songs(artist), title, duration_s, project):
+        for song in songs_for_entry(self._artist_songs(artist), title, duration_s, project, cover):
             cores = [c for c in map(_title_core, song_titles(song))
                      if len(c) >= FILE_TITLE_PREFIX_MIN_LENGTH and wanted.startswith(c + " ")]
             if cores:
@@ -1008,7 +1013,7 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list, en
     existing_artists_songs = get_songs_from_db_session(artist_categories[2], artist_obj.id)
 
     ex_son = find_existing_song(metadata.title, existing_artists_songs, metadata.duration_s, metadata.feat_artists,
-                                metadata.project)
+                                metadata.project, metadata.is_cover)
     if ex_son is not None:
         print("Yes, there is a song like this already. Skipping")
         slog(f"    [SONG EXISTS] Exact match found", priority=1)
@@ -1087,7 +1092,7 @@ def _settle_song_conflicts(pending_conflicts: list, session, entries: dict | Non
         artist_obj = conflict["artist_obj"]
         existing_song = conflict["existing_song"]
         added_now = find_existing_song(metadata.title, [s for s in added if s.artist_id == artist_obj.id],
-                                       metadata.duration_s, project=metadata.project)
+                                       metadata.duration_s, project=metadata.project, cover=metadata.is_cover)
         if added_now is not None:
             show(f"{styled(metadata.title, 'green')} by {styled(artist_obj.name, 'cyan')} was added a moment ago "
                   "from this import - not added twice")
@@ -1098,7 +1103,12 @@ def _settle_song_conflicts(pending_conflicts: list, session, entries: dict | Non
             session.commit()
             continue
         show(f"Found similar song {styled(existing_song.title, 'blue')} by {styled(existing_song.artist.name, 'cyan')} but you were trying to add {styled(metadata.title, 'green')} by {styled(artist_obj.name, 'cyan')}")
-        if ask_yes_no("Do you wish to use the song already in the database?"):
+        if ask_yes_no("Do you wish to use the song already in the database?", rule="import_existing_song",
+                      about=f"{artist_obj.name} - {metadata.title}: the song already in the database, "
+                            f"{existing_song.artist.name} - {existing_song.title}",
+                      facts={"title_similarity": round(similarity(existing_song.title, metadata.title), 3),
+                             "same_when_normalized": normalize(existing_song.title) == normalize(metadata.title),
+                             "same_artist": existing_song.artist_id == artist_obj.id}):
             skipped.append((_entry_label(metadata), "Song already exists"))
             _backfill_youtube_link(metadata, existing_song)
             _credit_found_song(existing_song, metadata)  # the owner said it's this song
@@ -1277,7 +1287,11 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             resolved_artist = None
             for candidate in conflict["candidate_artists"]:
                 show(f"Found similar artist {styled(candidate.name, 'blue')} but you were trying to add {styled(new_artist_name, 'green')}")
-                confirmation = ask_yes_no("Do you wish to use the artist already in the database?")
+                confirmation = ask_yes_no(
+                    "Do you wish to use the artist already in the database?", rule="import_existing_artist",
+                    about=f"{new_artist_name}: the artist already in the database, {candidate.name}",
+                    facts={"name_similarity": round(similarity(candidate.name, new_artist_name or ""), 3),
+                           "same_when_normalized": normalize(candidate.name) == normalize(new_artist_name)})
                 if confirmation:
                     resolved_artist = candidate
                     print("Found existing artist")

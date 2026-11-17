@@ -587,7 +587,7 @@ def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, mon
     monkeypatch.setattr(md, "is_full_album", lambda s: False)
     monkeypatch.setattr(md, "submit_global_database_session", session.flush)
     monkeypatch.setattr(md, "check_spelling", lambda a, t: {"corrected_artist": "Sting", "corrected_title": t})
-    monkeypatch.setattr(md, "ask_yes_no", lambda q: True)
+    monkeypatch.setattr(md, "ask_yes_no", lambda q, **k: True)
     monkeypatch.setattr(md, "_MENU_SPELLCHECK_CACHE", {})
     answers.append("Merge")
 
@@ -595,6 +595,36 @@ def test_spell_check_never_auto_renames_onto_an_existing_artist(session, ui, mon
 
     session.expire_all()
     assert _names(session) == ["Sting"] and song.artist_id == sting.id
+
+
+@pytest.mark.parametrize("rule_on", [True, False])
+def test_spell_check_unattended_renames_by_its_rule_and_leaves_the_rest_unchecked(session, monkeypatch, rule_on):
+    import menu.main_menu  # noqa: F401
+    import importlib
+    from utils.common import automation_settings
+    from utils.ui import prompts
+    md = importlib.import_module("menu.main_menu.enter_database.manage_database")
+    song = _song(session, "Feilds of Gold", _artist(session, "Stingg"))
+    tagged = []
+    monkeypatch.setattr(md, "get_songs_from_db_session", lambda *a: [song])
+    monkeypatch.setattr(md, "song_ids_with_tag", lambda tag: set())
+    monkeypatch.setattr(md, "add_tag_to_song", lambda s, tag: tagged.append(s))
+    monkeypatch.setattr(md, "_find_local_spellcheck_match", lambda s: None)
+    monkeypatch.setattr(md, "is_full_album", lambda s: False)
+    monkeypatch.setattr(md, "submit_global_database_session", session.flush)
+    monkeypatch.setattr(md, "check_spelling", lambda a, t: {"corrected_artist": "Sting", "corrected_title": "Fields of Gold"})
+    monkeypatch.setattr(md, "_MENU_SPELLCHECK_CACHE", {})
+    monkeypatch.setattr(prompts, "rule_on", lambda key: rule_on or key == "spell_check_title")
+    from utils.database import database_sessions
+    monkeypatch.setattr(database_sessions, "_GLOBAL_DATABASE_SESSION", (session, None))
+
+    with prompts.unattended():
+        md.check_spelling_menu()
+
+    assert song.title == "Fields of Gold"
+    assert song.artist.name == ("Sting" if rule_on else "Stingg")
+    # Marked spell checked only once both corrections are answered
+    assert tagged == ([song] if rule_on else [])
 
 
 def test_songs_loaded_before_a_merge_follow_it(session, monkeypatch):

@@ -1,10 +1,12 @@
 """
 The automatic pass over new requests from the phone: settles on its own what
 it safely can, and leaves the rest to the owner's review (Manage database ->
-"Resolve new requests", utils/ui/inbox_request_review.py). Run every
-INBOX_AUTO_INTERVAL by a systemd user timer (auto_resolve_requests.py at the
-repo root) while the app isn't open, and by the review itself before asking
-anything. Nothing here asks anything (ADR-0001).
+"Resolve new requests", utils/ui/inbox_request_review.py). Run as often as
+Settings -> "Automation" says by a systemd user timer
+(auto_resolve_requests.py at the repo root) while the app isn't open, and by
+the review itself before asking anything. Nothing here asks anything (ADR-0001). Each kind of change below is
+a rule of Settings -> "Automation" (constants.AUTOMATION_RULE_LABELS); one
+turned off leaves its cases to the owner, with a note saying so.
 
 What it does with the files in new/:
 - an unreadable file goes to rejected/;
@@ -39,9 +41,13 @@ the next start.
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from config.constants import AUTOMATION_RULE_LABELS
 from settings import Settings
+from utils.common.automation_settings import has_user_rules, rule_on, user_rule_taking
 from utils.common.debug import flog, mlog
-from utils.database.account_auth import PERMISSION_APPLY_CORRECTIONS, user_permissions
+from utils.common.normalizer import normalize
+from utils.common.text_utils import similarity
+from utils.database.account_auth import PERMISSION_ADD_SONGS, PERMISSION_APPLY_CORRECTIONS, user_permissions
 from utils.database.inbox_field_corrections import (
     ACCEPT,
     OPEN as FIELD_OPEN,
@@ -62,6 +68,7 @@ from utils.database.inbox_found_links import (
     settle_if_none_plays,
 )
 from utils.database.inbox_requests import (
+    AUTO,
     LINK_ALREADY_CHANGED,
     OPEN,
     REVIEW,
@@ -78,10 +85,8 @@ from utils.database.inbox_requests import (
     reject_request_file,
     save_case_checks,
 )
-from utils.database.inbox_song_requests import collect_song_request_cases
+from utils.database.inbox_song_requests import collect_song_request_cases, mark_song_added, song_request_facts
 from utils.database.song_artists import additional_artist_role, song_artist_label
-
-AUTO = "auto"
 
 
 @dataclass
@@ -102,6 +107,11 @@ def _song_label(song, report) -> str:
 
 def _shown(value) -> str:
     return "empty" if value is None or value == "" else f'"{value}"' if isinstance(value, str) else str(value)
+
+
+def _rule_off(key: str) -> str | None:
+    """Why the pass may not settle a case its rule `key` would: None when the rule is on."""
+    return None if rule_on(key) else f'the rule "{AUTOMATION_RULE_LABELS[key]}" is off in Settings -> Automation'
 
 
 def link_verdict(case) -> tuple[str | None, str | None]:
@@ -178,6 +188,109 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
     return None
 
 
+def _taken(blocker: str | None, question: str, built_in_note: str | None, facts: dict | None):
+    """(who takes the case, None) - "" for the built-in rule `question`, else
+    the name of the owner's rule (Settings -> Automation -> "My rules") whose
+    blocks all hold for `facts` - or (None, why nobody does). A `blocker` (a
+    change that would be wrong, or another operation) stops both."""
+    if blocker:
+        # Without rules of the owner's the built-in rule's reason says it as before
+        return None, built_in_note if built_in_note and not has_user_rules(question) else blocker
+    if built_in_note is None:
+        built_in_note = _rule_off(question)
+        if built_in_note is None:
+            return "", None
+    rule = user_rule_taking(question, facts) if facts else None
+    return (rule, None) if rule else (None, built_in_note)
+
+
+def _by(rule: str) -> str:
+    return f'; your rule "{rule}"' if rule else ""
+
+
+def _link_video(case) -> str | None:
+    """The video a link case would get: ours when Leina Radio suggested it
+    (or nothing), else its suggestion that plays here, else its first."""
+    suggested = [r.video_id for r in case.replacements]
+    if case.our_video_id and (case.our_video_id in suggested or not suggested):
+        return case.our_video_id
+    playing = [v for v in suggested if case.plays.get(v) is True]
+    return (playing or suggested or [None])[0]
+
+
+def link_blocker(case) -> str | None:
+    """Why no rule may set the link: nothing checked, or no video to put in."""
+    if not case.checked_at:
+        return "not checked on YouTube"
+    if _link_video(case) is None:
+        return "Leina Radio suggested only videos found bad before" if case.bad else "no video to put in"
+    return None
+
+
+def link_facts(case, sender: str | None, permitted: bool) -> dict:
+    """A link case's facts (constants.AUTOMATION_QUESTIONS), about _link_video()."""
+    video = _link_video(case)
+    shown = {r.video_id: r for r in case.replacements}.get(video)
+    artist = normalize(case.song.artist.name) if case.song is not None else ""
+    return {
+        "same_video": bool(case.our_video_id) and case.our_video_id in {r.video_id for r in case.replacements},
+        "suggested_by_leina_radio": bool(case.replacements),
+        "our_search_found": bool(case.our_video_id),
+        "plays": case.plays.get(video),
+        "video_title_similarity": (round(similarity(shown.title, case.song.title), 3)
+                                   if shown and shown.title and case.song is not None else None),
+        "channel_is_artist": artist in normalize(shown.channel) if shown and shown.channel and artist else None,
+        "logged_in": sender is not None, "sender_may_correct": permitted, "reports": len(case.reports),
+    }
+
+
+def field_correction_blocker(session, case) -> str | None:
+    """Why no rule may save the correction: a value that can't be stored, a
+    song or row it no longer fits, an artist that can't be told apart, a
+    merge (another operation), a video found bad or not checked."""
+    if case.error:
+        return f"the value can't be stored: {case.error}"
+    if case.song is None:
+        return "the song it was corrected from is gone"
+    if case.not_on_song:
+        return "that artist / album isn't the song's any more"
+    if case.is_artist:
+        matches = artist_choices(session, case, case.new_value)
+        if len(matches) > 1:
+            return "several artists have that name"
+        if matches and additional_artist_role(case.row, matches[0]):
+            return "that artist is already credited on the song"
+    if artist_twins(session, case, case.new_value):
+        return "another artist already has that name (a merge?)"
+    if album_title_twin(session, case, case.new_value) is not None:
+        return "the artist already has an album of that title (saving merges the two)"
+    if case.video_id:
+        if case.bad:
+            return f"the video was found bad before: {case.bad}"
+        if not case.checked_at:
+            return "not checked on YouTube"
+    return None
+
+
+def field_correction_facts(session, case, sender: str | None, permitted: bool) -> dict:
+    """A field correction's facts (constants.AUTOMATION_QUESTIONS); only for
+    a case field_correction_blocker() lets through."""
+    old, new = _current_shown(case), case.new_value
+    return {
+        "field": case.label,
+        "similarity": round(similarity(old, new), 3) if isinstance(old, str) and isinstance(new, str) else None,
+        "changed_since": bool(case.changed_since), "other_values_asked": bool(case.earlier_values),
+        "title_changed": bool(case.title_differs),
+        "new_artist": case.is_artist and not artist_choices(session, case, new),
+        "old_artist_left_empty": bool(case.is_artist and artist_left_empty(session, case)),
+        "looks_like_spelling_fix": not rename_looks_like_other_artist(case, new),
+        "whole_album_could_be_renamed": song_album_to_rename(case) is not None,
+        "latin_form_to_check": bool(latin_form_to_check(case, new)),
+        "video_plays": case.plays.get(case.video_id) if case.video_id else None,
+        "logged_in": sender is not None, "sender_may_correct": permitted, "reports": len(case.reports),
+    }
+
+
 def _current_shown(case):
     """The field's value as the report shows it: the song's artist by name, not id."""
     return case.row.artist.name if case.is_artist else case.current
@@ -218,12 +331,28 @@ def auto_resolve(session, requests: list[RequestFile], on_case=None, shown: bool
     return result
 
 
+def _sender_of(case, senders: dict) -> str | None:
+    """The newest logged-in sender among the case's reports' files."""
+    for report in reversed(case.reports):
+        if senders.get(report.file_name):
+            return senders[report.file_name]
+    return None
+
+
 def _resolve(session, requests: list[RequestFile], on_case, result: AutoResult) -> None:
     for request in [r for r in requests if r.error]:
         reject_request_file(request)
         result.rejected.append(request)
     requests = [r for r in requests if not r.error]
     senders = {r.name: r.sender for r in requests}
+    granted = {}
+
+    def may(sender: str | None, permission: str) -> bool:
+        if sender is None or Settings.users_dir is None:
+            return False
+        if sender not in granted:
+            granted[sender] = user_permissions(Path(str(Settings.users_dir)), sender)
+        return permission in granted[sender]
 
     dead_cases = collect_dead_link_cases(session, requests)
     found_cases = collect_found_link_cases(session, requests)
@@ -234,55 +363,56 @@ def _resolve(session, requests: list[RequestFile], on_case, result: AutoResult) 
         # One batch, so the Data API is asked once for everything
         result.check_stats = check_link_cases(
             to_check, on_case=(lambda i, case: on_case(i, len(to_check), case)) if on_case else None)
-    for case in open_dead:
-        video_id, case.auto_note = link_verdict(case)
-        if video_id is None:
-            continue
-        if not _applied(session, case, lambda: apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO)):
-            continue
-        result.changes.append({
-            "at": now_iso(), "kind": "dead_link", "song_id": case.song_id,
-            "text": f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id} "
-                    "(Leina Radio's suggestion; our search found the same video)",
-            "files": sorted({r.file_name for r in case.reports}),
-        })
-
-    for case in open_found:
-        if case.song.youtube_video_id:
-            # A dead link report for the same song was just settled above
-            case.status = LINK_ALREADY_CHANGED
-            continue
-        if settle_if_none_plays(case):
-            continue
-        video_id, case.auto_note = link_verdict(case)
-        if video_id is None:
-            continue
-        if not _applied(session, case, lambda: apply_found_link_decision(case, USE_VIDEO, video_id, by=AUTO)):
-            continue
-        result.changes.append({
-            "at": now_iso(), "kind": "found_link", "song_id": case.song_id,
-            "text": f"{_song_label(case.song, case.reports[0])}: YouTube link -> {video_id} "
-                    "(found by Leina Radio; our search found the same video)",
-            "files": sorted({r.file_name for r in case.reports}),
-        })
+    for question, cases, kind in (("dead_link_same_video", open_dead, "dead_link"),
+                                  ("found_link_same_video", open_found, "found_link")):
+        for case in cases:
+            if kind == "found_link":
+                if case.song.youtube_video_id:
+                    # A dead link report for the same song was just settled above
+                    case.status = LINK_ALREADY_CHANGED
+                    continue
+                if settle_if_none_plays(case):
+                    continue
+            sender = _sender_of(case, senders)
+            blocker = link_blocker(case)
+            case.auto_facts = None if blocker else link_facts(case, sender, may(sender, PERMISSION_APPLY_CORRECTIONS))
+            video_id, note = link_verdict(case)
+            rule, case.auto_note = _taken(blocker, question, note if video_id is None else None, case.auto_facts)
+            if rule is None:
+                continue
+            video_id = video_id if rule == "" else _link_video(case)
+            if kind == "dead_link":
+                applied = _applied(session, case, lambda: apply_dead_link_decision(case, USE_VIDEO, video_id, by=AUTO))
+                text = (f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id} "
+                        f"(Leina Radio's suggestion; our search found the same video{_by(rule)})" if rule == "" else
+                        f"{_song_label(case.song, case.reports[0])}: YouTube link {case.dead_video_id} -> {video_id}"
+                        f" ({_by(rule)[2:]})")
+            else:
+                applied = _applied(session, case, lambda: apply_found_link_decision(case, USE_VIDEO, video_id, by=AUTO))
+                text = (f"{_song_label(case.song, case.reports[0])}: YouTube link -> {video_id} "
+                        + ("(found by Leina Radio; our search found the same video)" if rule == ""
+                           else f"(found by Leina Radio{_by(rule)})"))
+            if applied:
+                result.changes.append({"at": now_iso(), "kind": kind, "song_id": case.song_id, "text": text,
+                                       "files": sorted({r.file_name for r in case.reports})})
 
     field_cases = collect_field_correction_cases(session, requests)
-    permitted = {}
     open_fields = [c for c in field_cases if c.status == FIELD_OPEN]
-    for case in open_fields:
-        sender = senders.get(case.latest.file_name)
-        if sender is not None and sender not in permitted:
-            permitted[sender] = (Settings.users_dir is not None and PERMISSION_APPLY_CORRECTIONS
-                                 in user_permissions(Path(str(Settings.users_dir)), sender))
     # Only links that could be saved are worth asking YouTube about
-    to_play = [c for c in open_fields if c.video_id and not c.bad
-               and permitted.get(senders.get(c.latest.file_name), False)]
+    by_rules = has_user_rules("field_correction_permitted")
+    to_play = [c for c in open_fields if c.video_id and not c.bad and (by_rules or (
+        rule_on("field_correction_permitted")
+        and may(senders.get(c.latest.file_name), PERMISSION_APPLY_CORRECTIONS)))]
     if to_play:
         check_correction_videos(to_play)
     for case in open_fields:
         sender = senders.get(case.latest.file_name)
-        case.auto_note = field_correction_verdict(session, case, sender, permitted.get(sender, False))
-        if case.auto_note is not None:
+        permitted = may(sender, PERMISSION_APPLY_CORRECTIONS)
+        blocker = field_correction_blocker(session, case)
+        case.auto_facts = None if blocker else field_correction_facts(session, case, sender, permitted)
+        rule, case.auto_note = _taken(blocker, "field_correction_permitted",
+                                      field_correction_verdict(session, case, sender, permitted), case.auto_facts)
+        if rule is None:
             continue
         old = _current_shown(case)
         if not _applied(session, case, lambda: apply_field_correction(session, case, ACCEPT, by=AUTO)):
@@ -290,17 +420,68 @@ def _resolve(session, requests: list[RequestFile], on_case, result: AutoResult) 
         result.changes.append({
             "at": now_iso(), "kind": "field_correction", "song_id": case.song.id if case.song else None,
             "text": f"{_song_label(case.song, case.latest)}: {case.label} {_shown(old)} -> "
-                    f"{_shown(_current_shown(case))} (corrected by {sender})",
+                    f"{_shown(_current_shown(case))} (corrected by {sender or 'someone not logged in'}{_by(rule)})",
             "files": sorted({r.file_name for r in case.reports}),
         })
 
     song_cases = collect_song_request_cases(session, requests)
-    for case in song_cases:
-        if case.pending:
-            case.auto_note = "adding a song waits for your approval"
+    _add_requested_songs(session, [c for c in song_cases if c.pending], senders, may, result)
 
     cases = dead_cases + found_cases + field_cases + song_cases
     left_cases = [c for c in cases if c.pending]
     result.to_review = len(left_cases)
     save_case_checks(left_cases)
     result.moved, result.left = finish_request_files(requests, cases, left_to=REVIEW)
+
+
+def _add_requested_songs(session, cases: list, senders: dict, may, result: AutoResult) -> None:
+    """The songs one of the owner's rules for "song_request" takes, added
+    through the import with nobody to ask (its questions about a similar
+    song or artist answered by the owner's rules for them, else no - a new
+    song, a new artist); the rest wait for the owner. Facts cost a
+    MusicBrainz lookup, so they're gathered only when such a rule exists."""
+    if not cases:
+        return
+    if not has_user_rules("song_request"):
+        for case in cases:
+            case.auto_note = ("adding a song waits for your approval (or a rule of yours in "
+                              "Settings -> Automation -> My rules)")
+        return
+    from utils.discoveries.import_engine import LocalSongMatcher, run_import_batch
+    from utils.ui.prompts import unattended
+
+    matcher = LocalSongMatcher(session)
+    taken = []
+    for case in cases:
+        artist, title = case.suggested or (case.latest.artist, case.latest.title)
+        if not (artist and title):
+            case.auto_note = "it has no artist or no title to be added as"
+            continue
+        sender = _sender_of(case, senders)
+        case.auto_facts = song_request_facts(case, artist, title, senders, matcher,
+                                             may(sender, PERMISSION_ADD_SONGS))
+        rule = user_rule_taking("song_request", case.auto_facts)
+        if rule is None:
+            case.auto_note = "no rule of yours (Settings -> Automation -> My rules) takes it"
+            continue
+        taken.append((case, artist, title, rule))
+    if not taken:
+        return
+    # The import works in the menu's sessions: this one must hold no
+    # transaction, or SQLite keeps its commits waiting
+    session.commit()
+    try:
+        with unattended() as answered:
+            run_import_batch([case.metadata(artist, title) for case, artist, title, _ in taken])
+    except Exception as exc:
+        flog(f"Inbox auto: adding requested songs failed: {exc!r}")
+        for case, *_ in taken:
+            case.auto_note = f"adding it automatically failed: {exc}"
+        return
+    for case, artist, title, rule in taken:
+        mark_song_added(case, artist, title, by=AUTO)
+        result.changes.append({"at": now_iso(), "kind": "song_request", "song_id": None,
+                               "text": f"{artist} - {title}: added (Leina Radio asked for it{_by(rule)})",
+                               "files": sorted({r.file_name for r in case.reports})})
+    result.changes += [{"at": now_iso(), "kind": "song_request", "song_id": None, "text": f"{step or 'Import'}: {item}",
+                        "files": []} for step, item in answered]

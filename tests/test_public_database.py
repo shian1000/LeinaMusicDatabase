@@ -438,15 +438,18 @@ def test_daily_publish_can_be_switched_off(tmp_path, monkeypatch):
     assert pd.daily_publish_enabled()  # on by default
     pd.set_daily_publish(False)
     monkeypatch.setattr(pd, "publish", lambda **k: pytest.fail("published while switched off"))
-    assert pd.publish_daily() is None
+    assert pd.publish_if_due() is None
 
 
-def test_daily_publish_never_raises(tmp_path, monkeypatch):
+def test_automatic_publish_never_raises_and_waits_its_interval(tmp_path, monkeypatch):
     monkeypatch.setattr(pd, "PUBLIC_DB_STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setattr(pd, "missing_setup", lambda: [])
 
     def broken(**kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr(pd, "publish", broken)
-    assert pd.publish_daily().status == pd.FAILED
+    assert pd.publish_if_due().status == pd.FAILED
     assert pd.last_result()["status"] == pd.FAILED
+    # Tried again only an interval (a day by default) after the failed attempt
+    assert not pd.publish_due()

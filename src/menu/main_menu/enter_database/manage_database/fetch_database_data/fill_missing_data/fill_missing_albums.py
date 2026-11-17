@@ -1,7 +1,8 @@
 from utils.common.project_names import song_project_name
 from utils.database.database_getter import get_songs_with_empty_category
 from utils.database.database_management import edit_db_entry
-from utils.ui.prompts import ask_typed, ask_yes_no
+from utils.common.automation_settings import recent_misses, remember_misses
+from utils.ui.prompts import ask_typed, ask_yes_no, stop_requested, unattended_now
 from menu.song_actions import edit_songs_menu
 from utils.database.artist_identity import may_be_swapped
 from utils.database.database_sessions import require_global_database_sessions, submit_global_database_session
@@ -40,6 +41,9 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         songs_objects = [song for song in songs if not song.album]
     # A project's recording isn't on the studio song's album the fetchers would find
     songs_objects = [song for song in songs_objects if not song_project_name(song)]
+    if unattended_now():  # the automation: not the songs it found nothing for lately
+        missed = recent_misses("albums")
+        songs_objects = [song for song in songs_objects if song.id not in missed]
 
     if not songs_objects:
         print("No songs with missing albums found")
@@ -67,6 +71,9 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         album_cache = AlbumTrackCache(songs_objects)
 
         for song in songs_objects:
+            if stop_requested():  # the automation: its time is up, or the app waits
+                print("\nStopped - the albums found so far are saved.")
+                break
             label = f"{song.artist.name} - {song.title}"
             print()
             print(f"Checking for {YELLOW}{label}{RESET}")
@@ -123,6 +130,8 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
             if album:
                 edit_db_entry(song, "album", album)
 
+    if unattended_now():
+        remember_misses("albums", [song.id for song, album, _ in found.values() if album is None])
     songs_objects = [song for song, _, _ in found.values()]
     confirmation = ask_yes_no(f"Do you want to edit some of the changes manually?")
     if confirmation:

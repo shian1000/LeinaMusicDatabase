@@ -7,7 +7,7 @@ actions; renaming an artist row is Artist actions → Edit only.
 
 import questionary
 from utils.common.output import review_header
-from utils.ui.prompts import ask_yes_no
+from utils.ui.prompts import ask_yes_no, unattended_now
 
 from config.constants import ADDITIONAL_ARTIST_ROLE_FEAT, ADDITIONAL_ARTIST_ROLE_MAIN
 from utils.database.artist_reassignment import (
@@ -234,6 +234,8 @@ def rename_artist(artist: Artist, new_name: str) -> bool:
     twins = artists_named(session, new_name, exclude=artist)
     if not twins:
         return False
+    if unattended_now():  # a merge is the owner's to choose: nothing done
+        return True
     twin = _pick_twin(twins)
     print(f'An artist called "{twin.name}" already exists ({count_artist_songs(session, twin.id)} song(s)).')
     merge = f'Merge "{artist.name}" into "{twin.name}"'
@@ -260,7 +262,8 @@ def review_held_artist_renames(held: dict[int, tuple[Artist, str]]) -> None:
     """Renames a scan (Spell check, Clean names) held back, keyed by artist
     id, because another artist already has the new name: one by one, merge
     into it, rename anyway or cancel (rename_artist())."""
-    if not held:
+    # Unattended they wait: the scan holds them again the next time
+    if not held or unattended_now():
         return
     review_header(f"REVIEW: {len(held)} artist rename(s) onto a name another artist already has")
     for artist, new_name in held.values():

@@ -55,7 +55,7 @@ def test_the_start_up_topic_shows_each_switch_as_it_is_now(monkeypatch, tmp_path
 
     text = help_menu.topic_text("What happens at start-up")
 
-    assert "[OFF] Daily backup" in text and "[OFF] Daily publish to GitHub" in text
+    assert "[OFF] Daily backup" in text and "[OFF] Publish to GitHub" in text
     assert all(f"[ON ] {switch.label}" in text for switch in switches.SWITCHES if switch is not switches.BACKUP)
     assert "Database upgrades (migrations)" in text.split("Optional")[0]
 

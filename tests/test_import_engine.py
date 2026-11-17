@@ -46,7 +46,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(ie, "check_spelling", check_spelling)
     answers, questions = [], []
 
-    def ask_yes_no(question):
+    def ask_yes_no(question, **kwargs):
         questions.append(question)
         return answers.pop(0)
 

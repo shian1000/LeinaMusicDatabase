@@ -3,9 +3,9 @@ import random
 from collections import defaultdict
 from utils.common.title_patterns import FEAT_WORD
 from datetime import date
-import questionary
 from utils.common.output import RESET, YELLOW, review_header
-from utils.ui.prompts import ask_typed, ask_yes_no
+from utils.common.automation_settings import recent_misses, remember_misses
+from utils.ui.prompts import ask_typed, ask_yes_no, stop_requested, tick_items, unattended_now
 from utils.database.database_getter import get_known_album_year, get_songs_with_album_missing_year
 from utils.database.database_management import edit_db_entry
 from utils.common.debug import slog
@@ -46,6 +46,9 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
     # up a slot meant for a network lookup.
     touched_songs = _fill_years_known_in_database(songs_objects)
     songs_objects = [song for song in songs_objects if song.year is None]
+    if unattended_now():  # the automation: not the songs it found nothing for lately
+        missed = recent_misses("years")
+        songs_objects = [song for song in songs_objects if song.id not in missed]
     if not songs_objects:
         _finish(touched_songs)
         return
@@ -85,6 +88,7 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
     # needs_review (YouTube upload dates) - shown to the user before
     # anything is written.
     review_results = []
+    looked_at = []  # the songs whose year was looked up (not those left by a stop)
 
     try:
         modules = load_discovery_modules(YEARS)
@@ -104,6 +108,10 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
                     for song in singles]
         try:
             for artist_name, name, single, songs, extra in lookups:
+                if stop_requested():  # the automation: its time is up, or the app waits
+                    print("\nStopped - the years found so far are saved.")
+                    break
+                looked_at += songs
                 label = f"{artist_name} - {name}"
                 print()
                 print(f"Checking release year for {'single ' if single else ''}{YELLOW}{label}{RESET}")
@@ -141,6 +149,8 @@ def fill_missing_years(songs: list | None = None, entries: dict | None = None):
                         edit_db_entry(song, "year", str(year))
                         touched_songs.append(song)
 
+    if unattended_now():
+        remember_misses("years", [song.id for song in looked_at if song.year is None])
     _finish(touched_songs)
 
 
@@ -258,21 +268,22 @@ def _review_unsure_years(review_results) -> list:
 
     review_header(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date "
                   f"or a title")
-    choices = [
-        questionary.Choice(title=f"{label}: {year}" + (f"  ({source})" if source else ""), value=i, checked=True)
-        for i, (label, year, _, source) in enumerate(review_results)
-    ]
-    selected = questionary.checkbox(
-        "Save the ticked years; untick a wrong one to type it (space toggles, enter confirms):",
-        choices=choices,
-    ).ask()
+    selected = tick_items("Save the ticked years; untick a wrong one to type it (space toggles, enter confirms):",
+                          review_results,
+                          lambda found: f"{found[0]}: {found[1]}" + (f"  ({found[3]})" if found[3] else ""),
+                          checked=True, rule="years_unsure",
+                          facts=lambda found: {"year": found[1], "songs": len(found[2]),
+                                               "from_title": str(found[3] or "").startswith("the title"),
+                                               "from_youtube": "youtu" in str(found[3] or "").lower()})
     if selected is None:
         print("Aborted, none of these years saved.")
         return []
 
     touched = []
-    for i, (label, year, songs, _) in enumerate(review_results):
-        if i not in selected:
+    for found in review_results:
+        label, year, songs, _ = found
+        # Unattended, nothing is typed: an untaken year leaves the song without one
+        if not any(found is s for s in selected):
             year = _ask_year(label, "Right year (put nothing to leave it empty): ", f"{label} (found {year})")
             if year is None:
                 continue

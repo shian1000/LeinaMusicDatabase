@@ -1280,7 +1280,7 @@ def test_install_is_idempotent_and_writes_expected_units(tmp_path, monkeypatch):
     assert f"ExecStart={sys.executable} {sharing.INBOX_AUTO_SCRIPT}" in inbox_service
     assert f"Environment=PATH={Path(sys.executable).parent}:" in inbox_service
     assert "Type=oneshot" in inbox_service
-    assert "OnUnitActiveSec=15min" in inbox_timer and "WantedBy=timers.target" in inbox_timer
+    assert "OnUnitActiveSec=5min" in inbox_timer and "WantedBy=timers.target" in inbox_timer
     assert calls == [
         ("daemon-reload",), ("enable", "musicdatabase-share.timer"), ("restart", "musicdatabase-share.service"),
         ("enable", "--now", "musicdatabase-inbox.timer"),

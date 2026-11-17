@@ -21,7 +21,7 @@ from utils.database.projects import (
 )
 from utils.database.tags_management import add_tag_to_songs, clear_tag, song_ids_with_tag
 from utils.ui.display_utils import display_songs
-from utils.ui.prompts import ask_yes_no, choose, tick_items
+from utils.ui.prompts import ask_yes_no, choose, decided, tick_items
 from utils.ui.song_colors import song_tokens
 
 _BACK = "Back"
@@ -113,13 +113,16 @@ def review_project_proposals() -> None:
                   "Unticked: the artist is only a guess, or the names don't say who it is.",
                   "Songs left unticked aren't offered again until the dictionary changes.")
     picked = tick_items("Which songs do you want to mark?", proposals, _proposal_title,
-                        checked=lambda proposal: not proposal.guessed)
+                        checked=lambda proposal: not proposal.guessed, rule="projects",
+                        facts=lambda p: {"guessed": p.guessed, "artist_unknown": p.artist_unknown, "whole": p.whole})
     if picked is None:
         say("Cancelled, nothing marked as checked.")
         return
     for proposal in picked:
         apply_project_proposal(session, proposal)
-    add_tag_to_songs(looked_at, PROJECT_CHECKED_TAG)
+    # Unattended, the ones no rule took are asked the next time
+    left = {p.song.id for p in proposals} - {p.song.id for p in decided(proposals, picked)}
+    add_tag_to_songs([song_id for song_id in looked_at if song_id not in left], PROJECT_CHECKED_TAG)
     submit_global_database_session()
     say(f"Marked {len(picked)} song(s)." if picked else "Nothing picked.")
 

@@ -39,7 +39,10 @@ def review_full_albums() -> int:
                   f"Pre-selected: the title says so. Recordings over {FULL_ALBUM_MIN_DURATION_S // 60} min "
                   "may also be mixes or live sets - tick only real albums.")
     marked = tick_items("Select the full albums (space toggles, enter confirms):", candidates, _describe,
-                        checked=lambda c: c.title_says_so)
+                        checked=lambda c: c.title_says_so, rule="full_albums",
+                        facts=lambda c: {"title_says_so": c.title_says_so,
+                                         "minutes": round(max(c.file_duration_s or 0, c.video_duration_s or 0) / 60, 1)
+                                         if c.file_duration_s or c.video_duration_s else None})
     if marked is None:
         show("Aborted, nothing marked.")
         return 0
@@ -49,7 +52,8 @@ def review_full_albums() -> int:
         show("\nTitles with the full-album words taken out:")
         for c in renames:
             show(f"  [red]{escape(c.song.title)}[/red] -> [green]{escape(c.cleaned_title)}[/green]")
-        if ask_yes_no(f"Change these {len(renames)} title(s)?"):
+        if ask_yes_no(f"Change these {len(renames)} title(s)?", rule="full_albums",
+                      about=f"{len(renames)} title(s) without the full-album words"):
             for c in renames:
                 c.song.title = c.cleaned_title
 

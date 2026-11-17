@@ -32,7 +32,8 @@ def review_soundtrack_names() -> int:
                   "Unticked: a single title, which may be the album's official name.")
     picked = tick_items("Change which?", found,
                         lambda v: f"{' / '.join(v.titles)}  ->  {v.title}  ({len(v.songs)} song(s))",
-                        checked=lambda v: len(v.titles) > 1)
+                        checked=lambda v: len(v.titles) > 1, rule="soundtracks",
+                        facts=lambda v: {"spellings": len(v.titles), "songs": len(v.songs)})
     if not picked:
         say("Nothing changed.")
         return 0

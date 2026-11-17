@@ -211,7 +211,8 @@ Good to know:
   logged into anyway.
 - **What runs in the background**: Help → "Background services (Linux)" explains the four
   systemd user units the setup installs (`musicdatabase-share` — the server — and
-  `musicdatabase-inbox` — the automatic request check every 15 minutes, each a `.service` plus a
+  `musicdatabase-inbox` — the automation: Leina Radio's new requests, the clean-ups and the GitHub publish, as often
+  as Settings → "Automation" says; each a `.service` plus a
   `.timer` in `~/.config/systemd/user/`), when they run and how to check, stop or remove them; its
   "Show the full unit files" prints them as installed, or what the setup would write.
 - **Turning it off**: the setup prints the `systemctl --user` commands for that.
