@@ -253,6 +253,16 @@ def test_various_artists_album_and_a_co_artists_album_still_count():
                                        (VARIOUS_ARTISTS, "Various Artists"))]}
     assert _pick_release([soundtrack])[0] == "Moulin Rouge"
 
+    # Real result for "Daan - Housewife", trimmed: a film soundtrack listed
+    # before the artist's own album on the same recording
+    daan = ("daan-id", "Daan")
+    housewife = {"title": "Housewife", "artist-credit": _credit(daan),
+                 "release-list": [_by(_release("Windkracht 10 Soundtrack", "Album", None, ["Soundtrack"]),
+                                      (VARIOUS_ARTISTS, "Various Artists")),
+                                  _release("Housewife", "Single", "2004-05-19"),
+                                  _release("Victory", "Album", "2004-11-29")]}
+    assert _pick_release([housewife])[0] == "Victory"
+
     # The release artist is one of the recording's artists, not the queried one
     duet = {"title": "Duet", "artist-credit": _credit(mcgregor, feliciano),
             "release-list": [_by(_release("McGregor Sings", "Album", "2003"), mcgregor)]}

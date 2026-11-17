@@ -568,8 +568,10 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 a compilation nobody tagged: "Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2" for Deep Blue
 Something) and releases credited to another artist
 (by MusicBrainz artist id - an Australian edition of Dido's "No Angel" carries four LeAnn Rimes
-songs; "Various Artists" passes), takes the first studio Album, and
-otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
+songs; "Various Artists" passes), takes the first studio Album - the artist's own from any of the
+hits before a "Various Artists" one: a film soundtrack is typed Album + Soundtrack, not
+Compilation, so it passes the filter, and MusicBrainz listed "Windkracht 10 Soundtrack" ahead of
+"Victory" on Daan's "Housewife" - and otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
 `tests/test_music_brainz_fetcher.py`). A compilation wrongly typed plain Album still wins ("Amstel
 Pulse: Modern Rock Playlist" for "Breakfast at Tiffany's", whose first 25 hits are almost all
 compilations, without the real album). Two known misses are by design, not bugs to chase:

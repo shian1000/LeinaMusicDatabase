@@ -52,7 +52,8 @@ FALLBACK_RELEASE_TYPE_RANK = {"EP": 0, "Single": 1}
 def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, dict | None]:
     """(release title, its recording) for the best release of the search hits.
 
-    The first Album in result order wins. Otherwise the best-ranked other
+    The first Album in result order wins, the artist's own before a "Various
+    Artists" one (a soundtrack). Otherwise the best-ranked other
     release of the first recording that has any, by type then earliest date
     (undated last). Compilations, live albums, remixes, blacklisted titles,
     another artist's release and another song's single never count.
@@ -64,11 +65,15 @@ def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, di
 def _pick_release_with_entry(recordings, artist: str | None = None) -> tuple[str | None, dict | None, dict | None]:
     """_pick_release() plus the picked release entry itself (its id and the
     recording's place on it)."""
-    for recording in recordings:
-        for release in recording.get("release-list", []):
-            if (_release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
-                    and release.get("release-group", {}).get("primary-type", "") == "Album"):
-                return _release_title(release), recording, release
+    # The artist's own album before a "Various Artists" one: Daan's "Housewife"
+    # lists the film soundtrack "Windkracht 10" ahead of "Victory"
+    for various_artists in (False, True):
+        for recording in recordings:
+            for release in recording.get("release-list", []):
+                if (_release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
+                        and release.get("release-group", {}).get("primary-type", "") == "Album"
+                        and _is_various_artists_release(release) == various_artists):
+                    return _release_title(release), recording, release
 
     for recording in recordings:
         candidates = [release for release in recording.get("release-list", [])
@@ -165,9 +170,13 @@ def _is_other_artists_release(release, recording) -> bool:
     for José Feliciano) and a release by any of the recording's own artists
     still count, and so does a release with no artist in the results."""
     release_ids = _artist_ids(release.get("artist-credit"))
-    if not release_ids or MUSICBRAINZ_VARIOUS_ARTISTS_ID in release_ids:
+    if not release_ids or _is_various_artists_release(release):
         return False
     return not release_ids & _artist_ids(recording.get("artist-credit"))
+
+
+def _is_various_artists_release(release) -> bool:
+    return MUSICBRAINZ_VARIOUS_ARTISTS_ID in _artist_ids(release.get("artist-credit"))
 
 
 def _is_other_songs_single(release, recording) -> bool:
