@@ -12,8 +12,10 @@ deletions through the table's trigger on song_id_changes.
 Added from "Create playlist from folder and compare with YT playlist" (the
 video paired with a file whose song already had a link; a song without a
 link gets the video as its own), by song merges (the dropped song's link)
-and by "Resolve new requests" (several links marked correct, one the main
-one: inbox_requests.record_link_decision()). Every function works in the session it's given; the caller commits.
+by "Resolve new requests" (several links marked correct, one the main
+one: inbox_requests.record_link_decision()), and by an import or a Leina
+Radio song request that found the song already there under another link
+(import_engine._backfill_youtube_link(), inbox_song_requests._settle()). Every function works in the session it's given; the caller commits.
 """
 
 from dataclasses import dataclass, field

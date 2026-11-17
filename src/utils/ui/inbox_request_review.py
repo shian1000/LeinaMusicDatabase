@@ -48,6 +48,7 @@ from utils.database.inbox_song_requests import (
     is_generic_channel_artist,
     mark_song_added,
     reject_song_request,
+    videos_saved_text,
 )
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
@@ -656,7 +657,8 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
         show(f"\n{len(settled)} song(s) Leina Radio asked for need no answer:")
         for case in settled:
             report = case.latest
-            also = (f" (#{case.existing.id} {escape(song_artist_label(case.existing))} - {escape(case.existing.title)})"
+            also = (f" (#{case.existing.id} {escape(song_artist_label(case.existing))} - {escape(case.existing.title)}"
+                    f"{', ' + videos_saved_text(case) if any(case.videos_saved) else ''})"
                     if case.existing is not None else "")
             show(f"    {escape(_song_label(report.artist, report.title))}: {case.status}{also}")
     if open_cases:
@@ -788,6 +790,7 @@ def resolve_new_requests(after_import=None) -> None:
     else:
         song_cases = collect_song_request_cases(session, requests)
     cases = cases + found_cases + field_cases + song_cases
+    submit_global_database_session()  # the videos of requested songs found in the database
 
     moved, left = finish_request_files(requests, cases)
     if moved:

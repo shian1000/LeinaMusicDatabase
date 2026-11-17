@@ -241,8 +241,11 @@ non-trivial work in that area.
   other than its own link, keyed by video, only so Leina Radio (after `songs.youtube_video_id`,
   which wins) and the inbox's song requests (`song_for_video()`) recognise another upload as the
   song; never played or searched for. Filled from the compared folder playlist (above), by
-  `merge_songs()` (the dropped song's link) and by "Resolve new requests" (several links marked
-  correct, the owner picks the main one); a trigger follows merges / deletions,
+  `merge_songs()` (the dropped song's link), by "Resolve new requests" (several links marked
+  correct, the owner picks the main one) and by an import or a song request that finds the song
+  under another link (`import_engine._backfill_youtube_link()`, `inbox_song_requests._settle()`;
+  a song without a link gets the video as its own; owner's choice 2026-11-17, a phone playlist
+  showed such songs as not in the database); a trigger follows merges / deletions,
   `mark_bad_videos()` for a song drops its row. Look a video's song up with `song_for_video()`.
   `video_durations.py` — `youtube_video_durations` (migration 0017), YouTube videos' lengths by id,
   asked once (`video_durations_via_api()`, each batch stored as it comes); "Find full albums" reads

@@ -36,6 +36,9 @@ from utils.common.output import REVIEW_WIDTH, review_header, show, styled
 import questionary
 from utils.ui.prompts import ask_yes_no
 from sqlalchemy import func
+from sqlalchemy.orm import object_session
+from utils.database.additional_videos import apply_video_links, plan_video_links
+from config.constants import ADDITIONAL_VIDEO_IMPORT
 
 # OPTIMIZATION: Cache for spell check results to avoid repeated API calls
 # Key: (artist, title) tuple, Value: spell_check_result dict
@@ -420,18 +423,26 @@ _LINKED_IN_BATCH: list = []
 
 
 def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
-    """If this metadata entry came with a YouTube video id (i.e. it's from a
-    playlist import) and the matched existing song doesn't have one stored
-    yet, save it - the song attribute is already tracked by the open
-    session, so it rides along on the next commit without an explicit
-    add_db_entry() call.
+    """If this metadata entry came with a YouTube video id (a playlist
+    import, a song request) and matched an existing song, save the video on
+    it: as its link when it has none, else as an additional video, so Leina
+    Radio recognises that upload as the song (a requested "Wonderful Life
+    (Smith & Burrows)" video was found as the song and kept nowhere,
+    2026-11-17). Not a video another song has or one found bad
+    (plan_video_links()). Rides along on the next commit of the song's
+    session.
     """
-    metadata = as_entry(metadata)
-    video_id = metadata.youtube_video_id
-    if video_id and not existing_song.youtube_video_id:
-        existing_song.youtube_video_id = video_id
+    video_id = as_entry(metadata).youtube_video_id
+    if not video_id:
+        return
+    session = object_session(existing_song)
+    plan = plan_video_links(session, [(existing_song.id, video_id, False)])
+    main, added = apply_video_links(session, plan.links, ADDITIONAL_VIDEO_IMPORT)
+    if main:
         _LINKED_IN_BATCH.append(existing_song)
         show(f"Linked existing song {styled(existing_song.title, 'blue')} to YouTube video {styled(video_id, 'green')}")
+    elif added:
+        show(f"Kept YouTube video {styled(video_id, 'green')} as another upload of {styled(existing_song.title, 'blue')}")
 
 def _with_feats(artist_songs: list, feat_artists) -> list:
     """The songs crediting every one of `feat_artists` - as featured or main

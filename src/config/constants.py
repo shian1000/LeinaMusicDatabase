@@ -379,11 +379,13 @@ ADDITIONAL_VIDEO_FOLDER_PLAYLIST = "folder_playlist"  # paired with a file of a 
 ADDITIONAL_VIDEO_SONG_MERGE = "song_merge"  # the link of a song merged into this one
 ADDITIONAL_VIDEO_INBOX_REVIEW = "inbox_review"  # found correct too when reviewing a request's link
 ADDITIONAL_VIDEO_MANUAL = "manual"  # set by the owner (a wrongly named upload of the song)
+ADDITIONAL_VIDEO_IMPORT = "import"  # an import's / a song request's video of a song that had another link
 ADDITIONAL_VIDEO_SOURCES = {
     ADDITIONAL_VIDEO_FOLDER_PLAYLIST: "paired with a file in a playlist compared with YouTube",
     ADDITIONAL_VIDEO_SONG_MERGE: "the link of a duplicate merged into this song",
     ADDITIONAL_VIDEO_INBOX_REVIEW: "marked correct along with another link in Resolve new requests",
     ADDITIONAL_VIDEO_MANUAL: "set by hand",
+    ADDITIONAL_VIDEO_IMPORT: "an import or a Leina Radio song request found it for this song",
 }
 
 # `Song.youtube_video_id` value meaning "confirmed: this song has no video on

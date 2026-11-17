@@ -56,7 +56,8 @@ this index is the map of everything else.
   [tracks added by hand to imported playlists](handoffs/added-tracks-for-musicdatabaseapp.md) and
   [YouTube links set by hand, music videos](handoffs/youtube-links-by-hand-for-musicdatabaseapp.md) and
   [songs' genres, `songs.genre`](handoffs/genres-for-musicdatabaseapp.md) and
-  [another artist for a song, `songs.artist_id` corrections](handoffs/song-artist-for-musicdatabaseapp.md). Once
+  [another artist for a song, `songs.artist_id` corrections](handoffs/song-artist-for-musicdatabaseapp.md) and
+  [recognising YouTube tracks by name](handoffs/name-matching-for-musicdatabaseapp.md). Once
   the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
 
 Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`

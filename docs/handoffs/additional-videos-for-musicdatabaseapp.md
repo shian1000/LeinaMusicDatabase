@@ -27,7 +27,7 @@ so check `sqlite_master` first, as for `bad_youtube_videos`.
 CREATE TABLE additional_youtube_videos (
   video_id TEXT PRIMARY KEY NOT NULL, -- a YouTube video id; one song's only
   song_id  INTEGER NOT NULL,          -- a current songs.id (follows merges, gone with a deleted song)
-  source   TEXT NOT NULL,             -- what added it: 'folder_playlist' | 'song_merge'; show-only, may grow
+  source   TEXT NOT NULL,             -- what added it: 'folder_playlist' | 'song_merge' | 'inbox_review' | 'manual' | 'import'; show-only, may grow
   added_at TEXT NOT NULL              -- 'YYYY-MM-DD HH:MM:SS' (UTC)
 );
 ```

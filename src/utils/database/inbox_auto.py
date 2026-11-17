@@ -85,7 +85,12 @@ from utils.database.inbox_requests import (
     reject_request_file,
     save_case_checks,
 )
-from utils.database.inbox_song_requests import collect_song_request_cases, mark_song_added, song_request_facts
+from utils.database.inbox_song_requests import (
+    collect_song_request_cases,
+    mark_song_added,
+    song_request_facts,
+    videos_saved_text,
+)
 from utils.database.song_artists import additional_artist_role, song_artist_label
 
 
@@ -425,6 +430,15 @@ def _resolve(session, requests: list[RequestFile], on_case, result: AutoResult) 
         })
 
     song_cases = collect_song_request_cases(session, requests)
+    session.commit()  # the videos of requested songs found in the database
+    for case in song_cases:
+        if any(case.videos_saved):
+            result.changes.append({
+                "at": now_iso(), "kind": "song_request", "song_id": case.existing.id,
+                "text": f"{_song_label(case.existing, case.latest)}: already in the database, "
+                        f"{videos_saved_text(case)} (Leina Radio asked for it)",
+                "files": sorted({r.file_name for r in case.reports}),
+            })
     _add_requested_songs(session, [c for c in song_cases if c.pending], senders, may, result)
 
     cases = dead_cases + found_cases + field_cases + song_cases

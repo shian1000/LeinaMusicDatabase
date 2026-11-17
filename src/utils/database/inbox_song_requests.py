@@ -19,7 +19,11 @@ Cases: one per song, by normalized artist + title, from every report of
 every file. Settled without asking (the automatic pass too):
 - the song is in the database already (the phone's music.db was older, or
   the phone didn't recognise it) - LocalSongMatcher, or its YouTube video is
-  a song's link;
+  a song's link; the request's videos become that song's (its link when it
+  has none, else additional videos, as plan_video_links() allows), so Leina
+  Radio recognises them from the next copy on (owner's choice, 2026-11-17:
+  "Renata Przemyk - Aniolek" was settled so, its video kept nowhere, and
+  the playlist holding it showed the song as not in the database);
 - it was rejected before (a rejected_song_requests row with the same artist +
   title, YouTube video or Spotify track).
 
@@ -75,6 +79,7 @@ from dataclasses import dataclass, field
 from functools import cache
 
 from config.constants import (
+    ADDITIONAL_VIDEO_IMPORT,
     ARTIST_JOINING_WORDS,
     GENERIC_TOPIC_CHANNELS,
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
@@ -84,7 +89,7 @@ from config.constants import (
 )
 from utils.common.debug import mlog
 from utils.common.normalizer import name_key, normalize
-from utils.database.additional_videos import song_for_video
+from utils.database.additional_videos import apply_video_links, plan_video_links, song_for_video
 from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, Song
 from utils.database.latin_names import artist_synonyms
 from utils.database.inbox_requests import (
@@ -139,6 +144,7 @@ class SongRequestCase:
     reports: list
     status: str = OPEN
     existing: Song | None = None  # the song it already is, for ALREADY_IN_DATABASE
+    videos_saved: tuple = (0, 0)  # (own links set, additional videos added) on `existing`
     auto_note: str | None = None  # why the automatic pass left it to the owner
     suggested: tuple | None = None  # (artist, title) read out of the title or the description, see the module docstring
     also_suggested: list = field(default_factory=list)  # the description's other readings, (artist, title) each
@@ -531,7 +537,8 @@ def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
 
 def collect_song_request_cases(session, requests: list[RequestFile], matcher=None) -> list[SongRequestCase]:
     """Group every supported file's song requests by song and settle what
-    needs no answer. Order: first report first. `matcher`: a
+    needs no answer (the videos of songs found in the database saved on
+    them, see _settle(); the caller commits). Order: first report first. `matcher`: a
     LocalSongMatcher to use (tests); made here otherwise."""
     cases: dict[str, SongRequestCase] = {}
     for request in requests:
@@ -571,7 +578,8 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
 
 def _settle(session, key: str, case: SongRequestCase, rejected: tuple, matcher) -> bool:
     """Settle the case if it was rejected before or is in the database
-    already (by any of its suggestions too); whether it was."""
+    already (by any of its suggestions too; its videos then saved on that
+    song, flushed - the caller commits); whether it was."""
     rejected_keys, rejected_videos, rejected_tracks = rejected
     if (key in rejected_keys or any(song_key(*s) in rejected_keys for s in case.suggestions)
             or set(case.youtube_video_ids) & rejected_videos
@@ -581,8 +589,17 @@ def _settle(session, key: str, case: SongRequestCase, rejected: tuple, matcher) 
     case.existing = _song_in_database(session, case, matcher)
     if case.existing is not None:
         case.status = ALREADY_IN_DATABASE
+        plan = plan_video_links(session, [(case.existing.id, v, False) for v in case.youtube_video_ids])
+        case.videos_saved = apply_video_links(session, plan.links, ADDITIONAL_VIDEO_IMPORT)
         return True
     return False
+
+
+def videos_saved_text(case: SongRequestCase) -> str:
+    """What _settle() saved of the request's videos, as shown; "" for nothing."""
+    main, added = case.videos_saved
+    return ", ".join((["its video saved as the song's link"] if main else [])
+                     + ([f"{added} video(s) saved as the song's additional videos"] if added else []))
 
 
 def reject_song_request(session, case: SongRequestCase) -> None:
