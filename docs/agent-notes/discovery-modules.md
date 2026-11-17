@@ -469,7 +469,10 @@ added at the owner's choice (2026-11-12) for the private catalog. `tekstowo_fetc
 text from `#songText .inner-text`; a Cyrillic name also as the site writes it in Latin letters,
 `latin_slug()`: "Крутится Земля" -> "krutitsa-zemla" - its search needs JavaScript) is the Polish one. `fajnanuta_fetcher`
 (`fajnanuta.pl/tekst-piosenki-tlumaczenie/<artists>-<title>.html`, Tekstowo's slugs; names from
-`<title>`, the text from the first `div.arttxt` - a translation may follow) has Polish songs
+`<title>`; the text runs through every `div.arttxt`, an advert between them, without the "… TEKST
+PIOSENKI" headings and up to the first `<p>` / `<div>` inside - the page's own blurb "<title> w
+wykonaniu …", all a page without lyrics has, which the first block alone saved as lyrics for 9
+songs until 2026-11-17) has Polish songs
 Tekstowo lacks. `cuspajz_fetcher` (`cuspajz.com/tekstovi-pjesama/pjesma/<artist>/<title>.html`,
 Tekstowo's slugs with "đ" as "d"; a page it lacks redirects to its index, which has no `<title>` "A — T —
 Tekst", so that counts as nothing found; the text in `article p.text`) is for the songs of the former

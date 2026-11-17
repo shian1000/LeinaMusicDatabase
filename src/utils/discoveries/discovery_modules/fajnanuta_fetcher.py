@@ -20,8 +20,20 @@ _PAGE_TITLE = re.compile(r"^\W*(?P<artist>.+?) - (?P<title>.+?) TEKST\b")
 
 
 def page_lyrics(soup) -> str | None:
-    text = soup.select_one("div.arttxt")  # the first: the lyrics, a translation may follow
-    return text_lines(text) if text else None
+    """The lyrics run through the "arttxt" blocks (an advert between them), under
+    their "<title> TEKST PIOSENKI" heading and up to the first paragraph or box -
+    the page's own blurb ("<title> w wykonaniu ..."), all a page without lyrics has."""
+    parts = []
+    for block in soup.select("div.arttxt"):
+        for child in block.children:
+            name = getattr(child, "name", None)
+            if name in ("p", "div"):
+                return text_lines("".join(parts)) or None
+            if name == "br":
+                parts.append("\n")
+            elif name not in ("h2", "h3", "span"):
+                parts.append(child.get_text() if name else str(child).strip())
+    return text_lines("".join(parts)) or None
 
 
 def get_lyrics(artist: str, title: str, duration_s: float | None = None, songs=None) -> list[LyricsDiscoveryResult]:

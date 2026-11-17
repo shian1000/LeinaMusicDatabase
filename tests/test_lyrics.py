@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 from mutagen.id3 import ID3, USLT
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -482,10 +483,19 @@ def test_lyricstranslate_falls_back_to_the_english_translations_page(monkeypatch
 
 
 FAJNANUTA_PAGE = ('<title>▷ Anna Maria Jopek, Branford Marsalis - Patrz i Słuchaj TEKST - na Fajnanuta.pl</title>'
-                  '<div class="arttxt">Właśnie tu <br/>\nwidzę<br/>\n</div><div class="arttxt">Translation</div>')
+                  '<div><div class="arttxt"><span class="linkhold"></span><h2>Patrz i Słuchaj TEKST PIOSENKI</h2>'
+                  '<br/>Właśnie tu<br/></div><div class="custom elast3cont">advert</div>'
+                  '<div class="arttxt"><br/>widzę<br/><div class="custom centr"></div>'
+                  '<p>Anna Maria Jopek - Patrz i Słuchaj Tekst piosenki</p></div></div>')
 
 
-def test_fajnanuta_reads_the_first_text_of_the_page_its_names_make(monkeypatch):
+def test_fajnanuta_gives_nothing_for_a_page_holding_only_its_blurb():
+    soup = BeautifulSoup('<div class="arttxt"><h2>Song TEKST PIOSENKI</h2><div class="custom centr"></div>'
+                         '<p>Artist - Song Tekst piosenki</p> <i>Song</i> w wykonaniu Artist</div>', "html.parser")
+    assert fajnanuta_fetcher.page_lyrics(soup) is None
+
+
+def test_fajnanuta_reads_the_lyrics_blocks_of_the_page_its_names_make_without_headings_or_blurb(monkeypatch):
     asked = []
     monkeypatch.setattr(fajnanuta_fetcher._pacer, "min_interval", 0)
     monkeypatch.setattr(lyrics_pages.requests, "get",
@@ -493,7 +503,7 @@ def test_fajnanuta_reads_the_first_text_of_the_page_its_names_make(monkeypatch):
     [found] = fajnanuta_fetcher.get_lyrics("Anna Maria Jopek & Branford Marsalis", "Patrz I Słuchaj")
     assert asked == ["https://fajnanuta.pl/tekst-piosenki-tlumaczenie/anna-maria-jopek-branford-marsalis-patrz-i-sluchaj.html"]
     assert (found.matched_artist, found.matched_title, found.plain) == \
-        ("Anna Maria Jopek, Branford Marsalis", "Patrz i Słuchaj", "Właśnie tu\nwidzę")
+        ("Anna Maria Jopek, Branford Marsalis", "Patrz i Słuchaj", "Właśnie tu\n\nwidzę")
 
 
 def test_a_page_of_another_site_gives_its_block_with_the_most_lines(monkeypatch):

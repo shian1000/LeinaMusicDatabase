@@ -40,10 +40,11 @@ def fetch_page(url: str, site: str, pacer=None) -> BeautifulSoup | None:
 
 
 def text_lines(element) -> str:
-    """An element's text, one line per line, at most one blank line between
-    stanzas - none when every "stanza" is one line (a page spacing every
+    """An element's text (or a text), one line per line, at most one blank line
+    between stanzas - none when every "stanza" is one line (a page spacing every
     line, teksty-pesenok.pro)."""
-    plain = re.sub(r"\n{3,}", "\n\n", "\n".join(line.strip() for line in element.get_text().splitlines()).strip())
+    raw = element if isinstance(element, str) else element.get_text()
+    plain = re.sub(r"\n{3,}", "\n\n", "\n".join(line.strip() for line in raw.splitlines()).strip())
     stanzas = plain.split("\n\n")
     return "\n".join(stanzas) if len(stanzas) > 2 and all("\n" not in stanza for stanza in stanzas) else plain
 
