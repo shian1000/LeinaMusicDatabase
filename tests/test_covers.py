@@ -23,6 +23,7 @@ from utils.database.song_artists import reassign_additional_artist_links
     ("AURORA", "Rasputin (Boney M cover - acoustic / live)", ("Rasputin", "Boney M", None)),
     ("HSCC", "Just the Two of Us (Cover)", ("Just the Two of Us", None, None)),
     ("Alina Gingertail", "Dirge (Gingertail Cover)", ("Dirge", None, None)),
+    ("Oktobar 1864", "Nadji me (Band Cover)", ("Nadji me", None, None)),  # "Band" names no one
 ])
 def test_read_cover(artist, title, expected):
     reading = read_cover(artist, title)
@@ -91,6 +92,25 @@ def test_a_song_cannot_cover_its_own_artist(session):
     song = _song(session, "A", "B")
     with pytest.raises(ValueError):
         covers.set_covered_artist([song], song.artist)
+
+
+def test_a_cover_is_never_matched_to_the_original(session):
+    """A song request "Oktobar 1864 - Nadji me (Band Cover)" was settled as the
+    original (2026-11-14); one naming the performer in the bracket reads it as
+    the covered artist, so the credit leaves the title - still no original."""
+    from utils.discoveries.import_engine import LocalSongMatcher
+    original = _song(session, "Oktobar 1864", "Nadji me")
+    matcher = LocalSongMatcher(session)
+    for title in ("Nadji me (Band Cover)", "Nadji me (Aleksandar Ilić Cover)"):
+        entry = s.sanitize_metadata({"artist_name": "Oktobar 1864", "title": title}, s.SOURCE_REQUEST)
+        assert matcher.match(entry) is None
+    assert matcher.match({"artist_name": "Oktobar 1864", "title": "Nadji me"}) is original
+
+    cover = _song(session, "Aleksandar Ilić", "Nadji me")
+    covers.set_covered_artist([cover], original.artist)
+    entry = s.sanitize_metadata({"artist_name": "Aleksandar Ilić", "title": "Nadji me (Oktobar 1864 Cover)"},
+                                s.SOURCE_REQUEST)
+    assert LocalSongMatcher(session).match(entry) is cover
 
 
 def test_import_reads_the_credit():

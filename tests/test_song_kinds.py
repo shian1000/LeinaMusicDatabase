@@ -113,6 +113,20 @@ def test_an_entry_that_looks_like_an_album_tries_full_albums_first():
     assert sk.songs_for_entry([track, album], "Migration", FULL_ALBUM_MIN_DURATION_S) == [album, track]
 
 
+def test_a_cover_matches_only_covers():
+    """A song request "Oktobar 1864 - Nadji me (Band Cover)" was settled as the
+    original "Nadji me" (2026-11-14)."""
+    original = _song("Nadji me")
+    cover = _song("Nadji me", covered_artist_id=7)
+    unmarked = _song("Nadji me (Cover)")  # its own title says so
+
+    assert sk.songs_for_entry([original, cover, unmarked], "Nadji me (Band Cover)") == [cover, unmarked]
+    # the credit moved out of the title: SongEntry.covered_artist
+    assert sk.songs_for_entry([original, cover], "Nadji me", cover=True) == [cover]
+    # anything else tries the covers last, a performer's own file may still be one
+    assert sk.songs_for_entry([cover, original], "Nadji me") == [original, cover]
+
+
 # ==================== marking ====================
 
 @pytest.mark.parametrize("album", [None, "", SINGLES_ALBUM])

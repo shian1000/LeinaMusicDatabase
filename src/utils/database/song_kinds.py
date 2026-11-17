@@ -15,6 +15,9 @@ shorter than FULL_ALBUM_MIN_DURATION_S or of unknown length) never matches a
 full album - a track "Migration" must not be taken for the album "Migration".
 One that does look like it tries full albums first, then songs (a long file
 may be a mix the owner keeps as a song).
+
+Covers (songs.covered_artist_id / covered_title, or a title still saying
+"cover") are kept apart the same way: an entry that is one matches only covers.
 """
 import re
 
@@ -27,6 +30,7 @@ from config.constants import (
     SONG_KINDS,
     VERSION_OTHER,
 )
+from utils.common.cover_names import read_cover
 from utils.common.normalizer import normalize
 from utils.common.version_names import read_version, title_with_version
 from utils.common.project_names import is_project_of
@@ -83,7 +87,7 @@ def looks_like_full_album(title: str | None, duration_s: int | None = None) -> b
 
 
 def songs_for_entry(songs: list, title: str | None, duration_s: int | None = None,
-                    project: str | None = None) -> list:
+                    project: str | None = None, cover: bool = False) -> list:
     """The songs an entry may be matched to, in the order to try them: only
     those of its `project` (songs.project_id; None: of no project) - a Tiny
     Desk recording isn't the studio song of that title - and, for an entry that
@@ -96,15 +100,29 @@ def songs_for_entry(songs: list, title: str | None, duration_s: int | None = Non
     still (not looked at by "Find versions" yet) counts as that version. A
     title with the marker run on, no bracket or dash ("Dancing Shoes KAMP!
     REMIX"), can't be cut by read_version(); it names the version whose title
-    and marker together read so, after the songs that aren't versions."""
+    and marker together read so, after the songs that aren't versions. A
+    cover - `cover` (its credit moved out of the title: SongEntry.covered_artist)
+    or a title still saying so - only among covers: "Oktobar 1864 - Nadji me
+    (Band Cover)" isn't Oktobar 1864's "Nadji me" (a song request was settled
+    as it, 2026-11-14); for any other entry covers come last."""
     songs = [s for s in songs if is_project_of(s, project)]
     songs = _songs_of_version(songs, title)
+    if cover or read_cover(None, title) is not None:
+        songs = [s for s in songs if is_cover(s)]
+    else:
+        songs = [s for s in songs if not is_cover(s)] + [s for s in songs if is_cover(s)]
     if project:
         return songs
     if not looks_like_full_album(title, duration_s):
         return [s for s in songs if not is_full_album(s)]
     albums = [s for s in songs if is_full_album(s) or title_has_full_album_marker(s.title)]
     return albums + [s for s in songs if s not in albums]
+
+
+def is_cover(song) -> bool:
+    """Is the song marked a cover, or does its title still say it is one?"""
+    return bool(getattr(song, "covered_artist_id", None) or getattr(song, "covered_title", None)
+                or read_cover(None, song.title) is not None)
 
 
 def _songs_of_version(songs: list, title: str | None) -> list:

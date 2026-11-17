@@ -158,6 +158,11 @@ class SongEntry(dict):
     def hints(self) -> Hints:
         return hints_from(self)
 
+    @property
+    def is_cover(self) -> bool:
+        """A cover whose credit left the title (song_kinds.songs_for_entry())."""
+        return bool(self.covered_artist)
+
     def copy_with(self, **changes) -> "SongEntry":
         """A copy with `changes` (attribute names: title=..., unsplit_title=None)
         and everything else, the attributes too - {**entry} loses those."""

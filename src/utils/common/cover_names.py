@@ -23,7 +23,7 @@ _TRAILING_COVER_RE = re.compile(rf"^(.*?)[\s\-–—|:]*{_COVER}[\s.]*$", re.IGN
 _NAME_SEPARATOR_RE = re.compile(r"\s+[-–—]\s+")
 # Words saying how it's played, not whose it is
 _STYLE_WORDS = frozenset({
-    "acoustic", "akustycznie", "bardcore", "bluegrass", "epic", "guitar", "instrumental", "jazz", "live", "metal",
+    "acoustic", "akustycznie", "band", "bardcore", "bluegrass", "epic", "guitar", "instrumental", "jazz", "live", "metal",
     "orchestral", "piano", "rock", "song", "synthwave", "ukrainian", "violin", "vintage", "vocal", "80s", "90s",
     "medieval",
 })

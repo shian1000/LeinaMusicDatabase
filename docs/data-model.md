@@ -249,6 +249,11 @@ added_at      NOT NULL, default datetime('now')
   when no artist can be named (a traditional song); only then does the credit show it.
   Owner's choice: a game whose soundtrack is covered goes in as the covered artist ("Power Blade 2"),
   a traditional song only as `covered_title` ("Bella Ciao"), never as an artist.
+  Matching keeps covers apart like versions (`song_kinds.songs_for_entry()`): an entry that is a
+  cover (its credit moved to `SongEntry.covered_artist`, or still in the title, even unnamed: "(Band
+  Cover)") is matched only to covers (`covered_artist_id` / `covered_title` set, or a title saying
+  "cover"); any other entry tries covers last. A request with the original's artist and a cover's
+  title used to be settled as the original, so Leina Radio never saw an answer.
 - `Song.version_kind` / `version_label` / `version_of` → `songs` (migration `0022`,
   `utils/database/versions.py`, [ADR-0007](decisions/0007-song-versions.md)) — a version of a song
   (`constants.VERSION_KINDS`: live, remix, acoustic, edit, extended, demo, instrumental, other; NULL =
