@@ -991,6 +991,9 @@ TITLE_JUNK_SUFFIXES = [
     "performance video",
     "m/v",
     "full song",
+    # Polish labels' audio-only upload (real case: "Granderinio - Buhurtowe
+    # Love (Oficjalny Odsłuch)")
+    "oficjalny odsłuch",
     # Upload quality tags, left at the end once everything else is cut
     # (real case: "MADUAR - Do It HD")
     "hd",
