@@ -13,6 +13,7 @@ repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
+from utils.common.song_entry import SongEntry  # noqa: E402
 import menu.main_menu  # noqa: F401,E402  (import order, see AGENTS.md)
 
 _PKG = "menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data"
@@ -172,9 +173,9 @@ def test_the_songs_added_from_requests_are_offered_their_data(monkeypatch):
     from utils.discoveries import import_engine
     monkeypatch.setattr(import_engine, "run_import_batch", lambda entries: ("result", len(entries)))
     monkeypatch.setattr(review, "submit_global_database_session", lambda: None)
-    monkeypatch.setattr(review, "mark_song_added", lambda case, artist, title: None)
-    case = SimpleNamespace(metadata=lambda artist, title: {"artist_name": artist, "title": title})
+    monkeypatch.setattr(review, "mark_song_added", lambda *args: None)
+    case = SimpleNamespace(metadata=lambda artist, title: SongEntry({"artist_name": artist, "title": title}))
     got = []
-    review._add_requested_songs([(case, "A", "T")], got.append)
+    review._add_requested_songs(None, [(case, "A", "T")], got.append)
     assert got == [("result", 1)]
-    review._add_requested_songs([(case, "A", "T")])  # without the menu's offer: as before
+    review._add_requested_songs(None, [(case, "A", "T")])  # without the menu's offer: as before

@@ -83,7 +83,7 @@ from utils.database.inbox_requests import (
 )
 from config.constants import NO_VIDEO_SENTINEL
 from utils.youtube.manage_youtube_playlists import extract_video_id
-from utils.common.output import escape, show
+from utils.common.output import escape, show, warn
 
 _PASTE = "Paste another link"
 _SEVERAL = "Several of these links are correct"
@@ -631,7 +631,7 @@ def _ask_song_request(case):
         show("[red]Both the artist and the title are needed.[/red]")
 
 
-def _add_requested_songs(approved: list, after_import=None) -> None:
+def _add_requested_songs(session, approved: list, after_import=None) -> None:
     """The approved songs through the import, in one batch (its questions
     about similar artists / songs come at the end, as for any import), then
     `after_import(result)` - the menu's offer to fill in their missing data."""
@@ -640,10 +640,18 @@ def _add_requested_songs(approved: list, after_import=None) -> None:
     from utils.discoveries.import_engine import run_import_batch
 
     show(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
-    result = run_import_batch([case.metadata(artist, title) for case, artist, title in approved])
+    entries = [case.metadata(artist, title) for case, artist, title in approved]
+    result = run_import_batch(entries)
     submit_global_database_session()
-    for case, artist, title in approved:
-        mark_song_added(case, artist, title)
+    left_out = []
+    for (case, artist, title), entry in zip(approved, entries):
+        if entry.song_id is None:
+            left_out.append(f"{artist} - {title}")
+        else:
+            mark_song_added(session, case, artist, title, entry.song_id)
+    submit_global_database_session()
+    if left_out:
+        warn(f"The import left out {len(left_out)} of them - they stay to be resolved: " + "; ".join(left_out))
     if after_import is not None:
         after_import(result)
 
@@ -680,7 +688,7 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
         _, artist, title = answer
         approved.append((case, artist, title))
     # What was approved before a stop is still added
-    _add_requested_songs(approved, after_import)
+    _add_requested_songs(session, approved, after_import)
     return cases, stopped
 
 

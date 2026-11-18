@@ -183,7 +183,12 @@ non-trivial work in that area.
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
   `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
   `feat_to_credits`), skips or rejects them; a rejected one goes to music.db's
-  `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again. Videos found bad (gone, unplayable, or wrong for a song) are remembered in
+  `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again; one
+  found in the database or added goes to `settled_song_requests` (migration 0024, with the song's
+  id, `record_settled_request()`; a trigger keeps `song_id` current), so the phone recognises its
+  track as that song when nothing else connects them, and a later request matching a row (names,
+  video or Spotify track as sent) is that song without matching ([handoff](docs/handoffs/settled-song-requests-for-musicdatabaseapp.md);
+  backfilled once from `Inbox/processed/` at the start the migration lands). Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
   table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: a
@@ -652,7 +657,9 @@ non-trivial work in that area.
   `LocalSongMatcher` and the reviews read attributes (`metadata = as_entry(metadata)` first). Copy with
   `copy_with()` - `{**entry}` drops the attributes; never a `Song`. Only in memory: `run_import_batch()`
   returns an `ImportResult` (the added songs as a list, plus `entries`: song id -> its SongEntry, added
-  or found) for the steps run right after: the end of the mp3 / YouTube import and of the request review
+  or found; and each entry's `song_id`, None for one the import left out - check it before recording an
+  entry as added: two song requests marked added that the import had skipped were never asked again)
+  for the steps run right after: the end of the mp3 / YouTube import and of the request review
   offers Albums and Years for those songs (`fill_missing_for_import()`, in the `fill_missing_data`
   menu package; `resolve_new_requests(after_import=...)`). `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/title_patterns.py` — regex pieces the title rules share, one spelling each:
@@ -854,6 +861,8 @@ non-trivial work in that area.
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
   Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `songs.other_titles` (migration 0023: more titles to search a song by, ";"-separated; [handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
+  `settled_song_requests` (migration 0024: the same as sent, plus the `songs.id` a request was
+  found to be or was added as; [handoff](docs/handoffs/settled-song-requests-for-musicdatabaseapp.md)), and
   `youtube_video_durations` (migration 0017: a YouTube video's length by video id, joined on
   `songs.youtube_video_id`, for playlist lengths; `utils/database/video_durations.py`, which asks
   the Data API only about videos not stored yet), and `additional_youtube_videos` (migration 0018:
@@ -909,7 +918,7 @@ non-trivial work in that area.
   "Automation"'s interval is up) keeps its own
   switch in `public_database.py`'s state, shown on the same screen. With the backup off, "the day's
   first start" comes from `data/startup_state.json`. Never switchable: the app lock wait, the
-  fresh-install database choice, migrations, the album backfill after its migration, applying song
+  fresh-install database choice, migrations, the album and settled song request backfills after their migrations, applying song
   id changes, resuming the sharing setup — a new start-up step says which kind it is. Settings → Server → "Back up database now" also lets the
   user trigger `backup_databases()` on demand, for a snapshot right before something risky.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check

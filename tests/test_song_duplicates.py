@@ -316,7 +316,8 @@ def test_the_same_new_song_twice_in_one_review_is_added_once(monkeypatch):
     created = []
 
     def create(metadata, artist_obj):
-        song = SimpleNamespace(title=metadata["title"], artist_id=artist_obj.id, kind=None, title_latin=None)
+        song = SimpleNamespace(id=100 + len(created), title=metadata["title"], artist_id=artist_obj.id,
+                               kind=None, title_latin=None)
         created.append(song)
         return song
 

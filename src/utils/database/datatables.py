@@ -285,6 +285,34 @@ END
 """))
 
 
+# --------------------
+# Songs Leina Radio asked to have added that MusicDatabase settled as one of
+# its songs (migration 0024), read by the phone client too - see
+# utils/database/inbox_song_requests.py
+# --------------------
+class SettledSongRequest(Base):
+    __tablename__ = "settled_song_requests"
+
+    id = Column(Integer, primary_key=True)
+    artist = Column(String)  # as requested; NULL = the request had none
+    title = Column(String, nullable=False)
+    youtube_video_id = Column(String)
+    spotify_track_id = Column(String)
+    song_id = Column(Integer, nullable=False, index=True)
+    settled_at = Column(String, nullable=False, server_default=text("(datetime('now'))"))
+
+# Same trigger as migration 0024 (see bad_youtube_videos_follow_songs above)
+event.listen(SongIdChange.__table__, "after_create", DDL("""
+CREATE TRIGGER IF NOT EXISTS settled_song_requests_follow_songs
+AFTER INSERT ON song_id_changes
+BEGIN
+	UPDATE settled_song_requests SET song_id = NEW.new_song_id
+		WHERE song_id = NEW.old_song_id AND NEW.new_song_id IS NOT NULL;
+	DELETE FROM settled_song_requests WHERE song_id = NEW.old_song_id;
+END
+"""))
+
+
 song_categories = [
     "title",
     "artist name",

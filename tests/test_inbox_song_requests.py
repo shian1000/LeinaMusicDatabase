@@ -21,7 +21,7 @@ from utils.database import inbox_auto as ia
 from utils.database import inbox_field_corrections as fc
 from utils.database import inbox_requests as pr
 from utils.database import inbox_song_requests as sr
-from utils.database.datatables import Artist, Base, RejectedSongRequest, Song
+from utils.database.datatables import Artist, Base, RejectedSongRequest, SettledSongRequest, Song, SongIdChange
 
 REQUEST_SQL = """
 CREATE TABLE request (format INTEGER NOT NULL, created_at TEXT NOT NULL, user_name TEXT, app TEXT NOT NULL);
@@ -469,12 +469,87 @@ def test_marking_added_records_the_answer(env):
     _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Unseen", "artist": "Elise Trouw"}])
     _, [case] = _cases(env)
 
-    sr.mark_song_added(case, "Elise Trouw", "Unseen (Live)")
+    sr.mark_song_added(env["session"], case, "Elise Trouw", "Unseen (Live)", 4601)
 
     assert case.status == pr.DECIDED
+    assert case.key not in pr.load_decisions()  # only once the song is committed
+    env["session"].commit()
     decision = pr.load_decisions()[case.key]
     assert decision["decision"] == sr.ADD
-    assert decision["added_as"] == {"artist": "Elise Trouw", "title": "Unseen (Live)"}
+    assert decision["added_as"] == {"artist": "Elise Trouw", "title": "Unseen (Live)", "song_id": 4601}
+    # Leina Radio recognises the track it asked about as that song
+    [row] = env["session"].query(SettledSongRequest).all()
+    assert (row.artist, row.title, row.youtube_video_id, row.song_id) == ("Elise Trouw", "Unseen", None, 4601)
+
+
+def test_a_song_found_in_the_database_is_recorded_and_settles_later_requests(env):
+    _request(env["inbox"], "2026-10-18_10-00-00_001.db", [
+        {"title": "Chromatic", "artist": "Elise Trouw", "youtube_video_id": "v9"},
+        {"title": "CHROMATIC", "artist": "elise trouw", "spotify_track_id": "sp9", "source": "spotify"},
+    ])
+    _, [case] = _cases(env)
+    env["session"].commit()
+
+    assert case.status == sr.ALREADY_IN_DATABASE
+    rows = env["session"].query(SettledSongRequest).order_by(SettledSongRequest.id).all()
+    assert [(r.artist, r.title, r.youtube_video_id, r.spotify_track_id, r.song_id) for r in rows] == [
+        ("Elise Trouw", "Chromatic", "v9", None, 1), ("elise trouw", "CHROMATIC", None, "sp9", 1)]
+
+    # The same request again adds no row; names the matcher can't reconcile,
+    # with that video or Spotify track, are the song too
+    _request(env["inbox"], "2026-10-18_11-00-00_002.db", [
+        {"title": "Chromatic", "artist": "Elise Trouw", "youtube_video_id": "v9"},
+        {"title": "[1-01] Chromatic (Main Theme)", "artist": None, "youtube_video_id": "v9"},
+        {"title": "Chromatic - 2020 Remaster", "artist": "Elise", "spotify_track_id": "sp9", "source": "spotify"},
+        {"title": "Other", "artist": "Elise Trouw"},
+    ])
+    _, cases = _cases(env)
+    env["session"].commit()
+
+    assert [(c.status, c.existing.id if c.existing else None) for c in cases] == \
+        [(sr.ALREADY_IN_DATABASE, 1)] * 3 + [(pr.OPEN, None)]
+    assert env["session"].query(SettledSongRequest).count() == 4
+
+
+def test_settled_requests_follow_merged_and_deleted_songs(env):
+    session = env["session"]
+    session.add_all([SettledSongRequest(title="a", song_id=1, settled_at="x"),
+                     SettledSongRequest(title="b", song_id=2, settled_at="x")])
+    session.flush()
+    session.add_all([SongIdChange(old_song_id=1, new_song_id=7),
+                     SongIdChange(old_song_id=2, new_song_id=None)])
+    session.commit()
+
+    assert [(r.title, r.song_id) for r in session.query(SettledSongRequest)] == [("a", 7)]
+
+
+def test_the_backfill_records_requests_settled_before_the_table(env):
+    session = env["session"]
+    added = Song(id=3, title="Cave Story", artist=Artist(id=40, name="Daisuke Amaya"))
+    session.add(added)
+    session.commit()
+    env["matcher"].songs.append(added)
+    env["matcher"].artists.append(added.artist)
+    path = _request(env["inbox"], "2026-10-18_10-00-00_001.db", [
+        {"title": "Chromatic", "artist": "Elise Trouw"},  # in the database by its names
+        {"title": "[1-01] Cave Story (Main Theme)", "artist": None, "source": "phone_file"},  # added as corrected
+        {"title": "Вахтёрам Live", "artist": "Бумбокс"},  # added, the song id recorded
+        {"title": "Unwanted", "artist": "Elise Trouw"},  # rejected
+        {"title": "Skipped", "artist": "Elise Trouw"},  # never decided
+    ], folder="processed")
+    decisions = {
+        "song:" + sr.song_key(None, "[1-01] Cave Story (Main Theme)"):
+            {"decision": sr.ADD, "added_as": {"artist": "Daisuke Amaya", "title": "Cave Story"}},
+        "song:" + sr.song_key("Бумбокс", "Вахтёрам Live"):
+            {"decision": sr.ADD, "added_as": {"artist": "Бумбокс", "title": "Вахтёрам (Live)", "song_id": 2}},
+        "song:" + sr.song_key("Elise Trouw", "Unwanted"): {"decision": sr.REJECT},
+    }
+
+    assert sr.backfill_settled_requests(session, [pr.read_request_file(path)], decisions, env["matcher"]) == 3
+    session.commit()
+
+    assert sorted((r.title, r.song_id) for r in session.query(SettledSongRequest)) == [
+        ("Chromatic", 1), ("[1-01] Cave Story (Main Theme)", 3), ("Вахтёрам Live", 2)]
 
 
 def test_a_file_missing_a_required_column_is_rejected(env):
@@ -509,8 +584,9 @@ def test_the_automatic_pass_adds_no_song_without_a_rule_of_the_owners(env):
     assert case.auto_note.startswith("adding a song waits for your approval")
 
 
-@pytest.mark.parametrize("threshold, added", [(0.9, True), (0.99, False)])
-def test_a_rule_of_the_owners_adds_a_requested_song_unattended(env, monkeypatch, threshold, added):
+@pytest.mark.parametrize("threshold, imports, added", [(0.9, True, True), (0.99, True, False),
+                                                       (0.9, False, False)])
+def test_a_rule_of_the_owners_adds_a_requested_song_unattended(env, monkeypatch, threshold, imports, added):
     from utils.common import automation_settings
     from utils.discoveries import import_engine
     from utils.ui import prompts
@@ -528,37 +604,46 @@ def test_a_rule_of_the_owners_adds_a_requested_song_unattended(env, monkeypatch,
     def fake_import(entries):
         assert prompts.unattended_now()  # nobody is asked during the automatic pass
         imported.extend((e.artist, e.title) for e in entries)
+        for entry in entries:
+            entry.song_id = 4700 if imports else None  # imports=False: the import left it out
     monkeypatch.setattr(import_engine, "run_import_batch", fake_import)
     _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Unseen", "artist": "Elise Trouw"}])
 
     result = ia.auto_resolve(env["session"], pr.read_new_requests())
 
-    assert imported == ([("Elise Trouw", "Unseen")] if added else [])
+    assert imported == ([("Elise Trouw", "Unseen")] if threshold == 0.9 else [])
     assert result.to_review == (0 if added else 1)
     if added:
         assert 'your rule "MusicBrainz agrees"' in result.changes[0]["text"]
+        assert result.changes[0]["song_id"] == 4700
         assert pr.load_decisions()["song:" + sr.song_key("Elise Trouw", "Unseen")]["by"] == "auto"
     else:
         [request] = pr.read_review_requests()
         [case] = sr.collect_song_request_cases(env["session"], [request], matcher=env["matcher"])
         pr.load_case_checks([case], 24)
-        assert "no rule of yours" in case.auto_note
+        assert ("no rule of yours" if imports else "the import left it out") in case.auto_note
     automation_settings.CONFIG_PATH.unlink()
 
 
-def test_migration_matches_the_model(tmp_path):
-    """migrations/music/0015 gives the same columns as create_all()."""
+@pytest.mark.parametrize("migration, table, insert, stamp", [
+    ("0015_rejected_song_requests.sql", "rejected_song_requests", "(title) VALUES ('t')", "rejected_at"),
+    ("0024_settled_song_requests.sql", "settled_song_requests", "(title, song_id) VALUES ('t', 1)", "settled_at"),
+])
+def test_migration_matches_the_model(tmp_path, migration, table, insert, stamp):
+    """migrations/music/0015 and 0024 give the same columns as create_all()."""
     db = tmp_path / "m.db"
     conn = sqlite3.connect(db)
-    conn.executescript((repo_root / "migrations" / "music" / "0015_rejected_song_requests.sql").read_text())
-    migrated = {row[1]: (row[2], bool(row[3])) for row in conn.execute("PRAGMA table_info(rejected_song_requests)")}
-    conn.execute("INSERT INTO rejected_song_requests (title) VALUES ('t')")
-    assert conn.execute("SELECT rejected_at FROM rejected_song_requests").fetchone()[0]
+    if table == "settled_song_requests":  # its trigger is on song_id_changes (0009)
+        conn.executescript((repo_root / "migrations" / "music" / "0009_song_id_changes.sql").read_text())
+    conn.executescript((repo_root / "migrations" / "music" / migration).read_text())
+    migrated = {row[1]: (row[2], bool(row[3])) for row in conn.execute(f"PRAGMA table_info({table})")}
+    conn.execute(f"INSERT INTO {table} {insert}")
+    assert conn.execute(f"SELECT {stamp} FROM {table}").fetchone()[0]
     conn.close()
 
     engine = create_engine(f"sqlite:///{tmp_path / 'model.db'}")
     Base.metadata.create_all(engine)
     modelled = {c["name"]: (str(c["type"]), not c["nullable"])
-                for c in inspect(engine).get_columns("rejected_song_requests")}
+                for c in inspect(engine).get_columns(table)}
     assert {name: nullable for name, (_, nullable) in migrated.items() if name != "id"} == \
         {name: nullable for name, (_, nullable) in modelled.items() if name != "id"}

@@ -32,6 +32,7 @@ def _daily() -> bool:
 
 def _keep_data_consistent() -> None:
     from utils.database.albums import ALBUM_ID_MIGRATION, run_album_backfill
+    from utils.database.inbox_song_requests import SETTLED_REQUESTS_MIGRATION, run_settled_requests_backfill
     from utils.database.migrations import run_all_pending_migrations
     from utils.database.song_references import apply_song_id_changes
 
@@ -39,6 +40,9 @@ def _keep_data_consistent() -> None:
     # songs.album_id just arrived: link the songs already in the database
     if ALBUM_ID_MIGRATION in applied.get("music", []):
         run_album_backfill()
+    # settled_song_requests just arrived: the requests settled before it
+    if SETTLED_REQUESTS_MIGRATION in applied.get("music", []):
+        run_settled_requests_backfill()
     # Tags, the library index and users' playlists catch up on songs merged
     # or deleted since (a user DB on an unplugged data drive included)
     try:

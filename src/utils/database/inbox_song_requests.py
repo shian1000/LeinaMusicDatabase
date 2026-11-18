@@ -13,7 +13,12 @@ Automation -> "My rules") holds for its facts (song_request_facts()). Else
 the owner adds it (through the import, run_import_batch(), which looks it up
 like any other import), skips it for later, or rejects it. A rejected song goes to
 music.db's rejected_song_requests (migration 0015), which the phone reads, so
-it doesn't ask for that song again.
+it doesn't ask for that song again. A song found in the database or added goes
+to settled_song_requests (migration 0024) with the song's id, one row per way
+the phone named it: Leina Radio recognises its track as that song from the
+next copy on even when nothing else connects them (a file on the phone with
+no video, names its matcher can't reconcile), and a later request matching a
+row is settled as that song without matching again.
 
 Cases: one per song, by normalized artist + title, from every report of
 every file. Settled without asking (the automatic pass too):
@@ -25,7 +30,9 @@ every file. Settled without asking (the automatic pass too):
   "Renata Przemyk - Aniolek" was settled so, its video kept nowhere, and
   the playlist holding it showed the song as not in the database);
 - it was rejected before (a rejected_song_requests row with the same artist +
-  title, YouTube video or Spotify track).
+  title, YouTube video or Spotify track);
+- it was settled before (a settled_song_requests row matching so) - as that
+  song.
 
 A request may carry a YouTube video's channel as the artist and the whole
 video title as the title ("familyboombox" / "Бумбокс - Твiй на 100%"; Leina
@@ -87,10 +94,10 @@ from config.constants import (
     SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
     SONG_REQUEST_TITLE_ARTIST_MAX_WORDS,
 )
-from utils.common.debug import mlog
+from utils.common.debug import flog, mlog
 from utils.common.normalizer import name_key, normalize
 from utils.database.additional_videos import apply_video_links, plan_video_links, song_for_video
-from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, Song
+from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, SettledSongRequest, Song
 from utils.database.latin_names import artist_synonyms
 from utils.database.inbox_requests import (
     DECIDED,
@@ -132,7 +139,7 @@ SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a fi
 
 def song_key(artist: str | None, title: str | None) -> str:
     # A comparison key of the names as sent, never sanitize()d: it groups the
-    # requests, finds rejected_song_requests rows (stored as sent) and, as
+    # requests, finds rejected / settled_song_requests rows (stored as sent) and, as
     # "song:<key>", is the case id decisions are saved under - a cleanup
     # step turned on later must not change it
     return f"{normalize(artist or '')}|{normalize(title or '')}"
@@ -213,16 +220,21 @@ class SongRequestCase:
                                               ("album", latest.album)) if value is not None}), SOURCE_REQUEST)
 
 
-def _rejected_rows(session) -> tuple[set, set, set]:
-    """(artist+title keys, YouTube ids, Spotify ids) of rejected_song_requests."""
-    keys, videos, tracks = set(), set(), set()
-    for row in session.query(RejectedSongRequest).all():
-        keys.add(song_key(row.artist, row.title))
-        if row.youtube_video_id:
-            videos.add(row.youtube_video_id)
-        if row.spotify_track_id:
-            tracks.add(row.spotify_track_id)
-    return keys, videos, tracks
+def _request_rows(session, model) -> dict:
+    """"name:<song_key()>", "video:<id>" and "spotify:<id>" of every row of
+    rejected_song_requests / settled_song_requests (`model`) -> its song_id
+    (None for a rejection); the oldest row of each stays."""
+    rows = {}
+    for row in session.query(model).order_by(model.id).all():
+        song_id = getattr(row, "song_id", None)
+        for key in _request_keys(row.artist, row.title, row.youtube_video_id, row.spotify_track_id):
+            rows.setdefault(key, song_id)
+    return rows
+
+
+def _request_keys(artist, title, video_id=None, track_id=None) -> list[str]:
+    return [f"name:{song_key(artist, title)}", *([f"video:{video_id}"] if video_id else []),
+            *([f"spotify:{track_id}"] if track_id else [])]
 
 
 def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tuple | None:
@@ -535,11 +547,13 @@ def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
     return matcher.match(metadata)
 
 
-def collect_song_request_cases(session, requests: list[RequestFile], matcher=None) -> list[SongRequestCase]:
+def collect_song_request_cases(session, requests: list[RequestFile], matcher=None,
+                               fetch: bool = True) -> list[SongRequestCase]:
     """Group every supported file's song requests by song and settle what
     needs no answer (the videos of songs found in the database saved on
     them, see _settle(); the caller commits). Order: first report first. `matcher`: a
-    LocalSongMatcher to use (tests); made here otherwise."""
+    LocalSongMatcher to use (tests); made here otherwise. `fetch` = False
+    asks YouTube nothing (a video's description or title and channel)."""
     cases: dict[str, SongRequestCase] = {}
     for request in requests:
         if not request.supported:
@@ -553,12 +567,12 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
     if matcher is None:
         from utils.discoveries.import_engine import LocalSongMatcher
         matcher = LocalSongMatcher(session)
-    rejected = _rejected_rows(session)
+    known = _request_rows(session, RejectedSongRequest), _request_rows(session, SettledSongRequest)
     for key, case in cases.items():
         case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
         if case.suggested:
             case.suggested_from = SUGGESTED_FROM_SWAP if case.suggested[1] == case.latest.artist else SUGGESTED_FROM_TITLE
-        if _settle(session, key, case, rejected, matcher):
+        if _settle(session, case, known, matcher) or not fetch:
             continue
         # Only now, the description fetch being slow
         credits = _description_credits(case)
@@ -566,33 +580,106 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
             case.suggested, *case.also_suggested = description_suggestions(
                 session, credits, case.latest.title, matcher)
             case.suggested_from = SUGGESTED_FROM_DESCRIPTION
-            _settle(session, key, case, rejected, matcher)
+            _settle(session, case, known, matcher)
             continue
         reading = channel_suggestion(case)
         if reading:
             case.suggested, case.also_suggested = (_database_spelling(reading[0], matcher), reading[1]), []
             case.suggested_from = SUGGESTED_FROM_CHANNEL
-            _settle(session, key, case, rejected, matcher)
+            _settle(session, case, known, matcher)
     return list(cases.values())
 
 
-def _settle(session, key: str, case: SongRequestCase, rejected: tuple, matcher) -> bool:
-    """Settle the case if it was rejected before or is in the database
-    already (by any of its suggestions too; its videos then saved on that
-    song, flushed - the caller commits); whether it was."""
-    rejected_keys, rejected_videos, rejected_tracks = rejected
-    if (key in rejected_keys or any(song_key(*s) in rejected_keys for s in case.suggestions)
-            or set(case.youtube_video_ids) & rejected_videos
-            or set(case.spotify_track_ids) & rejected_tracks):
+def _settle(session, case: SongRequestCase, known: tuple, matcher) -> bool:
+    """Settle the case if it was rejected before, settled before or is in
+    the database already (by any of its suggestions too; it then goes to
+    settled_song_requests and its videos are saved on that song, flushed -
+    the caller commits); whether it was. `known`: _request_rows() of
+    rejected_song_requests and settled_song_requests."""
+    rejected, settled = known
+    keys = [*(k for r in case.reports for k in _request_keys(r.artist, r.title, r.youtube_video_id,
+                                                                r.spotify_track_id)),
+            *(f"name:{song_key(*s)}" for s in case.suggestions)]
+    if any(k in rejected for k in keys):
         case.status = REJECTED_BEFORE
         return True
-    case.existing = _song_in_database(session, case, matcher)
+    case.existing = (next((song for k in keys if k in settled and (song := session.get(Song, settled[k]))), None)
+                     or _song_in_database(session, case, matcher))
     if case.existing is not None:
         case.status = ALREADY_IN_DATABASE
+        record_settled_request(session, case, case.existing.id)
         plan = plan_video_links(session, [(case.existing.id, v, False) for v in case.youtube_video_ids])
         case.videos_saved = apply_video_links(session, plan.links, ADDITIONAL_VIDEO_IMPORT)
         return True
     return False
+
+
+def record_settled_request(session, case: SongRequestCase, song_id: int) -> None:
+    """The case is song `song_id`: in settled_song_requests, one row per
+    distinct way the phone named it not there yet. The caller commits."""
+    stored = {(r.artist, r.title, r.youtube_video_id, r.spotify_track_id): r
+              for r in session.query(SettledSongRequest).filter(
+                  SettledSongRequest.title.in_({r.title for r in case.reports}))}
+    for report in case.reports:
+        row = (report.artist, report.title, report.youtube_video_id, report.spotify_track_id)
+        if row in stored:
+            stored[row].song_id = song_id
+            continue
+        stored[row] = SettledSongRequest(artist=report.artist, title=report.title,
+                                         youtube_video_id=report.youtube_video_id,
+                                         spotify_track_id=report.spotify_track_id, song_id=song_id,
+                                         settled_at=now_iso())
+        session.add(stored[row])
+
+
+SETTLED_REQUESTS_MIGRATION = "0024_settled_song_requests.sql"
+
+
+def backfill_settled_requests(session, requests: list[RequestFile], decisions: dict, matcher=None) -> int:
+    """settled_song_requests for requests settled before it existed
+    (migration 0024; main.py runs it once, for Inbox/processed/): the cases
+    collect_song_request_cases() settles now (YouTube not asked), and those
+    added then - as the decision recorded it (its song_id, else the song its
+    `added_as` names now). How many cases went in; the caller commits."""
+    if matcher is None:
+        from utils.discoveries.import_engine import LocalSongMatcher
+        matcher = LocalSongMatcher(session, load_artists_once=True)
+    cases = collect_song_request_cases(session, requests, matcher, fetch=False)
+    settled = 0
+    for case in cases:
+        if case.status == ALREADY_IN_DATABASE:
+            settled += 1
+            continue
+        added = (decisions.get(case.key) or {}).get("added_as") if case.pending else None
+        if not added or not added.get("title"):
+            continue
+        song = (session.get(Song, added["song_id"]) if added.get("song_id")
+                else matcher.match(case.metadata(added.get("artist"), added["title"])))
+        if song is not None:
+            record_settled_request(session, case, song.id)
+            settled += 1
+    return settled
+
+
+def run_settled_requests_backfill() -> None:
+    """Startup hook (main.py), run once right after migration 0024 lands."""
+    from utils.database.inbox_requests import PROCESSED, _request_paths, inbox_available, load_decisions, read_request_file
+    from utils.database.music_db_manager import get_music_session
+
+    if not inbox_available():
+        flog("settled_song_requests: the inbox isn't there (data drive), nothing backfilled")
+        return
+    session = get_music_session()
+    try:
+        requests = [read_request_file(path) for path in _request_paths(PROCESSED)]
+        count = backfill_settled_requests(session, requests, load_decisions())
+        session.commit()
+        mlog(f"settled_song_requests: {count} song request(s) Leina Radio sent earlier recorded as their songs")
+    except Exception as exc:
+        session.rollback()
+        flog(f"settled_song_requests: backfill failed: {exc!r}")
+    finally:
+        session.close()
 
 
 def videos_saved_text(case: SongRequestCase) -> str:
@@ -617,10 +704,16 @@ def reject_song_request(session, case: SongRequestCase) -> None:
     _decided(case, REJECT, session=session)
 
 
-def mark_song_added(case: SongRequestCase, artist: str | None, title: str, by: str | None = None) -> None:
-    """The song went through the import (added, or found there after all),
-    as `artist` - `title`. `by` = "auto" for the automatic pass."""
-    _decided(case, ADD, added_as={"artist": artist, "title": title}, **({"by": by} if by else {}))
+def mark_song_added(session, case: SongRequestCase, artist: str | None, title: str, song_id: int,
+                    by: str | None = None) -> None:
+    """The import made song `song_id` of the request (added it, or found it
+    there after all), as `artist` - `title`; only then - one it left out
+    stays open. Recorded in settled_song_requests; the decision is saved
+    when `session` commits (the caller commits). `by` = "auto" for the
+    automatic pass."""
+    record_settled_request(session, case, song_id)
+    _decided(case, ADD, session=session, added_as={"artist": artist, "title": title, "song_id": song_id},
+             **({"by": by} if by else {}))
 
 
 def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: dict, matcher,

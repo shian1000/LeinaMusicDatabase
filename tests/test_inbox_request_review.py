@@ -130,7 +130,13 @@ def env(tmp_path, monkeypatch):
                         lambda cases, on_case=None: checked.extend(cases) or {"api": True, "blocked": 0})
     monkeypatch.setattr(review, "check_correction_videos", lambda cases: {"api": True, "blocked": 0})
     imported = []
-    monkeypatch.setattr(ie, "run_import_batch", lambda entries: imported.extend(entries) or [])
+
+    def fake_import(entries):  # each entry becomes song 900, 901, ...
+        for entry in entries:
+            entry.song_id = 900 + len(imported)
+            imported.append(entry)
+        return []
+    monkeypatch.setattr(ie, "run_import_batch", fake_import)
 
     answers = Answers()
     monkeypatch.setattr(review.questionary, "select", answers.select)
@@ -488,7 +494,23 @@ def test_approved_songs_go_through_one_import_even_after_a_stop(env):
     asked_first = env["answers"].selects[1][1][0]
     assert f"{entry['artist_name']} - {entry['title']}" in asked_first
     decisions = [d for d in _decisions(env).values() if d.get("decision") == sr.ADD]
-    assert [d["added_as"] for d in decisions] == [{"artist": entry["artist_name"], "title": entry["title"]}]
+    assert [d["added_as"] for d in decisions] == \
+        [{"artist": entry["artist_name"], "title": entry["title"], "song_id": 900}]
+    assert _folder(env, pr.REVIEW) == ["2026-10-14_09-00-00_001.db"]
+
+
+def test_a_song_the_import_left_out_stays_to_be_resolved(env, monkeypatch, capsys):
+    # The import skipped it (no song made or found): marked added, it would never
+    # be asked about again while Leina Radio still misses it (2026-10-27/31)
+    monkeypatch.setattr(ie, "run_import_batch", lambda entries: env["imported"].extend(entries) or [])
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", songs=[("CMB G MONEY", "Soul Glo")])
+    env["answers"].add(REVIEW_LABEL, "Add it to the database (")
+
+    review.resolve_new_requests()
+
+    assert len(env["imported"]) == 1
+    assert "The import left out 1 of them" in capsys.readouterr().out
+    assert not (env["inbox"] / pr.DECISIONS_FILE).exists()
     assert _folder(env, pr.REVIEW) == ["2026-10-14_09-00-00_001.db"]
 
 

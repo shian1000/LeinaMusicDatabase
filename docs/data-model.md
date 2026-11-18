@@ -65,7 +65,24 @@ video_id      PK, a YouTube video id - one song's only
 song_id       NOT NULL, a current songs.id (trigger on song_id_changes)
 source        NOT NULL, constants.ADDITIONAL_VIDEO_SOURCES
 added_at      NOT NULL, default datetime('now')
+
+SettledSongRequest  (table settled_song_requests, migration 0024)
+--------------------
+id            PK
+artist        as Leina Radio's request sent it, NULL = it had none
+title         NOT NULL, as sent
+youtube_video_id, spotify_track_id   as sent
+song_id       NOT NULL, a current songs.id (trigger on song_id_changes)
+settled_at    NOT NULL, default datetime('now')
 ```
+
+- `settled_song_requests` — the counterpart of `rejected_song_requests`: a song Leina Radio asked
+  for that MusicDatabase found it had or added, one row per way the phone named it, with the song
+  it is. Leina Radio recognises a track by the request's names, video or Spotify track as that
+  song even when its own matcher can't (a file on the phone with no video, "[1-01] Cave Story
+  (Main Theme)"); handoff [`handoffs/settled-song-requests-for-musicdatabaseapp.md`](handoffs/settled-song-requests-for-musicdatabaseapp.md).
+  `inbox_song_requests.record_settled_request()`, from `_settle()` and `mark_song_added()`; the
+  inbox settles a later request matching a row as that song without matching. Public on GitHub.
 
 - `additional_youtube_videos` — a song's YouTube videos other than its own link, only for telling
   which song a video is (Leina Radio looks a played video up here after `songs.youtube_video_id`,

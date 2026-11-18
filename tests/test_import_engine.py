@@ -412,6 +412,12 @@ def test_the_result_pairs_every_song_with_its_entry(env):
     # added, matched, chosen in the review - the first entry of a song stays
     assert by_title == {"Runaway": new, "Engel": found, "Du hast": similar}
     assert by_title["Runaway"] is new and result.entry_for(result[0]).raw_text == new.raw_text
+    # each entry knows its song; one the import left out, none
+    assert [e.song_id for e in (new, found, similar)] == [session.query(Song).filter(Song.title == t).one().id
+                                                         for t in ("Runaway", "Engel", "Du hast")]
+    left_out = SongEntry(_entry("Rammstein", ""))
+    ie.run_import_batch([left_out])
+    assert left_out.song_id is None
 
 
 def test_a_song_added_after_a_review_has_its_entry(env):

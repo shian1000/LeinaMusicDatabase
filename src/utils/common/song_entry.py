@@ -139,6 +139,9 @@ class SongEntry(dict):
     file       - the file it was read from
     removed    - what the cleanup cut (Removed), in order
     hints      - what that and the title say about the song (Hints)
+    song_id    - the song run_import_batch() made of it or found it to be;
+                 None before, or when the import left it out (a copy starts
+                 without it)
     """
 
     def __init__(self, metadata: Optional[dict] = None, *, source: Optional[str] = None,
@@ -153,6 +156,7 @@ class SongEntry(dict):
         self.channel = channel
         self.file = file
         self.removed = list(removed or [])
+        self.song_id = None
 
     @property
     def hints(self) -> Hints:

@@ -453,7 +453,13 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   A rejection is a row of music.db's `rejected_song_requests` (migration 0015), read by the phone
   with the next copy for sharing, so it doesn't ask again; a later request matching one by artist +
   title (normalized), YouTube video or Spotify track is settled without asking. Delete a row (app
-  closed) to let Leina Radio ask for that song again.
+  closed) to let Leina Radio ask for that song again. The other way round, a song found in the
+  database or added is a row of `settled_song_requests` (migration 0024) with its `songs.id`:
+  Leina Radio then shows its track as that song, and a later request matching one the same way
+  is settled as that song. The rows for requests settled before the table were written once
+  from `Inbox/processed/` and `decisions.json` (`run_settled_requests_backfill()`, at the start
+  that applied the migration; with the data drive missing then, nothing is backfilled - run
+  `backfill_settled_requests()` by hand).
   A request carrying a YouTube channel as the artist and the whole video title as the title
   ("familyboombox" / "Бумбокс - Твiй на 100%", Leina Radio's search results before
   [`youtube-search-requests-for-musicdatabaseapp.md`](../handoffs/youtube-search-requests-for-musicdatabaseapp.md))

@@ -76,7 +76,10 @@ songs it added (every caller and test treats it as one), plus `entries`,
 song id -> the SongEntry the song came from, for every song the import added
 *or found already there* - the exact match in `resolve_song()`, the "use the
 existing song" answer, a song added in the review, an entry held back for a
-similar artist (`_remember()`, the first entry of a song stays). Planned on
+similar artist (`_remember()`, the first entry of a song stays). `_remember()`
+also sets the entry's own `song_id`, for every entry (two of one song too); it
+stays None for one left out (no artist or title, ...), which is how a caller
+recording its entries as done (`mark_song_added()`) tells them apart. Planned on
 top (owner's plan; featured artists done - normalization note): Years
 takes `songs` and `entries` - `fill_missing_years(songs, entries)` looks
 only at those songs (with an album and no year), and a group no module found

@@ -1064,9 +1064,12 @@ def _credit_found_song(song: Song, metadata) -> None:
 
 def _remember(entries: dict | None, song: Song, metadata) -> None:
     """Pair `song` with the entry it came from in `entries` (song id ->
-    SongEntry); the first entry of a song stays."""
-    if entries is not None and song is not None and song.id is not None:
-        entries.setdefault(song.id, as_entry(metadata))
+    SongEntry; the first entry of a song stays) and in the entry's `song_id`."""
+    if song is None or song.id is None:
+        return
+    metadata.song_id = song.id
+    if entries is not None:
+        entries.setdefault(song.id, metadata)
 
 
 class ImportResult(list):

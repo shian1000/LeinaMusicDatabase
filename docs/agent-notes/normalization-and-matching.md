@@ -195,7 +195,7 @@ composes every column, and the Polish repair stays record-level. Each pass
 is skipped when its step is off. Song requests too: `SongRequestCase.metadata()`
 is `sanitize_metadata(..., "request")`.
 `inbox_song_requests.song_key()` is deliberately not cleaned: it groups the
-requests, finds `rejected_song_requests` rows (stored as sent) and, as
+requests, finds `rejected_song_requests` / `settled_song_requests` rows (stored as sent) and, as
 "song:<key>", is the id a decision is saved under, so turning a step on
 must not change it. Field corrections from Leina Radio are typed by a
 person - the "manual" source, which has no steps - and keep their own

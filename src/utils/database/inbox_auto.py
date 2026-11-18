@@ -484,18 +484,23 @@ def _add_requested_songs(session, cases: list, senders: dict, may, result: AutoR
     # The import works in the menu's sessions: this one must hold no
     # transaction, or SQLite keeps its commits waiting
     session.commit()
+    entries = [case.metadata(artist, title) for case, artist, title, _ in taken]
     try:
         with unattended() as answered:
-            run_import_batch([case.metadata(artist, title) for case, artist, title, _ in taken])
+            run_import_batch(entries)
     except Exception as exc:
         flog(f"Inbox auto: adding requested songs failed: {exc!r}")
         for case, *_ in taken:
             case.auto_note = f"adding it automatically failed: {exc}"
         return
-    for case, artist, title, rule in taken:
-        mark_song_added(case, artist, title, by=AUTO)
-        result.changes.append({"at": now_iso(), "kind": "song_request", "song_id": None,
+    for (case, artist, title, rule), entry in zip(taken, entries):
+        if entry.song_id is None:
+            case.auto_note = "the import left it out (its summary says why)"
+            continue
+        mark_song_added(session, case, artist, title, entry.song_id, by=AUTO)
+        result.changes.append({"at": now_iso(), "kind": "song_request", "song_id": entry.song_id,
                                "text": f"{artist} - {title}: added (Leina Radio asked for it{_by(rule)})",
                                "files": sorted({r.file_name for r in case.reports})})
+    session.commit()  # settled_song_requests, and only then the decisions
     result.changes += [{"at": now_iso(), "kind": "song_request", "song_id": None, "text": f"{step or 'Import'}: {item}",
                         "files": []} for step, item in answered]
