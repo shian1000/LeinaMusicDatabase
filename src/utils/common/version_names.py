@@ -13,6 +13,7 @@ from config.constants import (
     VERSION_EDIT,
     VERSION_EXTENDED,
     VERSION_INSTRUMENTAL,
+    VERSION_KARAOKE,
     VERSION_KIND_LABELS,
     VERSION_LIVE,
     VERSION_OTHER,
@@ -32,6 +33,8 @@ _KIND_WORDS = (
     # ("Eurovision Version" is its studio edit: a version, not live)
     (VERSION_LIVE, r"live|na zywo|koncert\w*|concert|eurovision song contest|eurovision \d{4}|sessions?"),
     (VERSION_ACOUSTIC, r"acoustic|akustycz\w*|unplugged"),
+    # before instrumental: "Karaoke Instrumental" is sung along to
+    (VERSION_KARAOKE, r"karaoke"),
     (VERSION_INSTRUMENTAL, r"instrumental|instrumentalna"),
     (VERSION_DEMO, r"demo"),
     (VERSION_REMIX, r"remix|rmx|rework|bootleg|mashup|mix|dub"),

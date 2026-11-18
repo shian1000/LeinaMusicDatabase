@@ -446,7 +446,10 @@ music video's length (AC/DC "Touch Too Much": video 326 s, the recording 266 s),
 the same. It decides only `synced_fits` (within `LYRICS_DURATION_TOLERANCE_S` = 3 s, or a length
 unknown): otherwise the synced lines are dropped and the plain text kept. Ranking: sure, then a
 text over an "instrumental" flag (LRCLIB flagged a vocal remix of "Crookers - Jump Up" so), then
-fitting synced lines, then the closest length. The first sure match ends the search. Each module
+fitting synced lines, then the closest length. The first sure match with words ends the search; a source's "instrumental" doesn't (LRCLIB's for John Legend's "Green Light" hid Genius's words until 2026-11-18). Before any check a found text is read for what it is
+(`_read_as_meant()`): only "Instrumental" is a claim of none, only addresses, signs and times (a download
+site's tag in an mp3's lyrics frame - "www.t.me/pmedia_music" stood as 10 songs' lyrics -, LRCLIB's blank lines)
+no text at all. Each module
 is asked `_lyrics_queries()` in turn until a candidate fits: the artist's name, each synonym, the
 parts of a joined name ("Alice Cooper & Bee Gees": Genius has "Alice Cooper") and the song's main
 artists, each with the title, the title without its brackets and each other title ("Studzianki" is
@@ -497,7 +500,8 @@ text from `#songText .inner-text`; a Cyrillic name also as the site writes it in
 `<title>`; the text runs through every `div.arttxt`, an advert between them, without the "… TEKST
 PIOSENKI" headings and up to the first `<p>` / `<div>` inside - the page's own blurb "<title> w
 wykonaniu …", all a page without lyrics has, which the first block alone saved as lyrics for 9
-songs until 2026-11-17) has Polish songs
+songs until 2026-11-17; its note "Ta piosenka jest utworem instrumentalnym" / "Instrumental" is an
+instrumental claim, not words) has Polish songs
 Tekstowo lacks. `cuspajz_fetcher` (`cuspajz.com/tekstovi-pjesama/pjesma/<artist>/<title>.html`,
 Tekstowo's slugs with "đ" as "d"; a page it lacks redirects to its index, which has no `<title>` "A — T —
 Tekst", so that counts as nothing found; the text in `article p.text`) is for the songs of the former

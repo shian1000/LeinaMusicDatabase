@@ -259,7 +259,8 @@ added_at      NOT NULL, default datetime('now')
   title used to be settled as the original, so Leina Radio never saw an answer.
 - `Song.version_kind` / `version_label` / `version_of` → `songs` (migration `0022`,
   `utils/database/versions.py`, [ADR-0007](decisions/0007-song-versions.md)) — a version of a song
-  (`constants.VERSION_KINDS`: live, remix, acoustic, edit, extended, demo, instrumental, other; NULL =
+  (`constants.VERSION_KINDS`: live, remix, acoustic, edit, extended, demo, instrumental, karaoke - sung
+  along to, so it gets the original's lyrics -, other; NULL =
   not one), shown with `version_label` or the kind's label: "Boję się (Live)". The title carries no
   marker. `version_of` is the original when music.db has it, always the original itself; the version
   stays a row of its own (own id, video, album, plays). Handoff to the app

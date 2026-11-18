@@ -38,7 +38,7 @@ from utils.common.romanize import suggest_latin
 from utils.common.version_names import read_version
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 import re
 
@@ -765,9 +765,30 @@ def _has_text(result) -> bool:
         result.instrumental or (result.plain or "").strip() or (result.synced or "").strip())
 
 
+# What isn't words: an address (a download site's tag in an mp3's lyrics frame,
+# "www.t.me/pmedia_music", "ElectroHouse.ucoz.com" - 10 songs had one as lyrics)
+_ADDRESS_RE = re.compile(r"https?://\S+|www\.\S+|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|info|biz|io|it|pl|ru|cz|me)\b\S*",
+                         re.IGNORECASE)
+_INSTRUMENTAL_NOTE_RE = re.compile(r"^\W*instrumental\W*$", re.IGNORECASE)
+
+
+def _read_as_meant(result: LyricsDiscoveryResult) -> LyricsDiscoveryResult:
+    """A text that is only "Instrumental" is a claim of none (LRCLIB's "Linkin
+    Park - Session"); one of only addresses, signs and times (LRCLIB's blank
+    lines for "Acid Rain") is no text at all."""
+    plain = result.plain or ""
+    if _INSTRUMENTAL_NOTE_RE.match(plain):
+        return replace(result, plain=None, synced=None, instrumental=True)
+    if (plain or result.synced) and not re.search(r"[^\W\d_]", _ADDRESS_RE.sub(" ", plain + (result.synced or ""))):
+        return replace(result, plain=None, synced=None)
+    return result
+
+
 def _lyrics_match(result: LyricsDiscoveryResult, song, queried_artist: str, module_id: str, module_name: str,
                   duration_s: float | None, credited: list[str] | None) -> LyricsMatch | None:
     """The candidate checked against the song, or None when it's another song."""
+    if isinstance(result, LyricsDiscoveryResult):
+        result = _read_as_meant(result)
     if not _has_text(result):
         return None
     if result.from_song_file:
@@ -860,10 +881,12 @@ def _medley_parts(title: str) -> list[str]:
 
 def discover_lyrics(song, modules, duration_s: float | None = None) -> LyricsSearch:
     """The best lyrics the given get_lyrics() modules find for `song`, in
-    their order: the first sure match wins; one that isn't sure is kept
-    while the next modules may still find a sure one. Each module is asked
-    _lyrics_queries() in order until it has a candidate that fits.
-    `duration_s` is our length of the song (None = unknown)."""
+    their order: the first sure match with words wins; one that isn't sure, or
+    a source's "instrumental", is kept while the next modules may still find a
+    sure text (LRCLIB's instrumental entry for John Legend's "Green Light" hid
+    Genius's words). Each module is asked _lyrics_queries() in order until it
+    has a candidate that fits. `duration_s` is our length of the song (None =
+    unknown)."""
     credited, _ = _multi_artist_query(song)
     queries = _lyrics_queries(song)
     search = LyricsSearch()
@@ -888,7 +911,7 @@ def discover_lyrics(song, modules, duration_s: float | None = None) -> LyricsSea
         record_success(module_id, LYRICS)
         if search.match is None or _match_rank(found) > _match_rank(search.match):
             search.match = found
-        if search.match.sure:
+        if search.match.sure and not search.match.result.instrumental:
             return search
     if search.match is None:
         flog(f"No module found lyrics for '{song.artist.name} - {song.title}'")

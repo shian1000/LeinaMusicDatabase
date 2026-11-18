@@ -17,6 +17,8 @@ MODULE_NAME = "Fajnanuta (Curl)"
 _pacer = RequestPacer(FAJNANUTA_MIN_INTERVAL)
 # <title>: "▷ Anna Maria Jopek, Branford Marsalis - Patrz i Słuchaj TEKST - na Fajnanuta.pl"
 _PAGE_TITLE = re.compile(r"^\W*(?P<artist>.+?) - (?P<title>.+?) TEKST\b")
+# What it writes instead of lyrics: "Ta piosenka jest utworem instrumentalnym. Fajnie, co nie?", "Instrumental"
+_INSTRUMENTAL = re.compile(r"^(?:instrumental\W*|ta piosenka jest utworem instrumentalnym\b.*)$", re.I | re.S)
 
 
 def page_lyrics(soup) -> str | None:
@@ -48,5 +50,8 @@ def get_lyrics(artist: str, title: str, duration_s: float | None = None, songs=N
     if not (names and plain):
         flog(f"[Fajnanuta] no lyrics or names on {url}")
         return []
+    if _INSTRUMENTAL.match(plain):
+        return [LyricsDiscoveryResult(instrumental=True, matched_artist=names["artist"], matched_title=names["title"],
+                                      source_ref=url)]
     return [LyricsDiscoveryResult(plain=plain, matched_artist=names["artist"], matched_title=names["title"],
                                   source_ref=url)]

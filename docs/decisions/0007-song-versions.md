@@ -22,7 +22,7 @@ database. Most versions are kept without the original.
 Modelled on covers (migrations 0020-0021): migration 0022 adds three columns to `songs`:
 
 - `version_kind` - `constants.VERSION_KINDS` (live, remix, acoustic, edit, extended, demo,
-  instrumental, other), NULL = not a version;
+  instrumental, karaoke, other), NULL = not a version;
 - `version_label` - the marker as shown ("Cid Rim Remix"), NULL = the kind's own label ("Live");
 - `version_of` - the original song when music.db has it, else NULL; always the original itself.
 

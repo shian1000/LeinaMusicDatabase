@@ -122,15 +122,17 @@ def test_marking_songs_instrumental():
     assert song.language == "Instrumental" and store.is_instrumental(song)
 
 
-def test_a_version_gets_its_originals_plain_text(music, lyrics_db):
+@pytest.mark.parametrize("kind", ["live", "karaoke"])
+def test_a_version_gets_its_originals_plain_text(music, lyrics_db, kind):
     original = _song("Kometa")
     music.add(original)
     music.commit()
-    live = _song("Kometa", version_kind="live", version_of=original.id)
+    version = _song("Kometa", version_kind=kind, version_of=original.id)
+    assert not store.is_instrumental(version)  # a karaoke track is sung along to
     with store.lyrics_db_session(lyrics_db) as session:
-        assert store.original_lyrics(session, live) is None
+        assert store.original_lyrics(session, version) is None
         store.save_lyrics(session, original.id, store.Lyrics(plain="Słowa", synced="[00:01.00] Słowa", source="m"))
-        found = store.original_lyrics(session, live)
+        found = store.original_lyrics(session, version)
     assert (found.plain, found.synced, found.source) == ("Słowa", None, "original")
 
 
@@ -489,6 +491,16 @@ FAJNANUTA_PAGE = ('<title>▷ Anna Maria Jopek, Branford Marsalis - Patrz i Słu
                   '<p>Anna Maria Jopek - Patrz i Słuchaj Tekst piosenki</p></div></div>')
 
 
+@pytest.mark.parametrize("note", ["Ta piosenka jest utworem instrumentalnym.<br/>Fajnie, co nie?", "Instrumental"])
+def test_fajnanuta_s_note_of_no_words_is_an_instrumental_claim(monkeypatch, note):
+    page = ('<title>▷ Marek Biliński - Ucieczka z Tropiku TEKST - na Fajnanuta.pl</title>'
+            f'<div class="arttxt"><h2>Ucieczka z Tropiku TEKST PIOSENKI</h2><br/>{note}<br/><p>blurb</p></div>')
+    monkeypatch.setattr(fajnanuta_fetcher._pacer, "min_interval", 0)
+    monkeypatch.setattr(lyrics_pages.requests, "get", lambda url, **kw: _Page(200, page))
+    [found] = fajnanuta_fetcher.get_lyrics("Marek Biliński", "Ucieczka z tropiku")
+    assert found.instrumental and not found.plain
+
+
 def test_fajnanuta_gives_nothing_for_a_page_holding_only_its_blurb():
     soup = BeautifulSoup('<div class="arttxt"><h2>Song TEKST PIOSENKI</h2><div class="custom centr"></div>'
                          '<p>Artist - Song Tekst piosenki</p> <i>Song</i> w wykonaniu Artist</div>', "html.parser")
@@ -586,6 +598,25 @@ def test_words_win_over_a_claim_of_none():
     claim = LyricsDiscoveryResult(instrumental=True, matched_title="Jump Up", matched_artist="Crookers", duration_s=222)
     match = dm.discover_lyrics(_song("Jump Up", "Crookers"), _module(claim, _found("Jump Up", "Crookers")), 222).match
     assert not match.result.instrumental and match.result.plain
+
+
+def test_an_address_is_no_text_and_instrumental_alone_is_a_claim_of_none():
+    tag = LyricsDiscoveryResult(plain="www.t.me/pmedia_music", from_song_file=True)
+    assert dm.discover_lyrics(_song(), _module(tag)).match is None
+    blank = LyricsDiscoveryResult(plain=" \n ", synced="[00:01.00] \n[00:02.00] ", matched_title="Kometa", matched_artist="Lao Che")
+    assert dm.discover_lyrics(_song(), _module(blank)).match is None
+    note = LyricsDiscoveryResult(plain="Instrumental\n", matched_title="Session", matched_artist="Linkin Park")
+    match = dm.discover_lyrics(_song("Session", "Linkin Park"), _module(note)).match
+    assert match.result.instrumental and match.result.plain is None
+
+
+def test_a_modules_claim_of_none_lets_the_next_module_answer():
+    claim = LyricsDiscoveryResult(instrumental=True, matched_title="Green Light", matched_artist="John Legend")
+    [(_, _, says_none)] = _module(claim)
+    [(_, _, has_words)] = _module(_found("Green Light", "John Legend"))
+    modules = [("lrclib_fetcher", "LRCLIB", says_none), ("genius_lyrics_fetcher", "Genius", has_words)]
+    match = dm.discover_lyrics(_song("Green Light", "John Legend"), modules).match
+    assert match.module_id == "genius_lyrics_fetcher" and match.result.plain
 
 
 def test_a_found_title_naming_another_version_is_not_ours():

@@ -574,6 +574,9 @@ VERSION_EDIT = "edit"
 VERSION_EXTENDED = "extended"
 VERSION_DEMO = "demo"
 VERSION_INSTRUMENTAL = "instrumental"
+# The backing track to sing along to: its lyrics are the original's, as for a live take
+# (owner's choice 2026-11-18), unlike an instrumental version's
+VERSION_KARAOKE = "karaoke"
 VERSION_OTHER = "other"
 VERSION_KIND_LABELS = {
     VERSION_LIVE: "Live",
@@ -583,6 +586,7 @@ VERSION_KIND_LABELS = {
     VERSION_EXTENDED: "Extended",
     VERSION_DEMO: "Demo",
     VERSION_INSTRUMENTAL: "Instrumental",
+    VERSION_KARAOKE: "Karaoke",
     VERSION_OTHER: "Version",
 }
 VERSION_KINDS = tuple(VERSION_KIND_LABELS)

@@ -34,6 +34,9 @@ from utils.discoveries.import_engine import create_song_entry, find_existing_son
     ("Crazy In Love (BBC Session)", ("Crazy In Love", "live", "BBC Session")),
     ("Lose Control - The Village Sessions", ("Lose Control", "live", "The Village Sessions")),
     ("Song - Part 2 - Live", ("Song - Part 2", "live", None)),
+    # Sung along to: the original's words, not an instrumental's none
+    ("Zanim zrozumiesz (Karaoke)", ("Zanim zrozumiesz", "karaoke", None)),
+    ("Song (Karaoke Instrumental)", ("Song", "karaoke", "Karaoke Instrumental")),
 ])
 def test_read_version(title, expected):
     reading = read_version(title)

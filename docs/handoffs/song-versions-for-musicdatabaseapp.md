@@ -15,10 +15,10 @@ live take, a different recording from the studio row #3994, and only the lengths
 Migration `0022_song_version.sql`, in the shared and the public `music.db`, three new columns on
 `songs`, NULL for most songs:
 
-- `version_kind` (TEXT): `live`, `remix`, `acoustic`, `edit`, `extended`, `demo`, `instrumental` or
+- `version_kind` (TEXT): `live`, `remix`, `acoustic`, `edit`, `extended`, `demo`, `instrumental`, `karaoke` (since 2026-11-18) or
   `other`. NULL = not a version. Treat an unknown value as `other`.
 - `version_label` (TEXT): the marker as shown, "Cid Rim Remix", "na żywo, akustycznie". NULL = the
-  kind's own label: Live, Remix, Acoustic, Edit, Extended, Demo, Instrumental, Version.
+  kind's own label: Live, Remix, Acoustic, Edit, Extended, Demo, Instrumental, Karaoke, Version.
 - `version_of` (INTEGER): `songs.id` of the original, when music.db has it; always the original
   itself, never another version. Most versions have none (153 of the first 167).
 
