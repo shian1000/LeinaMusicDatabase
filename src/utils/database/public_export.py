@@ -49,6 +49,7 @@ MUSIC_SPEC = DatabaseSpec("music.db", {
                         "version_kind", "version_label", "version_of", "other_titles")),
     "artists": TableSpec(("id", "name", "origin", "synonyms", "name_latin")),
     "projects": TableSpec(("id", "name", "aliases", "channels")),
+    "soundtrack_works": TableSpec(("id", "name", "aliases")),
     "additional_song_artists": TableSpec(("song_id", "artist_id", "role")),
     "albums": TableSpec(("id", "title", "title_latin", "artist_id", "year", "type",
                          "musicbrainz_release_group_id", "itunes_collection_id", "deezer_album_id",

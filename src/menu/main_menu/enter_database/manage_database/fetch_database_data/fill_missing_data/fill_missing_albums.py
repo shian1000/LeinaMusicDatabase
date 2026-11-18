@@ -17,7 +17,7 @@ from utils.discoveries.discoveries_manager import (
 from utils.ui.album_guess_review import review_album_guesses
 from utils.ui.album_swap_review import review_swapped_albums
 from utils.ui.soundtrack_review import review_soundtrack_guesses
-from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works
+from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works, list_album_work, listed_works
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM
 from utils.discoveries.discovery_settings import YEARS
@@ -98,7 +98,7 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     album_guesses = []
     # (song, album) where the song's artist may be the game or film itself
     soundtrack_guesses = []
-    known_works = None  # read at the first song no module found an album for
+    known_works = listed = None  # read at the first song no module found an album for
 
     print("Preparing fetch modules . . . ")
     try:
@@ -123,8 +123,8 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
                 swapped_match = (discover_album_after_swap(song, discovery_modules)
                                  if may_be_swapped(session, song) else None)
                 if known_works is None:
-                    known_works = known_soundtrack_works(session)
-                guess = guess_soundtrack_album(song.artist.name, known_works)
+                    known_works, listed = known_soundtrack_works(session), listed_works(session)
+                guess = guess_soundtrack_album(song.artist.name, known_works, listed)
                 if swapped_match:
                     print(f"Found album {YELLOW}{swapped_match.album}{RESET} with the artist and title swapped, "
                           "asking about it at the end")
@@ -160,6 +160,7 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         save(song, match.album, match)
     for song, album in review_soundtrack_guesses(soundtrack_guesses):
         save(song, album)
+        list_album_work(require_global_database_sessions()[0], [album])
     _save_album_details(saved)
 
     missing = [song for song, album, _ in found.values() if album is None]

@@ -37,12 +37,20 @@ GENERIC_HEADINGS = {
 }
 # Between the names of a song's joint credit in an infobox
 CREDIT_SEPARATORS = re.compile(r",\s*|\s+(?:and|&|featuring|feat\.|with)\s+", re.IGNORECASE)
-# Sections whose lists are links or citations, never a track listing: on a
-# franchise page "See also" lists "Wangan Midnight", which held "Night"
+# Sections whose lists are links, citations or songs outside any album, never a
+# track listing: on a franchise page "See also" lists "Wangan Midnight", which
+# held "Night"; "Depeche Mode discography" lists "Heroes" under "Music videos"
 NON_TRACK_HEADINGS = {
     "contents", "see also", "references", "notes", "footnotes", "citations",
     "sources", "bibliography", "further reading", "external links",
+    "music videos", "video albums", "videography", "filmography",
+    "track listings and formats", "track listing and formats", "formats and track listings",
+    "charts", "weekly charts", "year-end charts", "certifications", "release history",
+    "personnel", "credits and personnel", "cover versions", "covers", "accolades", "tours",
 }
+# A page about one song: "Heart of Glass (song)", "Heroes (David Bowie song)"
+SONG_PAGE_TITLE = re.compile(r"\((?:[^()]*\s)?(?:song|single)\)\s*$", re.IGNORECASE)
+SONG_INFOBOX_HEADER = re.compile(r"^(?:promotional\s+)?(?:single|song)\s+by\b", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +79,12 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     if title_resembles(title, page.title):
         album = _extract_from_infobox(soup, title)
         matched_artist = _infobox_artist(soup, artist)
+    elif _is_song_page(soup, page.title):
+        # Another song's page: its lists are the single's formats, never an
+        # album's tracks ("Heart - Of Glass" found "Heart of Glass (song)",
+        # whose title names the artist, and took "Track listings and formats")
+        flog(f"[Wikipedia] '{page.title}' is another song's page")
+        return None
     elif _page_is_about_artist(soup, page.title, artist):
         album = _extract_from_track_listing(soup, page.title, title, artist)
     else:
@@ -204,6 +218,18 @@ def _infobox_artist(soup: BeautifulSoup, artist: str) -> str | None:
                 return name
         return credit or None
     return None
+
+
+def _is_song_page(soup: BeautifulSoup, page_title: str) -> bool:
+    """Whether the page is about one song: "(song)" in its title, or an
+    infobox of a single ("Single by Blondie")."""
+    if SONG_PAGE_TITLE.search(page_title):
+        return True
+    infobox = soup.find("table", class_=re.compile(r"\binfobox\b"))
+    return infobox is not None and any(
+        SONG_INFOBOX_HEADER.match(th.get_text(separator=" ", strip=True).replace("\xa0", " "))
+        for th in infobox.find_all("th", class_="infobox-header")
+    )
 
 
 def _page_is_about_artist(soup: BeautifulSoup, page_title: str, artist: str) -> bool:

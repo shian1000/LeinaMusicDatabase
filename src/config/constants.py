@@ -308,6 +308,7 @@ AUTOMATION_QUESTIONS = {
         "has_original": ("the original is in the database", FACT_YES_NO)}),
     "songless_artists": ("Remove artists without songs", {
         "merge": ("merged into a look-alike artist (not deleted)", FACT_YES_NO),
+        "look_alike": ("it looks like an artist with songs (deleted: as a misspelling)", FACT_YES_NO),
         "name_similarity": ("its name and the look-alike's alike" + _SIMILARITY, FACT_NUMBER),
         "empty_albums": ("how many empty albums it has", FACT_NUMBER)}),
     "soundtracks": ("Resolve soundtrack album names", {

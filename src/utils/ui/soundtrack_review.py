@@ -1,11 +1,13 @@
 """Soundtrack albums, asked about in one checkbox list each: guesses at the end
 of Fill missing data -> Albums (nothing ticked: a name ending in "Music" is only
 a hint) and Manage database -> "Resolve soundtrack album names" (one soundtrack
-spelt several ways ticked; a lone title, maybe its official name, not)."""
+spelt several ways ticked; a lone title, maybe its official name, not). The
+works of the ticked ones go on the soundtrack works list
+(soundtrack_albums.list_album_work())."""
 
 from utils.common.output import ok, review_header, say
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
-from utils.database.soundtrack_albums import apply_soundtrack_variants, find_soundtrack_variants
+from utils.database.soundtrack_albums import apply_soundtrack_variants, find_soundtrack_variants, list_album_work
 from utils.ui.album_guess_review import tick_album_pairs
 from utils.ui.prompts import tick_items
 
@@ -39,6 +41,7 @@ def review_soundtrack_names() -> int:
         return 0
     for variants in picked:
         apply_soundtrack_variants(session, variants)
+        list_album_work(session, [variants.title, *variants.titles])
     submit_global_database_session()
     ok(f"Changed {len(picked)} soundtrack album name(s).")
     return len(picked)

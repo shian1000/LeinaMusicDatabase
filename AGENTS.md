@@ -307,6 +307,17 @@ non-trivial work in that area.
   (`albums.unify_album_titles()`, one row kept, the rest merged). The form with "OST" is the owner's
   choice (2026-11-09), not the bare title: `get_known_album_year()` shares a year across artists by
   that word in the album name, so don't drop it without moving that to `albums.type`.
+  Its works list (`soundtrack_works`, migration 0025, Manage database → "Soundtrack works",
+  `utils/ui/soundtrack_works_menu.py`): films, games, anime a song gets credited to with no "OST"
+  in the name ("Nana - Kuroi Namida" is Anna Tsuchiya's). A listed name is a work whole, however
+  short; one only read from "<work> OST" albums needs two words ("Rio OST" / "Rio Reiser").
+  `LocalSongMatcher.match_exact()` ends with `match_work()`: a work's entry (listed, of a two-word+
+  "<work> OST" album - `matching_works()` -, or ending in "OST") is the one song of its title, any
+  artist, whose album or artists name the work as whole words - so requests, folder playlists and
+  the library index find it; Albums' soundtrack guesses offer "<work> OST". A soundtrack the owner
+  confirms goes on the list (`list_album_work()`: ticked in "Resolve soundtrack album names", or
+  saved from Albums' soundtrack guesses; its other spellings as aliases). Seeded 2026-11-18 from
+  the catalog's OST albums by hand - real bands left out ("Beck", "AIR").
   `song_kinds.py` — `songs.kind` (migration 0014, `'full_album'` = a whole album in one recording),
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
@@ -350,7 +361,8 @@ non-trivial work in that area.
   (`artist_identity.find_songless_artists()` / `remove_songless_artist()`,
   `utils/ui/songless_artist_review.py`, a Run all step after covers), deleted with their empty
   albums (`albums.delete_empty_album()`), or merged into an artist with songs they look like
-  (`artists_look_same()`, unticked; "Pan" → "Span" is one such false look-alike), kept ones
+  (`artists_look_same()`, unticked; "Pan" → "Span" is one such false look-alike) - or, a second
+  unticked row for each, deleted as a misspelling with its name not kept ("egenda"), kept ones
   remembered in `data/songless_artist_ignore.json`. `artists_look_same()` costs ~2 ms a pair, so a
   scan against every artist gates it (`_may_reach()`, shared words) first.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +

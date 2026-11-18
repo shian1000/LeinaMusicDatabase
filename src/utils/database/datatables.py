@@ -13,6 +13,7 @@ COMPOSED_FIELDS = {
     "songs": ("title", "title_latin", "other_titles", "album", "genre"),
     "albums": ("title", "title_latin"),
     "projects": ("name", "aliases", "channels"),
+    "soundtrack_works": ("name", "aliases"),
 }
 
 
@@ -100,6 +101,21 @@ class Song(Base):
     )
 
     @validates(*COMPOSED_FIELDS["songs"])
+    def _compose(self, _key, value):
+        return composed(value)
+
+
+# --------------------
+# Soundtrack works: films, games, anime, series an artist name may be (migration 0025)
+# --------------------
+class SoundtrackWork(Base):
+    __tablename__ = "soundtrack_works"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    aliases = Column(String)  # other spellings, comma-separated
+
+    @validates(*COMPOSED_FIELDS["soundtrack_works"])
     def _compose(self, _key, value):
         return composed(value)
 

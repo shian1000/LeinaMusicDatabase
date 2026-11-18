@@ -281,6 +281,8 @@ def test_names_review_ticks_only_soundtracks_spelt_several_ways(monkeypatch, ses
     assert [bool(c.checked) for c in shown] == [True, False]
     assert several.album == "Yakuza OST"
     assert lone.album == "Hohokum Soundtrack"
+    # The confirmed one is on the works list, the lone title isn't
+    assert [w.name for w in session.query(SoundtrackWork).all()] == ["Yakuza"]
 
 
 @pytest.mark.parametrize("answer", [[], None])
@@ -401,3 +403,85 @@ def test_names_review_unattended_takes_the_ticked_ones_only_by_its_rule(monkeypa
 
     assert several.album == ("Yakuza OST" if rule_on else "Yakuza Soundtrack")
     assert lone.album == "Hohokum Soundtrack" and len(taken) == (1 if rule_on else 0)
+
+
+# ==================== The works list (migration 0025) ====================
+
+from utils.database.datatables import SoundtrackWork  # noqa: E402
+from utils.database.soundtrack_albums import add_soundtrack_work, credited_work, listed_works  # noqa: E402
+from utils.discoveries.import_engine import LocalSongMatcher  # noqa: E402
+
+
+def test_a_listed_work_is_one_however_short(session):
+    # "Nana" has no "OST" saying it's the anime: only the list knows
+    session.add(SoundtrackWork(name="Nana", aliases="NANA Anime"))
+    session.flush()
+    listed = listed_works(session)
+
+    assert guess_soundtrack_album("Nana", known_soundtrack_works(session), listed) == "Nana OST"
+    assert guess_soundtrack_album("nana anime", known_soundtrack_works(session), listed) == "Nana OST"
+    # Only the whole name: the singer isn't the anime
+    assert guess_soundtrack_album("Nana Mouskouri", known_soundtrack_works(session), listed) is None
+    assert credited_work("Tekken 5 OST", listed) == "Tekken 5"
+    assert credited_work("Anna Tsuchiya", listed) is None
+
+
+def test_a_work_is_listed_once(session):
+    add_soundtrack_work(session, "Nana", "NANA Anime")
+    with pytest.raises(ValueError):
+        add_soundtrack_work(session, "nana anime")
+
+
+def test_a_song_credited_to_a_work_is_found_by_its_title(session):
+    # A Leina Radio request "Nana - Kuroi Namida" was added a second time:
+    # the song is Anna Tsuchiya's, on an album naming the anime
+    session.add(SoundtrackWork(name="Nana"))
+    _song(session, "Nana", "Starless Night", "OLIVIA inspi' REIRA (TRAPNEST)")
+    kuroi = _song(session, "土屋アンナ", "黒い涙", "Anna Tsuchiya Inspi' Nana (Black Stones)")
+    kuroi.title_latin = "Kuroi Namida"
+    _song(session, "Somebody", "Lonely", "Other Album")
+    tekken = _song(session, "Namco Sound Team", "Main Theme", "Tekken 5 OST")
+    session.flush()
+    matcher = LocalSongMatcher(session)
+
+    assert matcher.match({"artist_name": "Nana", "title": "Kuroi Namida"}) is kuroi
+    assert matcher.match({"artist_name": "NANA", "title": "黒い涙"}) is kuroi
+    assert matcher.match({"artist_name": "Tekken 5 OST", "title": "Main Theme"}) is tekken
+    # Another song of that title whose album doesn't name the work isn't taken
+    assert matcher.match({"artist_name": "Nana", "title": "Lonely"}) is None
+    # Nor for a name that isn't a work
+    assert matcher.match({"artist_name": "Black Stones", "title": "Kuroi Namida"}) is None
+
+
+def test_two_songs_of_the_title_naming_the_work_are_left_alone(session):
+    session.add(SoundtrackWork(name="Nana"))
+    _song(session, "土屋アンナ", "Rose", "Anna Tsuchiya Inspi' Nana (Black Stones)")
+    _song(session, "Somebody Else", "Rose", "Nana Best")
+    session.flush()
+
+    assert LocalSongMatcher(session).match({"artist_name": "Nana", "title": "Rose"}) is None
+
+
+def test_a_work_of_an_ost_album_needs_no_row(session):
+    # "Cave Story OST" in the catalog: "Cave Story - Main Theme" is that song
+    main_theme = _song(session, "Daisuke Amaya", "Main Theme", "Cave Story OST")
+    _song(session, "Rio Reiser", "Junimond", "Rio OST")
+    _song(session, "Someone", "Junimond", "Rio OST Bonus")
+    session.flush()
+    matcher = LocalSongMatcher(session)
+
+    assert matcher.match({"artist_name": "Cave Story", "title": "Main Theme"}) is main_theme
+    # A one-word work only from the list
+    assert matcher.match({"artist_name": "Rio", "title": "Junimond"}) is None
+
+
+def test_a_confirmed_soundtrack_goes_on_the_list_with_its_spellings(session):
+    from utils.database.soundtrack_albums import list_album_work
+
+    work = list_album_work(session, ["Rick and Morty OST", "Rick adn Morty OST", "Rick and Morty Soundtrack"])
+    assert (work.name, work.aliases) == ("Rick and Morty", "Rick adn Morty")
+    # Listed already: only a new spelling is added
+    assert list_album_work(session, ["Rick Morty OST", "Rick adn Morty OST"]) is work
+    assert work.aliases == "Rick adn Morty, Rick Morty"
+    assert session.query(SoundtrackWork).count() == 1
+    assert list_album_work(session, ["Some Album"]) is None

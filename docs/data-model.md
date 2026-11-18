@@ -74,7 +74,20 @@ title         NOT NULL, as sent
 youtube_video_id, spotify_track_id   as sent
 song_id       NOT NULL, a current songs.id (trigger on song_id_changes)
 settled_at    NOT NULL, default datetime('now')
+
+SoundtrackWork  (table soundtrack_works, migration 0025)
+--------------------
+id            PK
+name          NOT NULL UNIQUE, a film / game / anime / series ("Nana")
+aliases       other spellings, comma-separated
 ```
+
+- `soundtrack_works` — the works a song may be credited to instead of who sings it, with no "OST"
+  in the name. The owner's list (Manage database → "Soundtrack works"; the migration seeded
+  "Nana"), also filled by the soundtrack reviews the owner confirms, `utils/database/soundtrack_albums.py`. The matchers take an entry credited to one as the
+  one song of its title whose album or artists name the work (`LocalSongMatcher.match_work()`);
+  handoff [`handoffs/soundtrack-works-for-musicdatabaseapp.md`](handoffs/soundtrack-works-for-musicdatabaseapp.md).
+  Public on GitHub.
 
 - `settled_song_requests` — the counterpart of `rejected_song_requests`: a song Leina Radio asked
   for that MusicDatabase found it had or added, one row per way the phone named it, with the song

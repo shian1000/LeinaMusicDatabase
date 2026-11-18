@@ -18,6 +18,7 @@ from utils.ui.swapped_song_review import review_swapped_songs
 from utils.ui.songless_artist_review import review_songless_artists
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.soundtrack_review import review_soundtrack_names
+from utils.ui.soundtrack_works_menu import manage_soundtrack_works
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.request_package_import import import_request_package
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_for_import
@@ -376,6 +377,7 @@ def manage_database():
         "Find versions": review_versions,
         "Resolve albums with several artists": review_multi_artist_albums,
         "Resolve soundtrack album names": review_soundtrack_names,
+        "Soundtrack works": manage_soundtrack_works,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
         "Fix names and tags for mp3 files that are in the database": fix_file_names_and_tags,
         "Spell check existing data": check_spelling_menu,

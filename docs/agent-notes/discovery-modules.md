@@ -584,11 +584,15 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
   the fetcher reports the name equal to the query, since `_matched_artist_resembles()` doesn't
   split at "and". Artist/album pages still report no artist. Any other page is turned down first
   (`_page_is_about_artist()`: its title names the artist, or its infobox says "by X"), since a TV
-  show's tables of songs gave the album "Week 3: Krzysztof Krawczyk Week". Past that the tracklist
+  show's tables of songs gave the album "Week 3: Krzysztof Krawczyk Week". Another song's page
+  (`_is_song_page()`: "(song)" in its title or a "Single by" infobox) is turned down too, even when
+  its title names the artist: "Heart - Of Glass" got "Heart of Glass (song)"'s heading "Track
+  listings and formats". Past that the tracklist
   scan is the only guard, and it can fire on the wrong section: the manager's first query cuts a title at "&" ("Initial
   D - Night & Day" → "Night"), Wikipedia answers with the franchise page "Initial D", and its
   "See also" list held "Wangan Midnight" — "See also" came back as the album. So the scan skips
-  `NON_TRACK_HEADINGS` (see also, references, external links, ...) and matches the title as
+  `NON_TRACK_HEADINGS` (see also, references, music videos, charts, ... - a discography's "Music
+  videos" table gave Depeche Mode's "Heroes" that album) and matches the title as
   whole words (`_contains_words()`), never as a substring.
 
 ## MusicBrainz: which release becomes the album, and what it can't find

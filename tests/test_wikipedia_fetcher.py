@@ -189,3 +189,34 @@ def test_the_artists_own_page_and_album_page_are_still_scanned(monkeypatch):
     infobox = '<table class="infobox"><tr><th class="infobox-header">Studio album by Krzysztof Krawczyk</th></tr></table>'
     _track_listing_page(monkeypatch, module, "Some Album", f"<html><body>{infobox}{listing}</body></html>")
     assert module.get_album_name("Krzysztof Krawczyk", "Chciałem być").album == "Some Album"
+
+
+def test_another_songs_page_gives_no_album(monkeypatch):
+    # "Heart - Of Glass (Disco Version)" found "Heart of Glass (song)": its title
+    # names the artist "Heart", and "Track listings and formats" came back as the album
+    module = load_wikipedia_fetcher_module()
+    formats = """
+<div class="mw-heading mw-heading2"><h2>Some Formats</h2></div>
+<ul><li>7-inch single: "Heart of Glass" - 3:50 / "Rifle Range" - 3:39</li></ul>
+"""
+    _track_listing_page(monkeypatch, module, "Heart of Glass (song)", f"<html><body>{formats}</body></html>")
+    assert module.get_album_name("Heart", "Of Glass (Disco Version)") is None
+
+    infobox = '<table class="infobox"><tr><th class="infobox-header">Single by Heart</th></tr></table>'
+    _track_listing_page(monkeypatch, module, "Barracuda", f"<html><body>{infobox}{formats}</body></html>")
+    assert module.get_album_name("Heart", "Of Glass") is None
+
+
+def test_sections_of_songs_outside_albums_give_no_album(monkeypatch):
+    # "Depeche Mode - Heroes" found "Depeche Mode discography", whose "Music
+    # videos" table lists the song - "Music videos" came back as the album
+    module = load_wikipedia_fetcher_module()
+    page = """
+<div class="mw-heading mw-heading2"><h2>Music videos</h2></div>
+<table class="wikitable"><tr><td>"Heroes"</td><td>2017</td></tr></table>
+<div class="mw-heading mw-heading2"><h2>Track listings and formats</h2></div>
+<ul><li>"Heroes" - 4:10</li></ul>
+"""
+    _track_listing_page(monkeypatch, module, "Depeche Mode discography", f"<html><body>{page}</body></html>")
+
+    assert module.get_album_name("Depeche Mode", "Heroes") is None

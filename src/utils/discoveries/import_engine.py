@@ -613,6 +613,7 @@ class LocalSongMatcher:
         self._by_title = None
         self._scoring = None       # [(song, title forms)] for best_guesses()
         self._artist_forms = {}    # song id -> normalized _artist_names()
+        self._works = None  # soundtrack_albums.matching_works(), read at the first entry asking
 
     def _artist(self, name: str) -> Artist | None:
         if name not in self._artists:
@@ -635,19 +636,46 @@ class LocalSongMatcher:
         return self.match_exact(metadata) or self.match_similar(metadata, title_guesses=False)
 
     def match_exact(self, metadata: dict) -> Song | None:
-        """The song by the tag's own artist (as the database knows it)."""
+        """The song by the tag's own artist (as the database knows it), or -
+        the tag's artist being a film, game or anime - the song match_work()
+        finds."""
         metadata = as_entry(metadata)
         name, title = metadata.artist, metadata.title
         if not name or not title:
             return None
         artist = self._artist(name)
-        if artist is None:
+        song = None
+        if artist is not None:
+            songs, duration, feats = self._artist_songs(artist), metadata.duration_s, metadata.feat_artists
+            song = find_song_loosely(title, songs, duration, feats, metadata.project, metadata.is_cover)
+            if song is None and (rest := title_after_artists(title, name)):
+                song = find_song_loosely(rest, songs, duration, feats, metadata.project, metadata.is_cover)
+        return song or self.match_work(metadata)
+
+    def match_work(self, metadata: dict) -> Song | None:
+        """For an entry credited to a film, game or anime instead of who sings
+        it ("Nana - Kuroi Namida", "Tekken 5 OST - ..."; a listed work, one of
+        an "<work> OST" album or a name ending in "OST",
+        soundtrack_albums.credited_work()): the one song
+        of that title, by any artist, whose album or artists name the work as
+        whole words - "Anna Tsuchiya Inspi' Nana (Black Stones)". None for any
+        other entry, or when no song or several do."""
+        from utils.database.soundtrack_albums import credited_work, matching_works
+
+        metadata = as_entry(metadata)
+        name, title = metadata.artist, metadata.title
+        if not name or not title:
             return None
-        songs, duration, feats = self._artist_songs(artist), metadata.duration_s, metadata.feat_artists
-        song = find_song_loosely(title, songs, duration, feats, metadata.project, metadata.is_cover)
-        if song is None and (rest := title_after_artists(title, name)):
-            song = find_song_loosely(rest, songs, duration, feats, metadata.project, metadata.is_cover)
-        return song
+        if self._works is None:
+            self._works = matching_works(self.session)
+        work = credited_work(name, self._works)
+        if not work:
+            return None
+        spellings = {normalize(work), *(key for key, known in self._works.items() if known == work)} - {""}
+        found = [song for song in self._songs_by_title_core(title, metadata.duration_s, metadata.project,
+                                                            metadata.is_cover)
+                 if any(_names_words(text, spellings) for text in (song.album, *_artist_names(song, split_parts=False)))]
+        return found[0] if len(found) == 1 else None
 
     def without_project(self, metadata: dict) -> Song | None:
         """For an entry of a project: the same artist's song of that title
@@ -979,6 +1007,12 @@ def _names_of(artist: Artist, split_parts: bool = True):
     split = propose_artist_split(artist.name) if split_parts else None
     parts = [*split.main, *split.feat] if split else []
     yield from filter(None, (artist.name, *artist_synonyms(artist), *parts))
+
+
+def _names_words(text: str | None, keys: set) -> bool:
+    """Does normalize(text) hold one of `keys` (normalized) as whole words?"""
+    padded = f" {normalize(text or '')} "
+    return any(f" {key} " in padded for key in keys)
 
 
 def _artist_resembles(name: str, song: Song) -> bool:

@@ -268,8 +268,8 @@ All in Enter database -> Manage database:
   - Find songs with artist and title swapped: 'Renegade - Styx' - a title that is another artist's
     name, by an artist with no other song - in one list to tick.
   - Remove artists without songs: artists left over from deleted songs or songs credited to another
-    artist, in one list to tick; one spelt like an artist with songs is merged into it. Artists only
-    covered by a song stay.
+    artist, in one list to tick; one spelt like an artist with songs is merged into it, or deleted
+    as a misspelling. Artists only covered by a song stay.
   - Find full albums: songs that are a whole album in one recording.
   - Projects: the series recordings were made for (Tiny Desk, Like a Version): a song keeps its
     real artist and is shown "Project: Artist - Title". The dictionary, and stored songs to mark.
@@ -277,6 +277,9 @@ All in Enter database -> Manage database:
     'Artist - Title (Original cover)'. For titles saying only 'cover' it asks whose song it is.
   - Resolve albums with several artists: one album title shared by different artists.
   - Resolve soundtrack album names: one soundtrack spelt several ways, brought to 'Title OST'.
+  - Soundtrack works: films, games, anime a song gets credited to with no 'OST' in the name
+    ('Nana - Kuroi Namida'): the song is then found by its title among every artist's songs
+    whose album names the work.
   - Fill in Latin forms of names in other alphabets: 'Кино' -> 'Kino' for Leina Radio.
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
     after their song.
