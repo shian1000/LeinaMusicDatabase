@@ -1160,7 +1160,8 @@ non-trivial work in that area.
 - [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract (with the track position and the lazy tracklist behind Albums' per-run
-  `AlbumTrackCache`, which writes `songs.track_number`), why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
+  `AlbumTrackCache`, which writes `songs.track_number`, and the year / album type / ids the same
+  answer carries, saved by Albums into empty fields - the year only from a module on for Years), why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't

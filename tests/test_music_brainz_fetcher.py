@@ -390,3 +390,34 @@ def test_a_singles_year_isnt_taken_from_someone_elses_release(monkeypatch):
 
     result = music_brainz_fetcher.get_release_year("LeAnn Rimes", "Can't Fight the Moonlight", is_single=True)
     assert result.year == 2000
+
+
+def _grouped_release(title, primary_type, date, group_id, secondary_types=()):
+    release = _placed_release(title, primary_type, "4")
+    release["date"] = date
+    release["release-group"].update({"id": group_id, "title": title, "secondary-type-list": list(secondary_types)})
+    return release
+
+
+def test_album_comes_with_the_earliest_year_of_its_release_group_its_type_and_id(monkeypatch):
+    # The picked edition is a remaster; another hit holds the group's first edition
+    _mock_search(monkeypatch, [
+        _recording("Notion", [_grouped_release("Futureproof", "Album", "2021-07-15", "rg-1")]),
+        _recording("Notion", [_grouped_release("Futureproof", "Album", "2016-08-05", "rg-1"),
+                              _grouped_release("Other", "Album", "2001", "rg-2")]),
+    ])
+
+    result = get_album_name("The Rare Occasions", "Notion")
+
+    assert (result.album, result.year, result.album_type) == ("Futureproof", 2016, "album")
+    assert result.album_ids == {"musicbrainz_release_group_id": "rg-1"}
+
+
+def test_a_soundtrack_is_typed_so_and_a_single_gets_no_type(monkeypatch):
+    _mock_search(monkeypatch, [_recording("Notion", [
+        _grouped_release("Some Film", "Album", "2016", "rg-1", ["Soundtrack"])])])
+    assert get_album_name("The Rare Occasions", "Notion").album_type == "soundtrack"
+
+    _mock_search(monkeypatch, [_recording("Notion", [_grouped_release("Notion", "Single", "2016", "rg-3")])])
+    result = get_album_name("The Rare Occasions", "Notion")
+    assert (result.album, result.album_type, result.year) == ("Notion", None, 2016)

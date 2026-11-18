@@ -4,6 +4,7 @@ import time
 import requests
 
 from config.constants import (
+    ALBUM_TYPE_ALBUM,
     HTTP_LOOKUP_TIMEOUT,
     SPELLING_CHECK_THRESHOLD,
     SPOTIFY_API_MIN_INTERVAL,
@@ -112,22 +113,38 @@ def _find_best(items: list[dict], artist: str, name: str) -> dict | None:
     return best
 
 
+def _year(release_date: str | None) -> int | None:
+    """Spotify's "YYYY", "YYYY-MM" or "YYYY-MM-DD"."""
+    release_date = release_date or ""
+    return int(release_date[:4]) if release_date[:4].isdigit() else None
+
+
 def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     track = _find_best(_search(f"{artist} {title}", "track"), artist, title)
     if not track:
         flog("[Spotify API] No matching track in search results")
         return None
 
-    album = (track.get("album") or {}).get("name")
+    album_item = track.get("album") or {}
+    album = album_item.get("name")
     if not album or is_blacklisted_album(album, artist):
         return None
-    album_artists = (track.get("album") or {}).get("artists") or [{}]
+    album_artists = album_item.get("artists") or [{}]
     if is_various_artists_compilation(album, album_artists[0].get("name")):
         flog(f"[Spotify API] '{album}' is a various-artists compilation, skipping it")
         return None
 
     slog(f"[Spotify API] Matched: {track['name']} ({album})", priority=1)
-    return DiscoveryResult(album=album, matched_title=track["name"], matched_artist=track["artists"][0]["name"])
+    # A search's track doesn't say how many discs its album has: disc 1 is
+    # left out, as songs.disc_number NULL means 1. "single" covers EPs too.
+    disc = track.get("disc_number")
+    return DiscoveryResult(
+        album=album, matched_title=track["name"], matched_artist=track["artists"][0]["name"],
+        track_number=track.get("track_number"), disc_number=disc if isinstance(disc, int) and disc > 1 else None,
+        year=_year(album_item.get("release_date")),
+        album_type=ALBUM_TYPE_ALBUM if album_item.get("album_type") == "album" else None,
+        album_ids={"spotify_album_id": album_item["id"]} if album_item.get("id") else {},
+    )
 
 
 def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryResult | None:
@@ -139,11 +156,11 @@ def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryR
         flog(f"[Spotify API] No matching {kind} in search results")
         return None
 
-    release_date = ((item.get("album") or {}) if is_single else item).get("release_date") or ""
-    if not release_date[:4].isdigit():
+    year = _year(((item.get("album") or {}) if is_single else item).get("release_date"))
+    if not year:
         return None
     return YearDiscoveryResult(
-        year=int(release_date[:4]),
+        year=year,
         matched_title=item["name"],
         matched_artist=item["artists"][0]["name"],
     )

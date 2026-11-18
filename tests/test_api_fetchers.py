@@ -125,6 +125,28 @@ def test_spotify_without_a_usable_date_gives_no_year(spotify_api):
     assert spotify.get_release_year("Queen", "Song", True) is None
 
 
+def test_spotify_album_comes_with_its_year_type_id_and_the_place_on_it(spotify_api):
+    track = _track("Bohemian Rhapsody", "Opera", release_date="1975-11-21")
+    track.update({"track_number": 11, "disc_number": 1})
+    track["album"]["id"] = "1GbtB4zTqAsyfZEsm1RZfx"
+    spotify_api.results = {"tracks": {"items": [track]}}
+
+    result = spotify.get_album_name("Queen", "Bohemian Rhapsody")
+
+    assert (result.year, result.album_type, result.track_number, result.disc_number) == (1975, "album", 11, None)
+    assert result.album_ids == {"spotify_album_id": "1GbtB4zTqAsyfZEsm1RZfx"}
+
+
+def test_spotify_single_gets_no_type_and_a_second_disc_is_kept(spotify_api):
+    track = _track("Song", "Song", album_type="single")
+    track.update({"track_number": 3, "disc_number": 2})
+    spotify_api.results = {"tracks": {"items": [track]}}
+
+    result = spotify.get_album_name("Queen", "Song")
+
+    assert (result.album_type, result.disc_number, result.album_ids) == (None, 2, {})
+
+
 def test_spotify_token_is_reused_until_it_nearly_expires(spotify_api, monkeypatch):
     spotify_api.results = {"tracks": {"items": []}}
 

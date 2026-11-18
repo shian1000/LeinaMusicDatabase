@@ -9,7 +9,12 @@ from utils.common.normalizer import normalize
 from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
 import re
 from utils.common.text_utils import check_spelling
-from config.constants import MUSICBRAINZ_VARIOUS_ARTISTS_ID
+from config.constants import (
+    ALBUM_TYPE_ALBUM,
+    ALBUM_TYPE_EP,
+    ALBUM_TYPE_SOUNDTRACK,
+    MUSICBRAINZ_VARIOUS_ARTISTS_ID,
+)
 from utils.common.musicbrainz_client import lucene_quote
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
@@ -143,12 +148,36 @@ def _tracks_loader(release):
     return load
 
 
-def _album_result(title: str, recording, release, artist: str) -> DiscoveryResult:
+def _release_group_year(recordings, release) -> int | None:
+    """The earliest year of the search hits' releases of `release`'s release
+    group - the picked one may be a later edition (a remaster). The search
+    answer doesn't carry the group's own first-release-date."""
+    group_id = release.get("release-group", {}).get("id")
+    years = [_extract_year(other.get("date")) for recording in recordings
+             for other in recording.get("release-list", [])
+             if group_id and other.get("release-group", {}).get("id") == group_id]
+    years = [year for year in years if year]
+    return min(years) if years else _extract_year(release.get("date"))
+
+
+def _album_type(release) -> str | None:
+    """albums.type of a release, from its release group: only an album, an
+    EP or a soundtrack (see constants.DISCOVERY_ALBUM_TYPES)."""
+    release_group = release.get("release-group", {})
+    if "Soundtrack" in release_group.get("secondary-type-list", []):
+        return ALBUM_TYPE_SOUNDTRACK
+    return {"Album": ALBUM_TYPE_ALBUM, "EP": ALBUM_TYPE_EP}.get(release_group.get("primary-type", ""))
+
+
+def _album_result(title: str, recording, release, artist: str, recordings) -> DiscoveryResult:
     matched_title, matched_artist = _recording_title_artist(recording, artist)
     track_number, disc_number = _track_position(release)
+    group_id = release.get("release-group", {}).get("id")
     return DiscoveryResult(album=title, matched_title=matched_title, matched_artist=matched_artist,
                            track_number=track_number, disc_number=disc_number,
-                           load_tracks=_tracks_loader(release))
+                           load_tracks=_tracks_loader(release),
+                           year=_release_group_year(recordings, release), album_type=_album_type(release),
+                           album_ids={"musicbrainz_release_group_id": group_id} if group_id else {})
 
 
 def _release_title(release) -> str:
@@ -227,7 +256,7 @@ def _search_album(artist: str, song: str) -> DiscoveryResult | None:
         result, result_recording, result_release = _pick_release_with_entry(recordings, artist)
         slog(result)
         if result:
-            return _album_result(result, result_recording, result_release, artist)
+            return _album_result(result, result_recording, result_release, artist, recordings)
     return None
 
 

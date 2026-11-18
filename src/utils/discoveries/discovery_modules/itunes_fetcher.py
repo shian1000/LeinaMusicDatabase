@@ -5,6 +5,7 @@ from utils.common.request_pacing import RequestPacer
 from utils.common.text_utils import is_blacklisted_album, is_various_artists_compilation, similarity
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import (
+    ALBUM_TYPE_EP,
     HTTP_LOOKUP_TIMEOUT,
     ITUNES_SEARCH_COUNTRY,
     ITUNES_SEARCH_LIMIT,
@@ -20,14 +21,17 @@ MODULE_NAME = "iTunes fetcher (Curl)"
 # Apple appends this to the name of a release that only ever came out as a
 # single (no parent album) -- e.g. "Say So (feat. Nicki Minaj) - Single".
 SINGLE_TITLE_SUFFIX = " - single"
+# ... and this to an EP's ("Lost and Found - EP"), which isn't part of its name
+EP_TITLE_SUFFIX = " - ep"
 
 _pacer = RequestPacer(ITUNES_SEARCH_MIN_INTERVAL)
 
 
-def _find_track(results: list[dict], artist: str, song: str):
-    """Returns (album, matched_title, matched_artist) of the result that fits
-    best, or None. An equally good title on a real album beats a single, and
-    the plain title beats its "(Live ...)" versions."""
+def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult | None:
+    """The result that fits best, or None. An equally good title on a real
+    album beats a single, and the plain title beats its "(Live ...)" versions.
+    No year: iTunes takes no part in Years, and its releaseDate is often a
+    reissue's. The disc only on a release of several (songs.disc_number)."""
     song_query = song.lower()
     best = None
     best_rank = None
@@ -51,8 +55,11 @@ def _find_track(results: list[dict], artist: str, song: str):
 
         # A single-only release reports no real album -- the same
         # SINGLES_ALBUM sentinel wikipedia_fetcher uses for this case.
+        album_type = None
         if album.lower().endswith(SINGLE_TITLE_SUFFIX):
             album = SINGLES_ALBUM
+        elif album.lower().endswith(EP_TITLE_SUFFIX):
+            album, album_type = album[:-len(EP_TITLE_SUFFIX)].strip(), ALBUM_TYPE_EP
         if is_blacklisted_album(album, artist):
             continue
         if is_various_artists_compilation(album, result.get("collectionArtistName")):
@@ -62,7 +69,15 @@ def _find_track(results: list[dict], artist: str, song: str):
         rank = (similarity(song_query, track_title.lower()), album != SINGLES_ALBUM)
         if best_rank is None or rank > best_rank:
             best_rank = rank
-            best = (album, track_title_cln, track_artist)
+            several_discs = isinstance(result.get("discCount"), int) and result["discCount"] > 1
+            collection_id = result.get("collectionId")
+            best = DiscoveryResult(
+                album=album, matched_title=track_title_cln, matched_artist=track_artist,
+                track_number=result.get("trackNumber"),
+                disc_number=result.get("discNumber") if several_discs else None,
+                album_type=album_type,
+                album_ids={"itunes_collection_id": collection_id} if collection_id else {},
+            )
 
     return best
 
@@ -91,6 +106,5 @@ def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
         flog("[iTunes] No matching song in search results")
         return None
 
-    album_name, matched_title, matched_artist = match
-    slog(f"Matched: {artist} - {matched_title} ({album_name})")
-    return DiscoveryResult(album=album_name, matched_title=matched_title, matched_artist=matched_artist)
+    slog(f"Matched: {artist} - {match.matched_title} ({match.album})")
+    return match

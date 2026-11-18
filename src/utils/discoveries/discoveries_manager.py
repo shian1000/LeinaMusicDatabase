@@ -14,6 +14,8 @@ from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, Lyri
 from utils.discoveries.discovery_settings import ALBUMS, KINDS, LYRICS, YEARS, reconcile_discovery_config
 from utils.discoveries.discovery_stats import record_invocation, record_success
 from config.constants import (
+    ALBUM_EXTERNAL_ID_COLUMNS,
+    DISCOVERY_ALBUM_TYPES,
     LYRICS_DURATION_TOLERANCE_S,
     MIN_PLAUSIBLE_RELEASE_YEAR,
     SINGLES_ALBUM,
@@ -130,6 +132,12 @@ def load_discovery_modules(kind: str = ALBUMS):
     return _enabled_modules(module_files, reconcile_discovery_config(module_files.keys(), kind))
 
 
+def enabled_module_ids(kind: str) -> set:
+    """Ids of the enabled modules of a kind, without importing any."""
+    config = reconcile_discovery_config(_module_files(kind).keys(), kind)
+    return {module_id for module_id in config["order"] if config["enabled"].get(module_id, True)}
+
+
 def load_all_discovery_modules_metadata(kind: str = ALBUMS):
     module_files = _module_files(kind)
     return _modules_metadata(module_files, reconcile_discovery_config(module_files.keys(), kind))
@@ -232,12 +240,18 @@ def _match_resembles(result, queried_artist: str, queried_title: str, module_nam
 class AlbumMatch:
     """An album found for a song, with the song's place on it when the
     module knew it (None = unknown; disc None also means a one-disc album).
-    load_tracks, needs_review: the module's, see DiscoveryResult."""
+    load_tracks, needs_review, year, album_type, album_ids: the module's,
+    checked, see DiscoveryResult. source: the module's id (None for a
+    fallback)."""
     album: str
     track_number: int | None = None
     disc_number: int | None = None
     load_tracks: Callable[[], list[AlbumTrack]] | None = None
     needs_review: bool = False
+    year: int | None = None
+    album_type: str | None = None
+    album_ids: dict = field(default_factory=dict)
+    source: str | None = None
 
 
 def _call_module(module, module_id: str, module_name: str, artist: str, title: str,
@@ -272,9 +286,23 @@ def _call_module_match(module, module_id: str, module_name: str, artist: str, ti
     record_success(module_id)
     if not isinstance(result, DiscoveryResult):
         return AlbumMatch(album)
+    year = result.year
+    if not (isinstance(year, int) and MIN_PLAUSIBLE_RELEASE_YEAR <= year <= datetime.now().year + 1):
+        if year is not None:
+            flog(f"[{module_name}] returned implausible release year '{year}' with the album, discarding it")
+        year = None
+    ids = result.album_ids if isinstance(result.album_ids, dict) else {}
     return AlbumMatch(album, _positive_int(result.track_number), _positive_int(result.disc_number),
                       result.load_tracks if callable(result.load_tracks) else None,
-                      result.needs_review is True)
+                      result.needs_review is True, year,
+                      result.album_type if result.album_type in DISCOVERY_ALBUM_TYPES else None,
+                      {column: value for column, value in ids.items()
+                       if column in ALBUM_EXTERNAL_ID_COLUMNS and _is_external_id(value)},
+                      module_id)
+
+
+def _is_external_id(value) -> bool:
+    return (isinstance(value, str) and bool(value.strip())) or _positive_int(value) is not None
 
 
 def _positive_int(value) -> int | None:
@@ -343,7 +371,9 @@ class AlbumTrackCache:
             key = _track_key(track.title)
             if key and key not in known:
                 known[key] = AlbumMatch(match.album, _positive_int(track.track_number),
-                                        _positive_int(track.disc_number))
+                                        _positive_int(track.disc_number), year=match.year,
+                                        album_type=match.album_type, album_ids=match.album_ids,
+                                        source=match.source)
                 added += 1
         if added:
             print(f"Remembered {added} tracks of {match.album} for the other songs of {song.artist.name}")

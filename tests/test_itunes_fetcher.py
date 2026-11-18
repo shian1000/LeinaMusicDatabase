@@ -19,37 +19,43 @@ def no_waiting(monkeypatch):
 def test_find_track_reads_album_title_and_artist():
     results = [_track("Cyber Sex", "Hot Pink"), _track("Say So", "Hot Pink")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So") == ("Hot Pink", "Say So", "Doja Cat")
+    result = itunes._find_track(results, "Doja Cat", "Say So")
+
+    assert (result.album, result.matched_title, result.matched_artist) == ("Hot Pink", "Say So", "Doja Cat")
 
 
 def test_find_track_skips_anything_but_songs():
     results = [_track("Say So", "Say So Video", kind="music-video"), _track("Say So", "Hot Pink")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
 
 
 def test_find_track_reports_singles_for_single_only_release():
     results = [_track("Say So (feat. Nicki Minaj)", "Say So (feat. Nicki Minaj) - Single")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So") == ("Singles", "Say So", "Doja Cat")
+    result = itunes._find_track(results, "Doja Cat", "Say So")
+
+    assert (result.album, result.matched_title, result.matched_artist) == ("Singles", "Say So", "Doja Cat")
 
 
 def test_find_track_prefers_the_album_over_the_single():
     results = [_track("Say So", "Say So - Single"), _track("Say So", "Hot Pink")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
 
 
 def test_find_track_prefers_the_plain_title_over_a_live_version():
     results = [_track("Say So (Live in Paris)", "Tour"), _track("Say So", "Hot Pink")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
 
 
 def test_find_track_matches_one_of_several_credited_artists():
     results = [_track("Say So (Remix)", "Remixes - Single", artist="Doja Cat & Jax Jones")]
 
-    assert itunes._find_track(results, "Jax Jones", "Say So") == ("Singles", "Say So", "Doja Cat & Jax Jones")
+    result = itunes._find_track(results, "Jax Jones", "Say So")
+
+    assert (result.album, result.matched_title, result.matched_artist) == ("Singles", "Say So", "Doja Cat & Jax Jones")
 
 
 def test_find_track_returns_none_on_artist_mismatch():
@@ -64,7 +70,7 @@ def test_find_track_skips_a_blacklisted_album(monkeypatch):
     monkeypatch.setattr(itunes, "is_blacklisted_album", lambda album, artist=None: album == "Greatest Hits")
     results = [_track("Say So", "Greatest Hits"), _track("Say So", "Hot Pink")]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
 
 
 def test_find_track_skips_a_various_artists_compilation():
@@ -73,7 +79,7 @@ def test_find_track_skips_a_various_artists_compilation():
         {**_track("Say So", "Hot Pink"), "collectionArtistName": "Doja Cat"},
     ]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == "Hot Pink"
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
     assert itunes._find_track(results[:1], "Doja Cat", "Say So") is None
 
 
@@ -81,7 +87,7 @@ def test_find_track_keeps_a_various_artists_soundtrack():
     album = "Some Film (Original Motion Picture Soundtrack)"
     results = [{**_track("Say So", album), "collectionArtistName": "Various Artists"}]
 
-    assert itunes._find_track(results, "Doja Cat", "Say So")[0] == album
+    assert itunes._find_track(results, "Doja Cat", "Say So").album == album
 
 
 def test_get_album_name_sends_the_whole_query_and_reports_the_match(monkeypatch):
@@ -110,3 +116,26 @@ def test_get_album_name_logs_a_failed_request(monkeypatch):
 
     assert itunes.get_album_name("Doja Cat", "Say So") is None
     assert logged and "no network" in logged[0]
+
+
+def test_find_track_reports_the_place_on_the_album_and_its_id():
+    results = [{**_track("Say So", "Hot Pink"), "trackNumber": 11, "discNumber": 1, "discCount": 1,
+                "collectionId": 1486262969, "releaseDate": "2019-11-07T08:00:00Z"}]
+
+    result = itunes._find_track(results, "Doja Cat", "Say So")
+
+    assert (result.track_number, result.disc_number) == (11, None)  # one disc: NULL = 1
+    assert result.album_ids == {"itunes_collection_id": 1486262969}
+    assert result.year is None  # iTunes takes no part in Years, its dates are often a reissue's
+
+
+def test_find_track_reports_the_disc_of_a_release_of_several():
+    results = [{**_track("Say So", "Hot Pink"), "trackNumber": 2, "discNumber": 2, "discCount": 2}]
+
+    assert itunes._find_track(results, "Doja Cat", "Say So").disc_number == 2
+
+
+def test_find_track_cuts_the_ep_suffix_off_the_name_and_types_it():
+    result = itunes._find_track([_track("Say So", "Lost and Found - EP")], "Doja Cat", "Say So")
+
+    assert (result.album, result.album_type) == ("Lost and Found", "ep")

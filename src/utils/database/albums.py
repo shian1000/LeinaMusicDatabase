@@ -41,6 +41,7 @@ from config.constants import (
     ALBUM_COVERS_DIRNAME,
     ALBUM_COVER_SOURCE_FILE,
     ALBUM_COVER_STATUS_FOUND,
+    ALBUM_EXTERNAL_ID_COLUMNS,
     ALBUM_TYPE_SINGLE,
     SINGLES_ALBUM,
 )
@@ -560,8 +561,7 @@ def merge_albums(session, keep: Album, drop: Album) -> None:
     succeeds (a rollback leaves them as they were, matching the rows)."""
     for song in list(drop.songs):
         song.album_entry = keep
-    for attr in ("title_latin", "year", "musicbrainz_release_group_id", "itunes_collection_id",
-                 "deezer_album_id", "spotify_album_id"):
+    for attr in ("title_latin", "year", *ALBUM_EXTERNAL_ID_COLUMNS):
         if getattr(keep, attr) is None and getattr(drop, attr) is not None:
             setattr(keep, attr, getattr(drop, attr))
 

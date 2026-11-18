@@ -159,8 +159,8 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
 
     # The track page doesn't say what kind of album it is, only the album's own
     # page does. One that doesn't load keeps the album. A soundtrack stays.
+    album_href = track_soup.select_one('[data-testid="track-page"] a[href^="/album/"]')["href"]
     if not soundtrack_work(album):
-        album_href = track_soup.select_one('[data-testid="track-page"] a[href^="/album/"]')["href"]
         album_soup = _load(
             driver, f"https://open.spotify.com{album_href}", '[data-testid="album-page"] [data-testid="tracklist-row"]'
         )
@@ -168,10 +168,15 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
             flog(f"[Spotify] '{album}' is a various-artists compilation, skipping it")
             return None
 
+    # The track page's date is its album's - what Years reads off it too
+    year = _extract_year_from_page(track_soup, "track-page")
+    album_id = _SPOTIFY_URL_RE.match(f"open.spotify.com{album_href.split('?')[0]}")
     return DiscoveryResult(
         album=album,
         matched_title=matched_title or row_title,
         matched_artist=matched_artist or row_artist,
+        year=year.year if year else None,
+        album_ids={"spotify_album_id": album_id.group(2)} if album_id else {},
     )
 
 

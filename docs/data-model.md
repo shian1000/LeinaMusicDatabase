@@ -30,7 +30,7 @@ name_latin    (migration 0011)  year
                                  kind           (migration 0014) NULL = song, 'full_album'
                                  album_id       FK -> Album.id (NULL = see below)
                                  track_number   NULL = unknown (filled by Fill missing data
-                                 disc_number    NULL = 1 / unknown   -> Albums, MusicBrainz only)
+                                 disc_number    NULL = 1 / unknown   -> Albums, with the album)
 
 Album  (table albums, migration 0005)    AlbumCover  (table album_covers, migration 0008)
 -----                                    ----------
@@ -44,7 +44,8 @@ type          NULL | 'album' | 'ep' |    status      NOT NULL, 'found' | 'missin
               'single' | 'compilation'   checked_at  NOT NULL, default datetime('now')
               | 'soundtrack'
 musicbrainz_release_group_id, itunes_collection_id, deezer_album_id, spotify_album_id
-              (external ids for later fetchers; nothing fills them yet)
+              (the release's ids there; Fill missing data -> Albums fills
+              them and an empty type / year from the album's source, deezer none yet)
 
 AdditionalSongArtist  (table additional_song_artists, migration 0003)
 --------------------

@@ -546,6 +546,16 @@ ALBUM_TYPE_SINGLE = "single"
 ALBUM_TYPE_COMPILATION = "compilation"
 ALBUM_TYPE_SOUNDTRACK = "soundtrack"
 ALBUM_TYPES = (ALBUM_TYPE_ALBUM, ALBUM_TYPE_EP, ALBUM_TYPE_SINGLE, ALBUM_TYPE_COMPILATION, ALBUM_TYPE_SOUNDTRACK)
+# The types an album lookup may set on an album row that has none
+# (DiscoveryResult.album_type). Not single: a lookup's single is a release
+# titled after the song, stored as an ordinary album, while ALBUM_TYPE_SINGLE
+# rows are the one-song albums of "Singles" songs, which title matching skips.
+# Not compilation: the fetchers turn those down.
+DISCOVERY_ALBUM_TYPES = (ALBUM_TYPE_ALBUM, ALBUM_TYPE_EP, ALBUM_TYPE_SOUNDTRACK)
+# albums' ids of a release on another site (migration 0005), filled by the
+# album lookups (DiscoveryResult.album_ids) and kept by merges
+ALBUM_EXTERNAL_ID_COLUMNS = ("musicbrainz_release_group_id", "itunes_collection_id", "deezer_album_id",
+                             "spotify_album_id")
 
 # songs.kind (migration 0014). NULL = an ordinary song. SONG_KIND_FULL_ALBUM =
 # the row is a whole album played through (one video / one mp3 of the album);

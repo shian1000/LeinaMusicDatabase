@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 
@@ -30,6 +30,15 @@ class DiscoveryResult:
     needs_review marks an album that's only a guess (Google names the first
     release it knows the recording from, maybe a compilation): the other
     modules are still asked, and the owner confirms it if none of them knows.
+
+    What else the page or answer the album came from says, so nobody asks
+    the site again for it (None / empty = it doesn't say):
+    year: that release's year - the album's, a single's own; kept only from
+    a module enabled for Years too (fill_missing_albums.py).
+    album_type: ALBUM_TYPE_ALBUM / _EP / _SOUNDTRACK only - never single or
+    compilation, see constants.DISCOVERY_ALBUM_TYPES.
+    album_ids: the release's id on the site, by its `albums` column
+    (constants.ALBUM_EXTERNAL_ID_COLUMNS).
     """
     album: str
     matched_title: Optional[str] = None
@@ -38,6 +47,9 @@ class DiscoveryResult:
     disc_number: Optional[int] = None
     load_tracks: Optional[Callable[[], list[AlbumTrack]]] = None
     needs_review: bool = False
+    year: Optional[int] = None
+    album_type: Optional[str] = None
+    album_ids: dict = field(default_factory=dict)
 
 
 @dataclass

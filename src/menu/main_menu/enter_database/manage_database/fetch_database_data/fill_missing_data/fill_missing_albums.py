@@ -11,6 +11,7 @@ from utils.discoveries.discoveries_manager import (
     AlbumTrackCache,
     discover_album,
     discover_album_after_swap,
+    enabled_module_ids,
     load_discovery_modules,
 )
 from utils.ui.album_guess_review import review_album_guesses
@@ -19,16 +20,50 @@ from utils.ui.soundtrack_review import review_soundtrack_guesses
 from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from config.constants import SINGLES_ALBUM
+from utils.discoveries.discovery_settings import YEARS
 from utils.common.output import RESET, YELLOW, warn
 
 def _set_track_position(song, match):
     """The song's place on the album just found, unless it has one already
-    (songs.track_number / disc_number, migration 0007)."""
-    if match is None or match.track_number is None or getattr(song, "track_number", None) is not None:
+    (songs.track_number / disc_number, migration 0007). Not on "Singles",
+    which is no album."""
+    if (match is None or match.track_number is None or match.album == SINGLES_ALBUM
+            or getattr(song, "track_number", None) is not None):
         return
     song.track_number = match.track_number
     if match.disc_number is not None and getattr(song, "disc_number", None) is None:
         song.disc_number = match.disc_number
+
+
+def _save_album_details(saved):
+    """What the albums' sources said besides the album, for the (song,
+    AlbumMatch) pairs just saved, into what's still empty: the song's year -
+    the album row's if it has one, else the source's, and only from a module
+    enabled for Years too - and the album row's year, type and ids on the
+    other sites. Once the songs are flushed, so they're on their album rows."""
+    saved = [(song, match) for song, match in saved
+             if getattr(match, "year", None) or getattr(match, "album_type", None) or getattr(match, "album_ids", None)]
+    if not saved:
+        return
+    session, _ = require_global_database_sessions()
+    session.flush()
+    year_sources = enabled_module_ids(YEARS)
+    for song, match in saved:
+        album = song.album_entry
+        year = match.year if match.source in year_sources else None
+        if song.year is None and (album is not None and album.year or year):
+            edit_db_entry(song, "year", str(album.year if album is not None and album.year else year))
+        if album is None:
+            continue
+        if album.year is None and song.year:
+            album.year = song.year
+        if match.album == SINGLES_ALBUM:
+            continue  # its one-song album row isn't the release the source named
+        if album.type is None and match.album_type:
+            album.type = match.album_type
+        for column, value in match.album_ids.items():
+            if getattr(album, column) is None:
+                setattr(album, column, value)
 
 
 def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
@@ -110,10 +145,13 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     finally:
         close_global_driver()
 
+    saved = []
+
     def save(song, album, match=None):
         edit_db_entry(song, "album", album)
         _set_track_position(song, match)
         found[id(song)] = (song, album, match)
+        saved.append((song, match))
 
     for song, album, match in list(found.values()):
         if album is not None:
@@ -122,6 +160,7 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
         save(song, match.album, match)
     for song, album in review_soundtrack_guesses(soundtrack_guesses):
         save(song, album)
+    _save_album_details(saved)
 
     missing = [song for song, album, _ in found.values() if album is None]
     if missing and ask_yes_no(f"Unable to find {len(missing)} album names. Would you like to fill them up manually?"):

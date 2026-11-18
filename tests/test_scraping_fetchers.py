@@ -154,6 +154,20 @@ def _spotify_album_of_track(monkeypatch, album, album_page):
     return spotify.get_album_name("Queen", "Bohemian Rhapsody"), browser
 
 
+def test_spotify_album_comes_with_the_track_pages_year_and_the_albums_id(monkeypatch):
+    track_page = _spotify_track_page("A Night at the Opera").replace(
+        "</section>", '<span data-testid="release-date">November 21, 1975</span></section>')
+    FakeBrowser({
+        spotify._search_url("Queen Bohemian Rhapsody", "tracks"): SPOTIFY_TRACKS,
+        "https://open.spotify.com/track/T1": track_page,
+        "https://open.spotify.com/album/A1": _spotify_album_page("Queen", creator="Queen"),
+    }).install(spotify, monkeypatch)
+
+    result = spotify.get_album_name("Queen", "Bohemian Rhapsody")
+
+    assert (result.album, result.year, result.album_ids) == ("A Night at the Opera", 1975, {"spotify_album_id": "A1"})
+
+
 def test_spotify_various_artists_compilation_is_refused(monkeypatch):
     result, browser = _spotify_album_of_track(monkeypatch, "Pop Gold", _spotify_album_page("Queen", "ABBA", "Signal"))
 

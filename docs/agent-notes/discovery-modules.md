@@ -191,6 +191,10 @@ class DiscoveryResult:
     track_number: Optional[int] = None    # the song's place on that album
     disc_number: Optional[int] = None     # None also = a one-disc release
     load_tracks: Optional[Callable[[], list[AlbumTrack]]] = None
+    needs_review: bool = False
+    year: Optional[int] = None            # that release's year (the album's, a single's own)
+    album_type: Optional[str] = None      # constants.DISCOVERY_ALBUM_TYPES only
+    album_ids: dict = field(default_factory=dict)  # albums column -> the release's id there
 ```
 
 A fetcher's `get_album_name()` can return this instead of a bare `str`. `matched_title` /
@@ -222,9 +226,30 @@ module degrades gracefully rather than breaking.
 
 `discover_album()` returns an `AlbumMatch` (album + track/disc number); `discover_album_name()` is
 its text-only wrapper. Fill missing data → Albums writes the position into `songs.track_number` /
-`disc_number` only when the song has none, so a hand-set number is never overwritten. Only
-MusicBrainz reports a position so far. It comes free from the search hit (the release's
-`medium-list` holds just that track).
+`disc_number` only when the song has none, so a hand-set number is never overwritten, and never
+on "Singles". MusicBrainz (the release's `medium-list` holds just that track), iTunes and the
+Spotify API report it, free from the search hit.
+
+### Everything else the album's page says
+
+A fetcher reports whatever else the answer it found the album in carries, at no extra request
+(owner's request, 2026-11-17: once we're on the page, take what's sure there): `year`,
+`album_type`, `album_ids`. The manager drops an implausible year, a type outside
+`DISCOVERY_ALBUM_TYPES` and ids of unknown columns; the `AlbumMatch` keeps the module id
+(`source`). Fill missing data → Albums (`_save_album_details()`, after every save, one flush so
+the songs are on their album rows) fills only empty fields:
+- **The year** goes onto the song only from a module enabled for Years too
+  (`enabled_module_ids(YEARS)`, owner's choice) - and the album row's year wins over it, as Years'
+  `get_known_album_year()` would. Years then skips those songs, so it no longer opens the same
+  pages again. Who gives one: MusicBrainz (the earliest date among the hits' releases of the
+  picked release group - the picked edition may be a remaster, and the search hit has no
+  `first-release-date`), the Spotify API (`album.release_date`), Spotify's track page (its
+  `release-date`, the one Years reads too). iTunes doesn't: it has no `get_release_year()`, and its
+  `releaseDate` is often a reissue's.
+- **Type and ids** go onto the album row, never for "Singles" (its one-song row isn't the release
+  the source named). Never `ALBUM_TYPE_SINGLE`: a source's single is a release titled after the
+  song, stored as an ordinary album, while single-type rows are what title matching skips.
+  iTunes' " - EP" suffix is cut off the name and gives the EP type.
 
 `load_tracks` is lazy on purpose: a tracklist is one more request (`get_release_by_id`, ~1 s with
 the rate limit). `AlbumTrackCache` calls it only while another song of the same artist id still
