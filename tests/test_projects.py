@@ -586,3 +586,19 @@ def test_fill_missing_albums_leaves_a_projects_songs(session, monkeypatch, capsy
     monkeypatch.setattr(albums, "load_discovery_modules", lambda: pytest.fail("no lookup for a project's song"))
     albums.fill_missing_albums([_song(session, "Wolf Alice", "Boys", "Like a Version")])
     assert "No songs with missing albums" in capsys.readouterr().out
+
+
+def test_a_take_away_show_with_an_i_typed_for_the_bar():
+    # Leina Radio's track "Blogothèque - The Dø I A Take Away Show" read "The Dø I"
+    # as the artist, and the show wasn't a whole set
+    from utils.common.project_names import ProjectName, read_project
+    projects = [ProjectName("Take Away Show", ("A Take Away Show",), ("Blogothèque", "La Blogothèque"))]
+
+    reading = read_project("Blogothèque", "The Dø I A Take Away Show", projects)
+    assert (reading.project, reading.artist, reading.title, reading.whole) == \
+        ("Take Away Show", "The Dø", "A Take Away Show", True)
+    reading = read_project("The Dø", "A Take Away Show", projects)
+    assert (reading.artist, reading.title, reading.whole) == ("The Dø", "A Take Away Show", True)
+    # An "I" that isn't next to the project stays: "I" is a word
+    reading = read_project("Blogothèque", "Phoenix - I Wanna Be | A Take Away Show", projects)
+    assert (reading.artist, reading.title, reading.whole) == ("Phoenix", "I Wanna Be", False)

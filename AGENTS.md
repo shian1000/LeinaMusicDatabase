@@ -340,10 +340,12 @@ non-trivial work in that area.
   Spotify link ("Hasiok x Maleńczuk" / "Yugopolis x Maleńczuk"); kept is the song naming every
   artist, else the one on a real album over "Singles", else the most data; the dropped song's main
   artist is not carried over, and is removed when left without songs. Never silently merged.
-  Deleting a song that is used in playlists, moods or the library index (`song_references.song_uses()`)
-  first offers merging it into a song it may duplicate (`merge_candidates()`; `utils/ui/song_delete_review.py`,
-  every song-deleting menu path): a deletion leaves the playlists' tracks without a song, which is how
-  five wrongly read folder-playlist songs got lost on 2026-10-17/18.
+  Deleting a song that is used in playlists, moods, the library index or Leina Radio's settled
+  requests (`song_references.song_uses()`) first offers merging it into a song it may duplicate
+  (`merge_candidates()`; `utils/ui/song_delete_review.py`, every song-deleting menu path): a deletion
+  leaves the playlists' tracks without a song, which is how five wrongly read folder-playlist songs
+  got lost on 2026-10-17/18, and two duplicates a request added left Leina Radio's tracks of their
+  videos unrecognised on 2026-11-18.
   The groups left unticked can be remembered on a yes (`data/song_duplicate_ignore.json`, sets of
   song ids); a group is left out while all its songs were in one remembered group.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)

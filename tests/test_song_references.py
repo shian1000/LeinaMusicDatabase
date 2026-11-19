@@ -334,10 +334,20 @@ def test_song_uses_count_playlists_moods_and_files(tmp_path):
     db.commit()
     db.close()
 
-    uses = sr.song_uses(7, user_dbs=[user, tmp_path / "missing.db"], tag_db=tag, files_db=files)
-    # Two live playlists (a track twice counts once, a deleted playlist not), a user and a global mood
-    assert (uses.playlists, uses.moods, uses.files) == (2, 2, 1) and uses
-    assert not sr.song_uses(99, user_dbs=[user], tag_db=tag, files_db=files)
+    music = tmp_path / "music.db"
+    db = sqlite3.connect(music)
+    db.executescript("CREATE TABLE settled_song_requests (id INTEGER PRIMARY KEY, song_id INTEGER);"
+                     "INSERT INTO settled_song_requests VALUES (1, 7), (2, 7), (3, 8);")
+    db.commit()
+    db.close()
+
+    uses = sr.song_uses(7, user_dbs=[user, tmp_path / "missing.db"], tag_db=tag, files_db=files, music_db=music)
+    # Two live playlists (a track twice counts once, a deleted playlist not), a user and a global mood,
+    # two Leina Radio requests settled as it
+    assert (uses.playlists, uses.moods, uses.files, uses.requests) == (2, 2, 1, 2) and uses
+    assert not sr.song_uses(99, user_dbs=[user], tag_db=tag, files_db=files, music_db=music)
+    # Only a settled request: still offered a merge before deleting
+    assert sr.song_uses(8, user_dbs=[], tag_db=tag, files_db=files, music_db=music)
 
 
 def test_lyrics_follow_merges_and_deletions(env):

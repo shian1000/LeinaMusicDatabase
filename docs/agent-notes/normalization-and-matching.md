@@ -623,7 +623,9 @@ there. An artist that is only the project with a plain title ("NPR Music Tiny
 Desk Concert" - "Daughter") could be a band or a song: the import leaves the
 names and marks the project, and only the stored-songs list offers the title as
 the artist, unticked (`read_project(guess=True)`), and only when the spelling
-names a concert or session: the first run over the catalog read "Męskie Granie" -
-"Rilke" as Rilke's whole set. For the same reason a project is cut out of an
+names a concert, session or show (`_WHOLE_SET_WORD_RE`): the first run over the catalog read "Męskie Granie" -
+"Rilke" as Rilke's whole set. A capital "I" alone right next to the spelling is a
+"|" typed by hand ("Blogothèque" - "The Dø I A Take Away Show" -> The Dø), never
+an "I" anywhere else - it's a word. For the same reason a project is cut out of an
 artist only when a separator sets it apart: "Męskie Granie Orkiestra 2022" is a
 name that contains the project, and came out as "Orkiestra 2022".

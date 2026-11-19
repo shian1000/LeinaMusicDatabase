@@ -1,11 +1,12 @@
 """Before songs are deleted (Song actions -> delete, the song editor's
-"delete", Remove songs): a song used in playlists, moods or the library index
-(song_references.song_uses()) is offered merging into the song it may
+"delete", Remove songs): a song used in playlists, moods, the library index or
+Leina Radio's settled requests (song_references.song_uses()) is offered merging into the song it may
 duplicate instead (song_duplicates.merge_candidates(), or one searched for).
 Deleting leaves its playlist tracks with no song and drops its moods and
 library match; merging moves them to the kept song. On 2026-10-17/18 five
 wrongly read duplicates from folder playlists were deleted, and their
-playlists showed them as not in the database."""
+playlists showed them as not in the database; on 2026-11-18 two duplicates
+song requests had added went the same way on Leina Radio."""
 
 import questionary
 from questionary import Choice
@@ -27,7 +28,8 @@ _KEEP = "Keep it (don't delete)"
 
 
 def _uses_text(uses) -> str:
-    parts = [(uses.playlists, "playlist"), (uses.moods, "mood"), (uses.files, "library file")]
+    parts = [(uses.playlists, "playlist"), (uses.moods, "mood"), (uses.files, "library file"),
+             (uses.requests, "Leina Radio request")]
     return ", ".join(f"{n} {word}{'s' if n != 1 else ''}" for n, word in parts if n)
 
 

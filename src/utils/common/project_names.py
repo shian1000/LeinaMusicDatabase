@@ -20,7 +20,10 @@ _ARTIST_TITLE_RE = re.compile(r"\s+[-–—]\s+|\s+:\s+")
 _SEPARATORS_AROUND_A_NAME = ":|-–—/"
 # A spelling naming a performance itself: only then can a title be the whole
 # set of whoever it names. "Męskie Granie" - "Rilke" is just a song
-_WHOLE_SET_WORD_RE = re.compile(r"(?<!\w)(?:concerts?|koncert|sessions?|sesja)(?!\w)", re.IGNORECASE)
+_WHOLE_SET_WORD_RE = re.compile(r"(?<!\w)(?:concerts?|koncert|sessions?|sesja|shows?)(?!\w)", re.IGNORECASE)
+# A capital "I" typed for "|" right next to the project: "The Dø I A Take Away Show"
+_I_BEFORE_RE = re.compile(r"\sI\s*$")
+_I_AFTER_RE = re.compile(r"^\s*I\s")
 
 
 @dataclass(frozen=True)
@@ -134,7 +137,7 @@ def _enclosing_bracket(text: str, start: int, end: int) -> tuple | None:
 def cut_project(text: str | None, projects: list) -> tuple | None:
     """(project, `text` without it, the spelling as written), or None when
     `text` names none: "Boys (Like a Version)" -> "Boys", "Daughter | Tiny Desk
-    Concert" -> "Daughter". A bracket left with nothing but numbers in it goes
+    Concert" -> "Daughter" (also typed "Daughter I Tiny Desk Concert"). A bracket left with nothing but numbers in it goes
     too: "(Męskie Granie 2018)" is that edition."""
     found = _find(text, projects)
     if found is None:
@@ -145,6 +148,10 @@ def cut_project(text: str | None, projects: list) -> tuple | None:
     bracket = _enclosing_bracket(text, start, end)
     if bracket and not re.sub(r"[\W\d_]", "", text[bracket[0] + 1:start] + text[end:bracket[1]]):
         start, end = bracket[0], bracket[1] + 1
+    elif before := _I_BEFORE_RE.search(text[:start]):
+        start = before.start()
+    elif after := _I_AFTER_RE.match(text[end:]):
+        end += after.end()
     rest = text[:start] + text[end:]
     rest = _EMPTY_LIST_ITEM_RE.sub("", " ".join(rest.split()))
     rest = _REPEATED_SEPARATOR_RE.sub(r"\1", rest).strip(_EDGE_SEPARATORS)

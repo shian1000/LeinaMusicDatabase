@@ -58,7 +58,8 @@ this index is the map of everything else.
   [songs' genres, `songs.genre`](handoffs/genres-for-musicdatabaseapp.md) and
   [another artist for a song, `songs.artist_id` corrections](handoffs/song-artist-for-musicdatabaseapp.md) and
   [recognising YouTube tracks by name](handoffs/name-matching-for-musicdatabaseapp.md) and
-  [songs credited to a film, game or anime, `soundtrack_works`](handoffs/soundtrack-works-for-musicdatabaseapp.md). Once
+  [songs credited to a film, game or anime, `soundtrack_works`](handoffs/soundtrack-works-for-musicdatabaseapp.md) and
+  [anime theme titles and Take Away Show](handoffs/theme-titles-and-take-away-show-for-musicdatabaseapp.md). Once
   the other side has acted on one, it can be deleted; the lasting facts live in the runbook.
 
 Nothing else yet. If a future task needs a `plans/` (proposed work not yet done) or `reviews/`

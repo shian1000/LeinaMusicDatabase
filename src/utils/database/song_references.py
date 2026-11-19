@@ -280,14 +280,17 @@ def apply_song_id_changes(tag_session=None, force: bool = False) -> dict:
 
 @dataclass
 class SongUses:
-    """Where a song's id is used outside music.db: users' playlists (each
-    counted once), moods (users' and global), library files."""
+    """Where a song's id is used: users' playlists (each counted once), moods
+    (users' and global), library files, and Leina Radio's requests settled
+    as it (music.db's settled_song_requests - a playlist track on a phone is
+    recognised by them)."""
     playlists: int = 0
     moods: int = 0
     files: int = 0
+    requests: int = 0
 
     def __bool__(self) -> bool:
-        return bool(self.playlists or self.moods or self.files)
+        return bool(self.playlists or self.moods or self.files or self.requests)
 
 
 def _count(path, query: str, song_id: int) -> int:
@@ -305,13 +308,18 @@ def _count(path, query: str, song_id: int) -> int:
         return 0
 
 
-def song_uses(song_id: int, user_dbs=None, tag_db=None, files_db=None) -> SongUses:
+def song_uses(song_id: int, user_dbs=None, tag_db=None, files_db=None, music_db=None) -> SongUses:
     """What deleting song `song_id` would leave pointing at nothing:
-    playlist tracks keep their title with song_id NULL, mood entries and
-    library matches go. Merging instead (song_duplicates.merge_songs())
+    playlist tracks keep their title with song_id NULL, mood entries,
+    library matches and settled song requests go - a duplicate a request
+    added, deleted by hand, left Leina Radio's tracks of its video
+    unrecognised (2026-11-18). Merging instead (song_duplicates.merge_songs())
     moves them all to the kept song. Read-only; the paths default to every
-    user's user.db, tag.db and files.db."""
+    user's user.db, tag.db, files.db and music.db."""
     uses = SongUses()
+    music_db = music_db or DB_FILES["music"]
+    if Path(music_db).exists():
+        uses.requests += _count(music_db, "SELECT COUNT(*) FROM settled_song_requests WHERE song_id = ?", song_id)
     for path in (user_dbs if user_dbs is not None else user_db_files().values()):
         uses.playlists += _count(path, "SELECT COUNT(DISTINCT t.playlist_id) FROM playlist_tracks t "
                                        "JOIN playlists p ON p.id = t.playlist_id "

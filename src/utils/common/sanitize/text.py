@@ -193,12 +193,13 @@ def strip_trailing_junk_suffix(title: str) -> str:
     end of `title`, handling more than one stacked suffix (e.g. "Song Music
     Video Official Audio"). Returns `title` unchanged if nothing matches.
     A separator the phrase leaves dangling goes with it ("Secret Youth -
-    Music Video" -> "Secret Youth").
+    Music Video" -> "Secret Youth"). A title that is nothing but such a
+    phrase ("Ending Theme") stays.
     """
     title = (title or "").strip()
     while True:
         new_title = _TITLE_JUNK_SUFFIX_RE.sub("", title).strip()
-        if new_title == title:
+        if new_title == title or not _JUNK_LEFTOVER_SEPARATOR_RE.sub("", new_title):
             return title
         title = _JUNK_LEFTOVER_SEPARATOR_RE.sub("", new_title)
 

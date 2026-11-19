@@ -424,3 +424,13 @@ def test_shared_title_patterns():
     assert not youtube.fullmatch("(a (b) c)") and not youtube.fullmatch("《HD》")
     assert re.findall(tp.BRACKETED, "Song (Live) [2020] 【x】") == ["Live", "2020"]
     assert re.fullmatch(tp.YEAR, "1999") and not re.fullmatch(tp.YEAR, "2100")
+
+
+def test_an_anime_theme_named_by_its_place_in_the_show_is_junk():
+    # A Leina Radio request "Cowboy Bebop - The Real Folk Blues ending theme"
+    # wasn't matched to SEATBELTS' "The Real Folk Blues"
+    assert strip_trailing_junk_suffix("The Real Folk Blues ending theme") == "The Real Folk Blues"
+    assert strip_trailing_junk_suffix("Tank! - Opening Theme") == "Tank!"
+    # A title that is only the phrase stays
+    assert strip_trailing_junk_suffix("Ending Theme") == "Ending Theme"
+    assert strip_trailing_junk_suffix("HD") == "HD"

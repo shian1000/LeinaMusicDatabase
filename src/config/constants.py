@@ -992,6 +992,12 @@ TITLE_JUNK_SUFFIXES = [
     "performance video",
     "m/v",
     "full song",
+    # An anime's or a game's theme named by its place in the show (real case:
+    # "Cowboy Bebop - The Real Folk Blues ending theme")
+    "opening theme",
+    "ending theme",
+    "opening song",
+    "ending song",
     # Polish labels' audio-only upload (real case: "Granderinio - Buhurtowe
     # Love (Oficjalny Odsłuch)")
     "oficjalny odsłuch",
