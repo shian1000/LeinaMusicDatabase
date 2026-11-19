@@ -45,6 +45,16 @@ def load_blacklist(config_dir):
 
 ALBUM_TITLE_BLACKLIST, ALBUM_TITLE_BLACKLIST_SUBSTRINGS = load_blacklist(settings.config_dir)
 
+# A span of years names a retrospective, not an album a song came out on:
+# "Najbolje pesme 1980-1988", "Zvuk osamdesetih 1980-1989" (YouTube Music's
+# album of Denis & Denis - "Soba 23", 1984). Every such stored title is one
+# ("Pelmel 1993–2007", "Miłość jest cudowna (1975-2015)"; checked 2026-11-19)
+_YEAR_SPAN_RE = re.compile(r"(?<!\d)((?:19|20)\d\d)\s*[-–—]\s*((?:19|20)\d\d)(?!\d)")
+
+
+def _names_a_span_of_years(title: str) -> bool:
+    return any(int(start) < int(end) for start, end in _YEAR_SPAN_RE.findall(title))
+
 
 def copy_to_clipboard(message: str):
     try:
@@ -264,7 +274,8 @@ def is_various_artists_compilation(album: str, album_artist: str | None) -> bool
 
 
 def is_blacklisted_album(title: str, artist: str | None = None) -> bool:
-    """Is `title` a placeholder rather than an album (blacklist.txt)?
+    """Is `title` a placeholder or a compilation rather than an album
+    (blacklist.txt, or a span of years)?
 
     With `artist`, a title the database already has as that artist's album
     passes anyway: the user entered or kept it, so it's a real album of
@@ -274,7 +285,7 @@ def is_blacklisted_album(title: str, artist: str | None = None) -> bool:
     if not title:
         return False
     lowered = title.lower().strip()
-    blacklisted = lowered in ALBUM_TITLE_BLACKLIST or any(
+    blacklisted = lowered in ALBUM_TITLE_BLACKLIST or _names_a_span_of_years(lowered) or any(
         re.search(r'\b' + re.escape(sub) + r'\b', lowered) for sub in ALBUM_TITLE_BLACKLIST_SUBSTRINGS)
     if blacklisted and artist:
         # Imported here: the database layer imports text_utils

@@ -403,8 +403,9 @@ def test_album_comes_with_the_earliest_year_of_its_release_group_its_type_and_id
     # The picked edition is a remaster; another hit holds the group's first edition
     _mock_search(monkeypatch, [
         _recording("Notion", [_grouped_release("Futureproof", "Album", "2021-07-15", "rg-1")]),
+        # (a later album of the same recording, which the earliest-album rule leaves out)
         _recording("Notion", [_grouped_release("Futureproof", "Album", "2016-08-05", "rg-1"),
-                              _grouped_release("Other", "Album", "2001", "rg-2")]),
+                              _grouped_release("Other", "Album", "2017", "rg-2")]),
     ])
 
     result = get_album_name("The Rare Occasions", "Notion")
@@ -421,3 +422,84 @@ def test_a_soundtrack_is_typed_so_and_a_single_gets_no_type(monkeypatch):
     _mock_search(monkeypatch, [_recording("Notion", [_grouped_release("Notion", "Single", "2016", "rg-3")])])
     result = get_album_name("The Rare Occasions", "Notion")
     assert (result.album, result.album_type, result.year) == ("Notion", None, 2016)
+
+
+# Real search results for ex-Yugoslav songs (2026-11-19), trimmed. Each got a
+# later release's album and year because the first Album listed won.
+def _yu_release(title, date, group_id, primary_type="Album", secondary_types=(), artist=None):
+    release = _grouped_release(title, primary_type, date, group_id, secondary_types)
+    if artist:
+        release["artist-credit"] = [{"artist": {"id": artist, "name": artist}}]
+    return release
+
+
+def _yu_recording(title, releases):
+    return {"title": title, "artist-credit": [{"artist": {"id": "own", "name": "Tajči"}}], "release-list": releases}
+
+
+def test_the_earliest_album_wins_not_the_first_listed():
+    # Tajči - "Hajde da ludujemo": "Bube u glavi" (1991) came first, the 1990 album later
+    recordings = [
+        _yu_recording("Hajde Da Ludujemo", [_yu_release("The Best Of", None, "rg-best", None, ["Compilation"])]),
+        _yu_recording("Hajde da ludujemo", [
+            _yu_release("90-e - 120 originalnih hitova", "2012", "rg-90", secondary_types=["Compilation"]),
+            _yu_release("Bube u glavi", "1991", "rg-bube", artist="own"),
+        ]),
+        _yu_recording("Hajde Da Ludujemo", [_yu_release("Hajde Da Ludujemo", "1990", "rg-hajde", artist="own")]),
+    ]
+    assert _pick_release(recordings, "Tajči", "Hajde da ludujemo")[0] == "Hajde Da Ludujemo"
+
+
+def test_a_recording_titled_otherwise_goes_last():
+    # Its album would be dropped by the manager's title check anyway
+    recordings = [
+        _yu_recording("Lipe cvatu, sve je isto k'o i lani", [_yu_release("Bijelo dugme", "1984", "rg-1")]),
+        _yu_recording("Lipe cvatu", [_yu_release("Some Album", "1985", "rg-2")]),
+    ]
+    assert _pick_release(recordings, title="Lipe cvatu")[0] == "Some Album"
+    assert _pick_release(recordings)[0] == "Bijelo dugme"
+
+
+def test_a_release_years_after_the_song_first_appeared_is_a_reissue():
+    # Denis & Denis - "Soba 23" (1984): "Program tvog kompjutera" (1995) is a
+    # best-of typed a plain Album; the recording was on a 1988 EP already
+    recordings = [
+        _yu_recording("Soba 23", [_yu_release("Riječki Novi Val: Antologija", "2008", "rg-a",
+                                              secondary_types=["Compilation"])]),
+        _yu_recording("Soba 23", [
+            _yu_release("The Best of Denis & Denis", "2006", "rg-b", secondary_types=["Compilation"]),
+            _yu_release("Ja sam lažljiva", "1988-01-28", "rg-ep", "EP"),
+            _yu_release("Program tvog kompjutera", "1995", "rg-p"),
+        ]),
+    ]
+    assert _pick_release(recordings, title="Soba 23")[0] == "Ja sam lažljiva"
+
+
+def test_a_reissue_is_taken_last_and_without_its_year(monkeypatch):
+    # Czesław Niemen - "Wspomnienie": "Dziwny jest ten świat" (1967) is among the
+    # hits only as its 1991 edition, after a 1979 best-of
+    _mock_search(monkeypatch, [
+        _yu_recording("Wspomnienie", [_yu_release("The Best Of Niemen", "1979", "rg-b",
+                                                  secondary_types=["Compilation"])]),
+        _yu_recording("Wspomnienie", [_yu_release("Dziwny jest ten świat", "1991", "rg-d")]),
+    ])
+    result = get_album_name("Czesław Niemen", "Wspomnienie")
+    assert (result.album, result.year) == ("Dziwny jest ten świat", None)
+
+
+def test_a_lead_single_a_year_or_two_earlier_doesnt_make_the_album_a_reissue():
+    recordings = [_yu_recording("Song", [_yu_release("Song", "2010", "rg-s", "Single"),
+                                         _yu_release("The Album", "2012", "rg-a")])]
+    assert _pick_release(recordings, title="Song")[0] == "The Album"
+
+
+def test_a_singles_year_is_the_earliest_release_not_the_first_listed(monkeypatch):
+    # Josipa Lisac - "O jednoj mladosti" (1973) got 2018, a studio session listed first
+    _mock_search(monkeypatch, [
+        _yu_recording("O jednoj mladosti", [_yu_release("Live", "2002", "rg-l", "Other", ["Live"])]),
+        _yu_recording("O Jednoj Mladosti", [_yu_release("...tu u mojoj duši stanuješ...", "2018-12", "rg-t")]),
+        _yu_recording("O jednoj mladosti", [_yu_release("Dnevnik jedne ljubavi", "1973", "rg-d"),
+                                            _yu_release("Dnevnik jedne ljubavi", "1993", "rg-d")]),
+    ])
+    result = music_brainz_fetcher.get_release_year("Josipa Lisac", "O jednoj mladosti", is_single=True)
+    assert (result.year, result.matched_title) == (1973, "O jednoj mladosti")

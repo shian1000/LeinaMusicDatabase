@@ -1,5 +1,7 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
 from sqlalchemy.orm import declarative_base, relationship, validates
+from utils.common.language_names import clean_language
+from utils.common.origin_names import clean_origin
 from utils.common.normalizer import composed
 
 Base = declarative_base()
@@ -39,8 +41,9 @@ class Artist(Base):
     )
 
     @validates(*COMPOSED_FIELDS["artists"])
-    def _compose(self, _key, value):
-        return composed(value)
+    def _compose(self, key, value):
+        # One form per country on every write - utils/common/origin_names.py
+        return clean_origin(value) if key == "origin" else composed(value)
 
 
 # --------------------
@@ -103,6 +106,11 @@ class Song(Base):
     @validates(*COMPOSED_FIELDS["songs"])
     def _compose(self, _key, value):
         return composed(value)
+
+    # One spelling per language on every write - utils/common/language_names.py
+    @validates("language")
+    def _clean_language(self, _key, value):
+        return clean_language(value)
 
 
 # --------------------

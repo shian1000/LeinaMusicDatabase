@@ -158,7 +158,7 @@ def test_flags_changed_since_and_an_artist_no_longer_on_the_song(env):
     env["songs"][0].year = 2021
     env["songs"][0].artist = env["session"].get(Artist, 11)
     env["session"].commit()
-    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(), _row("artists", 10, "origin", "USA", "US")])
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_row(), _row("artists", 10, "origin", "United States", "US")])
 
     year, origin = _cases(env)[1]
 

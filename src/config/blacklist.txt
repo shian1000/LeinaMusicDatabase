@@ -50,6 +50,7 @@ festival
 edition
 demos
 the best
+лучшее
 
 # Partial matches — if any of these appear in the title as whole words, skip it. No
 # common words, places or names here: they'd reject real albums ("Morrison Hotel")
@@ -137,3 +138,39 @@ najljepše ljubavne
 najlepše ljubavne
 najljepse ljubavne
 najlepse ljubavne
+# Compilations in the languages of the catalog (Bijelo dugme's "Lipe cvatu" got iTunes'
+# "Kompilacija Bijelo Dugme", 2013; YouTube Music gave "Najbolje Od Tajči"); none is a
+# word of a stored real album (checked 2026-11-19)
+kompilacija
+kompilacije
+kompilacja
+kompilation
+компилација
+компиляция
+najbolje
+најбоље
+najboljše
+хитови
+antologija
+antologia
+антологија
+антология
+originalnih
+reizdanje
+diskobiografija
+przeboje
+golden hits
+коллекция
+колекція
+колекција
+найкраще
+grandes éxitos
+grandes exitos
+lo mejor de
+le meilleur de
+il meglio di
+größten hits
+to nejlepší
+najlepšie
+# A karaoke label's album, typed a plain Album on MusicBrainz (Avril Lavigne - "Don't Tell Me")
+karaoke

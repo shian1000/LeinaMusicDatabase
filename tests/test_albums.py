@@ -461,6 +461,20 @@ def test_an_import_leaves_a_blacklisted_album_empty(album, stored):
     assert importable_album(album, "Someone") == stored
 
 
+@pytest.mark.parametrize("album, year", [
+    # A compilation's tag date isn't the song's (Električni orgazam's 1988 song tagged 2009)
+    ("The ultimate collection CD1 (Croatia records) CD 5861485", None),
+    ("Letim sanjam dišem", 2009),
+    (None, 2009),
+])
+def test_an_import_keeps_the_tag_year_only_with_an_accepted_album(session, album, year):
+    from utils.discoveries.import_engine import create_song_entry
+    artist, = _artists(session, "Električni orgazam")
+    song = create_song_entry({"title": "Igra rok en rol cela Jugoslavija", "album": album, "year": "2009"},
+                             artist, session)
+    assert song.year == year
+
+
 def test_an_import_keeps_a_blacklisted_looking_album_the_artist_has(monkeypatch):
     from utils.database import albums
     from utils.discoveries.import_engine import importable_album
@@ -476,6 +490,9 @@ def test_an_import_keeps_a_blacklisted_looking_album_the_artist_has(monkeypatch)
     "Dance of the Knights", "Radio K.A.O.S.", "Tokyo", "The Next Episode", "Version 2.0",
     "Selected Ambient Works Volume II", "The Best Damn Thing", "Czerwony album", "Rock Action",
     "Music for the People", "I Want to Die in New Orleans",
+    # Ex-Yugoslav originals next to the compilations below
+    "Dnevnik jedne ljubavi", "Hajde Da Ludujemo", "Bube u glavi", "Letim sanjam dišem", "Čuvaj se!",
+    "1986-08-05 - Great Woods, Mansfield, MA", "1999", "2001",
 ])
 def test_a_real_album_with_a_common_word_is_not_blacklisted(title):
     from utils.common.text_utils import is_blacklisted_album
@@ -488,6 +505,12 @@ def test_a_real_album_with_a_common_word_is_not_blacklisted(title):
     "Hity lata 2016", "The Essential Leonard Cohen", "Kuschelrock 25", "Party Hard 2000",
     "Megahits 2010 Die Erste", "MTV History 2000", "50 Oldies Party", "Absolut Grillparty", "Now Yearbook 79",
     "Billboard Top 100 of 1994", "WOW Gospel 2015", "Poolside Lounge 2023", "Sun of Jamaica - Super Sommerhits",
+    # What Albums gave old ex-Yugoslav songs (2026-11-19), and the like in other languages
+    "Kompilacija Bijelo Dugme", "Najbolje Od Tajči", "Zvuk osamdesetih 1980-1989, Pop i Rock",
+    "Najbolje pesme 1980-1988", "50 Originalnih Pjesama", "Dnevnik Jedne Ljubavi (Reizdanje)",
+    "Riječki Novi Val: Antologija", "Pelmel 1993–2007", "Sve Hrvatske Eurovizije 1963 - 1993",
+    "Największe przeboje Maryli Rodowicz", "Лучшее", "Золотая коллекция", "Grandes Éxitos",
+    "Die größten Hits", "Le meilleur de Dalida", "The Smash! Hits Chart Karaoke Album!",
 ])
 def test_compilations_and_placeholders_are_still_blacklisted(title):
     from utils.common.text_utils import is_blacklisted_album

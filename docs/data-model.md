@@ -17,11 +17,11 @@ Artist                          Song
 ------                          ----
 id            PK                id             PK
 name          NOT NULL          title          NOT NULL
-origin                          title_latin    (migration 0011)
+origin  "Country - Region - City" title_latin    (migration 0011)
                                  other_titles   (migration 0023) "Hymn of the Cherubim; Cherubic Hymn"
 synonyms                        album
 name_latin    (migration 0011)  year
-                                 language
+                                 language       "English / Japanese", "Unknown", "Instrumental"
                                  artist_id      FK -> Artist.id, NOT NULL
                                  youtube_video_id
                                  spotify_url

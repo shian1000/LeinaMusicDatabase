@@ -242,6 +242,25 @@ non-trivial work in that area.
   matches equal names). Every write goes through `clean_genres()` / `set_song_genre()`
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
   spelling music.db already uses); never assign `song.genre` raw text.
+  `languages.py` — `songs.language` (Leina Radio's stats "Języki" and search use the exact value):
+  English names, several joined by " / ", `"Unknown"` the imports' placeholder, `"Instrumental"`
+  = no words. Unlike genres, cleaning needs no database: `Song`'s `@validates("language")` runs
+  `utils/common/language_names.clean_language()` on every ORM write (`LANGUAGE_SYNONYMS` for
+  typos, lowercase ISO codes "eng" / "de" from tags → the name, the owner's own names - "Kajkavian",
+  "Interslavic" - kept). Older rows: Manage database → "Unify language and country names"
+  (`utils/ui/language_review.py`, `languages.spelling_fixes()`); a new synonym needs it run once.
+  `artists.origin` the same way (`Artist`'s validator → `utils/common/origin_names.clean_origin()`):
+  "Country - Region - City", the country in one English form (owner, 2026-11-19: translated for
+  display later, one form stored; `ORIGIN_COUNTRY_SYNONYMS`, pycountry with `ORIGIN_COUNTRY_NAMES`),
+  the UK's countries as "United Kingdom - England", "City, Country" turned around, the old "#"
+  dropped, junk from mp3 tags cleared. Leina Radio takes the part before the first " - " as the
+  country. Filled by Fill missing data →
+  "Languages" (same file; the `get_language()` kind: the stored lyrics read by langdetect with the
+  owner's rules in `language_names.song_language()` - alphabet and letters narrow the field, the
+  ex-Yugoslav languages go by country and year (`YUGOSLAV_COUNTRIES`; neither known = asked at the
+  end: typed now or looked up again once the artist's origin is known) -, Musixmatch, MusicBrainz's
+  work - `docs/agent-notes/discovery-modules.md`). A Run all step, deliberately not in
+  `LOOKUP_STEPS` until the owner has reviewed its rules (see Run all below).
   `additional_videos.py` — `additional_youtube_videos` (migration 0018): a song's YouTube videos
   other than its own link, keyed by video, only so Leina Radio (after `songs.youtube_video_id`,
   which wins) and the inbox's song requests (`song_for_video()`) recognise another upload as the
@@ -794,12 +813,15 @@ non-trivial work in that area.
 - Manage database → "Run all clean-ups and lookups in order" (`run_all_steps()` in
   `manage_database/__init__.py`) runs `RUN_ALL_STEPS`, the whole-catalog steps of that menu, in an
   order explained in the comment above it (requests → names → duplicates → swapped songs → spell
-  check → what a song is → artists without songs → albums → years / genres / Latin forms). Their order and labels are
+  check → what a song is → artists without songs → albums → years / genres / Latin forms → lyrics → languages). Their order and labels are
   `constants.RUN_ALL_STEP_LABELS` (same keys); Settings → "Run all: steps"
   (`menu/main_menu/settings/run_all_steps.py`) turns them off, saved by key in `run_all_config.json`
   (`utils/common/run_all_settings.py`, only the ones off, so a new step starts on). A new
   whole-catalog step of that menu goes into both at its place, and into Help's "Keeping the
-  catalog clean" text. The automation timer runs `CLEAN_UP_STEPS` (no internet, when the
+  catalog clean" text. The timer runs the working tree, uncommitted code included: a key added to
+  `CLEAN_UP_STEPS` / `LOOKUP_STEPS` runs on the real catalog within minutes (a half-built
+  languages step saved 2,658 songs' languages that way, 2026-11-19), so a new unattended step goes
+  in only once finished and agreed with the owner. The automation timer runs `CLEAN_UP_STEPS` (no internet, when the
   databases or settings changed) and `LOOKUP_STEPS` (spell check, albums, years, genres, lyrics;
   their own interval, only while MusicBrainz answers) - steps asking only through `prompts` -
   through `run_unattended_steps(keys)` inside `prompts.unattended()`: a checkbox list takes what
@@ -938,7 +960,10 @@ non-trivial work in that area.
 - `main.py` may be writing to `music.db` right now. Before any direct/out-of-band SQL write, check
   `python tools/db_inspect.py` (the app lock; "UNKNOWN" counts as running); prefer the app's own edit flow, or ask the user to pause it. A direct
   write has already been caught racing a live session mid-edit (title cleanup) and clobbering
-  in-progress work.
+  in-progress work. The automation timer can also start mid-write: a script that must write holds
+  `app_lock.try_exclusive_lock()` for its whole run (None = the app or a pass is on - write
+  nothing) and writes through the app's session (`open_and_set_global_database_sessions()` /
+  `submit_global_database_session()`), so validators and listeners run.
 - Add a schema change via a new file in `migrations/<db_name>/`, never by hand-editing a DB file or
   relying on `Base.metadata.create_all()` (which only creates missing tables — it never alters an
   existing one). See the runbook before adding one.
@@ -1180,13 +1205,15 @@ non-trivial work in that area.
   strings, and why a typo inside an artist name defeats the local fuzzy lookup (substring-only
   candidates) and how `LocalSongMatcher.match_similar()` works around it, and why the duplicate-song
   key keeps non-junk brackets (remixes and covers are songs of their own).
-- [discovery-modules.md](docs/agent-notes/discovery-modules.md) — why `discoveries_manager.py`
+- [discovery-modules.md](docs/agent-notes/discovery-modules.md) — the language lookups (langdetect on the stored lyrics, measured accuracy, what it confuses), why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract (with the track position and the lazy tracklist behind Albums' per-run
   `AlbumTrackCache`, which writes `songs.track_number`, and the year / album type / ids the same
   answer carries, saved by Albums into empty fields - the year only from a module on for Years), why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
-  the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
+  why MusicBrainz takes the earliest release and never a reissue (a release years after the
+  recording first appeared anywhere), compilation words in every language and spans of years in
+  `blacklist.txt` / `is_blacklisted_album()`, the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
   try to evade the latter), the three kinds of fetcher (Curl / Curl + API / Selenium), API modules off by default, how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the

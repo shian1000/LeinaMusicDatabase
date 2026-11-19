@@ -5,9 +5,9 @@ Modules are identified by their filename stem (e.g. "wikipedia_fetcher"),
 which is stable across renames of the display name (MODULE_NAME).
 
 One config per kind of lookup (KINDS): the album fetchers (get_album_name()),
-"Fill missing data -> Years" (get_release_year()) and "-> Lyrics"
-(get_lyrics()). They're kept apart because a module may implement any of the
-three, so each kind's available modules (and a sensible order) differ.
+"Fill missing data -> Years" (get_release_year()), "-> Lyrics" (get_lyrics())
+and "-> Languages" (get_language()). They're kept apart because a module may
+implement any of them, so each kind's available modules (and a sensible order) differ.
 """
 from dataclasses import dataclass
 
@@ -20,13 +20,16 @@ from config.constants import (
     DEFAULT_DISCOVERY_MODULE_YEAR_ORDER,
     DISCOVERY_MODULES_LYRICS_CONFIG_FILE,
     DEFAULT_DISCOVERY_MODULE_LYRICS_ORDER,
+    DISCOVERY_MODULES_LANGUAGE_CONFIG_FILE,
+    DEFAULT_DISCOVERY_MODULE_LANGUAGE_ORDER,
     DISCOVERY_MODULES_NEEDING_API_KEY,
     DISCOVERY_STATS_FILE,
     DISCOVERY_STATS_YEAR_FILE,
     DISCOVERY_STATS_LYRICS_FILE,
+    DISCOVERY_STATS_LANGUAGE_FILE,
 )
 
-ALBUMS, YEARS, LYRICS = "albums", "years", "lyrics"
+ALBUMS, YEARS, LYRICS, LANGUAGES = "albums", "years", "lyrics", "languages"
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,8 @@ KINDS = {
                          DEFAULT_DISCOVERY_MODULE_YEAR_ORDER, DISCOVERY_STATS_YEAR_FILE),
     LYRICS: DiscoveryKind("get_lyrics", DISCOVERY_MODULES_LYRICS_CONFIG_FILE,
                           DEFAULT_DISCOVERY_MODULE_LYRICS_ORDER, DISCOVERY_STATS_LYRICS_FILE),
+    LANGUAGES: DiscoveryKind("get_language", DISCOVERY_MODULES_LANGUAGE_CONFIG_FILE,
+                             DEFAULT_DISCOVERY_MODULE_LANGUAGE_ORDER, DISCOVERY_STATS_LANGUAGE_FILE),
 }
 
 

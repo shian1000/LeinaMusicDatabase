@@ -24,8 +24,8 @@ LIBRARIES = [
                "ones apart."),
     ("musicbrainzngs", "MusicBrainz searches for a song's recordings: its album and release year."),
     ("wikipedia", "Wikipedia lookups for a song's album and release year."),
-    ("requests", "Plain web requests: MusicBrainz (spelling and genres), Wikipedia, song lyrics (LRCLIB, Genius, Musixmatch, LyricsTranslate, Tekstowo, Fajnanuta, Cuspajz), lyrics for guessing "
-                 "a song's language, the public catalog's GitHub release, the check for a newer yt-dlp, and the iTunes "
+    ("requests", "Plain web requests: MusicBrainz (spelling, genres and languages), Wikipedia, song lyrics (LRCLIB, Genius, Musixmatch, LyricsTranslate, Tekstowo, Fajnanuta, Cuspajz), "
+                 "a song's language on Musixmatch, the public catalog's GitHub release, the check for a newer yt-dlp, and the iTunes "
                  "and YouTube Music album searches."),
     ("beautifulsoup4", "Reads the web pages the lookups get back (Wikipedia, Spotify, Google, "
                        "Genius)."),
@@ -248,7 +248,7 @@ While making a playlist from a folder - Users -> Enter user database -> "Create 
 Each of these (mp3 tags, a YouTube playlist, Leina Radio's requests) ends by asking which missing
 data to fill in for the imported songs - albums, then years (a year in a video's or file's title,
 'Song (1991)', is offered too). Later: Manage database -> Fetch database data -> "Fill missing data"
-(albums, years, genres, lyrics for the whole catalog), "Import covers from mp3 tags", and
+(albums, years, genres, lyrics, languages for the whole catalog), "Import covers from mp3 tags", and
 Settings -> Server -> "Index music library" to link the files.
 """,
     "Keeping the catalog clean": """
@@ -256,7 +256,7 @@ All in Enter database -> Manage database:
   - Run all clean-ups and lookups in order: the steps below that need no folder or pick, one after
     another - requests, clean names, split and merge artists, swapped artist and title, spell
     check, songs' duplicates, full albums, projects, covers, artists without songs, albums, their
-    names, years, genres, Latin forms, lyrics. A list first lets
+    names, years, genres, Latin forms, lyrics, languages. A list first lets
     you leave some out this time; which ones are ticked there is set in Settings -> "Run all:
     steps". Ctrl+C stops the step running and asks whether to go on.
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names
@@ -281,6 +281,11 @@ All in Enter database -> Manage database:
     ('Nana - Kuroi Namida'): the song is then found by its title among every artist's songs
     whose album names the work.
   - Fill in Latin forms of names in other alphabets: 'Кино' -> 'Kino' for Leina Radio.
+  - Unify language and country names: one spelling per language ('Finish' -> 'Finnish', 'eng'
+    -> 'English') and per country in artists' origins, in English ('USA' -> 'United States',
+    'England - London' -> 'United Kingdom - England - London'), origins that aren't a place
+    cleared, since Leina Radio counts and searches them by the exact name. Every one saved since
+    is spelt that way already.
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
     after their song.
   - Spell check existing data: artist and title spelling against MusicBrainz.

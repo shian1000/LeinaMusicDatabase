@@ -383,7 +383,11 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     new_song_obj.artist_id = artist_obj.id
     new_song_obj.title = metadata.title
     new_song_obj.album = importable_album(metadata.album, artist_obj.name)
-    new_song_obj.year = song_year(metadata.year)
+    # A tag's date with an album not accepted is that compilation's, not the
+    # song's: "Električni orgazam - Igra rok en rol cela Jugoslavija" (1988)
+    # came tagged "The ultimate collection CD1 (Croatia records)", 2009
+    if not (metadata.album and new_song_obj.album is None):
+        new_song_obj.year = song_year(metadata.year)
     new_song_obj.language = metadata.language
     # Only present for entries sourced from a YouTube playlist import - mp3
     # imports never carry this key, so this is a no-op (None) for them.

@@ -6,16 +6,20 @@ import musicbrainzngs
 from utils.common.debug import flog, slog
 from utils.common.text_utils import is_blacklisted_album, title_resembles, similarity
 from utils.common.normalizer import normalize
-from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, YearDiscoveryResult
+from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, LanguageDiscoveryResult, YearDiscoveryResult
 import re
 from utils.common.text_utils import check_spelling
 from config.constants import (
     ALBUM_TYPE_ALBUM,
     ALBUM_TYPE_EP,
     ALBUM_TYPE_SOUNDTRACK,
+    MIN_PLAUSIBLE_RELEASE_YEAR,
+    MUSICBRAINZ_REISSUE_AFTER_YEARS,
     MUSICBRAINZ_VARIOUS_ARTISTS_ID,
+    MUSICBRAINZ_WS_ROOT,
 )
-from utils.common.musicbrainz_client import lucene_quote
+from utils.common.language_names import clean_language, code_name
+from utils.common.musicbrainz_client import lucene_quote, mb_get
 
 # Set up the user agent (required by MusicBrainz). Contact points at the project
 # repo; see MUSICBRAINZ_API_USER_AGENT in config/constants.py.
@@ -54,43 +58,65 @@ def _recording_title_artist(recording, artist: str) -> tuple[str, str]:
 FALLBACK_RELEASE_TYPE_RANK = {"EP": 0, "Single": 1}
 
 
-def _pick_release(recordings, artist: str | None = None) -> tuple[str | None, dict | None]:
+def _pick_release(recordings, artist: str | None = None, title: str | None = None) -> tuple[str | None, dict | None]:
     """(release title, its recording) for the best release of the search hits.
 
-    The first Album in result order wins, the artist's own before a "Various
-    Artists" one (a soundtrack). Otherwise the best-ranked other
-    release of the first recording that has any, by type then earliest date
-    (undated last). Compilations, live albums, remixes, blacklisted titles,
-    another artist's release and another song's single never count.
+    The earliest Album wins (its release group's earliest year among the
+    hits, undated last, result order on a tie), of a recording titled like
+    `title` before one titled otherwise, the artist's own before a "Various
+    Artists" one (a soundtrack). Otherwise the best-ranked other release of
+    the first recording that has any, by type then earliest date (undated
+    last). Compilations, live albums, remixes, blacklisted titles, another
+    artist's release and another song's single never count; a reissue
+    (_is_reissue()) only when nothing else is left.
     """
-    title, recording, _release = _pick_release_with_entry(recordings, artist)
-    return title, recording
+    release_title, recording, _release = _pick_release_with_entry(recordings, artist, title)
+    return release_title, recording
 
 
-def _pick_release_with_entry(recordings, artist: str | None = None) -> tuple[str | None, dict | None, dict | None]:
+def _pick_release_with_entry(recordings, artist: str | None = None,
+                             title: str | None = None) -> tuple[str | None, dict | None, dict | None]:
     """_pick_release() plus the picked release entry itself (its id and the
     recording's place on it)."""
-    # The artist's own album before a "Various Artists" one: Daan's "Housewife"
-    # lists the film soundtrack "Windkracht 10" ahead of "Victory"
-    for various_artists in (False, True):
-        for recording in recordings:
-            for release in recording.get("release-list", []):
-                if (_release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
-                        and release.get("release-group", {}).get("primary-type", "") == "Album"
-                        and _is_various_artists_release(release) == various_artists):
-                    return _release_title(release), recording, release
+    first_appearances = _first_appearances(recordings)
 
-    for recording in recordings:
-        candidates = [release for release in recording.get("release-list", [])
-                      if _release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
-                      and not _is_other_songs_single(release, recording)]
-        if candidates:
-            best = min(candidates, key=lambda release: (
-                FALLBACK_RELEASE_TYPE_RANK.get(release.get("release-group", {}).get("primary-type", ""),
-                                               len(FALLBACK_RELEASE_TYPE_RANK)),
-                release.get("date") or "9999",
-            ))
-            return _release_title(best), recording, best
+    def counts(release, recording, reissues: bool) -> bool:
+        return (_release_counts(release, recording, artist)
+                and _is_reissue(release, recording, recordings, first_appearances) == reissues)
+
+    # The earliest, not the first listed: Tajči's "Hajde da ludujemo" (1990)
+    # was listed after "Bube u glavi" (1991), Josipa Lisac's "O jednoj
+    # mladosti" (1973) after a 2018 studio session. A recording titled
+    # otherwise ("Lipe cvatu, sve je isto k'o i lani") goes last, since the
+    # manager drops its album anyway.
+    def album_rank(pair):
+        recording, release = pair
+        return not _is_queried_song(recording, title), _release_group_year(recordings, release) or 9999
+
+    # A reissue only when nothing else is left: Czesław Niemen's "Dziwny jest
+    # ten świat" (1967) is among the hits only as its 1991 edition
+    for reissues in (False, True):
+        # The artist's own album before a "Various Artists" one: Daan's "Housewife"
+        # lists the film soundtrack "Windkracht 10" ahead of "Victory"
+        for various_artists in (False, True):
+            albums = [(recording, release) for recording in recordings for release in recording.get("release-list", [])
+                      if counts(release, recording, reissues)
+                      and release.get("release-group", {}).get("primary-type", "") == "Album"
+                      and _is_various_artists_release(release) == various_artists]
+            if albums:
+                recording, release = min(albums, key=album_rank)
+                return _release_title(release), recording, release
+
+        for recording in recordings:
+            candidates = [release for release in recording.get("release-list", [])
+                          if counts(release, recording, reissues) and not _is_other_songs_single(release, recording)]
+            if candidates:
+                best = min(candidates, key=lambda release: (
+                    FALLBACK_RELEASE_TYPE_RANK.get(release.get("release-group", {}).get("primary-type", ""),
+                                                   len(FALLBACK_RELEASE_TYPE_RANK)),
+                    release.get("date") or "9999",
+                ))
+                return _release_title(best), recording, best
     return None, None, None
 
 
@@ -173,10 +199,13 @@ def _album_result(title: str, recording, release, artist: str, recordings) -> Di
     matched_title, matched_artist = _recording_title_artist(recording, artist)
     track_number, disc_number = _track_position(release)
     group_id = release.get("release-group", {}).get("id")
+    # A reissue's year isn't the song's; Years then asks for the album's own
+    reissue = _is_reissue(release, recording, recordings, _first_appearances(recordings))
     return DiscoveryResult(album=title, matched_title=matched_title, matched_artist=matched_artist,
                            track_number=track_number, disc_number=disc_number,
                            load_tracks=_tracks_loader(release),
-                           year=_release_group_year(recordings, release), album_type=_album_type(release),
+                           year=None if reissue else _release_group_year(recordings, release),
+                           album_type=_album_type(release),
                            album_ids={"musicbrainz_release_group_id": group_id} if group_id else {})
 
 
@@ -217,6 +246,45 @@ def _is_other_songs_single(release, recording) -> bool:
     return not title_resembles(recording.get("title", ""), _release_title(release))
 
 
+def _release_year(release) -> int | None:
+    return _extract_year(release.get("date") or release.get("release-group", {}).get("first-release-date"))
+
+
+def _first_appearances(recordings) -> dict:
+    """normalize(recording title) -> the earliest year a hit of that title is
+    on any release at all (a compilation, someone else's): the song was out
+    by then."""
+    first = {}
+    for recording in recordings:
+        key = normalize(recording.get("title", ""))
+        for release in recording.get("release-list", []):
+            year = _release_year(release)
+            if year and year >= MIN_PLAUSIBLE_RELEASE_YEAR:
+                first[key] = min(first.get(key, year), year)
+    return first
+
+
+def _is_reissue(release, recording, recordings, first_appearances) -> bool:
+    """Did `release` come out more than MUSICBRAINZ_REISSUE_AFTER_YEARS after
+    the recording first appeared anywhere? Then it's a reissue or a best-of
+    nobody typed Compilation ("Program tvog kompjutera", 1995, for Denis &
+    Denis - "Soba 23", on an EP of 1988), not where the song came out - or
+    an album MusicBrainz lists only by a later edition."""
+    year = _release_group_year(recordings, release)
+    first = first_appearances.get(normalize(recording.get("title", "")))
+    return bool(year and first and year > first + MUSICBRAINZ_REISSUE_AFTER_YEARS)
+
+
+def _is_queried_song(recording, title: str | None) -> bool:
+    return title is None or title_resembles(title, recording.get("title", ""), allow_subtitle=False)
+
+
+def _release_counts(release, recording, artist: str | None) -> bool:
+    """Can `release` be the song's album or give its year? Not a compilation
+    or a live one, not someone else's."""
+    return _release_is_eligible(release, artist) and not _is_other_artists_release(release, recording)
+
+
 # Release kinds that are never a song's own album or release
 _SKIPPED_SECONDARY_TYPES = ("Compilation", "Live", "Remix", "DJ-mix")
 
@@ -253,7 +321,7 @@ def _search_album(artist: str, song: str) -> DiscoveryResult | None:
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
             response = musicbrainzngs.search_recordings(query=query, limit=limit)
         recordings = response.get("recording-list", [])
-        result, result_recording, result_release = _pick_release_with_entry(recordings, artist)
+        result, result_recording, result_release = _pick_release_with_entry(recordings, artist, song)
         slog(result)
         if result:
             return _album_result(result, result_recording, result_release, artist, recordings)
@@ -320,7 +388,7 @@ def _release_year_from_artist_recordings(artist: str, album: str, delay: float) 
             title = release.get("title", "")
             if not title_resembles(album, title, allow_subtitle=allow_subtitle):
                 continue
-            year = _extract_year(release.get("date") or release.get("release-group", {}).get("first-release-date"))
+            year = _release_year(release)
             if year:
                 time.sleep(delay)
                 return YearDiscoveryResult(year=year, matched_title=title,
@@ -356,20 +424,23 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
             with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
                 response = musicbrainzngs.search_recordings(query=query_str, limit=10)
             recordings = response.get("recording-list", [])
+            first_appearances = _first_appearances(recordings)
 
-            for recording in recordings:
-                for release in recording.get("release-list", []):
-                    release_group = release.get("release-group", {})
-                    # The same releases as for the album (get_album_name()): not a
-                    # compilation or live one, not someone else's
-                    if not _release_is_eligible(release, artist) or _is_other_artists_release(release, recording):
-                        continue
-                    year = _extract_year(release.get("date") or release_group.get("first-release-date"))
-                    if year:
-                        time.sleep(delay)
-                        matched_title, matched_artist = _recording_title_artist(recording, artist)
-                        return YearDiscoveryResult(year=year, matched_title=matched_title, matched_artist=matched_artist)
-            return None
+            # The same releases as for the album (get_album_name()), never a
+            # reissue's year, the earliest of a recording titled like the song
+            # first - not the first listed: Josipa Lisac's "O jednoj mladosti"
+            # (1973) got a 2018 studio session's year
+            dated = [(not _is_queried_song(recording, query), year, recording)
+                     for recording in recordings for release in recording.get("release-list", [])
+                     if _release_counts(release, recording, artist)
+                     and not _is_reissue(release, recording, recordings, first_appearances)
+                     and (year := _release_year(release))]
+            if not dated:
+                return None
+            _, year, recording = min(dated, key=lambda entry: entry[:2])
+            time.sleep(delay)
+            matched_title, matched_artist = _recording_title_artist(recording, artist)
+            return YearDiscoveryResult(year=year, matched_title=matched_title, matched_artist=matched_artist)
 
         query_str = f'releasegroup:{lucene_quote(query)} AND artist:{lucene_quote(artist)}'
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
@@ -410,3 +481,38 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
     except musicbrainzngs.WebServiceError as e:
         flog(f"[MusicBrainz] error for release year of '{artist} - {query}': {e}")
         return None
+
+# ==================== languages ====================
+# A recording's work (inc=work-rels) holds the language of its words ("zxx" =
+# none). Not every recording is linked to its work, so up to this many of the
+# ones titled like the song are looked up - through mb_get(), not
+# musicbrainzngs (rate limit, timeout).
+_LANGUAGE_RECORDINGS = 3
+
+
+def _mb_json(url: str, params: dict) -> dict:
+    """Raises when MusicBrainz can't be asked, so the song is asked again next time."""
+    response = mb_get(url, {**params, "fmt": "json"})
+    if response is None:
+        raise ConnectionError(f"MusicBrainz didn't answer {url}")
+    return response.json()
+
+
+def _credit(recording: dict) -> str:
+    return "".join(f"{c.get('name', '')}{c.get('joinphrase', '')}" for c in recording.get("artist-credit") or [])
+
+
+def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult | None:
+    query = f'recording:{lucene_quote(title)} AND artist:{lucene_quote(artist)} AND video:false'
+    recordings = _mb_json(f"{MUSICBRAINZ_WS_ROOT}recording/", {"query": query, "limit": 10}).get("recordings") or []
+    titled = [r for r in recordings if title_resembles(title, r.get("title") or "")][:_LANGUAGE_RECORDINGS]
+    for recording in titled:
+        data = _mb_json(f"{MUSICBRAINZ_WS_ROOT}recording/{recording['id']}", {"inc": "work-rels"})
+        codes = [code for relation in data.get("relations") or []
+                 for code in (relation.get("work") or {}).get("languages") or []]
+        names = [name for name in (code_name(code) for code in dict.fromkeys(codes)) if name]
+        if names:
+            return LanguageDiscoveryResult(clean_language(" / ".join(names)), matched_title=recording.get("title"),
+                                           matched_artist=_credit(recording), source_ref=recording["id"])
+    flog(f"[{MODULE_NAME}] no work with a language for '{artist} - {title}'")
+    return None

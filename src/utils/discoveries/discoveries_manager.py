@@ -10,12 +10,15 @@ from utils.common.text_utils import (
     resembles_across_scripts,
     remove_brackets,
 )
-from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, LyricsDiscoveryResult, YearDiscoveryResult
-from utils.discoveries.discovery_settings import ALBUMS, KINDS, LYRICS, YEARS, reconcile_discovery_config
+from utils.discoveries.discovery_result import (AlbumTrack, DiscoveryResult, LanguageDiscoveryResult, LyricsDiscoveryResult,
+                                                YearDiscoveryResult)
+from utils.discoveries.discovery_settings import ALBUMS, KINDS, LANGUAGES, LYRICS, YEARS, reconcile_discovery_config
 from utils.discoveries.discovery_stats import record_invocation, record_success
 from config.constants import (
     ALBUM_EXTERNAL_ID_COLUMNS,
     DISCOVERY_ALBUM_TYPES,
+    LANGUAGE_DETECT_SURE,
+    LANGUAGE_MAX_QUERIES,
     LYRICS_DURATION_TOLERANCE_S,
     MIN_PLAUSIBLE_RELEASE_YEAR,
     SINGLES_ALBUM,
@@ -915,4 +918,74 @@ def discover_lyrics(song, modules, duration_s: float | None = None) -> LyricsSea
             return search
     if search.match is None:
         flog(f"No module found lyrics for '{song.artist.name} - {song.title}'")
+    return search
+
+
+@dataclass
+class LanguageMatch:
+    """A language a module found for a song. sure: the source says it
+    outright, or reads it from the lyrics with LANGUAGE_DETECT_SURE."""
+    result: LanguageDiscoveryResult
+    module_id: str
+    sure: bool
+
+
+@dataclass
+class LanguageSearch:
+    """What discover_language() found: the best match (None = nothing), the
+    modules that answered without one and those that couldn't be asked."""
+    match: LanguageMatch | None = None
+    missed: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+
+
+def _language_match(result, song, queried_artist: str, module_id: str, module_name: str,
+                    credited: list[str] | None) -> LanguageMatch | None:
+    """The answer checked against the song, or None when it's another song's."""
+    if not isinstance(result, LanguageDiscoveryResult) or not result.language:
+        return None
+    sure = (result.confidence is None or result.confidence >= LANGUAGE_DETECT_SURE) and not result.needs_origin
+    if result.from_song:
+        return LanguageMatch(result, module_id, sure)
+    if not (result.matched_title and result.matched_artist):
+        flog(f"[{module_name}] a language without the title/artist it belongs to, discarding")
+        return None
+    if not any(title_resembles(title, result.matched_title) for title in song_titles(song)):
+        slog(f"[{module_name}] the language of '{result.matched_title}' isn't '{song.title}'s")
+        return None
+    if not _matched_artist_resembles(queried_artist, result.matched_artist, credited):
+        slog(f"[{module_name}] the language of a song by '{result.matched_artist}' isn't '{queried_artist}'s")
+        return None
+    return LanguageMatch(result, module_id, sure)
+
+
+def discover_language(song, modules) -> LanguageSearch:
+    """The language the given get_language() modules find for `song`, in
+    their order: the first sure one wins, an unsure one is kept while the
+    next modules may still be sure. Each module is asked the song's first
+    LANGUAGE_MAX_QUERIES (artist, title) of _lyrics_queries() until it answers
+    - a module raising (no network) is asked again next time."""
+    credited, _ = _multi_artist_query(song)
+    search = LanguageSearch()
+    for module_id, module_name, module in modules:
+        found, failed = None, False
+        for artist, title in _lyrics_queries(song)[:LANGUAGE_MAX_QUERIES]:
+            record_invocation(module_id, LANGUAGES)
+            try:
+                result = module.get_language(composed(artist), composed(title), songs=[song])
+            except Exception as e:
+                flog(f"[{module_name}] failed while looking up the language of '{artist} - {title}': {e}")
+                failed = True
+                break
+            found = _language_match(result, song, artist, module_id, module_name, credited)
+            if found is not None or getattr(module, "LOCAL", False):
+                break  # a local module reads the song itself, whatever its names
+        if found is None:
+            (search.failed if failed else search.missed).append(module_id)
+            continue
+        record_success(module_id, LANGUAGES)
+        if search.match is None or (found.sure and not search.match.sure):
+            search.match = found
+        if search.match.sure:
+            return search
     return search

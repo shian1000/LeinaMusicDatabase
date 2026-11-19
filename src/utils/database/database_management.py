@@ -81,7 +81,8 @@ def edit_db_entry(db_object, category: str, new_value: str) -> bool:
     old_value = getattr(db_object, attribute)
     setattr(db_object, attribute, value)
     old_text = "---" if old_value in (None, "") else str(old_value)
-    print(f"Updated {category} for {label}: '{old_text}' --> '{new_value}'.")
+    # What was stored: the validators spell a language or a country their one way ("usa" -> "United States")
+    print(f"Updated {category} for {label}: '{old_text}' --> '{getattr(db_object, attribute)}'.")
     return True
 
 class ArtistHasSongsError(ValueError):

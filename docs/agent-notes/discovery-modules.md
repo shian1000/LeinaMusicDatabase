@@ -214,6 +214,13 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
   ("party hard", "megahits", "now yearbook"), not by a "name + year" shape: the catalog's real
   albums have it too ("Anawa 2020", "Acoustic 1993", "Demo 2004", every "Męskie Granie 20xx";
   checked 2026-11-12). Check a new `[substring]` entry against every stored album title first.
+  Compilation words go in for every language of the catalog, not just English: old ex-Yugoslav
+  songs got "Kompilacija Bijelo Dugme" (iTunes), "Najbolje Od Tajči" (YouTube Music), "50
+  Originalnih Pjesama" (2026-11-19; also "antologija", "reizdanje" = reissue, "przeboje",
+  "коллекция", "grandes éxitos", ...). A span of years ("Najbolje pesme 1980-1988", "Zvuk
+  osamdesetih 1980-1989") is rejected by `is_blacklisted_album()` itself, not by an entry: every
+  stored title with one is a retrospective. Such a name already stored for the artist still
+  passes (the `artist_has_album()` exception below) until the owner corrects it.
 - If `matched_title`/`matched_artist` were provided, independently checks their similarity against
   the *query* — not the module's own opinion of whether it matched — using
   `scaled_similarity_threshold()` (the same short-string-aware threshold used elsewhere in the
@@ -527,6 +534,58 @@ site is under (`_reader_for()`); their `<br>`s become new lines
 LRCLIB knew 29 (27 synced); the misses were game soundtracks (instrumental), niche Ukrainian /
 Polish songs and data errors (a swapped artist and title).
 
+## Language lookups ("Fill missing data -> Languages") and `get_language()`
+
+The fourth kind (`discovery_settings.LANGUAGES`), `LanguageDiscoveryResult`: the language as
+stored (`language_names.clean_language()`), `confidence` (a guess, 0-1) or None when the source
+says it outright, `from_song` when read from the song's own data. Three modules:
+
+- `stored_lyrics_fetcher` (`LOCAL = True`, no network): the song's text in lyrics.db read by
+  langdetect (seeded so a text always reads the same) with the owner's rules
+  (`language_names.song_language()`, agreed in a review of the automation's first run,
+  2026-11-19). The alphabet and the letters narrow the field - they don't decide alone (a Russian
+  text may come in Latin letters): each script with `LANGUAGE_SECOND_SCRIPT_SHARE` (0.4 - 0.2 gave
+  "Japanese / English" to songs the owner marks Japanese) of the letters is read on its own (a
+  hangul / kana / kanji character counts as two letters), Cyrillic only among Cyrillic languages
+  with `romanize.cyrillic_language()`'s letters (ў, ї/є/ґ, ђ/ћ), ѓ/ќ/ѕ Macedonian, ө/ү Mongolian
+  (Kazakh with ә/ғ/қ/ң), Hebrew script with Yiddish marks Yiddish; in Latin ŭ is Belarusian, ś
+  beside several č/š/ž (no ą/ę/ż: a Polish text holds names with č) Belarusian with ł, Montenegrin
+  with đ. Credit lines ("Lời:", "Writer(s):") are dropped, under 80 letters tells nothing. Then
+  the song: kana / kanji in its names or an artist singing mostly Japanese make a romaji
+  misreading Japanese; `LANGUAGE_RARELY_RIGHT` (Somali, Swahili...) is never sure, nor is a reading in a
+  language the title's script doesn't write (`may_be_translation()`: LRCLIB and Genius held English
+  translations of Ado's "ビバリウム" and Brutto's "Капитал"; the review list says so). Serbian /
+  Croatian / Bosnian are politics more than form (the owner): `YUGOSLAV_COUNTRIES` - made in
+  Yugoslavia = Serbo-Croatian, after the country left (Croatia 1991, Bosnia 1992, Serbia 2006) its
+  language, Montenegro's = Serbian unless its letters (ś, ź, с́, з́) say Montenegrin; the country
+  from the artist's origin, else its other songs' language, else ekavian words (Serbia); no
+  country and up to 1990 = Serbo-Croatian. Neither known: nothing is guessed
+  (`needs_origin`) - the screen lists those songs at the end and asks to type them now or look
+  them up again once the artists' origins are known; a site's Serbian / Croatian / Bosnian answer
+  goes through the same rule (`language_review._country_rule()`). Measured on the owner's 2,551 songs with a language and
+  lyrics: 95.4% right, 97.2% of the sure ones (langdetect alone: 94.5% / 96.8%; `lingua` was 95.5%
+  for 292 MB, not worth it). Still wrong: Kashubian (as Polish), Kajkavian (as Slovenian), lyrics
+  that are a translation.
+- `musixmatch_fetcher`: the page's `lyrics.language` / `languageDescription` - what Shazam shows,
+  its lyrics are Musixmatch's - or `isInstrumental`.
+- `music_brainz_fetcher`: the recording's work (`inc=work-rels`) `languages` ("zxx" = no words),
+  through `mb_get()`, not musicbrainzngs; not every recording is linked to its work, so up to three
+  titled like the song are looked up.
+
+`discover_language()` asks each module the first `LANGUAGE_MAX_QUERIES` names of
+`_lyrics_queries()` (a local one once), checks title and artist like the lyrics, and keeps the
+first sure answer. The screen (`utils/ui/language_review.py`) runs the local modules over every
+song first, then the sites for max-songs-per-fetch of those left. A sure reading of the lyrics in a
+language none of an artist's (3+) known songs has is still asked about, unticked
+(`_foreign()`), as are unsure readings (ticked when the artist sings it in half its songs) and,
+for a song every module was asked about, the language nearly all its artist's songs have
+(`LANGUAGE_ARTIST_MIN_SONGS` / `_SHARE`, ticked). It isn't in `LOOKUP_STEPS` yet: the owner reviews
+the rules first. A first unattended run on 2026-11-19 (it had been put there unfinished) saved
+2,658 songs' languages; the review of them with the owner gave the rules above, about 80 were
+corrected by hand, and a random sample of 60 of the 1,495 nobody had a value to compare with
+all looked right on reading. The lyrics turned out to hold a few English translations (LRCLIB, Genius) -
+LyricsTranslate's pages, "-english" addresses too, are the originals.
+
 ## Multi-artist songs (`additional_song_artists`)
 
 Fetchers still get one artist string; nothing in a module changed. `discover_album_name()` (and
@@ -601,11 +660,33 @@ discarded. It's an exact key match, so "Lee" or "Cody Lee Band" still don't pass
 a compilation nobody tagged: "Radio Woodstock 100.1 WDST 25th Anniversary - Disc 2" for Deep Blue
 Something) and releases credited to another artist
 (by MusicBrainz artist id - an Australian edition of Dido's "No Angel" carries four LeAnn Rimes
-songs; "Various Artists" passes), takes the first studio Album - the artist's own from any of the
+songs; "Various Artists" passes), takes the earliest studio Album - the artist's own from any of the
 hits before a "Various Artists" one: a film soundtrack is typed Album + Soundtrack, not
 Compilation, so it passes the filter, and MusicBrainz listed "Windkracht 10 Soundtrack" ahead of
 "Victory" on Daan's "Housewife" - and otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
-`tests/test_music_brainz_fetcher.py`). A compilation wrongly typed plain Album still wins ("Amstel
+`tests/test_music_brainz_fetcher.py`).
+
+**Earliest, not first listed, and never a reissue** (2026-11-19, old ex-Yugoslav songs whose
+year decides their language). Search order isn't release order: Tajči's "Hajde da ludujemo"
+(1990) listed "Bube u glavi" (1991) first, Josipa Lisac's "O jednoj mladosti" (1973) a 2018
+studio session. So the Albums are ranked by their release group's earliest year among the hits
+(`_release_group_year()`), those of a recording titled like the query first (the manager drops
+any other's album anyway), result order on a tie. And a release more than
+`MUSICBRAINZ_REISSUE_AFTER_YEARS` (2) after the recording - every hit of the same normalized
+title - first appeared on *any* release, compilations and other artists' included
+(`_first_appearances()`), is a reissue (`_is_reissue()`), taken only when no other release
+is left (Albums, then the EP/Single fallback, both without reissues first) and then without a
+year: Denis & Denis - "Soba 23" (1984) is on "Program tvog kompjutera", a 1995 best-of typed a
+plain Album, while a 1988 EP already had it, so the EP wins. The original "Čuvaj se!" (1984)
+isn't among the hits - MusicBrainz can only give what it links. Not dropped altogether, because
+an album may be among the hits only by a later edition: Czesław Niemen's "Dziwny jest ten świat"
+(1967) shows up as its 1991 CD after a 1979 best-of, so it's still the album, its year left to
+Years (the release-group search has the group's own first date). The margin keeps a lead single
+a year or two before its album from making the album a reissue. A re-check of the 68 songs with a
+MusicBrainz album on 2026-11-19 changed only reissues and compilations ("CDN", 2017, for Hey's
+1990s songs; "ZKM Live"; a chart) besides the cases above. The single-mode year
+(`get_release_year(is_single=True)`) never takes a reissue's year and takes the earliest one, not
+the first listed. A compilation wrongly typed plain Album still wins ("Amstel
 Pulse: Modern Rock Playlist" for "Breakfast at Tiffany's", whose first 25 hits are almost all
 compilations, without the real album). Two known misses are by design, not bugs to chase:
 

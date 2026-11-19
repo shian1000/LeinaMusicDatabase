@@ -96,7 +96,7 @@ def _serbian(text: str) -> str:
 _BELARUSIAN_PAIRS = ("жы", "шы", "чы", "жэ", "шэ", "чэ", "цэ")
 
 
-def _cyrillic_language(text: str, language: str | None, origin: str | None) -> str:
+def cyrillic_language(text: str, language: str | None, origin: str | None) -> str:
     """"be" / "uk" / "sr" / "ru": the language field first, then letters
     only one alphabet has, then the artist's origin. Belarusian has і with
     ы/э/ё, Ukrainian і with и/щ/apostrophe; Russian has neither і nor ў."""
@@ -126,7 +126,7 @@ def _cyrillic_language(text: str, language: str | None, origin: str | None) -> s
 
 
 def _cyrillic(text: str, language: str | None, origin: str | None) -> str:
-    code = _cyrillic_language(text, language, origin)
+    code = cyrillic_language(text, language, origin)
     if code == "be":
         result = belarusian_to_latin(text)
         # The Belarusian alphabet lacks и, щ, ъ - a Russian name by a

@@ -31,6 +31,7 @@ DISCOVERY_MODULES_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config.json"
 DISCOVERY_MODULES_YEAR_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_years.json"
 # The same for "Fill missing data -> Lyrics" (modules with get_lyrics())
 DISCOVERY_MODULES_LYRICS_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_lyrics.json"
+DISCOVERY_MODULES_LANGUAGE_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_language.json"
 
 # Optional override for Settings.database_dir (the folder holding music.db /
 # tag.db), persisted as JSON. Read once at startup, so a change made through
@@ -47,6 +48,7 @@ DISCOVERY_STATS_FILE = PROJECT_ROOT / "discovery_fetcher_stats.json"
 # invocation/success rates in the Statistics menu.
 DISCOVERY_STATS_YEAR_FILE = PROJECT_ROOT / "discovery_fetcher_stats_years.json"
 DISCOVERY_STATS_LYRICS_FILE = PROJECT_ROOT / "discovery_fetcher_stats_lyrics.json"
+DISCOVERY_STATS_LANGUAGE_FILE = PROJECT_ROOT / "discovery_fetcher_stats_language.json"
 
 # Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
 # albums) processes at once, persisted as JSON. Keeps a single run from
@@ -79,6 +81,7 @@ RUN_ALL_STEP_LABELS = {
     "genres": "Fill missing genres",
     "latin_forms": "Fill in Latin forms of names in other alphabets",
     "lyrics": "Fill missing lyrics",
+    "languages": "Fill missing languages",
 }
 
 # "Create playlist from folder": a file whose title matches a song exactly but
@@ -207,6 +210,8 @@ AUTOMATION_RULE_LABELS = {
     "lyrics_same_title": "Fill missing lyrics: save lyrics found for a song of the same title whose length "
                          "doesn't confirm it",
     "lyrics_instrumental": "Fill missing lyrics: mark a song instrumental when a source says it has no words",
+    "languages_unsure": "Fill missing languages: save a language read from the lyrics without certainty, or "
+                        "the one the artist's other songs nearly all have",
 }
 # Settings -> "Automation" -> "My rules": the owner's own rules, "if these
 # facts hold, take it", one question each: key -> (what is asked, {fact:
@@ -335,6 +340,13 @@ AUTOMATION_QUESTIONS = {
         "length_difference_s": ("the recordings' lengths differ by (seconds)", FACT_NUMBER)}),
     "lyrics_instrumental": ("Fill missing lyrics: a song nothing had words for", {
         "source_says_instrumental": ("a source says it has no words", FACT_YES_NO)}),
+    "languages_unsure": ("Fill missing languages: a language no source is sure of", {
+        "language": ("the language", FACT_TEXT),
+        "from_lyrics": ("read from the stored lyrics", FACT_YES_NO),
+        "confidence": ("how sure the reading of the lyrics is (0-1)", FACT_NUMBER),
+        "artist_share": ("the share of the artist's songs with a language that have this one (0-1)",
+                         FACT_NUMBER),
+        "artist_songs": ("how many of the artist's songs have a language", FACT_NUMBER)}),
 }
 # The comparisons a condition may make, by the fact's kind
 FACT_OPERATORS = {
@@ -455,6 +467,14 @@ DEFAULT_DISCOVERY_MODULE_LYRICS_ORDER = [
     "tekstowo_fetcher",
     "fajnanuta_fetcher",
     "cuspajz_fetcher",
+]
+
+# The same for the modules with get_language(): the stored lyrics first (no network),
+# then the sites saying it outright
+DEFAULT_DISCOVERY_MODULE_LANGUAGE_ORDER = [
+    "stored_lyrics_fetcher",
+    "musixmatch_fetcher",
+    "music_brainz_fetcher",
 ]
 
 # A fetched release year outside this range is treated as implausible (e.g. a
@@ -700,6 +720,127 @@ PERMISSION_LABELS = {
                           "Settings -> Automation)",
 }
 
+# ==================== Languages (utils/common/language_names.py, songs.language) ====================
+
+# songs.language: English names, several joined by LANGUAGE_SEPARATOR ("English / Japanese");
+# LANGUAGE_UNKNOWN is the imports' placeholder (Leina Radio ignores it), NULL = not set.
+LANGUAGE_UNKNOWN = "Unknown"
+LANGUAGE_INSTRUMENTAL = "Instrumental"  # a song without words
+LANGUAGE_SEPARATOR = " / "
+# Other spellings -> the stored one, keyed by language_names.language_key() (lowercase,
+# no diacritics, spaces or punctuation). Spellings differing only in case need no entry.
+LANGUAGE_SYNONYMS = {
+    "finish": "Finnish",
+    "portugeese": "Portuguese",
+    "lithianian": "Lithuanian",
+    "islandic": "Icelandic",
+    "slovakian": "Slovak",
+    "slovene": "Slovenian",
+    "arabian": "Arabic",
+    "farsi": "Persian",
+    "panjabi": "Punjabi",
+    "nigerianpigdin": "Nigerian Pidgin",
+    "unknown": LANGUAGE_UNKNOWN,
+    "instrumental": LANGUAGE_INSTRUMENTAL,
+}
+# ISO 639 codes (mp3 TLAN tags "eng" / "pol", later the lookups) whose pycountry name isn't
+# the one stored. Codes saying "no known language" give LANGUAGE_UNKNOWN; "zxx" (no
+# linguistic content) LANGUAGE_INSTRUMENTAL.
+# Fill missing data -> Languages (utils/ui/language_review.py). A language read from the lyrics
+# (stored_lyrics_fetcher, langdetect) is saved at once from this probability on - measured on the
+# catalog's 2,551 songs with a language and lyrics: 96.8% right from 0.95, 94.5% over all; below it
+# the owner is asked. A song nothing knows is offered the language of its artist's other songs when
+# at least LANGUAGE_ARTIST_MIN_SONGS have one and LANGUAGE_ARTIST_MIN_SHARE of them this one.
+LANGUAGE_DETECT_SURE = 0.95
+LANGUAGE_DETECT_MIN_LETTERS = 80  # fewer letters of lyrics than that tell nothing ("Lake", "Oh my god")
+# The owner's rules for reading lyrics (2026-11-19, language_names.language_of_text() /
+# song_language()): the alphabet and the letters narrow which languages a text may be in.
+# A second script with at least this share of the letters adds its language ("Korean / English")
+LANGUAGE_SECOND_SCRIPT_SHARE = 0.4  # 0.2 added a second language to songs the owner had marked with one
+# A line starting with one of these credits the authors, it isn't lyrics ("Lời: Dennis Lyxzén"
+# read as Vietnamese)
+LANGUAGE_CREDIT_WORDS = ("lời", "nhạc", "writer", "writers", "written by", "lyrics", "lyrics by", "music",
+                         "music by", "composer", "produced by", "tekst", "słowa", "muzyka", "text", "texte",
+                         "musique", "слова", "музыка", "автор", "текст")
+# Ekavian forms: a Croatian reading with one of these is Serbian ("Koju pesmu hoćete?")
+# Not "vremena" nor "sveta": Croatian too (vrijeme's genitive, "holy")
+SERBIAN_EKAVIAN_WORDS = ("pesma", "pesmu", "pesme", "lepo", "lepa", "vreme", "dete", "deca", "reka", "mleko",
+                         "hteo", "htela", "belo", "beli", "mesto", "leto", "devojka", "devojko", "nedelja", "cvet",
+                         "telo", "uvek", "videti", "osećam", "osećaj")
+# Serbian, Croatian, Bosnian, Montenegrin: mostly a matter of politics, rarely of form (the owner,
+# 2026-11-19). A song made in Yugoslavia is Serbo-Croatian wherever it's from; after its country
+# left (the year here), that country's language - Montenegro's is Serbian. The country comes from
+# the artist's origin, else the language of its other songs, else ekavian words (Serbia); a song
+# with no known country is Serbo-Croatian up to YUGOSLAVIA_LAST_YEAR. Montenegrin only by its
+# letters (ś, ź, Cyrillic с́ з́) or as the owner marks it.
+YUGOSLAV_COUNTRIES = {"Croatia": ("Croatian", 1991), "Bosnia": ("Bosnian", 1992), "Serbia": ("Serbian", 2006),
+                      "Montenegro": ("Serbian", 2006)}
+YUGOSLAVIA_LAST_YEAR = 1990
+SERBO_CROATIAN = "Serbo-Croatian"
+# Hebrew letters with these are Yiddish: the vowel signs Yiddish writes under alef, its words
+YIDDISH_MARKS = ("אַ", "אָ", "דער", "דאָס", "און", "איך", "ניט", "נישט")
+# Readings of Japanese in romaji (title or artist in kana / kanji, or the artist's other songs
+# mostly Japanese): it's Japanese
+LANGUAGE_ROMAJI_MISREADINGS = frozenset({"Swahili", "Somali", "Yoruba", "Shona", "Tagalog", "Indonesian", "Malay",
+                                         "Sotho", "Tswana", "Tsonga", "Zulu", "Xhosa", "Maori", "Finnish",
+                                         "Estonian", "Italian"})
+# Readings that are rarely right - never saved without the owner
+LANGUAGE_RARELY_RIGHT = frozenset({"Somali", "Swahili", "Yoruba", "Shona", "Sotho", "Tswana", "Tsonga", "Zulu",
+                                   "Xhosa", "Afrikaans", "Welsh"})
+LANGUAGE_ARTIST_MIN_SONGS = 3
+LANGUAGE_ARTIST_MIN_SHARE = 0.9
+# Questions a song's lookup asks a site at most (each module, its names first - see
+# discoveries_manager.discover_language())
+LANGUAGE_MAX_QUERIES = 3
+LANGUAGE_CODE_NAMES = {
+    "ell": "Greek", "gre": "Greek", "el": "Greek",
+    "nob": "Norwegian", "nno": "Norwegian", "nb": "Norwegian", "nn": "Norwegian",
+    "yue": "Cantonese",
+    "zxx": LANGUAGE_INSTRUMENTAL,
+    "und": LANGUAGE_UNKNOWN, "mul": LANGUAGE_UNKNOWN, "mis": LANGUAGE_UNKNOWN, "xxx": LANGUAGE_UNKNOWN,
+}
+
+# ==================== Countries (utils/common/origin_names.py, artists.origin) ====================
+
+# artists.origin: "Country - Region - City", the country in one English form (the owner,
+# 2026-11-19: translated for display later, one form stored). Leina Radio takes the part before
+# the first " - " as the country. Several countries joined by " / ".
+ORIGIN_SEPARATOR = " - "
+ORIGIN_COUNTRY_SEPARATOR = " / "
+# A country's name by its ISO code where pycountry's isn't the common English one
+ORIGIN_COUNTRY_NAMES = {
+    "US": "United States", "GB": "United Kingdom", "RU": "Russia", "KR": "South Korea", "KP": "North Korea",
+    "TR": "Turkey", "MD": "Moldova", "IR": "Iran", "SY": "Syria", "VN": "Vietnam", "TZ": "Tanzania",
+    "VE": "Venezuela", "BO": "Bolivia", "TW": "Taiwan", "LA": "Laos", "MK": "North Macedonia",
+    "PS": "Palestine", "CD": "DR Congo", "CZ": "Czechia", "NL": "Netherlands", "BN": "Brunei",
+    "CV": "Cape Verde", "FM": "Micronesia", "VA": "Vatican City",
+}
+# Other spellings -> the stored country, keyed by origin_names.place_key() (lowercase, no
+# diacritics, spaces or punctuation): typos found in the catalog, abbreviations, local names
+ORIGIN_COUNTRY_SYNONYMS = {
+    "usa": "United States", "us": "United States", "unitedstatesofamerica": "United States", "america": "United States",
+    "uk": "United Kingdom", "greatbritain": "United Kingdom", "britain": "United Kingdom",
+    "russia": "Russia", "turkey": "Turkey", "korea": "South Korea", "southkorea": "South Korea",
+    "rsa": "South Africa", "thenetherlands": "Netherlands", "holland": "Netherlands",
+    "austalia": "Australia", "denamrk": "Denmark", "englad": "England", "finish": "Finland", "irland": "Ireland",
+    "newzeland": "New Zealand", "chechia": "Czechia", "czechrepublic": "Czechia", "ukrainian": "Ukraine",
+    "macedonia": "North Macedonia", "bosna": "Bosnia and Herzegovina", "bosnia": "Bosnia and Herzegovina",
+    "bosnaandherzegovina": "Bosnia and Herzegovina", "bosnaandhercegovina": "Bosnia and Herzegovina",
+    "bosniaandhercegovina": "Bosnia and Herzegovina", "bih": "Bosnia and Herzegovina",
+    "hrvatska": "Croatia", "srbija": "Serbia", "crnagora": "Montenegro", "polska": "Poland",
+    "ussr": "Soviet Union", "sssr": "Soviet Union",
+}
+# Countries an origin may name that the ISO list hasn't (any more)
+ORIGIN_OTHER_COUNTRIES = ("Yugoslavia", "Soviet Union", "Czechoslovakia", "East Germany", "Kosovo")
+# The United Kingdom's countries: stored as "United Kingdom - England" (the owner, 2026-11-19)
+UK_COUNTRIES = ("England", "Scotland", "Wales", "Northern Ireland")
+# What isn't a place and is cleared: what download sites and rippers wrote into mp3 tags, and
+# names nobody comes from ("World")
+ORIGIN_JUNK_WORDS = ("download", "converted", "convert", "ripper", "ripped", "tagged", "renamed", "zapraszam",
+                     "chomik", "network", "enjoy", "excellent", "soundtrack", "made by", "by memento", "www",
+                     "http", "spotydl", "pmedia", "kludge sound")
+ORIGIN_JUNK_NAMES = ("world", "unknown", "various", "aryan_l33t", "guajiropunk", "jb", "sevmakc")
+
 # ==================== Genres (utils/database/genres.py, songs.genre) ====================
 
 # MusicBrainz's genre list (CC0, ws/2/genre/all?fmt=txt), one per line - the
@@ -762,8 +903,7 @@ LYRICS_RETRY_DAYS = 180
 # lyrics.source of text not from a discovery module (those store their module id)
 LYRICS_SOURCE_ORIGINAL = "original"  # a version's lyrics, the plain text of its original
 LYRICS_SOURCE_MANUAL = "manual"  # pasted by the owner (Song actions -> "Lyrics")
-# songs.language of a song without words: never looked up, offered after a lookup
-LANGUAGE_INSTRUMENTAL = "Instrumental"
+# songs.language LANGUAGE_INSTRUMENTAL (Languages, above): never looked up, offered after a lookup
 # A found song whose length differs from ours by at most this is the same
 # recording, so its synced lines fit; otherwise only its plain text is kept
 # (a music video's intro, a radio edit: the words are the same, the times not)
@@ -808,6 +948,12 @@ MUSICBRAINZ_API_LIMIT = 20
 # MusicBrainz's special "Various Artists" artist - a compilation's or soundtrack's
 # release artist, so a song on it is never "another artist's album"
 MUSICBRAINZ_VARIOUS_ARTISTS_ID = "89ad4ac3-39f7-470e-963a-56509c546377"
+# A release more years than this after the recording's first appearance on any
+# release (a compilation counts) is a reissue or an untyped best-of, not where
+# the song came out: Denis & Denis - "Soba 23" (1984) got "Program tvog
+# kompjutera", 1995, typed a plain Album. A lead single a year or two before
+# its album stays within it.
+MUSICBRAINZ_REISSUE_AFTER_YEARS = 2
 # (connect, read) timeout in seconds for a single MusicBrainz HTTP request, so a
 # stalled connection can never hang an import forever.
 MUSICBRAINZ_API_TIMEOUT = (5, 12)

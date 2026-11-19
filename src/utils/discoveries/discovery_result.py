@@ -93,3 +93,23 @@ class LyricsDiscoveryResult:
     duration_s: Optional[float] = None
     source_ref: Optional[str] = None
     from_song_file: bool = False
+
+
+@dataclass
+class LanguageDiscoveryResult:
+    """What a module's get_language() found: the language as stored
+    (language_names.clean_language(), "English / Japanese", "Instrumental"
+    for a song without words). confidence: how sure a guess is (0-1, a
+    reading of the lyrics), None when the source says it outright. matched_*
+    are what the source says the language belongs to - never an echo of the
+    query; from_song: read from the song's own stored data, nothing to check.
+    needs_origin: a Serbian / Croatian / Bosnian reading neither the artist's
+    country nor the year settles (language_names.yugoslav_language()) - not
+    saved until the artist's origin is known, or the owner types it."""
+    language: str
+    matched_title: Optional[str] = None
+    matched_artist: Optional[str] = None
+    confidence: Optional[float] = None
+    from_song: bool = False
+    source_ref: Optional[str] = None
+    needs_origin: bool = False

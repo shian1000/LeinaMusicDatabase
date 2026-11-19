@@ -60,7 +60,7 @@ def test_edit_db_entry_sets_songs_and_artists_fields(song, capsys):
     assert dm.edit_db_entry(song, "album", "Outlandos d'Amour") and song.album == "Outlandos d'Amour"
     assert dm.edit_db_entry(song.artist, "artist origin", "GB") and song.artist.origin == "GB"
     assert dm.edit_db_entry(song.artist, "artist id", "7") is False
-    assert "'UK' --> 'GB'" in capsys.readouterr().out
+    assert "'United Kingdom' --> 'GB'" in capsys.readouterr().out
 
 
 def test_song_editor_offers_only_editable_fields(song, monkeypatch):

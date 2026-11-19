@@ -19,6 +19,7 @@ from utils.ui.songless_artist_review import review_songless_artists
 from utils.ui.album_resolution_review import review_multi_artist_albums
 from utils.ui.soundtrack_review import review_soundtrack_names
 from utils.ui.soundtrack_works_menu import manage_soundtrack_works
+from utils.ui.language_review import fill_missing_languages, unify_language_and_country_names
 from utils.ui.inbox_request_review import resolve_new_requests
 from utils.ui.request_package_import import import_request_package
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data import fill_missing_for_import
@@ -275,6 +276,7 @@ RUN_ALL_STEPS = {
     "genres": fill_missing_genres,
     "latin_forms": fill_latin_forms,
     "lyrics": fill_missing_lyrics,
+    "languages": fill_missing_languages,  # after lyrics: it reads them
 }
 
 
@@ -320,7 +322,8 @@ def run_all_steps():
 # the clean-ups, which look nothing up on the internet, and the lookups, on an
 # interval of their own. Left out: the requests (the timer's own pass runs
 # right before), "Resolve albums with several artists" (a pick per album) and
-# the Latin forms (nothing ticked at first).
+# the Latin forms (nothing ticked at first). Languages waits for the owner's review of its
+# rules first (2026-11-19).
 CLEAN_UP_STEPS = ("clean_names", "split_artists", "duplicated_artists", "swapped_songs", "duplicated_songs",
                   "full_albums", "projects", "covers", "versions", "songless_artists", "soundtracks")
 LOOKUP_STEPS = ("spell_check", "albums", "years", "genres", "lyrics")
@@ -379,6 +382,7 @@ def manage_database():
         "Resolve soundtrack album names": review_soundtrack_names,
         "Soundtrack works": manage_soundtrack_works,
         "Fill in Latin forms of names in other alphabets": fill_latin_forms,
+        "Unify language and country names": unify_language_and_country_names,
         "Fix names and tags for mp3 files that are in the database": fix_file_names_and_tags,
         "Spell check existing data": check_spelling_menu,
         "Clean names": clean_names

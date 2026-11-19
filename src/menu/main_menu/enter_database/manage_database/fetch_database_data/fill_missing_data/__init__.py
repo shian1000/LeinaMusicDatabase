@@ -3,6 +3,7 @@ from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_miss
 from menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_years import fill_missing_years
 from utils.ui.genre_review import fill_missing_genres
 from utils.ui.lyrics_review import fill_missing_lyrics
+from utils.ui.language_review import fill_missing_languages
 import questionary
 from utils.database.database_sessions import require_global_database_sessions
 from utils.database.datatables import Song
@@ -13,6 +14,7 @@ def fill_missing_data():
         "Years": fill_missing_years,
         "Genres": fill_missing_genres,
         "Lyrics": fill_missing_lyrics,
+        "Languages": fill_missing_languages,
     }
 
 
