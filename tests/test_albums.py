@@ -511,6 +511,7 @@ def test_a_real_album_with_a_common_word_is_not_blacklisted(title):
     "Riječki Novi Val: Antologija", "Pelmel 1993–2007", "Sve Hrvatske Eurovizije 1963 - 1993",
     "Największe przeboje Maryli Rodowicz", "Лучшее", "Золотая коллекция", "Grandes Éxitos",
     "Die größten Hits", "Le meilleur de Dalida", "The Smash! Hits Chart Karaoke Album!",
+    "SingStar Party",
 ])
 def test_compilations_and_placeholders_are_still_blacklisted(title):
     from utils.common.text_utils import is_blacklisted_album

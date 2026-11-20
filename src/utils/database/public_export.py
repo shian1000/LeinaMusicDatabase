@@ -68,7 +68,7 @@ MUSIC_SPEC = DatabaseSpec("music.db", {
     "sqlite_sequence": TableSpec(("name", "seq")),
 })
 
-# Global moods only: the markers (spellchecked, album_checked, project_checked, cover_checked, version_checked) are the owner's
+# Global moods only: the markers (spellchecked, album_checked, project_checked, cover_checked, version_checked, year_checked) are the owner's
 # work state, not catalog data
 TAG_SPEC = DatabaseSpec("tag.db", {
     "tags": TableSpec(("id", "name", "kind"), keep_rows="kind = 'mood'"),

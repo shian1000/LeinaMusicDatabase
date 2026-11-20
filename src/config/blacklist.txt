@@ -174,3 +174,5 @@ to nejlepší
 najlepšie
 # A karaoke label's album, typed a plain Album on MusicBrainz (Avril Lavigne - "Don't Tell Me")
 karaoke
+# A karaoke video game's song list, a plain Album there too (Dido - "White Flag" on "SingStar Party")
+singstar

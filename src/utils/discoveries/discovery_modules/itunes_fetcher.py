@@ -3,6 +3,8 @@ import requests
 from utils.common.debug import flog, slog
 from utils.common.request_pacing import RequestPacer
 from utils.common.text_utils import is_blacklisted_album, is_various_artists_compilation, similarity
+from utils.common.version_names import read_version
+from utils.database.song_kinds import sure_version
 from utils.discoveries.discovery_result import DiscoveryResult
 from config.constants import (
     ALBUM_TYPE_EP,
@@ -29,7 +31,8 @@ _pacer = RequestPacer(ITUNES_SEARCH_MIN_INTERVAL)
 
 def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult | None:
     """The result that fits best, or None. An equally good title on a real
-    album beats a single, and the plain title beats its "(Live ...)" versions.
+    album beats a single; a "(Live ...)" / remix... version counts only for a
+    song that is one.
     No year: iTunes takes no part in Years, and its releaseDate is often a
     reissue's. The disc only on a release of several (songs.disc_number)."""
     song_query = song.lower()
@@ -51,6 +54,10 @@ def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult 
         # discover_album_name() uses to clean the query itself.
         track_title_cln = track_title.split("(")[0].strip()
         if similarity(song_query, track_title_cln.lower()) <= SPELLING_CHECK_THRESHOLD:
+            continue
+        # A live / remix... version's album isn't the song's: Maanam's
+        # "Cykady Na Cykladach (Live 1985)" on "Totalski No Problemski"
+        if (reading := read_version(track_title)) and sure_version(reading) and not read_version(song):
             continue
 
         # A single-only release reports no real album -- the same

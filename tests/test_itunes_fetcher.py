@@ -50,8 +50,16 @@ def test_find_track_prefers_the_plain_title_over_a_live_version():
     assert itunes._find_track(results, "Doja Cat", "Say So").album == "Hot Pink"
 
 
+def test_a_live_version_alone_gives_no_album():
+    # Maanam - "Cykady na cykladach": only "(Live 1985)" on "Totalski No Problemski"
+    results = [_track("Cykady Na Cykladach (Live 1985)", "Totalski No Problemski", artist="Maanam")]
+
+    assert itunes._find_track(results, "Maanam", "Cykady na cykladach") is None
+    assert itunes._find_track(results, "Maanam", "Cykady na cykladach (Live)").album == "Totalski No Problemski"
+
+
 def test_find_track_matches_one_of_several_credited_artists():
-    results = [_track("Say So (Remix)", "Remixes - Single", artist="Doja Cat & Jax Jones")]
+    results = [_track("Say So", "Say So - Single", artist="Doja Cat & Jax Jones")]
 
     result = itunes._find_track(results, "Jax Jones", "Say So")
 

@@ -706,6 +706,8 @@ PROJECT_CHECKED_TAG = "project_checked"
 COVER_CHECKED_TAG = "cover_checked"
 # Marker of songs Manage database -> "Find versions" has looked at
 VERSION_CHECKED_TAG = "version_checked"
+# Marker of songs Fetch database data -> "Check stored years" has looked at
+YEAR_CHECKED_TAG = "year_checked"
 
 # What the owner can allow a user (main menu -> Users -> Permissions), kept
 # in that user's account.json. Names are part of the phone contract

@@ -21,6 +21,7 @@ from config.constants import (
     LANGUAGE_MAX_QUERIES,
     LYRICS_DURATION_TOLERANCE_S,
     MIN_PLAUSIBLE_RELEASE_YEAR,
+    MUSICBRAINZ_REISSUE_AFTER_YEARS,
     SINGLES_ALBUM,
     SPELLING_CHECK_THRESHOLD,
 )
@@ -609,6 +610,34 @@ def _validate_year_result(result, queried_artist: str, queried_query: str, modul
     return result if _match_resembles(result, queried_artist, queried_query, module_name, credited_artists) else None
 
 
+def year_after_the_song(year: int | None, artist: str, title: str, modules, source: str | None = None) -> bool:
+    """Is `year` a reissue's or a compilation's - more than
+    MUSICBRAINZ_REISSUE_AFTER_YEARS after the song first came out on any
+    release MusicBrainz knows? Spotify has Anawa's 1973 album with Andrzej
+    Zaucha only as a 2014 reissue, while MusicBrainz has the song on a 2004
+    compilation already. Asked of a module among `modules` that can tell
+    (first_appearance_year(): one request), not when it is `source` itself,
+    whose answer already left reissues out. False when nothing can tell."""
+    if not year or not title:
+        return False
+    for module_id, module_name, module in modules:
+        first_appearance = getattr(module, "first_appearance_year", None)
+        if first_appearance is None:
+            continue
+        if module_id == source:
+            return False
+        try:
+            first = first_appearance(composed(artist), composed(title))
+        except Exception as e:
+            flog(f"[{module_name}] crashed while looking up the first release of '{artist} - {title}': {e}")
+            return False
+        if first and year > first + MUSICBRAINZ_REISSUE_AFTER_YEARS:
+            flog(f"[{module_name}] '{artist} - {title}' was out by {first}, so {year} is a later release's year, discarding")
+            return True
+        return False
+    return False
+
+
 def _call_year_module(module, module_id: str, module_name: str, artist: str, query: str, is_single: bool,
                       credited_artists: list[str] | None = None, songs=None) -> YearDiscoveryResult | None:
     """Run a module's get_release_year(), isolated from crashes and bad output.
@@ -656,10 +685,14 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
     query as discover_album_name(). An album lookup is keyed on the primary
     artist alone - a guest on one track isn't the album's artist.
     `album_songs` (an album lookup) are only handed on to modules that read
-    data stored on the songs (see _call_year_module()).
+    data stored on the songs (see _call_year_module()). A year later than
+    the song (an album's first song) first came out is no year
+    (year_after_the_song()): the next module is asked.
     """
     credited, multi_label = _multi_artist_query(song) if song is not None else (None, None)
     songs = [song] if song is not None else album_songs
+    # The song a year is held against (year_after_the_song()): an album's first
+    song_title = songs[0].title if songs else (query if is_single else None)
     synonyms = split_synonyms(artist_synonyms)
     art_full, qry_full = artist, query
     art_cln_full = art_full.split("(")[0].strip()
@@ -710,6 +743,9 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
                 if result:
                     break
 
+        if result and year_after_the_song(result.year, art_cln, song_title, modules,
+                                          source=module_id if is_single else None):
+            result = None
         if result:
             return result
     flog(f"No module found a release year for '{artist} - {query}'")

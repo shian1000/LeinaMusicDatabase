@@ -1212,7 +1212,9 @@ non-trivial work in that area.
   answer carries, saved by Albums into empty fields - the year only from a module on for Years), why the Settings menu reads `MODULE_NAME` by static parsing, the shared headless-Chrome
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   why MusicBrainz takes the earliest release and never a reissue (a release years after the
-  recording first appeared anywhere), compilation words in every language and spans of years in
+  recording first appeared anywhere), why other modules' years are held against that first
+  appearance (`year_after_the_song()`: a store's date is its reissue's) and stored years checked against it (Fetch
+  database data → "Check stored years", `utils/ui/year_check_review.py`, `year_checked` marker), compilation words in every language and spans of years in
   `blacklist.txt` / `is_blacklisted_album()`, the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
   try to evade the latter), the three kinds of fetcher (Curl / Curl + API / Selenium), API modules off by default, how

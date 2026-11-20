@@ -216,7 +216,7 @@ defeats the whole point. Leave a field `None` if the module has no reliable way 
   checked 2026-11-12). Check a new `[substring]` entry against every stored album title first.
   Compilation words go in for every language of the catalog, not just English: old ex-Yugoslav
   songs got "Kompilacija Bijelo Dugme" (iTunes), "Najbolje Od Tajči" (YouTube Music), "50
-  Originalnih Pjesama" (2026-11-19; also "antologija", "reizdanje" = reissue, "przeboje",
+  Originalnih Pjesama", "SingStar Party" (a karaoke game's songs, typed a plain Album; 2026-11-19; also "antologija", "reizdanje" = reissue, "przeboje",
   "коллекция", "grandes éxitos", ...). A span of years ("Najbolje pesme 1980-1988", "Zvuk
   osamdesetih 1980-1989") is rejected by `is_blacklisted_album()` itself, not by an entry: every
   stored title with one is a retrospective. Such a name already stored for the artist still
@@ -666,6 +666,36 @@ Compilation, so it passes the filter, and MusicBrainz listed "Windkracht 10 Soun
 "Victory" on Daan's "Housewife" - and otherwise ranks EP over Single, earliest first (rule and reason in its docstring; pinned by
 `tests/test_music_brainz_fetcher.py`).
 
+**Other modules' years are held against MusicBrainz's first appearance.** A store's date is its
+edition's: Spotify has Anawa's 1973 album (Andrzej Zaucha, "Stwardnieje ci łza") only as a 2014
+reissue - its "℗ 2015" line says no more - and MusicBrainz credits the album to the band, so the
+release-group search by Zaucha finds nothing. But MusicBrainz has his song on a 2004 compilation,
+so 2014 can't be its year. `discoveries_manager.year_after_the_song(year, artist, title, modules,
+source)` asks a module among `modules` with `first_appearance_year()` (MusicBrainz, one request)
+and calls a year more than the margin later a reissue's. Years drops such a result and asks the
+next module (an album's first song is held against); Albums leaves the year out of
+`_save_album_details()`. Not asked about MusicBrainz's own single-mode or album answers, which
+left reissues out already. Without MusicBrainz enabled nothing is checked. A song nothing can
+date stays without a year (the manual prompt, or a miss unattended), never with a reissue's.
+
+**Stored years, checked the same way** - Fetch database data -> "Check stored years"
+(`utils/ui/year_check_review.py`): those rules only stop new reissue years, so the ones stored
+before are held against `first_appearance_year(..., raise_errors=True)` too, the songs not
+`year_checked` yet, max-songs-per-fetch a run; only a stored year later than MusicBrainz's first
+release by more than the margin is offered, unticked: a trial on 200 songs gave 6, about half
+right (Aerosmith 2001 -> 1998, Agnes Obel 2021 -> 2016, Akira Yamaoka 2016 -> 2003); MusicBrainz's
+first year was also a live take's on an edition dated as the original album (3 Doors Down, now
+left out by the recording's disambiguation), a re-recording's original (ASIAN KUNG-FU
+GENERATION's "Re:Re:", 2016 for an anime) and, for Alabama Shakes' "Sound and Color" and Alanis
+Morissette's "Citizen of the Planet", earlier than the songs - not looked into yet. A random sample of 150 stored years (2026-11-20):
+67% agreed with MusicBrainz, 3% were later (très.b's "Ola" with Męskie Granie's 2013, The HU's
+"Wolf Totem" with a Metal Hammer compilation's 2021 - what this fixes), 5% earlier (MusicBrainz
+lacks the original or its search shows only compilations for a big hit: Gloria Gaynor's "I Will
+Survive" first 1993, Maanam's 1981 single "Cykady na Cykladach" not there at all), 24% unknown to
+it (recent niche singles, game and anime soundtracks, junk in titles). The earlier and unknown
+ones are where another source - Discogs' master release years - would help, mostly for the ~1,100
+songs before 2000.
+
 **Earliest, not first listed, and never a reissue** (2026-11-19, old ex-Yugoslav songs whose
 year decides their language). Search order isn't release order: Tajči's "Hajde da ludujemo"
 (1990) listed "Bube u glavi" (1991) first, Josipa Lisac's "O jednoj mladosti" (1973) a 2018
@@ -677,12 +707,29 @@ title - first appeared on *any* release, compilations and other artists' include
 (`_first_appearances()`), is a reissue (`_is_reissue()`), taken only when no other release
 is left (Albums, then the EP/Single fallback, both without reissues first) and then without a
 year: Denis & Denis - "Soba 23" (1984) is on "Program tvog kompjutera", a 1995 best-of typed a
-plain Album, while a 1988 EP already had it, so the EP wins. The original "Čuvaj se!" (1984)
-isn't among the hits - MusicBrainz can only give what it links. Not dropped altogether, because
-an album may be among the hits only by a later edition: Czesław Niemen's "Dziwny jest ten świat"
-(1967) shows up as its 1991 CD after a 1979 best-of, so it's still the album, its year left to
-Years (the release-group search has the group's own first date). The margin keeps a lead single
-a year or two before its album from making the album a reissue. A re-check of the 68 songs with a
+plain Album, while the 1985 mini-album "Ja sam lažljiva" (MusicBrainz: an EP, 1988) already had
+it, so the EP wins. Not dropped altogether, because an album may be among the hits only by a later
+edition. The margin keeps a lead single a year or two before its album from making the album a
+reissue. Further rules, each from a real miss (2026-11-19, second round):
+- **Undated** counts as a reissue once the song is known from dated releases: the first 5 hits
+  of Maryla Rodowicz's "Sing Sing" held only the undated "Wola 2" (a re-recording) besides
+  compilations; "Sing-Sing" (1976) is a later hit.
+- **A "Various Artists" album** (a soundtrack) of any year after the song first appeared only
+  collected it: "Will & Grace: Let the Music Out!" (2004) for Dido's "White Flag" (2003). A
+  film's own song still gets its soundtrack - it's the first appearance.
+- **A version's recording isn't the song** (`_is_queried_song()`: `read_version()` +
+  `sure_version()`, unless the query is a version too): "Losing Grip (Demo)" is on a 2001 "Let
+  Go: Demo Tracks". **Bootleg** releases never count.
+- **A lone early compilation** more than the margin before every other release doesn't set the
+  first appearance (`_first_appearances()`): MusicBrainz lists Dido's box "Life for Rent / No
+  Angel" as 1999. A lone EP or album does (Denis & Denis). For the *year* the album answer
+  reports, the lone compilation counts after all (`lone_compilations=True`): Czesław Niemen's
+  "Dziwny jest ten świat" (1967) shows up only as its 1991 CD after a 1979 best-of, so it's the
+  album with no year, and Years asks the release-group search, which has the group's first date.
+- **`_search_album()` asks for 25 hits** whenever the first 5 gave no non-reissue Album (it
+  stops when fewer hits came back than asked for: that was all).
+- **`first_appearance_year()`**: the same earliest year as one request, for the manager's
+  `year_after_the_song()` (below). A re-check of the 68 songs with a
 MusicBrainz album on 2026-11-19 changed only reissues and compilations ("CDN", 2017, for Hey's
 1990s songs; "ZKM Live"; a chart) besides the cases above. The single-mode year
 (`get_release_year(is_single=True)`) never takes a reissue's year and takes the earliest one, not
@@ -853,7 +900,10 @@ changed under it once. Apple documents about 20 requests a minute, hence
 closest to the full title wins, so the plain title beats "(Live ...)", and at equal title a real album
 beats a single. A release whose `collectionName` ends in `" - Single"` is reported as `SINGLES_ALBUM`,
 the sentinel `wikipedia_fetcher.py` also uses. Blacklisted albums and various-artists compilations
-(`collectionArtistName`, see the Spotify section) are skipped per candidate.
+(`collectionArtistName`, see the Spotify section) are skipped per candidate, and so is a version
+the query isn't (`read_version()` + `sure_version()`: "(Live ...)", "(Remix)"): the title is
+compared before its "(", so Maanam's "Cykady Na Cykladach (Live 1985)" gave its live album
+"Totalski No Problemski" to the studio song.
 Tests: `tests/test_itunes_fetcher.py`.
 
 ## `youtube_fetcher.py` — music.youtube.com's JSON search, not the Data API

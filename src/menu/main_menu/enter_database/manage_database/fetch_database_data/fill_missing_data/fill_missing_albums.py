@@ -13,6 +13,7 @@ from utils.discoveries.discoveries_manager import (
     discover_album_after_swap,
     enabled_module_ids,
     load_discovery_modules,
+    year_after_the_song,
 )
 from utils.ui.album_guess_review import review_album_guesses
 from utils.ui.album_swap_review import review_swapped_albums
@@ -35,12 +36,14 @@ def _set_track_position(song, match):
         song.disc_number = match.disc_number
 
 
-def _save_album_details(saved):
+def _save_album_details(saved, modules=()):
     """What the albums' sources said besides the album, for the (song,
     AlbumMatch) pairs just saved, into what's still empty: the song's year -
-    the album row's if it has one, else the source's, and only from a module
-    enabled for Years too - and the album row's year, type and ids on the
-    other sites. Once the songs are flushed, so they're on their album rows."""
+    the album row's if it has one, else the source's, only from a module
+    enabled for Years too and never one later than the song first came out
+    (year_after_the_song(), asked of `modules`) - and the album row's year,
+    type and ids on the other sites. Once the songs are flushed, so they're
+    on their album rows."""
     saved = [(song, match) for song, match in saved
              if getattr(match, "year", None) or getattr(match, "album_type", None) or getattr(match, "album_ids", None)]
     if not saved:
@@ -51,6 +54,8 @@ def _save_album_details(saved):
     for song, match in saved:
         album = song.album_entry
         year = match.year if match.source in year_sources else None
+        if year_after_the_song(year, song.artist.name, song.title, modules, source=match.source):
+            year = None
         if song.year is None and (album is not None and album.year or year):
             edit_db_entry(song, "year", str(album.year if album is not None and album.year else year))
         if album is None:
@@ -101,6 +106,7 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     known_works = listed = None  # read at the first song no module found an album for
 
     print("Preparing fetch modules . . . ")
+    discovery_modules = []
     try:
         discovery_modules = load_discovery_modules()
         album_cache = AlbumTrackCache(songs_objects)
@@ -161,7 +167,7 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     for song, album in review_soundtrack_guesses(soundtrack_guesses):
         save(song, album)
         list_album_work(require_global_database_sessions()[0], [album])
-    _save_album_details(saved)
+    _save_album_details(saved, discovery_modules)
 
     missing = [song for song, album, _ in found.values() if album is None]
     if missing and ask_yes_no(f"Unable to find {len(missing)} album names. Would you like to fill them up manually?"):

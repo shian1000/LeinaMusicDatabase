@@ -142,7 +142,8 @@ def test_get_album_name_tries_the_corrected_spelling_only_when_nothing_was_found
 
     assert result.album == "Futureproof"
     assert spell_checks == ["Notoin"]
-    assert [limit for _, limit in searches] == [5, 25, 5]
+    # Fewer than 5 hits are all there is: no search for 25
+    assert [limit for _, limit in searches] == [5, 5]
     assert 'recording:"Notion"' in searches[-1][0]
 
 
@@ -152,7 +153,7 @@ def test_get_album_name_does_not_search_again_when_the_spelling_is_already_right
         "found": True, "corrected_artist": artist, "corrected_title": song})
 
     assert get_album_name("The Rare Occasions", "Unreleased Song") is None
-    assert [limit for _, limit in searches] == [5, 25]
+    assert [limit for _, limit in searches] == [5]
     assert spell_checks == ["Unreleased Song"]
 
 
@@ -475,9 +476,9 @@ def test_a_release_years_after_the_song_first_appeared_is_a_reissue():
     assert _pick_release(recordings, title="Soba 23")[0] == "Ja sam lažljiva"
 
 
-def test_a_reissue_is_taken_last_and_without_its_year(monkeypatch):
+def test_an_album_known_only_by_a_later_edition_comes_without_its_year(monkeypatch):
     # Czesław Niemen - "Wspomnienie": "Dziwny jest ten świat" (1967) is among the
-    # hits only as its 1991 edition, after a 1979 best-of
+    # hits only as its 1991 edition, after a lone 1979 best-of
     _mock_search(monkeypatch, [
         _yu_recording("Wspomnienie", [_yu_release("The Best Of Niemen", "1979", "rg-b",
                                                   secondary_types=["Compilation"])]),
@@ -503,3 +504,82 @@ def test_a_singles_year_is_the_earliest_release_not_the_first_listed(monkeypatch
     ])
     result = music_brainz_fetcher.get_release_year("Josipa Lisac", "O jednoj mladosti", is_single=True)
     assert (result.year, result.matched_title) == (1973, "O jednoj mladosti")
+
+
+def _rodowicz(title, releases):
+    return {"title": title, "artist-credit": [{"artist": {"id": "maryla", "name": "Maryla Rodowicz"}}],
+            "release-list": releases}
+
+
+def test_an_undated_album_waits_for_the_first_25_hits(monkeypatch):
+    # Maryla Rodowicz - "Sing Sing": the first 5 hits had only the undated "Wola 2"
+    # (a re-recording) besides compilations; "Sing-Sing" (1976) is a later hit
+    first_five = [_rodowicz("Sing Sing", [_yu_release("Złote Przeboje", "1999", "rg-z", secondary_types=["Compilation"])])
+                  for _ in range(4)] + [_rodowicz("Sing Sing", [_yu_release("Wola 2", None, "rg-w")])]
+    more = [_rodowicz("Sing-sing", [_yu_release("Sing-Sing", "1976", "rg-s")])]
+    searches = []
+
+    def search(query, limit):
+        searches.append(limit)
+        return {"recording-list": first_five if limit == 5 else first_five + more}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", search)
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+
+    result = get_album_name("Maryla Rodowicz", "Sing Sing")
+    assert (result.album, result.year, searches) == ("Sing-Sing", 1976, [5, 25])
+
+
+def test_first_appearance_year_counts_every_release_of_the_song(monkeypatch):
+    _mock_search(monkeypatch, [
+        _yu_recording("Stwardnieje ci łza", [_yu_release("C'est La Vie", "2004-12-13", "rg-c",
+                                                         secondary_types=["Compilation"])]),
+        _yu_recording("Inna piosenka", [_yu_release("Old", "1970", "rg-o")]),
+    ])
+    assert music_brainz_fetcher.first_appearance_year("Andrzej Zaucha", "Stwardnieje ci łza") == 2004
+
+
+def test_a_live_recording_named_only_in_its_disambiguation_doesnt_date_the_song(monkeypatch):
+    # 3 Doors Down - "Here Without You" (2002/2003): a live take of 2003 on a rarities edition
+    # dated as the 2000 album it extends
+    live = {**_yu_recording("Here Without You", [_yu_release("The Better Life (Rarities Edition)", "2000-02-08",
+                                                             "rg-r", secondary_types=["Live"])]),
+            "disambiguation": "live, 2003-02: Cynthia Woods Mitchell Pavilion, Houston, TX, USA"}
+    _mock_search(monkeypatch, [live, _yu_recording("Here Without You", [_yu_release("Away From the Sun", "2002",
+                                                                                    "rg-a")])])
+    assert music_brainz_fetcher.first_appearance_year("3 Doors Down", "Here Without You") == 2002
+
+
+def test_a_various_artists_album_after_the_song_came_out_is_a_reissue():
+    # Dido - "White Flag" (2003): a TV show's soundtrack of 2004 collected it
+    various = [{"artist": {"id": music_brainz_fetcher.MUSICBRAINZ_VARIOUS_ARTISTS_ID, "name": "Various Artists"}}]
+    soundtrack = {**_yu_release("Will & Grace: Let the Music Out!", "2004", "rg-w", secondary_types=["Soundtrack"]),
+                  "artist-credit": various}
+    promo = {**_yu_release("Promo Only: Mainstream Radio, August 2003", "2003-07", "rg-p",
+                           secondary_types=["Compilation"]), "artist-credit": various}
+    recordings = [_yu_recording("White Flag", [soundtrack]),
+                  _yu_recording("White Flag", [promo, _yu_release("White Flag", "2004-03-30", "rg-s", "Single")])]
+    assert _pick_release(recordings, title="White Flag")[0] == "White Flag"
+    # A film's own song still gets its soundtrack
+    assert _pick_release([_yu_recording("White Flag", [soundtrack])], title="White Flag")[0] == (
+        "Will & Grace: Let the Music Out!")
+
+
+def test_a_lone_early_compilation_date_doesnt_make_the_album_a_reissue(monkeypatch):
+    # Dido - "White Flag" (2003): MusicBrainz lists the box "Life for Rent / No Angel" as 1999
+    box = _yu_release("Life for Rent / No Angel", "1999", "rg-box", secondary_types=["Compilation"])
+    _mock_search(monkeypatch, [_yu_recording("White Flag", [
+        box, _yu_release("Life for Rent", "2003-09-29", "rg-l"), _yu_release("White Flag", "2004", "rg-s", "Single")])])
+
+    result = get_album_name("Dido", "White Flag")
+    assert (result.album, result.year) == ("Life for Rent", None)  # the year is left to Years
+    assert music_brainz_fetcher.first_appearance_year("Dido", "White Flag") == 2003
+
+
+def test_a_versions_recording_and_a_bootleg_are_not_the_songs_album():
+    # Avril Lavigne - "Losing Grip": a demo's "Let Go: Demo Tracks" (2001) a year before "Let Go"
+    bootleg = {**_yu_release("Life for Rent", "2001", "rg-b"), "status": "Bootleg"}
+    recordings = [
+        _yu_recording("Losing Grip (Demo)", [_yu_release("Let Go: Demo Tracks", "2001", "rg-d")]),
+        _yu_recording("Losing Grip", [bootleg, _yu_release("Let Go", "2002-06-04", "rg-l")]),
+    ]
+    assert _pick_release(recordings, title="Losing Grip")[0] == "Let Go"

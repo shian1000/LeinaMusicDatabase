@@ -156,3 +156,52 @@ def test_nothing_is_flushed_for_matches_without_details(session, monkeypatch):
 
     fill_albums._save_album_details([(SimpleNamespace(), SimpleNamespace(album="Dark")),
                                      (SimpleNamespace(), None)])
+
+
+def _first_appearance_module(first, asked=None):
+    def first_appearance_year(artist, title):
+        if asked is not None:
+            asked.append((artist, title))
+        return first
+    return SimpleNamespace(first_appearance_year=first_appearance_year)
+
+
+def test_a_sources_year_later_than_the_song_first_came_out_is_left_out(session, monkeypatch):
+    # Andrzej Zaucha - "Stwardnieje ci łza": Spotify has Anawa's 1973 album only
+    # as a 2014 reissue; MusicBrainz has the song on a 2004 compilation already
+    song = _song(session, "Stwardnieje ci łza", "Anawa")
+    asked = []
+    modules = [(YEARS_MODULE, "MusicBrainz", _first_appearance_module(2004, asked))]
+    monkeypatch.setattr(fill_albums, "enabled_module_ids", lambda kind: {YEARS_MODULE, "spotify_fetcher"})
+
+    fill_albums._save_album_details([(song, _match("Anawa", source="spotify_fetcher", year=2014))], modules)
+
+    assert (song.year, song.album_entry.year) == (None, None)
+    assert asked == [("Artist", "Stwardnieje ci łza")]
+
+
+def test_a_year_close_to_the_first_release_stays_and_musicbrainz_isnt_asked_about_its_own(session):
+    song = _song(session, "Song", "Dark")
+    asked = []
+    modules = [(YEARS_MODULE, "MusicBrainz", _first_appearance_module(1972, asked))]
+
+    fill_albums._save_album_details([(song, _match("Dark"))], modules)
+
+    assert song.year == 1973
+    assert asked == []  # MusicBrainz's own answer already left reissues out
+
+
+def test_the_manager_tries_the_next_module_after_a_reissues_year(monkeypatch):
+    monkeypatch.setattr(dm, "record_invocation", lambda *a: None)
+    monkeypatch.setattr(dm, "record_success", lambda *a: None)
+    mb = _first_appearance_module(2004)
+    mb.get_release_year = lambda artist, query, is_single: None
+    spotify = SimpleNamespace(get_release_year=lambda artist, query, is_single: 2014)
+    other = SimpleNamespace(get_release_year=lambda artist, query, is_single: 2005)
+    song = SimpleNamespace(title="Stwardnieje ci łza")
+    modules = [(YEARS_MODULE, "MusicBrainz", mb), ("spotify_fetcher", "Spotify", spotify)]
+
+    assert dm.discover_release_year_result("Andrzej Zaucha", "Anawa", False, modules, album_songs=[song]) is None
+    result = dm.discover_release_year_result("Andrzej Zaucha", "Anawa", False,
+                                             [*modules, ("other", "Other", other)], album_songs=[song])
+    assert result.year == 2005
