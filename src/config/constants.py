@@ -1149,6 +1149,11 @@ TITLE_JUNK_SUFFIXES = [
     # Polish labels' audio-only upload (real case: "Granderinio - Buhurtowe
     # Love (Oficjalny Odsłuch)")
     "oficjalny odsłuch",
+    # A lyrics upload named outside a bracket (real case: a Leina Radio request
+    # "Dream Theater - Disappear + Lyrics"). Never a bare "lyrics", which a
+    # title may end with; no catalog title held "lyric" when these came in
+    "+ lyrics",
+    "with lyrics",
     # Upload quality tags, left at the end once everything else is cut
     # (real case: "MADUAR - Do It HD")
     "hd",

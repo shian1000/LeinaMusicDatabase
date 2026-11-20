@@ -499,6 +499,18 @@ def test_approved_songs_go_through_one_import_even_after_a_stop(env):
     assert _folder(env, pr.REVIEW) == ["2026-10-14_09-00-00_001.db"]
 
 
+def test_a_song_request_shows_why_the_automatic_pass_left_it(env, capsys):
+    # Saved in auto_checks.json, it was shown for links and corrections only
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", songs=[("Vulfpeck", "Dean Town")])
+    (env["inbox"] / pr.CHECKS_FILE).write_text(json.dumps(
+        {f"song:{sr.song_key('Vulfpeck', 'Dean Town')}": {"note": "no rule of yours takes it"}}))
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+
+    review.resolve_new_requests()
+
+    assert "Left for you by the automatic check: no rule of yours takes it" in capsys.readouterr().out
+
+
 def test_a_song_the_import_left_out_stays_to_be_resolved(env, monkeypatch, capsys):
     # The import skipped it (no song made or found): marked added, it would never
     # be asked about again while Leina Radio still misses it (2026-10-27/31)

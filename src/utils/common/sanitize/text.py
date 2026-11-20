@@ -179,8 +179,9 @@ def strip_band_word(artist: str) -> str:
 
 # ==================== Junk phrases at the end ====================
 
+# (?<!\w), not \b: a phrase may start with a sign ("+ lyrics")
 _TITLE_JUNK_SUFFIX_RE = re.compile(
-    r"\s*\b(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
+    r"\s*(?<!\w)(?:" + "|".join(re.escape(p) for p in TITLE_JUNK_SUFFIXES) + r")\s*$",
     re.IGNORECASE,
 )
 

@@ -434,3 +434,12 @@ def test_an_anime_theme_named_by_its_place_in_the_show_is_junk():
     # A title that is only the phrase stays
     assert strip_trailing_junk_suffix("Ending Theme") == "Ending Theme"
     assert strip_trailing_junk_suffix("HD") == "HD"
+
+
+def test_a_lyrics_upload_named_outside_a_bracket_is_junk():
+    # A Leina Radio request "Dream Theater - Disappear + Lyrics" wasn't matched to "Disappear"
+    assert strip_trailing_junk_suffix("Disappear + Lyrics") == "Disappear"
+    assert strip_trailing_junk_suffix("Disappear with Lyrics") == "Disappear"
+    # A bare "lyrics" may be the title's own word
+    assert strip_trailing_junk_suffix("Love Lyrics") == "Love Lyrics"
+    assert strip_trailing_junk_suffix("+ Lyrics") == "+ Lyrics"

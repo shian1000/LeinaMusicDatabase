@@ -670,6 +670,7 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
                     if case.existing is not None else "")
             show(f"    {escape(_song_label(report.artist, report.title))}: {case.status}{also}")
     if open_cases:
+        load_case_checks(open_cases, INBOX_CHECK_MAX_AGE_HOURS)
         show(f"\n{len(open_cases)} song(s) Leina Radio played that aren't in the database:")
     approved = []
     stopped = False
