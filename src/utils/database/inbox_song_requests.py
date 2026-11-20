@@ -96,6 +96,7 @@ from config.constants import (
 )
 from utils.common.debug import flog, mlog
 from utils.common.normalizer import name_key, normalize
+from utils.common.version_names import read_version
 from utils.database.additional_videos import apply_video_links, plan_video_links, song_for_video
 from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, SettledSongRequest, Song
 from utils.database.latin_names import artist_synonyms
@@ -544,7 +545,22 @@ def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
         return None
     if not metadata.artist:
         return None
-    return matcher.match(metadata)
+    song = matcher.match(metadata)
+    # The phone cut the artist off a video title at its first dash, so a
+    # second one may start a description: "K. Pronko" / "Jestes Lekiem Na
+    # Cale Zlo - a great Polish song". Not when it names a version ("- Live"),
+    # a project or a cover, which the title alone would lose
+    title_part = _TITLE_ARTIST_SEPARATOR.split(metadata.title, maxsplit=1)[0]
+    if song is None and title_part != metadata.title and not (
+            read_version(metadata.title) or metadata.project or metadata.is_cover):
+        song = matcher.match(metadata.copy_with(title=title_part))
+    if song is None:
+        # Known artists written side by side, "Fisz Emade": the song of one
+        # of them - when only one has it
+        found = {s.id: s for a in _known_side_by_side(metadata.artist, matcher) or ()
+                 if (s := matcher.match(metadata.copy_with(artist=a.name)))}
+        song = next(iter(found.values())) if len(found) == 1 else None
+    return song
 
 
 def collect_song_request_cases(session, requests: list[RequestFile], matcher=None,

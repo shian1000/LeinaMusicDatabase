@@ -393,7 +393,10 @@ was found by the search and then thrown away, so nothing local matched it. `Loca
 songs with the same title core, filtered to artists whose name / Latin form /
 synonym - or one part of a joined name not split yet, via
 `propose_artist_split()` ("College" of "College & Electric Youth") - passes
-`scaled_similarity_threshold()`, accepted only when exactly one song fits.
+`scaled_similarity_threshold()` - or that is the name with its first names cut
+to initials (`_initials_of()`: "K. Pronko" for Krystyna Prońko, which
+`similarity()` rates far too low; the surname whole, never the surname alone) -,
+accepted only when exactly one song fits.
 Before that it tries the tags with artist and title swapped ("N.I.B." /
 "Black Sabbath"), and when the artist *is* found but no title matches, a
 whole-title similarity (bracket text kept) of `FILE_TITLE_SIMILARITY_THRESHOLD`
@@ -413,6 +416,17 @@ usual via `scaled_similarity_threshold()`). Note that `files.db` rematches
 old unmatched rows only when the catalog fingerprint changes, so a matching
 improvement like this reaches those rows only after the next catalog change.
 
+Song requests (`inbox_song_requests._song_in_database()`) try two readings of
+their own after `match()` found nothing as asked. Leina Radio cuts the artist off
+a video title at the *first* dash, so a second one may start a description ("K.
+Pronko" / "Jestes Lekiem Na Cale Zlo - a great Polish song"): the title before it
+is tried, except when the full title names a version ("- Live"), a project or a
+cover. And an artist that is known artists side by side ("Fisz Emade",
+`_known_side_by_side()`) is tried as each of them, taken only when exactly one
+has the title. Both settle the request as that song without asking, so keep
+them that narrow; when added, each found only its own case (the dash on the 52
+requests then in `review/`, the side by side on all 314 past ones).
+
 Title cores also drop a trailing unbracketed "feat. X" ("Шкідлива звичка feat.
 YanGo"), but `find_song_loosely()` tries the core *with* it first: one artist
 can have both "No Scrubs" and "No Scrubs ft. Joanna Jones (Cover)" (seven such
@@ -425,7 +439,12 @@ title found nothing.
 Title cores (`import_engine._title_core()`) also drop a leading track number
 (`strip_track_number_prefix()`: "T03: ", "03. ", "03 - ", "Track 5) "). It
 needs a separator *and* a space after the digits so titles that are numbers
-("1979", "7 Rings", "2:00 AM", "99 Luftballons") stay whole. They also drop
+("1979", "7 Rings", "2:00 AM", "99 Luftballons") stay whole. A number run into
+the *artist* ("06.coma", a Leina Radio request) is read off only by
+`LocalSongMatcher._artist()`, never by a cleanup step: when the whole name is no
+artist, the rest (`strip_track_number_prefix(glued=True)`) must be an artist's
+whole name or synonym. "5. element" is a band of the catalog (the only artist
+name of that shape, 2026-11-20), so stripping it before storing would break it. They also drop
 the words in `TITLE_AMPERSAND_WORDS` ("and", "i", "und", "et", "y", "n"):
 `normalize()` removes "&" as punctuation but keeps "And", so "Angel of Small
 Death & the Codeine Scene" never met "... And The Codeine Scene". This lives in

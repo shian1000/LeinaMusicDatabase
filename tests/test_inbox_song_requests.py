@@ -267,6 +267,43 @@ def test_a_title_ending_with_its_artist_finds_the_song_in_the_database(env):
     assert case.existing.id == 2
 
 
+@pytest.mark.parametrize("title, found", [
+    # Leina Radio cut the artist off at the first dash; the second starts a
+    # description ("K. Pronko - Jestes Lekiem Na Cale Zlo - a great Polish song")
+    ("Chromatic - a great song", True),
+    # ... but a version is a song of its own: not the plain one
+    ("Chromatic - Live", False),
+    ("Chromatic - Acoustic Version", False),
+])
+def test_a_title_with_a_description_after_a_dash_finds_the_song(env, title, found):
+    _request(env["inbox"], "2026-11-19_09-40-07_141.db", [{"title": title, "artist": "Elise Trouw"}])
+
+    _, [case] = _cases(env)
+
+    assert (case.status, case.existing and case.existing.id) == (
+        (sr.ALREADY_IN_DATABASE, 1) if found else (pr.OPEN, None))
+
+
+@pytest.mark.parametrize("emade_has_it", [False, True])
+def test_known_artists_side_by_side_find_the_song_of_one_of_them(env, emade_has_it):
+    """"Fisz Emade" (a Leina Radio request, 2026-11-20) is Fisz and Emade:
+    Fisz's song of that title - unless both have one."""
+    fisz, emade = Artist(id=40, name="Fisz"), Artist(id=50, name="Emade")
+    songs = [Song(id=3, title="30 cm ponad chodnikami", artist=fisz),
+             *([Song(id=4, title="30 cm ponad chodnikami", artist=emade)] if emade_has_it else [])]
+    env["session"].add_all([*songs, emade])
+    env["session"].commit()
+    env["matcher"].songs += songs
+    env["matcher"].artists += [fisz, emade]
+    _request(env["inbox"], "2026-11-20_11-13-48_001.db",
+             [{"title": "30 cm ponad chodnikami", "artist": "Fisz Emade"}])
+
+    _, [case] = _cases(env)
+
+    assert (case.status, case.existing and case.existing.id) == (
+        (pr.OPEN, None) if emade_has_it else (sr.ALREADY_IN_DATABASE, 3))
+
+
 def test_a_feat_credit_leaves_the_title_for_the_imports_feat_artists(env):
     _request(env["inbox"], "2026-10-21_19-26-51_001.db",
              [{"title": "Travie McCoy: Billionaire ft. Bruno Mars", "artist": "Fueled By Ramen"}])

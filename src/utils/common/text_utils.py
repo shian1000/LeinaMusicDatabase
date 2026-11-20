@@ -417,10 +417,14 @@ def are_artists_entries_similar(
 # "T03: Song", "03. Song", "03 - Song", "Track 5) Song": a track number with
 # a separator *and* a space after it, so "1979", "7 Rings" or "2:00 AM" stay
 _TRACK_NUMBER_PREFIX_RE = re.compile(r"^(?:(?:track|t)\s*)?\d{1,3}\s*[.:)\-–]\s+", re.IGNORECASE)
+_GLUED_TRACK_NUMBER_PREFIX_RE = re.compile(r"^(?:(?:track|t)\s*)?\d{1,3}\s*[.)]\s*", re.IGNORECASE)
 
 
-def strip_track_number_prefix(title: str) -> str:
+def strip_track_number_prefix(title: str, glued: bool = False) -> str:
     """`title` without a leading track number ("T03: Mimiga Town" ->
-    "Mimiga Town"), unchanged when nothing would be left."""
+    "Mimiga Town"), unchanged when nothing would be left. `glued`: also one
+    with no space after it ("06.coma" -> "coma") - never for a title, "11.33"
+    is one."""
     title = (title or "").strip()
-    return _TRACK_NUMBER_PREFIX_RE.sub("", title, count=1).strip() or title
+    pattern = _GLUED_TRACK_NUMBER_PREFIX_RE if glued else _TRACK_NUMBER_PREFIX_RE
+    return pattern.sub("", title, count=1).strip() or title

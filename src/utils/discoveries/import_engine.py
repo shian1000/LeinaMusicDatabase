@@ -625,6 +625,12 @@ class LocalSongMatcher:
             proposal = None if artist else propose_artist_split(name)
             if proposal and proposal.main:
                 artist = find_matching_artist(proposal.main[0], self.session, self._artist_pool)
+            if artist is None and (bare := strip_track_number_prefix(name, glued=True)) != name:
+                # A file's track number run into the artist, "06.coma": only
+                # an artist named exactly the rest ("5. element" is a band)
+                artist = find_matching_artist(bare, self.session, self._artist_pool)
+                if artist is not None and normalize(bare) not in map(normalize, _names_of(artist, False)):
+                    artist = None
             self._artists[name] = artist
         return self._artists[name]
 
@@ -717,7 +723,7 @@ class LocalSongMatcher:
         song of theirs with a similar title ("Losing TimeGrande Finale"),
         else - no artist found - the one song with its title
         (brackets/junk ignored) by an artist whose name, Latin form or synonym
-        resembles the tag's; for a file with no artist, the one song with
+        resembles the tag's (or is it with initials: "K. Pronko"); for a file with no artist, the one song with
         its title by anyone, and for a file name split on a bare hyphen
         ("Svefn-g-englar" read as "Svefn" - "g-englar") the one song titled
         the whole name. None when there is none or more than one. A
@@ -1020,9 +1026,17 @@ def _names_words(text: str | None, keys: set) -> bool:
 
 
 def _artist_resembles(name: str, song: Song) -> bool:
-    """Does `name` resemble one of _artist_names(song)?"""
+    """Does `name` resemble one of _artist_names(song), or is it one with the
+    first names cut to initials ("K. Pronko" / "Krystyna Prońko")?"""
     return any(similarity(name, known) > scaled_similarity_threshold(name, known, SPELLING_CHECK_THRESHOLD)
-               for known in _artist_names(song))
+               or _initials_of(name, known) for known in _artist_names(song))
+
+
+def _initials_of(name: str, known: str) -> bool:
+    """Is `name` `known` with every word but the surname cut to its initial?"""
+    words, known_words = normalize(name).split(), normalize(known).split()
+    return (len(words) == len(known_words) >= 2 and len(words[-1]) >= 3 and words[-1] == known_words[-1]
+            and all(len(w) == 1 and k.startswith(w) for w, k in zip(words[:-1], known_words[:-1])))
 
 
 

@@ -317,6 +317,42 @@ def test_misspelt_tag_artist_is_only_suggested(tmp_path, music_session, monkeypa
     assert track.song_id is None and track.similar_song is acid_rain
 
 
+@pytest.mark.parametrize("tag_artist, found", [
+    ("K. Pronko", True),          # a Leina Radio request, 2026-11-19
+    ("K Prońko", True),
+    ("A. Pronko", False),         # another first name
+    ("K. Pronk", False),          # the surname must be whole
+    ("Pronko", False),            # no initial: a surname alone isn't the artist
+])
+def test_an_artist_with_initials_finds_the_song_of_its_title(music_session, tag_artist, found):
+    """The artist search finds no "K. Pronko"; the title plus the artist's
+    name with its first names cut to initials find the song."""
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    song = Song(title="Jesteś lekiem na całe zło", artist=Artist(name="Krystyna Prońko"))
+    music_session.add(song)
+    music_session.commit()
+    entry = {"artist_name": tag_artist, "title": "Jestes Lekiem Na Cale Zlo"}
+    assert LocalSongMatcher(music_session).match(entry) is (song if found else None)
+
+
+@pytest.mark.parametrize("tag_artist, artist", [
+    ("06.coma", "Coma"),          # a Leina Radio request, 2026-11-19
+    ("07)Coma", "Coma"),
+    ("06. Coma", "Coma"),
+    ("5. element", "5. element"),  # a band named so, not a track number
+    ("06.Comah", None),           # the rest must be an artist's whole name
+])
+def test_a_track_number_run_into_the_artist_is_read_off(music_session, tag_artist, artist):
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    music_session.add_all([Song(title="Ocalenie", artist=Artist(name="Coma")),
+                           Song(title="Ocalenie", artist=Artist(name="5. element"))])
+    music_session.commit()
+    song = LocalSongMatcher(music_session).match({"artist_name": tag_artist, "title": "ocalenie"})
+    assert (song.artist.name if song else None) == artist
+
+
 def test_ambiguous_similar_title_suggests_nothing(music_session):
     from utils.discoveries.import_engine import LocalSongMatcher
 
