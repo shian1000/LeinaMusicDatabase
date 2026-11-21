@@ -1164,6 +1164,11 @@ non-trivial work in that area.
   a wait succeeds when its CSS selector matches, no Chrome and no timeouts) — use it for a new
   scraping test instead of mocking the driver by hand (`tests/test_scraping_fetchers.py`).
 - Don't claim a check passed unless you ran it in this workspace.
+- Driving `main.py` yourself (asked to run a review and watch it): it's a `questionary` TUI, so
+  run it under a pty and pick each option by its text, never by a count of arrow presses - a
+  list's length varies (the request review adds a suggestion line), and a fixed count rejected two
+  requests on 2026-11-21 (undo: runbook → "Songs to add"). A yes/no prompt answers on its key, so
+  "n" + Enter also answers the next one. Close the app afterwards: it blocks the automation timer.
 - Ask before creating or changing regression tests unless the task explicitly requires it.
 - If the user is mid-import or mid-spellcheck, don't start the full suite alongside it.
 - If you rename or remove something a test covers, update that test (and its row in
@@ -1239,7 +1244,7 @@ non-trivial work in that area.
   separate `get_release_year()` contract/config/stats for "Fill missing data -> Years" (including
   why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers,
   why a project's recording without an album is looked up by its project, never its title,
-  why a hand-set `Song.spotify_url` is read before any module,
+  why a stored `Song.spotify_url` (set by hand or from a Spotify song request) is read before any module,
   and why `youtube_fetcher.py`'s YouTube-date years are flagged `needs_review` and reviewed by the user).
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MusicBrainz cost path shared by
   every importer via `utils/discoveries/import_engine.py`'s `run_import_batch()` (mp3-tag import

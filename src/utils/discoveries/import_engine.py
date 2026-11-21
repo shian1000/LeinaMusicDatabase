@@ -392,6 +392,8 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     # Only present for entries sourced from a YouTube playlist import - mp3
     # imports never carry this key, so this is a no-op (None) for them.
     new_song_obj.youtube_video_id = metadata.youtube_video_id
+    # A song request from Spotify: the track page, read by Years
+    new_song_obj.spotify_url = metadata.spotify_url
     # "Migration (Full Album)": a whole album, filed under "Migration" when
     # it came with no album. Length alone isn't enough (mixes, live sets) -
     # those are left to Manage database -> "Find full albums".
@@ -433,10 +435,14 @@ def _backfill_youtube_link(metadata: dict, existing_song: Song) -> None:
     Radio recognises that upload as the song (a requested "Wonderful Life
     (Smith & Burrows)" video was found as the song and kept nowhere,
     2026-11-17). Not a video another song has or one found bad
-    (plan_video_links()). Rides along on the next commit of the song's
+    (plan_video_links()). A Spotify track page (a song request) is saved
+    when the song has none. Rides along on the next commit of the song's
     session.
     """
-    video_id = as_entry(metadata).youtube_video_id
+    metadata = as_entry(metadata)
+    if metadata.spotify_url and not existing_song.spotify_url:
+        existing_song.spotify_url = metadata.spotify_url
+    video_id = metadata.youtube_video_id
     if not video_id:
         return
     session = object_session(existing_song)
@@ -521,14 +527,15 @@ _TITLE_ARTIST_SEPARATOR = re.compile(r"\s+[-–—/]\s+")
 _TITLE_BY_ARTIST = re.compile(r"^(.+)\s+by\s+(.+?)$", re.IGNORECASE)
 
 
-# A release year left at the end of a file's title ("... [Full Length] 2006")
-_TRAILING_YEAR = re.compile(r"\s+" + YEAR + r"\s*$")
+# A release year left at the end of a file's title ("... [Full Length] 2006"),
+# also with the Polish "r." for "rok" ("Taniec Eleny [Bandyta - soundtrack] 1997r")
+_TRAILING_YEAR = re.compile(r"\s+" + YEAR + r"(?:\s*r\.?)?\s*$")
 
 
 def _title_core(title: str, drop_feat: bool = True, drop_the: bool = True) -> str:
     """A title without brackets, trailing junk ("Official Video", "HD"), a
-    trailing "feat. X" (unless not `drop_feat`), a trailing year ("... 2006";
-    "1979" alone stays), a leading track number ("T03: ") or a leading "The"
+    trailing "feat. X" (unless not `drop_feat`), a trailing year ("... 2006",
+    "... 1997r"; "1979" alone stays), a leading track number ("T03: ") or a leading "The"
     (unless not `drop_the`; "The" alone stays), normalized:
     "Pay Your Respect (Official Lyric Video)" -> "pay your respect". Words
     standing for "&" are dropped too, since normalize() drops the "&" itself.

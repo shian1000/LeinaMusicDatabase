@@ -27,6 +27,7 @@ METADATA_KEYS = {
     "language": "language",
     "origin": "origin",
     "youtube_video_id": "youtube_video_id",
+    "spotify_url": "spotify_url",        # the track page a song request from Spotify named
     "duration_s": "duration_s",          # tells a full-album recording from a track
     "feat_artists": "feat_artists",      # credited as featured when the song is created
     "project": "project",                # a project's name (Tiny Desk), read by sanitize's "project_name" step

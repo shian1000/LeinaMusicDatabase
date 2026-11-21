@@ -385,7 +385,8 @@ boxes behave differently for an album vs. a song query) — this isn't automatic
 **A stored `Song.spotify_url` beats every module.** `fill_missing_years.py` first calls
 `release_year_from_stored_link(songs)` for each album group or single. It opens the stored page
 via `spotify_fetcher.get_release_year_from_url()` and trusts it apart from the plausible-range
-check, because the user picked the page. Why it exists: Spotify's search sometimes never shows a
+check, because the user picked the page (or Leina Radio played that track: a Spotify song
+request puts it on the song it was added as or found to be). Why it exists: Spotify's search sometimes never shows a
 release at all, and walking the artist's discography instead was tried and dropped. That page
 lazy-loads as you scroll, has no grid view, and for a prolific artist (Cypis) still hadn't reached
 2016 after 60–70 s of scrolling. The `artist:`/`album:` field filters in Spotify search returned

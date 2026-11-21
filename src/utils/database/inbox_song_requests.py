@@ -56,7 +56,11 @@ named "Title Artist") whose title ends with an artist the database knows by
 exactly that name ("Arriving somewhere but not here Porcupine Tree") suggests
 that split as well - only then, since a channel's own name is the likelier
 artist. A whole title that is an artist the database knows by exactly that
-name, with an artist it doesn't know, suggests the two swapped. The review offers it first, and the "already in the database" check uses it
+name (brackets aside), with an artist it doesn't know, suggests the two swapped. A request from
+Spotify gets none of those - its artist is a real credit, not a channel - only
+the same names without the artists Spotify also lists that the title already
+credits, a guest or the remixer (spotify_credits()); its track page goes on
+the song (spotify_url) when it has none. The review offers it first, and the "already in the database" check uses it
 too.
 
 A YouTube request whose artist is a generic Topic channel ("Release" - YouTube
@@ -121,6 +125,7 @@ SUGGESTED_FROM_TITLE = "the title starts with the artist"
 SUGGESTED_FROM_SWAP = "the title is a known artist's name"
 SUGGESTED_FROM_DESCRIPTION = "credited in the YouTube video's description"
 SUGGESTED_FROM_CHANNEL = "the YouTube video's title and channel"
+SUGGESTED_FROM_SPOTIFY = "Spotify's other artists are the title's guests"
 
 # Answers
 ADD = "added"
@@ -135,7 +140,10 @@ _TITLE_WORD = re.compile(r"[^\s,]+|,")
 _BRACKETED = re.compile(r"\([^)]*\)?|\[[^\]]*\]?")
 _TITLE_ARTIST_JOINERS = {*ARTIST_JOINING_WORDS, "&", "x", ",", "+", "/", "vs", "vs."}
 
-SOURCE_LABELS = {"youtube": "YouTube", "spotify": "Spotify", "phone_file": "a file on the phone"}
+SOURCE_SPOTIFY = "spotify"
+SOURCE_LABELS = {"youtube": "YouTube", SOURCE_SPOTIFY: "Spotify", "phone_file": "a file on the phone"}
+# How Spotify joins a track's artists
+_SPOTIFY_ARTIST_SEPARATOR = ", "
 
 
 def song_key(artist: str | None, title: str | None) -> str:
@@ -215,6 +223,7 @@ class SongRequestCase:
             "language": "Unknown",
             "origin": None,
             "youtube_video_id": self.youtube_video_ids[0] if self.youtube_video_ids else None,
+            "spotify_url": spotify_track_url(self.spotify_track_ids[0]) if self.spotify_track_ids else None,
             "duration_s": self._first("duration_s"),
         }, source=SOURCE_REQUEST, raw_text=latest.title, originals={
             field: value for field, value in (("artist", latest.artist), ("title", latest.title),
@@ -273,6 +282,23 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     if asked is not None and (in_title is None or asked.id != in_title.id):
         return None
     return (in_title.name if in_title is not None else parts[0]), parts[1]
+
+
+def spotify_track_url(track_id: str) -> str:
+    """The track's page, in the form "Set Spotify link" stores (Years reads its year off it)."""
+    return f"https://open.spotify.com/track/{track_id}"
+
+
+def spotify_credits(artist: str | None, title: str | None) -> tuple | None:
+    """(artist, title) of a Spotify request without the artists its title
+    already credits - a guest ("Petite Meller, Oslo Green" / "Watson (feat.
+    Oslo Green)") or the remixer ("Petite Meller, Marlon Hoffstadt" / "High
+    Forever - Marlon Hoffstadt Remix"): Spotify lists them among the
+    artists too. The first artist always stays; None when nothing goes."""
+    parts = (artist or "").split(_SPOTIFY_ARTIST_SEPARATOR)
+    title_words = f" {normalize(title or '')} "
+    kept = [parts[0], *(p for p in parts[1:] if f" {normalize(p)} " not in title_words)]
+    return (_SPOTIFY_ARTIST_SEPARATOR.join(kept), title) if len(kept) < len(parts) else None
 
 
 def _known_by_other_name(artist: str | None, matcher):
@@ -343,14 +369,20 @@ def _swapped_artist_title(artist: str | None, title: str, matcher) -> tuple | No
     """(title as the database's artist, artist) when the whole title is an
     artist the database knows by exactly that name and `artist` is one it
     doesn't: "Chciałem być" / "Krzysztof Krawczyk" -> ("Krzysztof Krawczyk",
-    "Chciałem być"). None for a short lone name ("Air"), which too many songs
-    are called, and for a generic Topic channel, which is no song title."""
+    "Chciałem być"). Brackets don't count ("Summer Vibe" / "Walk off the
+    Earth (Original)"); one naming a version goes to the title. None for a
+    short lone name ("Air"), which too many songs are called, and for a
+    generic Topic channel, which is no song title."""
     if not artist or is_generic_channel_artist(artist) or matcher.artist(artist) is not None:
         return None
-    if len(name_key(title)) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
+    name = _BRACKETED.sub("", title).strip()
+    if len(name_key(name)) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
         return None
-    db_artist = _known_exactly(title, matcher)
-    return (db_artist.name, artist) if db_artist is not None else None
+    db_artist = _known_exactly(name, matcher)
+    if db_artist is None:
+        return None
+    versions = [b for b in _BRACKETED.findall(title) if read_version(f"{artist} {b}")]
+    return db_artist.name, " ".join([artist, *versions])
 
 
 def _artist_words(words: list, i: int, title: str, channel: str | None, matcher) -> tuple | None:
@@ -585,9 +617,17 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
         matcher = LocalSongMatcher(session)
     known = _request_rows(session, RejectedSongRequest), _request_rows(session, SettledSongRequest)
     for key, case in cases.items():
-        case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
-        if case.suggested:
-            case.suggested_from = SUGGESTED_FROM_SWAP if case.suggested[1] == case.latest.artist else SUGGESTED_FROM_TITLE
+        if case.latest.source == SOURCE_SPOTIFY:
+            # Spotify's artist is a real credit, never a channel: nothing
+            # to read out of the title ("Petite Meller" / "High Forever"
+            # was "The High - Forever")
+            case.suggested = spotify_credits(case.latest.artist, case.latest.title)
+            case.suggested_from = SUGGESTED_FROM_SPOTIFY if case.suggested else None
+        else:
+            case.suggested = suggested_artist_title(case.latest.artist, case.latest.title, matcher)
+            if case.suggested:
+                swapped = _BRACKETED.sub("", case.suggested[1]).strip() == case.latest.artist
+                case.suggested_from = SUGGESTED_FROM_SWAP if swapped else SUGGESTED_FROM_TITLE
         if _settle(session, case, known, matcher) or not fetch:
             continue
         # Only now, the description fetch being slow
@@ -624,6 +664,8 @@ def _settle(session, case: SongRequestCase, known: tuple, matcher) -> bool:
     if case.existing is not None:
         case.status = ALREADY_IN_DATABASE
         record_settled_request(session, case, case.existing.id)
+        if case.spotify_track_ids and not case.existing.spotify_url:
+            case.existing.spotify_url = spotify_track_url(case.spotify_track_ids[0])
         plan = plan_video_links(session, [(case.existing.id, v, False) for v in case.youtube_video_ids])
         case.videos_saved = apply_video_links(session, plan.links, ADDITIONAL_VIDEO_IMPORT)
         return True

@@ -2053,6 +2053,9 @@ def test_trailing_year_in_the_tag_title_is_ignored(music_session):
                                 "title": "The Cure & The Cause (Dennis Ferrer Remix) [Full Length] 2006"}) is cure
     # A year that is the title, or ends it on both sides, still matches itself
     assert matcher.match_exact({"artist_name": "Fish Go Deep", "title": "Party Like It's 1999 (Official Video)"}) is party
+    # with the Polish "r." for "rok"
+    assert matcher.match_exact({"artist_name": "Fish Go Deep", "title": "The Cure & The Cause [Soundtrack] 2006r"}) is cure
+    assert matcher.match_exact({"artist_name": "Fish Go Deep", "title": "The Cure & The Cause 2006 r."}) is cure
     assert _title_core("1979") == "1979"
 
 

@@ -225,7 +225,10 @@ def test_an_unknown_channel_suggests_the_artist_from_the_title_even_a_new_one(en
     ("Some Uploads", "Air Безодня", None),                     # a short lone name starts many titles
     ("Some Uploads", "Бумбоксы Безодня", None),                # not exactly the name
     ("Some Uploads", "Безодня Бумбокс", None),
-    ("I Follow Rivers", "Бумбокс (La Vie d'Adèle)", None),     # only a bracket left for the title
+    # only a bracket left for the title: the song's title was the channel
+    ("I Follow Rivers", "Бумбокс (La Vie d'Adèle)", ("Бумбокс", "I Follow Rivers")),
+    ("Some Uploads", "Бумбокс (Original)", ("Бумбокс", "Some Uploads")),  # brackets aside: swapped
+    ("Some Uploads", "Бумбокс (Live)", ("Бумбокс", "Some Uploads (Live)")),  # a version goes to the title
     ("Some Uploads", "Бумбокс Безодня (Official Video)", ("Бумбокс", "Безодня (Official Video)")),
 ])
 def test_a_title_without_a_separator_starting_with_known_artists_suggests_them(env, channel, title, expected):
@@ -255,6 +258,53 @@ def test_a_title_with_no_artist_ending_with_a_known_artist_suggests_it(env, chan
     _, [case] = _cases(env)
 
     assert case.suggested == expected
+
+
+@pytest.mark.parametrize("artist, title, expected", [
+    # Spotify lists the title's guest or remixer among the artists too
+    ("Petite Meller, Oslo Green", "Watson (feat. Oslo Green)", ("Petite Meller", "Watson (feat. Oslo Green)")),
+    ("Petite Meller, Marlon Hoffstadt", "High Forever - Marlon Hoffstadt Remix",
+     ("Petite Meller", "High Forever - Marlon Hoffstadt Remix")),
+    ("A, B, C", "Song (feat. C)", ("A, B", "Song (feat. C)")),
+    ("Petite Meller, Kalman Chodakiewitz, Eli Shiffman", "In Love With Myself", None),  # all main artists
+    ("Oslo Green, Petite Meller", "Watson (feat. Oslo Green)", None),  # the first artist always stays
+    # Nothing read out of the title: Spotify's artist is a real credit
+    ("Some Uploads", "Бумбокс", None),
+    ("Some Uploads", "Бумбокс Безодня", None),
+    ("Petite Meller", "Бумбокс - Безодня", None),
+])
+def test_a_spotify_request_suggests_only_its_artists_without_the_titles_guests(env, artist, title, expected):
+    _request(env["inbox"], "2026-11-21_13-43-55_158.db",
+             [{"title": title, "artist": artist, "spotify_track_id": "sp5", "source": "spotify"}])
+
+    _, [case] = _cases(env)
+
+    assert case.suggested == expected
+    assert case.suggested_from == (sr.SUGGESTED_FROM_SPOTIFY if expected else None)
+
+
+def test_a_spotify_request_puts_its_track_page_on_the_song(env):
+    from utils.discoveries.import_engine import create_song_entry
+    env["session"].get(Song, 2).spotify_url = "https://open.spotify.com/album/kept"
+    _request(env["inbox"], "2026-11-21_14-01-58_163.db", [
+        {"title": "Chromatic", "artist": "Elise Trouw", "spotify_track_id": "sp7", "source": "spotify"},
+        {"title": "Вахтёрам", "artist": "Бумбокс", "spotify_track_id": "sp8", "source": "spotify"},
+        {"title": "Unseen", "artist": "Elise Trouw", "spotify_track_id": "sp9", "source": "spotify"}])
+
+    _, cases = _cases(env)
+
+    # Found in the database: on the song when it has none, never over another
+    assert env["session"].get(Song, 1).spotify_url == "https://open.spotify.com/track/sp7"
+    assert env["session"].get(Song, 2).spotify_url == "https://open.spotify.com/album/kept"
+    # Added: the new song gets it
+    [unseen] = [c for c in cases if c.pending]
+    song = create_song_entry(unseen.metadata(), env["session"].get(Artist, 10), env["session"])
+    assert song.spotify_url == "https://open.spotify.com/track/sp9"
+    # Found by the import (a corrected name): filled in the same way
+    from utils.discoveries.import_engine import _backfill_youtube_link
+    env["session"].get(Song, 1).spotify_url = None
+    _backfill_youtube_link(cases[0].metadata(), env["session"].get(Song, 1))
+    assert env["session"].get(Song, 1).spotify_url == "https://open.spotify.com/track/sp7"
 
 
 def test_a_title_ending_with_its_artist_finds_the_song_in_the_database(env):

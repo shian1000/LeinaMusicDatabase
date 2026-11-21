@@ -453,7 +453,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   A rejection is a row of music.db's `rejected_song_requests` (migration 0015), read by the phone
   with the next copy for sharing, so it doesn't ask again; a later request matching one by artist +
   title (normalized), YouTube video or Spotify track is settled without asking. Delete a row (app
-  closed) to let Leina Radio ask for that song again. The other way round, a song found in the
+  closed) to let Leina Radio ask for that song again; to review a rejection made by mistake, also
+  move its entry out of `Inbox/decisions.json` (into `decisions_reopened_<date>.json`, as on
+  2026-11-18 and 2026-11-21) and its file from `processed/` back to `review/` - the menu has no
+  undo. The other way round, a song found in the
   database or added is a row of `settled_song_requests` (migration 0024) with its `songs.id`:
   Leina Radio then shows its track as that song, and a later request matching one the same way
   is settled as that song. The rows for requests settled before the table were written once
@@ -476,17 +479,24 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   where an unknown name ends is otherwise a guess. One lone artist needs
   `SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS` ("Air" starts too many titles), and a title left as
   only a bracket is no split (Leina Radio's swapped "I Follow Rivers" / "Lykke Li (La Vie
-  d'Adèle)"). Checked against every real request in the inbox (2026-10-27): only correct new
+  d'Adèle)", which the swap below reads). Checked against every real request in the inbox (2026-10-27): only correct new
   suggestions. A title that as a whole is an artist music.db knows by exactly that name, the
   request's artist being one it doesn't know, is suggested swapped ("Chciałem być" / "Krzysztof
-  Krawczyk" -> Krzysztof Krawczyk / "Chciałem być"; same length rule, never for a generic Topic
-  channel, only ever a suggestion). A request with no artist at all (a file on Leina Radio's phone without an artist
+  Krawczyk" -> Krzysztof Krawczyk / "Chciałem być"; brackets aside - "Summer Vibe" / "Walk off the
+  Earth (Original)" -, one naming a version kept on the title; same length rule, never for a
+  generic Topic channel, only ever a suggestion). A request with no artist at all (a file on Leina Radio's phone without an artist
   tag, named "Title Artist") is also split when its title *ends* with one artist music.db knows by
   exactly that name, same length rules ("Arriving somewhere but not here Porcupine Tree" ->
   Porcupine Tree / "Arriving somewhere but not here", then settled as already in the database);
   with a channel as the artist it isn't, the channel being the likelier artist. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
   The review offers it first, and the "already
   in the database" / "rejected before" checks use it too.
+  A request from Spotify gets none of these: its artist is Spotify's credit, never a channel
+  ("Petite Meller" / "High Forever" was suggested "The High - Forever", 2026-11-21). It is only
+  suggested without the artists Spotify also lists that its title already credits, a guest or the
+  remixer (`spotify_credits()`: "Petite Meller, Oslo Green" / "Watson (feat. Oslo Green)" ->
+  Petite Meller, Oslo Green as feat; the first artist always stays). Its track page becomes the
+  song's `spotify_url` - the song added, or the one found, when it has none.
   A YouTube request whose artist is a generic Topic channel (`GENERIC_TOPIC_CHANNELS`: "Release",
   "Various Artists", with or without " - Topic"; Leina Radio sends just the bare title) is never
   offered "as asked": when nothing else settles it, the video's description is fetched (yt-dlp,

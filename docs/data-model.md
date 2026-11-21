@@ -228,7 +228,9 @@ aliases       other spellings, comma-separated
   writes covers so far (`utils/discoveries/mp3_covers.py`). The sharing server doesn't serve them
   yet.
 - `Song.spotify_url` — a Spotify album or track page set by hand (Song actions → "Set Spotify
-  link", stored normalized by `spotify_fetcher.normalize_spotify_url()`), for a release Spotify's
+  link", stored normalized by `spotify_fetcher.normalize_spotify_url()`), or the track a song
+  request from Spotify named (when the song has none, `inbox_song_requests.spotify_track_url()`),
+  for a release Spotify's
   own search never surfaces (Cypis' 2016 "Sprawdzian Z Chemii", buried under dozens of newer
   singles). "Fill missing data -> Years" reads the release date straight off it before trying any
   module: `discoveries_manager.release_year_from_stored_link()`. Migration `0004`.
