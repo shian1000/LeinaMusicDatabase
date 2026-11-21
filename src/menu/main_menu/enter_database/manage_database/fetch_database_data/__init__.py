@@ -14,7 +14,6 @@ from utils.database.albums import covers_dir
 from utils.common.output import RED, RESET
 from utils.ui.library_link_prompt import offer_linking_library_files
 from utils.common import trace
-from utils.ui.year_check_review import check_stored_years
 
 def _review_imported_songs(imported_songs):
     if imported_songs:
@@ -100,7 +99,6 @@ def import_covers():
 def fetch_database_data():
     action_map = {
         "Fill missing data": fill_missing_data,
-        "Check stored years": check_stored_years,
         "Import data from mp3 tags": import_data,
         "Import covers from mp3 tags": import_covers,
         "Import data from YouTube playlist": import_youtube_playlist,

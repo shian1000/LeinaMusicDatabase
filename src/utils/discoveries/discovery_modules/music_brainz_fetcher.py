@@ -379,8 +379,8 @@ def first_appearance_year(artist: str, title: str, raise_errors: bool = False) -
     """The earliest year a recording of `title` by `artist` is on any release
     MusicBrainz knows (a compilation, someone else's), None when it knows
     none dated. The manager holds other modules' years against it
-    (discoveries_manager.year_after_the_song()), Fetch database data ->
-    "Check stored years" the stored ones (raise_errors: a failed request
+    (discoveries_manager.year_after_the_song()), Fill missing data ->
+    "Years" the stored ones (raise_errors: a failed request
     raises, so the song isn't taken as unknown). One request."""
     query = f'recording:{lucene_quote(title)} AND artist:{lucene_quote(artist)}'
     try:
@@ -579,8 +579,9 @@ def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult
         codes = [code for relation in data.get("relations") or []
                  for code in (relation.get("work") or {}).get("languages") or []]
         names = [name for name in (code_name(code) for code in dict.fromkeys(codes)) if name]
-        if names:
+        if names:  # the work's language, also on an instrumental cover of it: never sure (18 of 22 right, 2026-11-21)
             return LanguageDiscoveryResult(clean_language(" / ".join(names)), matched_title=recording.get("title"),
-                                           matched_artist=_credit(recording), source_ref=recording["id"])
+                                           matched_artist=_credit(recording), source_ref=recording["id"],
+                                           never_sure=True)
     flog(f"[{MODULE_NAME}] no work with a language for '{artist} - {title}'")
     return None

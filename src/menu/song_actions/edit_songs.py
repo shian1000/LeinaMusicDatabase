@@ -27,7 +27,7 @@ from config.constants import OTHER_TITLES_SEPARATOR
 from utils.common.cover_names import covered_artist_name
 from utils.common.project_names import song_project_name
 from utils.ui.genre_review import set_genre_of_songs
-from utils.ui.cover_review import set_covered_artist_of_songs, set_covered_title_of_songs
+from utils.ui.cover_review import set_covered_artist_of_songs, set_covered_title_of_songs, tick_translated
 from utils.ui.version_review import set_version_of_songs
 from utils.common.version_names import version_marker
 from utils.ui.project_review import set_project_of_songs
@@ -165,6 +165,7 @@ def edit_entry_menu(mode: str = None, db_object = None):
             f"cover of ({covered_artist_name(db_object) or '—'})": lambda: set_covered_artist_of_songs(songs),
             f"original title of the cover ({db_object.covered_title or '—'})":
                 lambda: set_covered_title_of_songs(songs),
+            f"translated cover ({'yes' if db_object.cover_translated else 'no'})": lambda: tick_translated(songs),
             f"version ({version_marker(db_object) or '—'})": lambda: set_version_of_songs(songs),
             "Swap title and artist names": lambda: swap_titles_and_artist_names(songs),
         })

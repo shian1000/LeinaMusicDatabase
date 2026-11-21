@@ -80,6 +80,8 @@ class Song(Base):
     covered_artist_id = Column(Integer, index=True)
     # The original's title, when it differs or no artist can be named (migration 0021)
     covered_title = Column(String)
+    # 1 = a translated cover, with words of its own in another language (migration 0026)
+    cover_translated = Column(Integer)
     # A live / remix / acoustic... version (migration 0022) - see utils/database/versions.py.
     # NULL kind = not a version; version_of = the original song, when music.db has it
     version_kind = Column(String)

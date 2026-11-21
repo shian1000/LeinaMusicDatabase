@@ -282,6 +282,20 @@ aliases       other spellings, comma-separated
   when no artist can be named (a traditional song); only then does the credit show it.
   Owner's choice: a game whose soundtrack is covered goes in as the covered artist ("Power Blade 2"),
   a traditional song only as `covered_title` ("Bella Ciao"), never as an artist.
+  `Song.cover_translated` (migration `0026`): 1 = a translated cover, with words of its own in another
+  language than the original's (Mistmorn's Ukrainian "Дарма" of American Football's "Never Meant"),
+  NULL = it sings the original's words (or isn't marked yet). Only for a cover
+  (`covers.set_cover_translated()`; clearing both covered columns clears it). Its lyrics are never
+  looked up nor matched as the original's (`_lyrics_queries()` leaves out the covered artist,
+  `_lyrics_match()` its `covered_title`). The opposite, owner's rule 2026-11-20: a cover that isn't
+  translated takes the language music.db stores for its original (`covers.original_song()`: the
+  covered artist's song of that title, across alphabets, not a cover, a plain song before a version;
+  `languages.original_language()` - not when its title is in a script that language isn't written in
+  or isn't the original's beyond spelling, which may be a translation not marked yet, and never
+  "Instrumental"), and the language rules (Serbian / Croatian / Bosnian, romaji) go by the original's
+  year and the covered artist (`languages.words_basis()`; the cover's own year when the original
+  isn't in music.db - the original's is no later). Not in the public copy yet (`MUSIC_SPEC`), handoff
+  [`handoffs/translated-covers-for-musicdatabaseapp.md`](handoffs/translated-covers-for-musicdatabaseapp.md).
   Matching keeps covers apart like versions (`song_kinds.songs_for_entry()`): an entry that is a
   cover (its credit moved to `SongEntry.covered_artist`, or still in the title, even unnamed: "(Band
   Cover)") is matched only to covers (`covered_artist_id` / `covered_title` set, or a title saying

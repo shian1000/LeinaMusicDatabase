@@ -341,12 +341,10 @@ def get_songs_with_empty_category(category: str) -> list[Song]:
     return db_query.filter(or_(col == None, col == "")).all()
 
 
-def get_songs_with_album_missing_year() -> list[Song]:
-    """Songs that already have an album recorded (a real album name, or the
-    SINGLES_ALBUM sentinel from constants.py) but no
-    year yet. This is the source set for "Fill missing data -> Years": we
-    only look up a year once we know what to search for (an album name, or
-    the song title itself for a single)."""
+def get_songs_missing_year() -> list[Song]:
+    """Songs without a year - the source set for "Fill missing data ->
+    Years", which looks one up by the album, by the title for a single or a
+    song with no album, by the project for a project's recording."""
 
     music_session, _ = require_global_database_sessions()
 
@@ -354,7 +352,6 @@ def get_songs_with_album_missing_year() -> list[Song]:
         music_session.query(Song)
         .join(Artist)
         .filter(Song.year == None)
-        .filter(Song.album != None, Song.album != "")
         .order_by(Artist.name, Song.album, Song.title)
         .all()
     )

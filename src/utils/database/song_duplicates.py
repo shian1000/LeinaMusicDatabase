@@ -56,7 +56,7 @@ from utils.common.json_file import read_json, write_json
 # Filled from the dropped song when the kept one has nothing there
 _FILLED_FIELDS = ("album", "year", "language", "youtube_video_id", "spotify_url", "music_video_youtube_id",
                   "track_number", "disc_number", "project_id", "covered_artist_id", "covered_title",
-                  "version_kind", "version_label", "version_of")
+                  "cover_translated", "version_kind", "version_label", "version_of")
 _IGNORE_PATH = SONG_DUPLICATE_IGNORE_FILE
 _JUNK = {*TITLE_JUNK_SUFFIXES, *DUPLICATE_TITLE_EXTRA_JUNK}
 

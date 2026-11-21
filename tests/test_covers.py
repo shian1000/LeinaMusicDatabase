@@ -153,3 +153,65 @@ def test_naming_an_unnamed_cover_after_its_own_artist_changes_nothing(session):
     with pytest.raises(ValueError):
         covers.name_cover(session, song, "Alina Gingertail")
     assert (song.title, song.covered_artist) == ("Steel for Humans (Gingertail Cover)", None)
+
+
+# ==================== Translated covers (songs.cover_translated, migration 0026) ====================
+
+def test_only_a_cover_is_marked_translated_and_unmarking_the_cover_drops_it(session):
+    song = _song(session, "Mistmorn", "Дарма")
+    with pytest.raises(ValueError):
+        covers.set_cover_translated([song], True)
+    covers.set_covered_artist([song], Artist(name="American Football"))
+    covers.set_cover_translated([song], True)
+    assert covers.is_translated(song)
+    covers.set_covered_artist([song], None)
+    assert not covers.is_translated(song)
+
+
+def test_the_original_is_the_covered_artists_song_of_that_title(session):
+    original = _song(session, "Toto", "Africa")
+    _song(session, "Toto", "Rosanna")
+    live = _song(session, "Toto", "Africa")
+    live.version_kind = "live"
+    cover = _song(session, "UkrTrashDub", "Африка")
+    covers.set_covered_artist([cover], original.artist)
+    session.flush()
+    assert covers.original_song(cover) is None  # "Африка" isn't "Africa" spelt otherwise
+    covers.set_covered_title([cover], "Africa")
+    assert covers.original_song(cover) is original  # the plain song before a version
+    belarusian = _song(session, "AKUTE", "Кроў бы вада")
+    manizha = _song(session, "Manizha", "Kroŭ by vada")
+    covers.set_covered_artist([manizha], belarusian.artist)
+    session.flush()
+    assert covers.original_song(manizha) is belarusian  # across alphabets
+
+
+def test_ticking_translated_covers_marks_them_and_offers_their_own_lyrics(session, monkeypatch, tmp_path):
+    import questionary
+    from utils.database import lyrics_store as store
+    from utils.ui import cover_review
+
+    lyrics_db = store.ensure_lyrics_db(tmp_path / "lyrics.db")
+    africa, creep, plain = _song(session, "UkrTrashDub", "Африка"), _song(session, "Ørganek", "Creep"), _song(session, "A", "B")
+    covers.set_covered_title([africa], "Africa")
+    covers.set_covered_artist([creep], Artist(name="Radiohead"))
+    creep.cover_translated = 1
+    with store.lyrics_db_session(lyrics_db) as lyrics:
+        store.record_miss(lyrics, africa, "lrclib_fetcher", store.LYRICS_MISS_REJECTED)
+        lyrics.commit()
+    monkeypatch.setattr(cover_review, "lyrics_db_session", lambda: store.lyrics_db_session(lyrics_db))
+    monkeypatch.setattr(cover_review, "submit_global_database_session", session.commit)
+    monkeypatch.setattr(cover_review, "ask_yes_no", lambda question: True)
+    shown = {}
+
+    def checkbox(_question, choices):
+        shown.update({choice.value: choice.checked for choice in choices})
+        return type("Prompt", (), {"ask": lambda self: [0]})()  # Африка only
+    monkeypatch.setattr(questionary, "checkbox", checkbox)
+
+    cover_review.tick_translated([africa, creep, plain])
+
+    assert shown == {0: False, 1: True}  # the song that isn't a cover isn't listed
+    assert covers.is_translated(africa) and not covers.is_translated(creep)
+    with store.lyrics_db_session(lyrics_db) as lyrics:
+        assert not store.answered_modules(lyrics)  # its rejections forgotten

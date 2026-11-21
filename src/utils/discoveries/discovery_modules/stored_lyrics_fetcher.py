@@ -2,7 +2,7 @@ import re
 
 from utils.common.language_names import song_language
 from utils.discoveries.discovery_result import LanguageDiscoveryResult
-from utils.database.languages import other_song_languages
+from utils.database.languages import words_basis
 from utils.database.lyrics_store import lyrics_db_session, stored_lyrics
 from config.constants import LANGUAGE_INSTRUMENTAL
 
@@ -28,8 +28,9 @@ def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult
     if lyrics.instrumental:
         return LanguageDiscoveryResult(LANGUAGE_INSTRUMENTAL, from_song=True)
     song = songs[0]
+    year, origin, languages = words_basis(song)  # a cover's original's, when it sings its words
     found = song_language(lyrics.plain or _LRC_TIME.sub("", lyrics.synced or ""), song.title or "",
-                          song.artist.name or "", song.artist.origin, other_song_languages(song), song.year)
+                          song.artist.name or "", origin, languages, year)
     if found is None:
         return None
     language, probability, needs_origin = found

@@ -36,10 +36,12 @@ from utils.common.normalizer import composed, name_key, normalize
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms, artist_synonyms, song_titles
 from utils.database.other_titles import other_titles
+from utils.database.covers import is_translated
 from utils.common.artist_credits import propose_artist_split, split_synonyms
 from utils.common.script_utils import cyrillic_search_variant, has_non_latin
 from utils.common.romanize import suggest_latin
 from utils.common.version_names import read_version
+from utils.common.language_names import written_otherwise
 from config.constants import MULTI_ARTIST_MAIN_SEPARATOR
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
@@ -669,7 +671,7 @@ def _call_year_module(module, module_id: str, module_name: str, artist: str, que
 def discover_release_year_result(artist: str, query: str, is_single: bool, modules,
                                  artist_synonyms: str | None = None, song=None,
                                  alt_script_query: str | None = None,
-                                 album_songs=None) -> YearDiscoveryResult | None:
+                                 album_songs=None, held: bool = True) -> YearDiscoveryResult | None:
     """Look up a release year for either an album (query = album title,
     is_single=False) or a standalone single (query = song title,
     is_single=True), trying each enabled year-capable module in order until
@@ -687,12 +689,13 @@ def discover_release_year_result(artist: str, query: str, is_single: bool, modul
     `album_songs` (an album lookup) are only handed on to modules that read
     data stored on the songs (see _call_year_module()). A year later than
     the song (an album's first song) first came out is no year
-    (year_after_the_song()): the next module is asked.
+    (year_after_the_song()): the next module is asked - unless not `held`:
+    a project's recording is years after its studio song by nature.
     """
     credited, multi_label = _multi_artist_query(song) if song is not None else (None, None)
     songs = [song] if song is not None else album_songs
     # The song a year is held against (year_after_the_song()): an album's first
-    song_title = songs[0].title if songs else (query if is_single else None)
+    song_title = None if not held else songs[0].title if songs else (query if is_single else None)
     synonyms = split_synonyms(artist_synonyms)
     art_full, qry_full = artist, query
     art_cln_full = art_full.split("(")[0].strip()
@@ -779,13 +782,16 @@ class LyricsMatch:
     the found recording's length is within LYRICS_DURATION_TOLERANCE_S of
     ours (or one of them is unknown), so its synced lines fit our recording -
     otherwise only the plain text is worth keeping (a music video's intro, a
-    radio edit). duration_s: ours and the found one's, for showing them."""
+    radio edit). duration_s: ours and the found one's, for showing them.
+    other_script: the text is mostly in a script the song's stored language
+    isn't written in (language_names.written_otherwise()) - never sure."""
     result: LyricsDiscoveryResult
     module_id: str
     sure: bool
     duration_s: float | None = None
     found_duration_s: float | None = None
     synced_fits: bool = True
+    other_script: bool = False
 
 
 @dataclass
@@ -835,7 +841,9 @@ def _lyrics_match(result: LyricsDiscoveryResult, song, queried_artist: str, modu
     if not (result.matched_title and result.matched_artist):
         flog(f"[{module_name}] lyrics without the title/artist they belong to, discarding")
         return None
-    titles = [*song_titles(song), *([song.covered_title] if getattr(song, "covered_title", None) else [])]
+    # A translated cover isn't the original's words (covers.py)
+    covered_title = None if is_translated(song) else getattr(song, "covered_title", None)
+    titles = [*song_titles(song), *([covered_title] if covered_title else [])]
     # A bracket on either side is a credit or a note, not other words: "ARMANI TOP
     # (prod.bovskey)" is LRCLIB's and Genius's "Armani Top" (a version's marker
     # isn't in its title any more - songs.version_kind)
@@ -857,7 +865,11 @@ def _lyrics_match(result: LyricsDiscoveryResult, song, queried_artist: str, modu
         slog(f"[{module_name}] lyrics by '{result.matched_artist}' aren't by '{queried_artist}'")
         return None
     fits = not (duration_s and result.duration_s) or abs(duration_s - result.duration_s) <= LYRICS_DURATION_TOLERANCE_S
-    return LyricsMatch(result, module_id, exact, duration_s, result.duration_s, fits)
+    # Another song's words under this one's names: LRCLIB's "Fisz Emade - Serce" is Jandro's Russian
+    other_script = written_otherwise(result.plain or result.synced, getattr(song, "language", None))
+    if other_script:
+        slog(f"[{module_name}] lyrics of '{result.matched_title}' are in a script {song.language} isn't written in")
+    return LyricsMatch(result, module_id, exact and not other_script, duration_s, result.duration_s, fits, other_script)
 
 
 def _match_rank(match: LyricsMatch) -> tuple:
@@ -893,7 +905,9 @@ def _lyrics_queries(song) -> list[tuple[str, str]]:
     its brackets ("(prod. X)") and the other titles ("W moim ogródecku" for
     "Studzianki") and its Latin form (LyricsTranslate's addresses are in Latin);
     then for a cover, the covered artist with the original's
-    title - a cover sings its words ("Where Is My Mind" by Pixies)."""
+    title - a cover sings its words ("Where Is My Mind" by Pixies), unless
+    it's a translated one (songs.cover_translated: Mistmorn's "Дарма" isn't
+    American Football's English "Never Meant")."""
     proposal = propose_artist_split(song.artist.name)
     mains = [artist.name for artist in song_main_artists(song)]
     # A duet as the sites write it: "Anna Maria Jopek & Branford Marsalis"
@@ -902,7 +916,7 @@ def _lyrics_queries(song) -> list[tuple[str, str]]:
     titles = [song.title, remove_brackets(song.title), getattr(song, "title_latin", None), *other_titles(song)]
     queries = [(artist, title) for title in dict.fromkeys(titles) if title for artist in dict.fromkeys(names)]
     covered = getattr(song, "covered_artist", None)
-    if covered is not None:
+    if covered is not None and not is_translated(song):
         queries.append((covered.name, getattr(song, "covered_title", None) or song.title))
     # A medley's songs one by one, last: "Steel for Humans / Lazare"
     queries += [(artist, part) for artist, title in list(queries) for part in _medley_parts(title)]
@@ -960,7 +974,8 @@ def discover_lyrics(song, modules, duration_s: float | None = None) -> LyricsSea
 @dataclass
 class LanguageMatch:
     """A language a module found for a song. sure: the source says it
-    outright, or reads it from the lyrics with LANGUAGE_DETECT_SURE."""
+    outright, or reads it from the lyrics with LANGUAGE_DETECT_SURE - never a
+    never_sure source's."""
     result: LanguageDiscoveryResult
     module_id: str
     sure: bool
@@ -980,7 +995,8 @@ def _language_match(result, song, queried_artist: str, module_id: str, module_na
     """The answer checked against the song, or None when it's another song's."""
     if not isinstance(result, LanguageDiscoveryResult) or not result.language:
         return None
-    sure = (result.confidence is None or result.confidence >= LANGUAGE_DETECT_SURE) and not result.needs_origin
+    sure = ((result.confidence is None or result.confidence >= LANGUAGE_DETECT_SURE)
+            and not (result.needs_origin or result.never_sure))
     if result.from_song:
         return LanguageMatch(result, module_id, sure)
     if not (result.matched_title and result.matched_artist):
@@ -1014,7 +1030,7 @@ def discover_language(song, modules) -> LanguageSearch:
                 failed = True
                 break
             found = _language_match(result, song, artist, module_id, module_name, credited)
-            if found is not None or getattr(module, "LOCAL", False):
+            if found is not None or getattr(module, "LOCAL", False) or getattr(module, "BY_SONG", False):
                 break  # a local module reads the song itself, whatever its names
         if found is None:
             (search.failed if failed else search.missed).append(module_id)

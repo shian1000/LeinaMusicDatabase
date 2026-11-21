@@ -250,7 +250,7 @@ def _duplicates_after_spell_check():
 #   song removed (covers and projects are the last to move songs);
 # - albums found, then their names settled (soundtracks, titles shared by
 #   several artists - which also gives those songs their album rows);
-# - years after albums (Years looks only at songs with an album and shares a
+# - years after albums (Years looks a song up by its album and shares a
 #   year across one), genres, and Latin forms for every name by then;
 # - lyrics last: the slowest lookup, and it compares the titles fixed above.
 # Left out: imports and "Import a request package" (they need a source),

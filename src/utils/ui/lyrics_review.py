@@ -169,13 +169,15 @@ def _unsure_facts(pair) -> dict:
     return {"title_similarity": round(similarity(found.matched_title or "", song.title), 3),
             "artist_similarity": round(similarity(found.matched_artist or "", song.artist.name), 3),
             "same_title": normalize(found.matched_title) == normalize(song.title),
+            "other_script": match.other_script,
             "length_difference_s": (round(abs(match.duration_s - match.found_duration_s))
                                     if match.duration_s and match.found_duration_s else None)}
 
 
 def _review_unsure(lyrics_session, unsure: list) -> int:
     """One checkbox list of the lyrics found for a song only resembling it,
-    or with no length of ours to compare: those of an equal title ticked.
+    or with no length of ours to compare: those of an equal title ticked -
+    unless the text is in a script the song's language isn't written in.
     The ticked ones are saved; the rest may be remembered as wrong."""
     if not unsure:
         return 0
@@ -186,11 +188,13 @@ def _review_unsure(lyrics_session, unsure: list) -> int:
         song, match = pair
         found = f"{match.result.matched_artist} - {match.result.matched_title}"
         first = _as_lyrics(match).first_line or _kind(_as_lyrics(match))
+        note = f" · in a script {song.language} isn't written in" if match.other_script else ""
         return (f"{_label(song)}  <->  {found} ({_length(match.duration_s)} / "
-                f"{_length(match.found_duration_s)}) · {first[:60]}")
+                f"{_length(match.found_duration_s)}) · {first[:60]}{note}")
 
     selected = tick_items("Save these lyrics:", unsure, label,
-                          checked=lambda pair: normalize(pair[1].result.matched_title) == normalize(pair[0].title),
+                          checked=lambda pair: (normalize(pair[1].result.matched_title) == normalize(pair[0].title)
+                                                and not pair[1].other_script),
                           rule="lyrics_same_title", facts=_unsure_facts)
     if selected is None:
         return 0

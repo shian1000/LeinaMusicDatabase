@@ -5,6 +5,7 @@ This module centralizes all magic numbers, hardcoded strings, and configuration
 values used throughout the application. This makes them easier to maintain and
 modify in one place.
 """
+import re
 from pathlib import Path
 
 # The repository folder. Every state file below is resolved against it, never
@@ -204,14 +205,15 @@ AUTOMATION_RULE_LABELS = {
                           "artist's name)",
     "spell_check_title": "Spell check: retitle a song as MusicBrainz spells it",
     "years_unsure": "Fill missing years: save a year only an unsure source gave (a YouTube video's date, a "
-                    "year in the title)",
+                    "year in the title, a project's release)",
     "genres_artist": "Fill missing genres: give a song its artist's genres when MusicBrainz has none for the "
                      "song or its album",
     "lyrics_same_title": "Fill missing lyrics: save lyrics found for a song of the same title whose length "
                          "doesn't confirm it",
     "lyrics_instrumental": "Fill missing lyrics: mark a song instrumental when a source says it has no words",
-    "languages_unsure": "Fill missing languages: save a language read from the lyrics without certainty, or "
-                        "the one the artist's other songs nearly all have",
+    "languages_unsure": "Fill missing languages: save a language read from the lyrics without certainty, "
+                        "YouTube's audio language of the song's video, or the one the artist's other songs "
+                        "nearly all have",
 }
 # Settings -> "Automation" -> "My rules": the owner's own rules, "if these
 # facts hold, take it", one question each: key -> (what is asked, {fact:
@@ -329,7 +331,14 @@ AUTOMATION_QUESTIONS = {
         "year": ("the year", FACT_NUMBER),
         "from_title": ("read from the title", FACT_YES_NO),
         "from_youtube": ("a YouTube video's date", FACT_YES_NO),
-        "songs": ("how many songs get it", FACT_NUMBER)}),
+        "songs": ("how many songs get it", FACT_NUMBER),
+        "project": ("a project's recording (the year of a release of the project)", FACT_YES_NO)}),
+    "stored_years": ("Fill missing years: a stored year later than MusicBrainz's first release of the song", {
+        "stored_year": ("the stored year (an album's latest)", FACT_NUMBER),
+        "first_year": ("MusicBrainz's first release", FACT_NUMBER),
+        "years_later": ("how many years later the stored one is", FACT_NUMBER),
+        "songs": ("how many songs get it", FACT_NUMBER),
+        "album": ("an album's songs (not a single)", FACT_YES_NO)}),
     "genres_artist": ("Fill missing genres: only the artist's genres found", {
         "genres": ("the genres", FACT_TEXT),
         "genre_count": ("how many genres", FACT_NUMBER)}),
@@ -337,6 +346,7 @@ AUTOMATION_QUESTIONS = {
         "title_similarity": ("the titles alike" + _SIMILARITY, FACT_NUMBER),
         "artist_similarity": ("the artists alike" + _SIMILARITY, FACT_NUMBER),
         "same_title": ("the same title", FACT_YES_NO),
+        "other_script": ("the text is in a script the song's language isn't written in", FACT_YES_NO),
         "length_difference_s": ("the recordings' lengths differ by (seconds)", FACT_NUMBER)}),
     "lyrics_instrumental": ("Fill missing lyrics: a song nothing had words for", {
         "source_says_instrumental": ("a source says it has no words", FACT_YES_NO)}),
@@ -346,7 +356,9 @@ AUTOMATION_QUESTIONS = {
         "confidence": ("how sure the reading of the lyrics is (0-1)", FACT_NUMBER),
         "artist_share": ("the share of the artist's songs with a language that have this one (0-1)",
                          FACT_NUMBER),
-        "artist_songs": ("how many of the artist's songs have a language", FACT_NUMBER)}),
+        "artist_songs": ("how many of the artist's songs have a language", FACT_NUMBER),
+        "module": ("the module that found it (stored_lyrics_fetcher, youtube_language_fetcher; "
+                   "unknown = the artist's other songs)", FACT_TEXT)}),
 }
 # The comparisons a condition may make, by the fact's kind
 FACT_OPERATORS = {
@@ -475,6 +487,8 @@ DEFAULT_DISCOVERY_MODULE_LANGUAGE_ORDER = [
     "stored_lyrics_fetcher",
     "musixmatch_fetcher",
     "music_brainz_fetcher",
+    # Last on purpose: YouTube's audio language is never sure (the owner reviews it)
+    "youtube_language_fetcher",
 ]
 
 # A fetched release year outside this range is treated as implausible (e.g. a
@@ -706,7 +720,8 @@ PROJECT_CHECKED_TAG = "project_checked"
 COVER_CHECKED_TAG = "cover_checked"
 # Marker of songs Manage database -> "Find versions" has looked at
 VERSION_CHECKED_TAG = "version_checked"
-# Marker of songs Fetch database data -> "Check stored years" has looked at
+# Marker of songs whose stored year Fill missing data -> "Years" has held
+# against MusicBrainz's first release
 YEAR_CHECKED_TAG = "year_checked"
 
 # What the owner can allow a user (main menu -> Users -> Permissions), kept
@@ -742,6 +757,7 @@ LANGUAGE_SYNONYMS = {
     "farsi": "Persian",
     "panjabi": "Punjabi",
     "nigerianpigdin": "Nigerian Pidgin",
+    "kajkavian": "Croatian (Kajkavian)",  # the owner's one name for it (2026-11-20)
     "unknown": LANGUAGE_UNKNOWN,
     "instrumental": LANGUAGE_INSTRUMENTAL,
 }
@@ -764,6 +780,74 @@ LANGUAGE_SECOND_SCRIPT_SHARE = 0.4  # 0.2 added a second language to songs the o
 LANGUAGE_CREDIT_WORDS = ("lời", "nhạc", "writer", "writers", "written by", "lyrics", "lyrics by", "music",
                          "music by", "composer", "produced by", "tekst", "słowa", "muzyka", "text", "texte",
                          "musique", "слова", "музыка", "автор", "текст")
+# Lyrics that are a translation, or hold one line by line, tell nothing about the song's language
+# (LRCLIB's "Бумбокс - Eva": "Ева [Навсегда] (перевод)", every English line followed by its Russian):
+# one of these words in brackets or before ":" in the first lines, or lines alternating between two
+# scripts - or, in Latin, plain ASCII and accented letters (Vietnamese under English) - this often
+LANGUAGE_TRANSLATION_WORDS = ("перевод", "переклад", "превод", "tłumaczenie", "translation", "traducción",
+                              "traduction", "traduzione", "übersetzung", "lời dịch", "dịch")
+LANGUAGE_TRANSLATION_HEAD_LINES = 6
+LANGUAGE_TRANSLATION_ALTERNATION = 0.9
+LANGUAGE_TRANSLATION_MIN_LINES = 12
+# A text is also read stanza by stanza (blank lines; LANGUAGE_STANZA_LINES lines when it has none):
+# a language most of the letters are in wins over a short intro in another ("Sassja - Sad Tune"),
+# and a second one with LANGUAGE_SECOND_SCRIPT_SHARE of them is added. A stanza read less sure than
+# LANGUAGE_STANZA_SURE, or with fewer letters than LANGUAGE_STANZA_MIN_LETTERS, has no vote.
+LANGUAGE_STANZA_LINES = 4
+LANGUAGE_STANZA_MIN_LETTERS = 60
+LANGUAGE_STANZA_SURE = 0.9
+# Languages a stanza is easily misread as when the song is in another of the same group: such a
+# vote counts as the main language's (Bajaga's Serbo-Croatian stanzas read as Slovenian)
+LANGUAGE_NEIGHBOURS = (
+    frozenset({"Croatian", "Serbian", "Bosnian", "Montenegrin", "Serbo-Croatian", "Slovenian", "Macedonian",
+               "Croatian (Kajkavian)"}),
+    frozenset({"Norwegian", "Danish", "Swedish", "Icelandic", "Faroese"}),
+    frozenset({"Spanish", "Catalan", "Portuguese", "Galician", "Italian"}),
+    frozenset({"Dutch", "Afrikaans", "German"}),
+    frozenset({"Indonesian", "Malay", "Tagalog", "Filipino"}),
+    frozenset({"Czech", "Slovak"}),
+)
+# Languages langdetect doesn't know, told by their letters or words in a text it reads as a
+# neighbour (language_names._marked_language()): (the neighbour it's read as - None: any -, letters,
+# words or a pattern, how many must come, how sure). Kashubian's ò ù ë beside Polish; Crimean
+# Tatar's q in a Turkish reading (Turkish has none); Cape Verdean Creole's words in a Portuguese
+# one; Icelandic's þ, read as anything (Norwegian, Hungarian: Björk, Sigur Rós, Daði Freyr);
+# Breton's c'h (Denez Prigent as Indonesian); Guadeloupean Creole's words in a French one (Delgres).
+LANGUAGE_MARKS = {
+    "Kashubian": ("Polish", "òùë", 3, 1.0),
+    "Crimean Tatar": ("Turkish", "q", 2, 0.5),
+    "Cape Verdean Creole": ("Portuguese", ("nha", "nhos", "dja", "sodade", "kuma", "tita", "tchora", "tchorá",
+                                           "nôs", "bô"), 3, 0.5),
+    "Icelandic": (None, "þ", 2, 1.0),
+    "Breton": (None, re.compile(r"c['’]h"), 2, 1.0),
+    "Guadeloupean Creole": ("French", ("mwen", "nou", "kay", "ké", "sé", "fo", "pé", "lè"), 3, 0.5),
+}
+# The words a reading in one of these needs (at least the number given) to be sure: langdetect puts
+# languages it doesn't know there by their letters - Altai as Hungarian (Ummet Ozcan - Altay), Serbian
+# as Slovenian (Milan Stanković - Ovo je Balkan), Breton as Indonesian, pseudo-Latin as Romanian (Nox
+# Arcana). Slovenian without its own words is read as Serbo-Croatian (then the country-and-year rule),
+# unless the artist is Croatian (Kajkavian, KAJKAVIAN).
+LANGUAGE_PROOF_WORDS = {
+    "Hungarian": (("és", "hogy", "nem", "egy", "az", "van", "meg", "csak", "már", "mint", "vagy", "ez", "én"), 3),
+    "Slovenian": (("in", "kaj", "tudi", "ker", "lahko", "zelo", "sem", "ki", "bom", "še", "vem", "ko", "res",
+                   "vedno", "zdaj", "kje", "kdo", "jaz"), 2),
+    "Indonesian": (("yang", "dan", "aku", "kau", "tidak", "ini", "itu", "dengan", "untuk", "akan", "kita", "di"), 3),
+    "Tagalog": (("ang", "ng", "sa", "ko", "mo", "ako", "ikaw", "hindi", "mga", "ka"), 3),
+    "Romanian": (("și", "şi", "nu", "să", "că", "în", "pe", "cu", "mai", "este", "ce", "mă"), 3),
+}
+# A line holding its own translation after this mark ("Si te quieres divertir^If you want to have
+# fun", LRCLIB's Bad Bunny - NUEVAYoL, read as English): when this share of the lines has one, only
+# the part before it is read
+LANGUAGE_INLINE_TRANSLATION_MARK = "^"
+LANGUAGE_INLINE_TRANSLATION_SHARE = 0.5
+# Readings a Japanese text in romaji gets with no kana / kanji around it (Disgaea's "Etna Boogie"
+# as Swahili): Japanese when this share of its words are romaji syllables, never sure. Not Finnish,
+# Italian or Tagalog - real ones whose words look alike
+LANGUAGE_ROMAJI_ONLY_MISREADINGS = frozenset({"Swahili", "Somali", "Yoruba", "Shona", "Sotho", "Tswana", "Tsonga",
+                                              "Zulu", "Xhosa"})
+LANGUAGE_ROMAJI_SHARE = 0.75
+# Slovenian lyrics by a Croatian artist are Kajkavian (Cinkuši, Dunja Knebl), never sure
+KAJKAVIAN = "Croatian (Kajkavian)"
 # Ekavian forms: a Croatian reading with one of these is Serbian ("Koju pesmu hoćete?")
 # Not "vremena" nor "sveta": Croatian too (vrijeme's genitive, "holy")
 SERBIAN_EKAVIAN_WORDS = ("pesma", "pesmu", "pesme", "lepo", "lepa", "vreme", "dete", "deca", "reka", "mleko",
@@ -910,6 +994,10 @@ LYRICS_SOURCE_MANUAL = "manual"  # pasted by the owner (Song actions -> "Lyrics"
 # recording, so its synced lines fit; otherwise only its plain text is kept
 # (a music video's intro, a radio edit: the words are the same, the times not)
 LYRICS_DURATION_TOLERANCE_S = 3
+# A found text with more of its letters than this in a script the song's stored language
+# isn't written in is never sure (LRCLIB's "Fisz Emade - Serce" held Jandro's Russian
+# "Из Детства"; 2 of 5,230 stored texts on 2026-11-20, one of them a right one)
+LYRICS_OTHER_SCRIPT_SHARE = 0.5
 LRCLIB_API_URL = "https://lrclib.net/api"
 LRCLIB_TIMEOUT = 15
 # LRCLIB publishes no limit, but answered 429 to one search every 0.3 s

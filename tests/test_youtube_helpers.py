@@ -1,7 +1,8 @@
 """YouTube helpers below the playlist and search code, with yt-dlp and the
 Data API faked (YT-17): get_video_release_year() (release date before upload
 date), video_durations_via_api() (batches of 50, ISO 8601 lengths, the
-lengths kept per batch when a later one fails), and reading a playlist via
+lengths kept per batch when a later one fails), audio_languages_via_api()
+(snippet.defaultAudioLanguage, only with the API key), and reading a playlist via
 yt-dlp's --flat-playlist or the API (deleted / private videos left out,
 paging, "couldn't try" told apart from "empty")."""
 import json
@@ -67,17 +68,19 @@ def test_yt_dlp_missing_or_too_slow_gives_no_year(monkeypatch, error, capsys):
 # ==================== video_durations_via_api ====================
 
 class FakeVideos:
-    def __init__(self, durations, fail_on_call=None):
+    def __init__(self, durations, fail_on_call=None, field=("contentDetails", "duration")):
         self.durations = durations
         self.calls = []
         self.fail_on_call = fail_on_call
+        self.field = field
 
     def list(self, part, id, maxResults):
         ids = id.split(",")
         self.calls.append(ids)
         if self.fail_on_call == len(self.calls):
             return SimpleNamespace(execute=lambda: (_ for _ in ()).throw(RuntimeError("quota")))
-        items = [{"id": v, "contentDetails": {"duration": self.durations[v]}} for v in ids if v in self.durations]
+        part_name, key = self.field
+        items = [{"id": v, part_name: {key: self.durations[v]}} for v in ids if v in self.durations]
         return SimpleNamespace(execute=lambda: {"items": items})
 
 
@@ -119,6 +122,32 @@ def test_no_api_at_all_is_none_and_nothing_to_ask_is_empty(monkeypatch):
     monkeypatch.setattr(m, "_read_only_youtube_service", lambda: None)
     assert m.video_durations_via_api(["a"]) is None
     assert m.video_durations_via_api([None, "N/A"]) == {}
+
+
+# ==================== audio_languages_via_api ====================
+
+def test_audio_languages_50_at_a_time_empty_when_none_is_set(monkeypatch):
+    ids = [f"v{i}" for i in range(60)]
+    videos = FakeVideos({"v0": "pl", "v1": "en-US", "v59": "zxx"}, field=("snippet", "defaultAudioLanguage"))
+    _api(monkeypatch, videos)
+    monkeypatch.setattr(m.Settings, "youtube_api_key", "key")
+
+    result = m.audio_languages_via_api(ids + ["N/A", None])
+    assert (result["v0"], result["v1"], result["v59"], result["v2"]) == ("pl", "en-US", "zxx", "")
+    assert len(result) == 60
+    assert [len(c) for c in videos.calls] == [50, 10]
+
+
+def test_audio_languages_only_with_the_key_never_the_login(monkeypatch):
+    videos = FakeVideos({"a": "pl"}, field=("snippet", "defaultAudioLanguage"))
+    _api(monkeypatch, videos)  # a service the saved OAuth token would give
+    monkeypatch.setattr(m.Settings, "youtube_api_key", None)
+    assert m.audio_languages_via_api(["a"]) is None
+    assert videos.calls == []
+
+    monkeypatch.setattr(m.Settings, "youtube_api_key", "key")
+    _api(monkeypatch, FakeVideos({}, fail_on_call=1))
+    assert m.audio_languages_via_api(["a"]) is None
 
 
 # ==================== a playlist via yt-dlp / the API ====================

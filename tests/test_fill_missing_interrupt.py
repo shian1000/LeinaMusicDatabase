@@ -19,9 +19,9 @@ import menu.main_menu  # noqa: F401,E402  (import order, see AGENTS.md)
 _PKG = "menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data"
 
 
-def _song(title, album=None):
-    return SimpleNamespace(id=title, title=title, album=album, year=None,
-                           artist=SimpleNamespace(name="Artist"), artist_id=1)
+def _song(title, album=None, project=None):
+    return SimpleNamespace(id=title, title=title, album=album, year=None, artist=SimpleNamespace(name="Artist"),
+                           artist_id=1, project_id=project and 1, project=SimpleNamespace(name=project))
 
 
 def _common(monkeypatch, module, edits):
@@ -59,7 +59,8 @@ def test_years_found_before_ctrl_c_are_saved(monkeypatch):
     edits = []
     _common(monkeypatch, module, edits)
     songs = [_song("One", album="First"), _song("Two", album="Second")]
-    monkeypatch.setattr(module, "get_songs_with_album_missing_year", lambda: songs)
+    monkeypatch.setattr(module, "get_songs_missing_year", lambda: songs)
+    monkeypatch.setattr(module, "_check_stored_years", lambda room, skip: [])
     monkeypatch.setattr(module, "_fill_years_known_in_database", lambda songs: [])
     monkeypatch.setattr(module, "load_discovery_modules", lambda kind: ["module"])
     monkeypatch.setattr(module, "release_year_from_stored_link", lambda songs: None)
@@ -92,7 +93,7 @@ def test_a_title_year_is_offered_when_no_module_finds_one(monkeypatch, capsys):
     module = importlib.import_module(f"{_PKG}.fill_missing_years")
     edits = []
     _common(monkeypatch, module, edits)
-    monkeypatch.setattr(module, "get_songs_with_album_missing_year",
+    monkeypatch.setattr(module, "get_songs_missing_year",
                         lambda: (_ for _ in ()).throw(AssertionError("the whole catalog was read")))
     monkeypatch.setattr(module, "_fill_years_known_in_database", lambda songs: [])
     monkeypatch.setattr(module, "load_discovery_modules", lambda kind: ["module"])
@@ -100,6 +101,8 @@ def test_a_title_year_is_offered_when_no_module_finds_one(monkeypatch, capsys):
     monkeypatch.setattr(module, "artist_match_synonyms", lambda artist: [])
     monkeypatch.setattr(module, "cyrillic_search_variant", lambda *a: None)
     monkeypatch.setattr(module, "_finish", lambda touched: None)
+    monkeypatch.setattr(module, "_check_stored_years",  # the whole catalog's step only
+                        lambda room, skip: (_ for _ in ()).throw(AssertionError("stored years checked")))
     found = {"Found": SimpleNamespace(year=1999, needs_review=False, source_url=None)}
     monkeypatch.setattr(module, "discover_release_year_result", lambda artist, query, *a, **k: found.get(query))
     shown = []
@@ -155,8 +158,8 @@ def test_the_end_of_an_import_offers_albums_and_years_for_its_songs(monkeypatch,
     picked = ["albums", "years"]
     package.fill_missing_for_import(result)
     assert offered[-1] == [("Albums (1 song(s) without one)", "albums"),
-                           ("Years (2 song(s) without one, looked up for those with an album)", "years")]
-    # Albums first: Years looks at songs with an album; the import's songs, added or found, with their entries
+                           ("Years (2 song(s) without one, by the album, else the title)", "years")]
+    # Albums first: Years looks a song with an album up by it; the import's songs, added or found, with their entries
     assert [(step, [s.title for s in songs], got) for step, songs, got in calls] == [
         ("albums", ["Done", "Found", "New"], entries), ("years", ["Done", "Found", "New"], entries)]
 

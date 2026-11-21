@@ -325,8 +325,9 @@ folder: a test that patched the old module-level constants once rewrote the owne
 config (2026-11-12).
 
 **`fill_missing_years.py` batch-writes a year to every song sharing an album — unlike
-`fill_missing_albums.py`'s one-write-per-song.** It only looks at songs that already have an
-`album` filled in (a real album, or the `"Singles"` sentinel, `constants.SINGLES_ALBUM` — see below), groups them by
+`fill_missing_albums.py`'s one-write-per-song.** It looks at every song without a year (until
+2026-11-20 only those with an album; a song without one is now looked up as a single), groups the
+ones with a real album (not the `"Singles"` sentinel, `constants.SINGLES_ALBUM` — see below) by
 `(artist.name, album)`, and calls `discover_release_year_result()` once per group; every song in that
 group gets `edit_db_entry(song, "year", str(year))`. This is a real asymmetry from the album flow
 worth remembering if you're porting logic between the two: album lookups are inherently per-song
@@ -341,6 +342,20 @@ to the singles too (also when they match only once a "ft./feat." guest credit is
 cut at a comma and make "Dziękuję, że jesteś" a single from the album "Dziękuję"). That's how a single released under its own title is usually stored (~300 such
 songs lacked a year when this was added), and it would otherwise miss the single-only lookups:
 `youtube_fetcher.py` and the "A x B" collab retry.
+
+**A project's recording is looked up by its project, never by its title.** Albums skips
+projects' recordings on purpose, so they have no album, and their title alone finds the studio
+original's year: measured 2026-11-20 on the catalog's 10 songs without a year, all such -
+"Liūdni slibinai - Pieno Fabrikėlis" (Kaunas Acoustics) got the studio song's 2012, "Lao Che -
+Automaty" (Męskie Granie) Google's 2019; the title plus the project gave Spotify's 2007 "Unedited"
+reissue for Nirvana's MTV Unplugged. The project as the album query gave the edition: "Nirvana -
+MTV Unplugged" 1994 (Google), "Lao Che - Męskie Granie" 2013 (MusicBrainz's "Męskie Granie 2013",
+via the artist's recordings on it). So a project's recording with no album (or "Singles") is
+grouped by artist + project and looked up in album mode with the project's name, `held=False`
+(`year_after_the_song()` would call the edition a reissue of the studio song), and the year always
+goes to the unsure-years review (an artist may have played several editions; fact `project`).
+Before that, offline, an artist naming its edition ("Męskie Granie Orkiestra 2019", 7 of the 10)
+gives that year at once (`_fill_years_known_in_database()`).
 
 **Before any module runs, years already in the DB are reused.** `_fill_years_known_in_database()`
 groups the missing-year songs by `(artist_id, normalize(album))`, skipping `SINGLES_ALBUM`, and asks
@@ -446,7 +461,14 @@ A candidate counts when its `matched_title` is one of `song_titles(song)` (other
 form and the version's marked title included) and its `matched_artist` passes
 `_matched_artist_resembles()` (synonyms, credited artists): that's **sure**, saved at once. A
 title that only resembles one (`title_resembles()`, a bracketed subtitle allowed) is for the
-owner's review at the end (`utils/ui/lyrics_review._review_unsure()`, equal titles ticked). The
+owner's review at the end (`utils/ui/lyrics_review._review_unsure()`, equal titles ticked). So is
+a text mostly (`LYRICS_OTHER_SCRIPT_SHARE`) in a script the song's stored language isn't written in
+(`language_names.written_otherwise()`, `LyricsMatch.other_script`, unticked there): LRCLIB's
+"Fisz Emade - Serce" held Jandro's Russian "Из Детства" under the right names, so the next
+module's sure text wins. Latin never counts (romanized lyrics are common), nor an unknown language.
+Measured on 2026-11-20: 2 of the 5,230 stored texts with a language - that one, and Punjabi written
+in Devanagari; langdetect's reading instead of the script flagged 110, nearly all Croatian / Serbian /
+Bosnian or close-language confusions. The
 length (ours: `youtube_video_durations` by the song's link, else its longest `files.db` file -
 `lyrics_store.song_durations()`) does **not** decide whether a text is the song's: it's mostly a
 music video's length (AC/DC "Touch Too Much": video 326 s, the recording 266 s), and the words are
@@ -462,9 +484,9 @@ parts of a joined name ("Alice Cooper & Bee Gees": Genius has "Alice Cooper") an
 artists, each with the title, the title without its brackets and each other title ("Studzianki" is
 "W moim ogródecku" on Tekstowo); for a cover, last, the covered artist with the original's title
 (`covered_title`, else the title) - its words, and since the recording differs, rarely its times.
-A cover sung in another language gets the original's words that way ("Dav1d - It's My Life", a
-Russian cover, got Bon Jovi's English text): the owner rejects them, every module marked rejected
-for that song, so a cover is marked only once its language is known.
+A translated cover (`songs.cover_translated`, migration 0026) is never asked so, nor matched by
+`covered_title`: "Dav1d - It's My Life", a Russian cover, got Bon Jovi's English text that way, and
+the owner had to reject every module for it.
 A duet is also asked as the sites write it, its main artists joined by "&" ("Anna Maria Jopek &
 Branford Marsalis" - Fajnanuta's address holds both), and last a medley's songs one by one
 ("Steel for Humans / Lazare"); a text found for one of them is only reviewed, being part of ours.
@@ -538,7 +560,8 @@ Polish songs and data errors (a swapped artist and title).
 
 The fourth kind (`discovery_settings.LANGUAGES`), `LanguageDiscoveryResult`: the language as
 stored (`language_names.clean_language()`), `confidence` (a guess, 0-1) or None when the source
-says it outright, `from_song` when read from the song's own data. Three modules:
+says it outright, `from_song` when read from the song's own data, `never_sure` for a source too
+often wrong to save without the owner. Four modules:
 
 - `stored_lyrics_fetcher` (`LOCAL = True`, no network): the song's text in lyrics.db read by
   langdetect (seeded so a text always reads the same) with the owner's rules
@@ -564,20 +587,71 @@ says it outright, `from_song` when read from the song's own data. Three modules:
   them up again once the artists' origins are known; a site's Serbian / Croatian / Bosnian answer
   goes through the same rule (`language_review._country_rule()`). Measured on the owner's 2,551 songs with a language and
   lyrics: 95.4% right, 97.2% of the sure ones (langdetect alone: 94.5% / 96.8%; `lingua` was 95.5%
-  for 292 MB, not worth it). Still wrong: Kashubian (as Polish), Kajkavian (as Slovenian), lyrics
-  that are a translation.
+  for 292 MB, not worth it).
+  Second round (2026-11-20, after a review of 378 of the automation's 2,626 readings: no mistake
+  in English or Polish, 8 in rare languages), each rule measured on the owner's labels: a text
+  holding a translation isn't read (`looks_like_translation()`: "(перевод)" in the first lines,
+  or 90% of 12+ lines alternating script / ASCII-vs-accented Latin - LRCLIB's "Бумбокс - Eva",
+  Vietnamese under "Samurai - Never Fade Away"; none in the catalog's texts once those went);
+  each line counts once (a chorus doesn't outweigh the verses; a text left under 80 letters is read
+  whole but never sure - "I'm just a kid" ×20 had been Estonian); Latin and Cyrillic parts are
+  also read stanza by stanza - a language most of the letters are in replaces the whole text's
+  reading, unsure ("Sassja - Sad Tune"'s English intro), one with 40% adds itself ("Градусы -
+  Режиссёр"'s English verse) -, a stanza misread as a neighbour of the main language
+  (`LANGUAGE_NEIGHBOURS`: Slovenian in Serbo-Croatian) counting for it, and a Cyrillic stanza voting
+  only with its language's letters (`_CYRILLIC_PROOF`: a short Belarusian stanza without і / ў
+  read as Russian); `LANGUAGE_MARKS` for languages langdetect lacks (Kashubian's ò ù ë - sure -,
+  Crimean Tatar's q, Cape Verdean Creole's words - unsure); a Latin "i" in Cyrillic words is
+  Cyrillic (SUNSAY); song_language(): romaji alone read as an African language is Japanese
+  (`LANGUAGE_ROMAJI_ONLY_MISREADINGS`, 75% romaji words, unsure), Slovenian by a Croatian artist
+  Kajkavian (unsure). Result: 95.6% / 97.3% (sure); of the 29 songs it changes against a label, 20
+  better and 9 "worse" that are mostly real mixes the owner labelled with one language (Youssou
+  N'Dour - 7 Seconds as "English / French") or wrong labels (Бумбокс - Этажи is Russian). Invented
+  languages (Era, Adiemus, Vangelis) are never read: no rule tells them (owner).
+  Third round (2026-11-21, after the owner reviewed a dry run of the 807 songs without a language:
+  of 108 sure answers 14 wrong), measured the same way - 97.05% / 98.41% before (the labels had
+  been corrected since), 97.17% / 98.49% after, 3 better, 1 more unsure, none worse: a line
+  holding its translation after "^" is read without it (`LANGUAGE_INLINE_TRANSLATION_MARK`, LRCLIB's
+  Bad Bunny - NUEVAYoL as English); `LANGUAGE_MARKS` may take any reading (neighbour None) and a
+  pattern - Icelandic's þ (read as Hungarian / Norwegian), Breton's c'h (as Indonesian / Welsh),
+  Guadeloupean Creole's words in a French reading (unsure); `LANGUAGE_PROOF_WORDS`: a reading in
+  Hungarian, Slovenian, Indonesian, Tagalog or Romanian - where langdetect puts languages it lacks
+  (Altai, Kashmiri, Punjabi, pseudo-Latin) - is sure only with that language's own words, and
+  Slovenian without them (by a non-Croatian artist) is Serbo-Croatian, so the country-and-year rule
+  decides (Milan Stanković - Ovo je Balkan); `may_be_translation()` also catches a Cyrillic title
+  with letters the language lacks (і / ї / є in a Russian one), which also keeps such a proposal
+  unticked in the review. Real mixes read with one language (L'ENTOURLOOP's English chorus over
+  Hungarian verses) stay so: the owner chose 40% for a second language.
 - `musixmatch_fetcher`: the page's `lyrics.language` / `languageDescription` - what Shazam shows,
   its lyrics are Musixmatch's - or `isInstrumental`.
 - `music_brainz_fetcher`: the recording's work (`inc=work-rels`) `languages` ("zxx" = no words),
   through `mb_get()`, not musicbrainzngs; not every recording is linked to its work, so up to three
-  titled like the song are looked up.
+  titled like the song are looked up. `never_sure` since 2026-11-21: 18 of its 22 sure answers in
+  the owner's dry run were right, 23 of 26 on his labels - the language is the work's, so an
+  instrumental cover (Lindsey Stirling - Phantom of the Opera) or a song another work shares a
+  title with gets it (Madonna - Faz Gostoso as English, Bregović's Romani "Ederlezi" as Greek).
+- `youtube_language_fetcher` (last, owner's choice 2026-11-20, for the ~625 songs with neither
+  lyrics nor a language): `snippet.defaultAudioLanguage` of the song's own video
+  (`songs.youtube_video_id`, none for NULL / "" / "N/A") through
+  `manage_youtube_playlists.audio_languages_via_api()` - only with `YOUTUBE_API_KEY`, never the
+  OAuth token (no key = the module quietly answers nothing). BCP-47 codes, the primary subtag
+  through `code_name()` ("pt-BR" -> Portuguese, "zxx" -> Instrumental, "und" -> nothing). Measured
+  that day on 500 songs with a known language and 431 without lyrics or language: about a third
+  of the videos carry it, ~94% of those agreed (wrong: a Ukrainian song "ru", Polish and Arabic
+  ones "en", a Norwegian one "el", an English one "ja"), so it's `never_sure`: its answers go to
+  the review list, ticked like an unsure lyrics reading (the artist sings it in half its songs),
+  and a Serbian / Croatian / Bosnian one goes through the country-and-year rule like a site's.
+  `BY_SONG`: asked once a song, whatever its names. Its `prepare(songs)`, which `_look_up()`
+  calls for any module that has one, asks about every song's video before the loop - 50 a
+  request, one quota unit; a failing request makes it raise (asked again next run).
 
 `discover_language()` asks each module the first `LANGUAGE_MAX_QUERIES` names of
 `_lyrics_queries()` (a local one once), checks title and artist like the lyrics, and keeps the
 first sure answer. The screen (`utils/ui/language_review.py`) runs the local modules over every
 song first, then the sites for max-songs-per-fetch of those left. A sure reading of the lyrics in a
 language none of an artist's (3+) known songs has is still asked about, unticked
-(`_foreign()`), as are unsure readings (ticked when the artist sings it in half its songs) and,
+(`_foreign()`), as are unsure readings and YouTube's answers (ticked when the artist sings it in
+half its songs; the list's `module` fact says which module) and,
 for a song every module was asked about, the language nearly all its artist's songs have
 (`LANGUAGE_ARTIST_MIN_SONGS` / `_SHARE`, ticked). It isn't in `LOOKUP_STEPS` yet: the owner reviews
 the rules first. A first unattended run on 2026-11-19 (it had been put there unfinished) saved
@@ -678,11 +752,21 @@ next module (an album's first song is held against); Albums leaves the year out 
 left reissues out already. Without MusicBrainz enabled nothing is checked. A song nothing can
 date stays without a year (the manual prompt, or a miss unattended), never with a reissue's.
 
-**Stored years, checked the same way** - Fetch database data -> "Check stored years"
-(`utils/ui/year_check_review.py`): those rules only stop new reissue years, so the ones stored
-before are held against `first_appearance_year(..., raise_errors=True)` too, the songs not
-`year_checked` yet, max-songs-per-fetch a run; only a stored year later than MusicBrainz's first
-release by more than the margin is offered, unticked: a trial on 200 songs gave 6, about half
+**Stored years, checked the same way** - Years' second step (`fill_missing_years._check_stored_years()`;
+until 2026-11-20 a menu entry of its own, "Check stored years"): those rules only stop new reissue
+years, so the ones stored before are held against `first_appearance_year(..., raise_errors=True)`
+too, the songs not `year_checked` yet, in what step 1 left of max-songs-per-fetch (whole groups, at
+least one), and only for the whole catalog (an import's Years skips it). Grouped like step 1 -
+artist + album, a single or a song without an album alone. An album whose songs share one stored
+year gets one request (its first song asked) and a ticked change written to every song of it, so
+it keeps one year; one with several years is checked song by song, each proposal changing only its
+song, since then the album text is usually wrong for some of them (a full run, 2026-11-21:
+Kasabian's "Club Foot" 2004 under "West Ryder Pauper Lunatic Asylum" with "Fire" and "Runaway"
+2009, Walk off the Earth's "Vol. 4", Calvin Harris' "96 Months" - asked by one song, the whole
+group got its year). Only a stored year later than MusicBrainz's first
+release by more than the margin is offered, unticked (unattended only an owner's rule on the
+`stored_years` facts takes one; no built-in rule, a proposal left is not asked again for
+`AUTOMATION_LOOKUP_RETRY_DAYS`): a trial on 200 songs gave 6, about half
 right (Aerosmith 2001 -> 1998, Agnes Obel 2021 -> 2016, Akira Yamaoka 2016 -> 2003); MusicBrainz's
 first year was also a live take's on an edition dated as the original album (3 Doors Down, now
 left out by the recording's disambiguation), a re-recording's original (ASIAN KUNG-FU

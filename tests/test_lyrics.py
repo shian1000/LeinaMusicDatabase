@@ -216,6 +216,41 @@ def test_the_queries_cover_joined_names_other_titles_and_the_covered_original():
         ("Someone", "W moim ogródecku"), ("Pixies", "Studzianki")]
 
 
+def test_a_text_in_a_script_the_songs_language_isnt_written_in_is_never_sure():
+    """LRCLIB's "Fisz Emade - Serce" held Jandro's Russian "Из Детства" (2026-11-20)."""
+    from utils.common.language_names import written_otherwise
+
+    russian = LyricsDiscoveryResult(plain="Время летит, мчаться года вдаль улетая", matched_title="Serce",
+                                    matched_artist="Fisz")
+    polish = LyricsDiscoveryResult(plain="Nerwy jak druty mam", matched_title="Serce", matched_artist="Fisz")
+    song = _song("Serce", "Fisz", language="Polish")
+    alone = dm.discover_lyrics(song, _module(russian), duration_s=None).match
+    assert (alone.sure, alone.other_script) == (False, True)  # kept for the review at the end
+    second = [("lrclib_fetcher", "LRCLIB", _module(russian)[0][2]), ("genius_lyrics_fetcher", "Genius",
+                                                                       _module(polish)[0][2])]
+    assert dm.discover_lyrics(song, second, duration_s=None).match.result is polish
+    assert written_otherwise("Время летит", "Polish") and not written_otherwise("Время летит", "Russian")
+    assert not written_otherwise("Время летит", "Unknown") and not written_otherwise("Время летит", None)
+    assert not written_otherwise("Kimi no na wa", "Japanese")  # romanized lyrics are common
+    assert not written_otherwise("君の名は、ずっと", "Japanese") and not written_otherwise("你好世界", "Cantonese")
+    assert written_otherwise("ロンドンモード王道も", "English")
+    assert not written_otherwise("Время летит", "English / Russian")
+
+
+def test_a_translated_cover_is_neither_asked_nor_matched_as_the_original():
+    """Mistmorn's Ukrainian "Дарма" got American Football's English "Never Meant"
+    (2026-11-20): a translated cover has words of its own."""
+    song = _song("Дарма", "Mistmorn", covered_title="Never Meant")
+    song.covered_artist = Artist(name="American Football")
+    original = _found("Never Meant", "Mistmorn", duration=None)
+    assert ("American Football", "Never Meant") in dm._lyrics_queries(song)
+    assert dm.discover_lyrics(song, _module(original), duration_s=None).match is not None
+    song.cover_translated = 1
+    assert all(artist != "American Football" for artist, _ in dm._lyrics_queries(song))
+    assert dm.discover_lyrics(song, _module(original), duration_s=None).match is None
+    assert dm.discover_lyrics(song, _module(_found("Дарма", "Mistmorn", duration=None)), duration_s=None).match.sure
+
+
 def test_a_duet_is_asked_as_the_sites_write_it_and_a_medley_song_by_song():
     from utils.database.datatables import AdditionalSongArtist
 
@@ -684,10 +719,11 @@ def test_library_files_lyrics_tags(tmp_path, monkeypatch, text, plain, synced):
 # ---- the review list ----
 
 def test_the_review_saves_the_ticked_and_may_reject_the_rest(lyrics_db, monkeypatch):
-    first, second = _song("Kometa"), _song("Wojenka")
-    first.id, second.id = 1, 2
+    first, second, third = _song("Kometa"), _song("Wojenka"), _song("Serce", "Fisz", language="Polish")
+    first.id, second.id, third.id = 1, 2, 3
     unsure = [(first, dm.LyricsMatch(_found("Kometa"), "m", False, None, 200)),
-              (second, dm.LyricsMatch(_found("Wojenka (Live)"), "m", False, 200, 205, False))]
+              (second, dm.LyricsMatch(_found("Wojenka (Live)"), "m", False, 200, 205, False)),
+              (third, dm.LyricsMatch(_found("Serce", "Fisz"), "m", False, other_script=True))]
     seen = {}
 
     class Checkbox:
@@ -701,9 +737,10 @@ def test_the_review_saves_the_ticked_and_may_reject_the_rest(lyrics_db, monkeypa
     monkeypatch.setattr(lyrics_review, "ask_yes_no", lambda question: True)
     with store.lyrics_db_session(lyrics_db) as session:
         assert lyrics_review._review_unsure(session, unsure) == 1
-        assert seen["checked"] == [True, False]  # an equal title ticked, a resembling one not
+        # an equal title ticked, a resembling one not, nor one in a script Polish isn't written in
+        assert seen["checked"] == [True, False, False]
         assert store.stored_lyrics(session, 1).source == "m"
-        assert store.answered_modules(session) == {2: {"m"}}
+        assert store.answered_modules(session) == {2: {"m"}, 3: {"m"}}
         assert session.get(store.ModuleMiss, (2, "m")).reason == LYRICS_MISS_REJECTED
 
 

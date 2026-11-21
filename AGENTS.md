@@ -122,7 +122,9 @@ non-trivial work in that area.
   name, synonyms, a joined name's parts, the main artists and them joined by "&" × the title, it
   without brackets, the other titles; a cover's covered artist; last a medley's songs one by one -
   a text of one of them is only reviewed), checked by
-  `discoveries_manager.discover_lyrics()` (same title + artist = sure, a resembling title reviewed;
+  `discoveries_manager.discover_lyrics()` (same title + artist = sure, a resembling title reviewed, and so is
+  a text mostly in a script the song's stored language isn't written in - `language_names.written_otherwise()`:
+  LRCLIB's "Fisz Emade - Serce" held Jandro's Russian; the next module's sure text wins;
   the length - ±3 s of ours - only decides whether the synced lines are kept).
   Not a music.db table on purpose: ~25 MB that Leina Radio would download whole; the server
   answers one song at `GET /lyrics/<songs.id>` and the phone falls back to its own LRCLIB lookup
@@ -246,7 +248,7 @@ non-trivial work in that area.
   English names, several joined by " / ", `"Unknown"` the imports' placeholder, `"Instrumental"`
   = no words. Unlike genres, cleaning needs no database: `Song`'s `@validates("language")` runs
   `utils/common/language_names.clean_language()` on every ORM write (`LANGUAGE_SYNONYMS` for
-  typos, lowercase ISO codes "eng" / "de" from tags → the name, the owner's own names - "Kajkavian",
+  typos, lowercase ISO codes "eng" / "de" from tags → the name, the owner's own names - "Croatian (Kajkavian)",
   "Interslavic" - kept). Older rows: Manage database → "Unify language and country names"
   (`utils/ui/language_review.py`, `languages.spelling_fixes()`); a new synonym needs it run once.
   `artists.origin` the same way (`Artist`'s validator → `utils/common/origin_names.clean_origin()`):
@@ -256,10 +258,16 @@ non-trivial work in that area.
   dropped, junk from mp3 tags cleared. Leina Radio takes the part before the first " - " as the
   country. Filled by Fill missing data →
   "Languages" (same file; the `get_language()` kind: the stored lyrics read by langdetect with the
-  owner's rules in `language_names.song_language()` - alphabet and letters narrow the field, the
+  owner's rules in `language_names.song_language()` - alphabet and letters narrow the field, each
+  line counts once, the stanzas vote, a text holding a translation isn't read, a few languages
+  langdetect lacks come from their letters / words (`LANGUAGE_MARKS`), a reading where it puts
+  them (Hungarian, Slovenian, ...) is sure only with that language's own words (`LANGUAGE_PROOF_WORDS`),
+  invented ones never, the
   ex-Yugoslav languages go by country and year (`YUGOSLAV_COUNTRIES`; neither known = asked at the
   end: typed now or looked up again once the artist's origin is known) -, Musixmatch, MusicBrainz's
-  work - `docs/agent-notes/discovery-modules.md`). A Run all step, deliberately not in
+  work (`never_sure`: the work's language, an instrumental cover's too), last YouTube's audio language of the song's own video (`youtube_language_fetcher`, the
+  Data API with `YOUTUBE_API_KEY` only, ~1/3 of videos, ~94% right: `never_sure`, always the
+  owner's review list) - `docs/agent-notes/discovery-modules.md`). A Run all step, deliberately not in
   `LOOKUP_STEPS` until the owner has reviewed its rules (see Run all below).
   `additional_videos.py` — `additional_youtube_videos` (migration 0018): a song's YouTube videos
   other than its own link, keyed by video, only so Leina Radio (after `songs.youtube_video_id`,
@@ -293,7 +301,16 @@ non-trivial work in that area.
   goes into files). A title's credit is read by `utils/common/cover_names.py`: sanitize's `cover_credit`
   step for what comes in, Manage database → "Find covers" (`utils/ui/cover_review.py`, `find_covers()`,
   `cover_checked` marker) for stored songs - a title saying only "cover" is asked about right there
-  (`name_cover()`, "-" = not a cover, marked checked) - and Song actions → "Set covered artist" by hand. No `ForeignKey`
+  (`name_cover()`, "-" = not a cover, marked checked) - and Song actions → "Set covered artist" by hand.
+  `songs.cover_translated` (migration 0026, 1 = words of its own in another language: Mistmorn's
+  Ukrainian "Дарма" of "Never Meant"): ticked in one list after every way of marking a cover, and
+  Song actions → "Set translated cover" (`cover_review.tick_translated()`, which offers to forget the
+  newly marked songs' stored lyrics and remembered answers - often the original's text). Such a
+  cover is never asked nor matched as the original for lyrics; one that isn't takes its original's
+  stored language in Languages before any module, unattended too (`languages.original_language()`,
+  `covers.original_song()`), and the language rules go by the original's year and the covered
+  artist (`words_basis()`). Not in `MUSIC_SPEC` until the owner decides
+  ([handoff](docs/handoffs/translated-covers-for-musicdatabaseapp.md)). No `ForeignKey`
   in the model (the migration has one): a second one onto `artists` makes every `join(Artist)`
   ambiguous. An artist only covered is kept (`is_unused()`); merges follow through
   `reassign_additional_artist_links()`. Every matcher keeps covers apart (`song_kinds.songs_for_entry(...,
@@ -895,7 +912,7 @@ non-trivial work in that area.
   `songs.kind` (migration 0014: NULL = a song, `'full_album'` = a whole album in one recording,
   kept as a song row; only `song_kinds.set_song_kind()` writes it, and the app leaves full albums
   out of its radio), and `songs.project_id` / `projects` (migration 0019, shown "Project: Artist -
-  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `songs.other_titles` (migration 0023: more titles to search a song by, ";"-separated; [handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
+  Title"; [handoff](docs/handoffs/projects-for-musicdatabaseapp.md)), and `songs.covered_artist_id` / `covered_title` (migrations 0020-0021, shown "Artist - Title (Original cover)"; an artist may now have only covers; [handoff](docs/handoffs/cover-songs-for-musicdatabaseapp.md)), and `songs.cover_translated` (migration 0026, 1 = a translated cover; not in the public copy yet; [handoff](docs/handoffs/translated-covers-for-musicdatabaseapp.md)), and `songs.version_kind` / `version_label` / `version_of` (migration 0022: a live / remix / acoustic... version, a row of its own titled without the marker and shown "Title (Marker)"; [ADR-0007](docs/decisions/0007-song-versions.md), [handoff](docs/handoffs/song-versions-for-musicdatabaseapp.md)), and `songs.other_titles` (migration 0023: more titles to search a song by, ";"-separated; [handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)), and `rejected_song_requests` (migration 0015: songs the owner didn't want
   added, by the artist / title / YouTube video / Spotify track the request named), and
   `settled_song_requests` (migration 0024: the same as sent, plus the `songs.id` a request was
   found to be or was added as; [handoff](docs/handoffs/settled-song-requests-for-musicdatabaseapp.md)), and
@@ -1213,14 +1230,15 @@ non-trivial work in that area.
   lifecycle (including the snap-Chromium `DevToolsActivePort` gotcha and `ChromeDriverLaunchError`),
   why MusicBrainz takes the earliest release and never a reissue (a release years after the
   recording first appeared anywhere), why other modules' years are held against that first
-  appearance (`year_after_the_song()`: a store's date is its reissue's) and stored years checked against it (Fetch
-  database data → "Check stored years", `utils/ui/year_check_review.py`, `year_checked` marker), compilation words in every language and spans of years in
+  appearance (`year_after_the_song()`: a store's date is its reissue's) and stored years checked against it (Years'
+  second step, `_check_stored_years()`, one request per album only when its songs share one stored year, else per song, `year_checked` marker), compilation words in every language and spans of years in
   `blacklist.txt` / `is_blacklisted_album()`, the last-resort fallbacks when every fetcher is empty (soundtrack-like artist "Tekken 5 OST" →
   artist name as album; a `SINGLES_MARKER` word like "cover"/"unplugged" → `SINGLES_ALBUM`), `google_search_fetcher.py`'s two look-alike failure modes (cookie consent vs. CAPTCHA — don't
   try to evade the latter), the three kinds of fetcher (Curl / Curl + API / Selenium), API modules off by default, how
   `discovery_stats.py` counts per-fetcher invocations/successes for the Statistics menu, and the
   separate `get_release_year()` contract/config/stats for "Fill missing data -> Years" (including
   why it batch-writes a year to every song sharing an album, unlike the per-song album fetchers,
+  why a project's recording without an album is looked up by its project, never its title,
   why a hand-set `Song.spotify_url` is read before any module,
   and why `youtube_fetcher.py`'s YouTube-date years are flagged `needs_review` and reviewed by the user).
 - [import-pipeline.md](docs/agent-notes/import-pipeline.md) — the MusicBrainz cost path shared by

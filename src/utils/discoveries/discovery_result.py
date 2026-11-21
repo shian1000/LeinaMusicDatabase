@@ -105,7 +105,9 @@ class LanguageDiscoveryResult:
     query; from_song: read from the song's own stored data, nothing to check.
     needs_origin: a Serbian / Croatian / Bosnian reading neither the artist's
     country nor the year settles (language_names.yugoslav_language()) - not
-    saved until the artist's origin is known, or the owner types it."""
+    saved until the artist's origin is known, or the owner types it.
+    never_sure: a source too often wrong to save without the owner
+    (YouTube's audio language), however it reads."""
     language: str
     matched_title: Optional[str] = None
     matched_artist: Optional[str] = None
@@ -113,3 +115,4 @@ class LanguageDiscoveryResult:
     from_song: bool = False
     source_ref: Optional[str] = None
     needs_origin: bool = False
+    never_sure: bool = False

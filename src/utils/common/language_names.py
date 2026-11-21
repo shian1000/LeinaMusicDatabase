@@ -7,25 +7,36 @@ clean_language() is what every write goes through (Song's validator in
 datatables.py): each part looked up by language_key() in LANGUAGE_SYNONYMS,
 a lowercase ISO 639 code ("eng", "pl" - mp3 TLAN tags) by its name, any other
 name kept as written (capitalised when typed all lowercase - the owner's own
-names, "Kajkavian", "Interslavic", stay). No database here.
+names, "Croatian (Kajkavian)", "Interslavic", stay). No database here.
 
 language_of_text() reads the language of a text (lyrics) with langdetect,
 narrowed by the alphabet and the letters (the owner's rules, 2026-11-19):
 langdetect knows no Belarusian, Serbian, Montenegrin, Mongolian or Yiddish, and
 mixes up Ukrainian and Russian - the letters only one alphabet has decide
-(romanize.cyrillic_language(), ŭ, ś). song_language() adds what the song's names,
-its artist's other songs and origin tell.
+(romanize.cyrillic_language(), ŭ, ś), and a few languages it doesn't know at all
+come from their letters or words (LANGUAGE_MARKS). Each line counts once (a chorus
+sung ten times doesn't outweigh the verses), the stanzas vote (an intro in another
+language doesn't decide), and a text holding a translation isn't read
+(looks_like_translation()). song_language() adds what the song's names, its
+artist's other songs and origin tell. Invented languages are never read: no rule
+tells them (owner, 2026-11-20).
 """
 
 import re
 import unicodedata
 from functools import lru_cache
 
-from config.constants import (LANGUAGE_CODE_NAMES, LANGUAGE_CREDIT_WORDS, LANGUAGE_DETECT_MIN_LETTERS,
-                              LANGUAGE_RARELY_RIGHT, LANGUAGE_ROMAJI_MISREADINGS, LANGUAGE_SECOND_SCRIPT_SHARE,
-                              LANGUAGE_SEPARATOR, LANGUAGE_SYNONYMS, LANGUAGE_UNKNOWN, SERBIAN_EKAVIAN_WORDS,
-                              SERBO_CROATIAN, YIDDISH_MARKS, YUGOSLAV_COUNTRIES,
-                              YUGOSLAVIA_LAST_YEAR)
+from config.constants import (KAJKAVIAN, LANGUAGE_CODE_NAMES, LANGUAGE_CREDIT_WORDS, LANGUAGE_DETECT_MIN_LETTERS,
+                              LANGUAGE_INLINE_TRANSLATION_MARK, LANGUAGE_INLINE_TRANSLATION_SHARE,
+                              LANGUAGE_INSTRUMENTAL, LANGUAGE_MARKS, LANGUAGE_NEIGHBOURS, LANGUAGE_PROOF_WORDS,
+                              LANGUAGE_RARELY_RIGHT,
+                              LANGUAGE_ROMAJI_MISREADINGS, LANGUAGE_ROMAJI_ONLY_MISREADINGS, LANGUAGE_ROMAJI_SHARE,
+                              LANGUAGE_SECOND_SCRIPT_SHARE, LANGUAGE_SEPARATOR, LANGUAGE_STANZA_LINES,
+                              LANGUAGE_STANZA_MIN_LETTERS, LANGUAGE_STANZA_SURE, LANGUAGE_SYNONYMS,
+                              LANGUAGE_TRANSLATION_ALTERNATION, LANGUAGE_TRANSLATION_HEAD_LINES,
+                              LANGUAGE_TRANSLATION_MIN_LINES, LANGUAGE_TRANSLATION_WORDS, LANGUAGE_UNKNOWN,
+                              LYRICS_OTHER_SCRIPT_SHARE, SERBIAN_EKAVIAN_WORDS, SERBO_CROATIAN, YIDDISH_MARKS,
+                              YUGOSLAV_COUNTRIES, YUGOSLAVIA_LAST_YEAR)
 from utils.common.normalizer import composed, normalize
 from utils.common.origin_names import clean_origin
 from utils.common.romanize import cyrillic_language
@@ -111,9 +122,14 @@ def _script(ch: str) -> str | None:
 
 
 def _lyrics_only(text: str) -> str:
-    """Without the lines crediting the authors ("Lời: ...", "Writer(s): ...")."""
-    return "\n".join(line for line in text.splitlines()
-                     if not _CREDIT_LINE.match(line.strip().lower()))
+    """Without the lines crediting the authors ("Lời: ...", "Writer(s): ...")
+    and, when LANGUAGE_INLINE_TRANSLATION_SHARE of the lines hold one, each
+    line's translation after LANGUAGE_INLINE_TRANSLATION_MARK."""
+    lines = [line for line in text.splitlines() if not _CREDIT_LINE.match(line.strip().lower())]
+    sung = [line for line in lines if line.strip()]
+    if sung and sum(LANGUAGE_INLINE_TRANSLATION_MARK in line for line in sung) >= len(sung) * LANGUAGE_INLINE_TRANSLATION_SHARE:
+        lines = [line.split(LANGUAGE_INLINE_TRANSLATION_MARK, 1)[0] for line in lines]
+    return "\n".join(lines)
 
 
 _CREDIT_LINE = re.compile(r"^(?:%s)\s*(?:\(s\))?\s*[:\-–]" % "|".join(
@@ -142,6 +158,9 @@ def _read_latin(text: str) -> tuple[str, float] | None:
     if "ŭ" in letters:
         return "Belarusian", 1.0
     found = _detect(text)
+    marked = _marked_language(lower, code_name(found[0]) if found else None)
+    if marked:
+        return marked
     slavic = sum(lower.count(ch) for ch in "čšž") >= _LACINKA_MIN_LETTERS and not letters & set("ąęż")
     if "ś" in letters and slavic:
         if "ł" in letters:
@@ -155,6 +174,32 @@ def _read_latin(text: str) -> tuple[str, float] | None:
     if name == "Vietnamese" and not letters & _VIETNAMESE_LETTERS:
         return name, min(found[1], 0.5)
     return (name, found[1]) if name else None
+
+
+def _marked_language(lower: str, reading: str | None) -> tuple[str, float] | None:
+    """A language langdetect doesn't know, read as its neighbour (LANGUAGE_MARKS)."""
+    for language, (neighbour, marks, needed, sure) in LANGUAGE_MARKS.items():
+        if neighbour is not None and reading != neighbour:
+            continue
+        if isinstance(marks, str):
+            count = sum(lower.count(ch) for ch in marks)
+        elif isinstance(marks, re.Pattern):
+            count = len(marks.findall(lower))
+        else:
+            count = _word_count(lower, marks)
+        if count >= needed:
+            return language, sure
+    return None
+
+
+def _word_count(lower: str, words) -> int:
+    return sum(word in words for word in re.findall(r"\w+", lower))
+
+
+def _proven_by_words(language: str, text: str) -> bool:
+    """Does `text` hold enough of LANGUAGE_PROOF_WORDS' words of `language` (any language not listed does)?"""
+    words, needed = LANGUAGE_PROOF_WORDS.get(language, ((), 0))
+    return _word_count(text.lower(), words) >= needed
 
 
 def _read_script(script: str, text: str) -> tuple[str, float] | None:
@@ -184,33 +229,174 @@ def _read_script(script: str, text: str) -> tuple[str, float] | None:
 
 def language_of_text(text: str | None) -> tuple[str, float] | None:
     """(language as stored, how sure) of a text (lyrics); None when it has
-    too few letters or nothing can tell. Its alphabet narrows which languages
-    it may be - each script with LANGUAGE_SECOND_SCRIPT_SHARE of the letters is
-    read on its own, the most written first ("Korean / English"); kana beside
-    kanji is Japanese. The probability is the main script's."""
-    text = _lyrics_only(text or "")
+    too few letters, holds a translation or nothing can tell. Its alphabet
+    narrows which languages it may be - each script with
+    LANGUAGE_SECOND_SCRIPT_SHARE of the letters is read on its own, the most
+    written first ("Korean / English"); kana beside kanji is Japanese. Each
+    line counts once, and a Latin or Cyrillic part is also read stanza by
+    stanza (_stanza_readings()). The probability is the main script's."""
+    text = _LATIN_I_IN_CYRILLIC.sub("і", _lyrics_only(text or ""))
+    if looks_like_translation(text):
+        return None
+    stanzas = _stanzas(text)
+    unique = "\n".join(line for stanza in stanzas for line in stanza)
+    counts = _letter_counts(unique)
+    sure = True
+    if sum(counts.values()) < LANGUAGE_DETECT_MIN_LETTERS:  # a few lines sung over and over: never sure
+        counts, unique, stanzas, sure = _letter_counts(text), text, [], False
+    total = sum(counts.values())
+    if total < LANGUAGE_DETECT_MIN_LETTERS:
+        return None
+    text = unique
+    readings = []
+    for script, count in sorted(counts.items(), key=lambda item: -item[1]):
+        if count / total < LANGUAGE_SECOND_SCRIPT_SHARE and readings:
+            break
+        reading = _read_script(script, _in_script(text, script))
+        if reading:
+            readings += _stanza_readings(script, reading, stanzas)
+    if not readings:
+        return None
+    sure = sure and _proven_by_words(readings[0][0], text)
+    probability = readings[0][1] if sure else min(readings[0][1], 0.5)
+    return clean_language(LANGUAGE_SEPARATOR.join(name for name, _ in readings)), round(probability, 3)
+
+
+# Ukrainian / Belarusian typed with a Latin "i" (SUNSAY's "свое iм'я")
+_LATIN_I_IN_CYRILLIC = re.compile(r"(?<=[\u0400-\u04ff'’])[iI]|[iI](?=[\u0400-\u04ff])")
+
+
+def _letter_counts(text: str) -> dict:
+    """{script: letters}, a syllable counting as two; kanji go with kana."""
     counts: dict = {}
     for ch in text:
         script = _script(ch)
         if script:
             counts[script] = counts.get(script, 0) + (2 if script in _SYLLABIC else 1)
-    total = sum(counts.values())
-    if total < LANGUAGE_DETECT_MIN_LETTERS:
-        return None
     if "KANA" in counts:  # kanji are Japanese too
         counts["KANA"] += counts.pop("CJK", 0)
-    readings = []
-    for script, count in sorted(counts.items(), key=lambda item: -item[1]):
-        if count / total < LANGUAGE_SECOND_SCRIPT_SHARE and readings:
-            break
-        part = "".join(ch if _script(ch) in (script, None) or (script == "KANA" and _script(ch) == "CJK")
-                       else " " for ch in text)
-        reading = _read_script(script, part)
-        if reading:
-            readings.append(reading)
-    if not readings:
+    return counts
+
+
+def _in_script(text: str, script: str) -> str:
+    """`text` with the letters of other scripts blanked (kanji kept beside kana)."""
+    return "".join(ch if _script(ch) in (script, None) or (script == "KANA" and _script(ch) == "CJK")
+                   else " " for ch in text)
+
+
+def _stanzas(text: str) -> list[list[str]]:
+    """The text's stanzas (blank lines between; LANGUAGE_STANZA_LINES lines a
+    piece when it has none), each line only where it first comes."""
+    stanzas, stanza, seen = [], [], set()
+    for line in text.splitlines():
+        key = " ".join(line.lower().split())
+        if not key:
+            if stanza:
+                stanzas.append(stanza)
+            stanza = []
+        elif key not in seen:
+            seen.add(key)
+            stanza.append(line.strip())
+    if stanza:
+        stanzas.append(stanza)
+    if len(stanzas) == 1:
+        lines = stanzas[0]
+        stanzas = [lines[i:i + LANGUAGE_STANZA_LINES] for i in range(0, len(lines), LANGUAGE_STANZA_LINES)]
+    return stanzas
+
+
+def _stanza_readings(script: str, reading: tuple[str, float], stanzas) -> list[tuple[str, float]]:
+    """`reading` of a script's part, checked against its stanzas' votes (their
+    letters): a language most of them are in replaces it - not sure then -, a
+    second one with LANGUAGE_SECOND_SCRIPT_SHARE of them is added. Not for a
+    language told by its letters alone (LANGUAGE_MARKS), whose stanzas may lack them."""
+    if script not in ("LATIN", "CYRILLIC") or reading[0] in LANGUAGE_MARKS:
+        return [reading]
+    votes: dict = {}
+    for stanza in stanzas:
+        part = _in_script("\n".join(stanza), script)
+        letters = sum(1 for ch in part if _script(ch) == script)
+        if letters < LANGUAGE_STANZA_MIN_LETTERS:
+            continue
+        found = _read_script(script, part)
+        if not found or not found[0] or found[1] < LANGUAGE_STANZA_SURE or not _proven(script, found[0], part):
+            continue
+        language = reading[0] if _neighbours(found[0], reading[0]) else found[0]
+        votes[language] = votes.get(language, 0) + letters
+    total = sum(votes.values())
+    if not total:
+        return [reading]
+    top = max(votes, key=votes.get)
+    main = reading if top == reading[0] or votes[top] * 2 <= total else (top, min(reading[1], 0.5))
+    return [main] + [(language, main[1]) for language, letters in sorted(votes.items(), key=lambda item: -item[1])
+                     if language != main[0] and letters / total >= LANGUAGE_SECOND_SCRIPT_SHARE]
+
+
+def _neighbours(language: str, other: str) -> bool:
+    return any(language in group and other in group for group in LANGUAGE_NEIGHBOURS)
+
+
+# The letter sets a Cyrillic stanza must show to vote for its language: a short Belarusian
+# stanza without і or ў ("Гэта мой колер, не выходзь з дому") reads as Russian
+_CYRILLIC_PROOF = {
+    "Belarusian": lambda letters: "ў" in letters or ("і" in letters and bool(letters & set("ыэ"))),
+    "Ukrainian": lambda letters: bool(letters & set("їєґ")) or ("і" in letters and "и" in letters
+                                                                 and not letters & set("ыэ")),
+    "Russian": lambda letters: bool(letters & set("ыэъё")) and bool(letters & set("иъщ"))
+    and not letters & set("іўїє"),
+}
+
+
+def _proven(script: str, language: str, text: str) -> bool:
+    """May a stanza in `script` read as `language` vote? A Cyrillic one only
+    with the letters only that language has (_CYRILLIC_PROOF); other Cyrillic
+    languages never vote."""
+    if script != "CYRILLIC":
+        return True
+    proof = _CYRILLIC_PROOF.get(language)
+    return bool(proof and proof(set(text.lower())))
+
+
+_TRANSLATION_HEAD = re.compile(r"[(\[](?:%s)[)\]]|^(?:%s)\s*:" % (("|".join(map(re.escape, LANGUAGE_TRANSLATION_WORDS)),) * 2))
+
+
+def looks_like_translation(text: str | None) -> bool:
+    """Lyrics that are a translation or hold one line by line: a translation
+    word in brackets or before ":" in the first lines ("Ева (перевод)"), or
+    LANGUAGE_TRANSLATION_ALTERNATION of the lines changing script - in Latin,
+    plain ASCII against accented letters (English under Vietnamese)."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if any(_TRANSLATION_HEAD.search(line.lower()) for line in lines[:LANGUAGE_TRANSLATION_HEAD_LINES]):
+        return True
+    kinds = [kind for kind in map(_line_kind, lines) if kind]
+    if len(kinds) < LANGUAGE_TRANSLATION_MIN_LINES or len(set(kinds)) != 2:
+        return False
+    changes = sum(a != b for a, b in zip(kinds, kinds[1:]))
+    return changes / (len(kinds) - 1) >= LANGUAGE_TRANSLATION_ALTERNATION
+
+
+def _line_kind(line: str) -> str | None:
+    """A line's main script (kanji counted as kana); a Latin line with
+    accented letters is "LATIN+"."""
+    counts: dict = {}
+    for ch in line:
+        script = _script(ch)
+        if script:
+            script = "KANA" if script == "CJK" else script
+            counts[script] = counts.get(script, 0) + 1
+    if not counts:
         return None
-    return clean_language(LANGUAGE_SEPARATOR.join(name for name, _ in readings)), round(readings[0][1], 3)
+    script = max(counts, key=counts.get)
+    return "LATIN+" if script == "LATIN" and any(ch.isalpha() and not ch.isascii() for ch in line) else script
+
+
+_ROMAJI_WORD = re.compile(r"(?:(?:[kstpc](?=[kstpc]))?(?:ky|gy|sh|ch|ts|ny|hy|my|ry|by|py|[kgszjtdnhbpmrwyf])?[aiueo]"
+                          r"|n)+")
+
+
+def _romaji_share(text: str) -> float:
+    words = [word for word in re.findall(r"[a-z]+", text.lower()) if len(word) > 1]
+    return sum(bool(_ROMAJI_WORD.fullmatch(word)) for word in words) / len(words) if words else 0.0
 
 
 # The languages each script writes - a title wholly in one, with lyrics read as another
@@ -225,14 +411,42 @@ _SCRIPT_WRITES = {
 }
 
 
+# Cyrillic letters a title in that language can't have (Сергій Бабкін - "ДАЛІ МИ САМІ" isn't Russian)
+_CYRILLIC_FOREIGN = {"Russian": set("іїєґў"), "Ukrainian": set("ыэъёў"), "Belarusian": set("иїєґщъ")}
+
+
 def may_be_translation(title: str | None, language: str | None) -> bool:
     """A title written wholly in a script none of `language`'s parts is
-    written in: the lyrics read may be a translation of the song."""
+    written in, or in Cyrillic letters none of them has: the lyrics read
+    may be a translation of the song."""
     scripts = {_script(ch) for ch in title or ""} - {None}
     if not scripts or "LATIN" in scripts or not language:
         return False
+    parts = set(language.split(LANGUAGE_SEPARATOR))
     written = set().union(*(_SCRIPT_WRITES.get(script, set()) for script in scripts))
-    return bool(written) and not written & set(language.split(LANGUAGE_SEPARATOR))
+    if written and not written & parts:
+        return True
+    letters = set(title.lower())
+    return all(letters & _CYRILLIC_FOREIGN.get(part, set()) for part in parts)
+
+
+def written_otherwise(text: str | None, language: str | None) -> bool:
+    """A text mostly (LYRICS_OTHER_SCRIPT_SHARE of its letters) in a script none
+    of `language`'s parts is written in: Cyrillic lyrics of a Polish song, likely
+    another song's. Never Latin - romanized lyrics are common."""
+    if not text or language in (None, "", LANGUAGE_UNKNOWN, LANGUAGE_INSTRUMENTAL):
+        return False
+    counts = {}
+    for script in filter(None, map(_script, text)):
+        counts[script] = counts.get(script, 0) + 1
+    if "KANA" in counts:  # kanji are Japanese too
+        counts["KANA"] += counts.pop("CJK", 0)
+    if not counts:
+        return False
+    script, count = max(counts.items(), key=lambda item: item[1])
+    if script == "LATIN" or script not in _SCRIPT_WRITES or count / sum(counts.values()) <= LYRICS_OTHER_SCRIPT_SHARE:
+        return False
+    return not _SCRIPT_WRITES[script] & set(language.split(LANGUAGE_SEPARATOR))
 
 
 _YUGOSLAV_READINGS = {"Croatian", "Serbian", "Bosnian", "Montenegrin", SERBO_CROATIAN}
@@ -283,6 +497,12 @@ def song_language(text: str | None, title: str = "", artist: str = "", origin: s
     if language in LANGUAGE_ROMAJI_MISREADINGS and (any(_script(ch) in ("KANA", "CJK") for ch in names)
                                                     or len(japanese) * 2 > len(artist_languages) > 0):
         return "Japanese", probability, False
+    if language in LANGUAGE_ROMAJI_ONLY_MISREADINGS and _romaji_share(text) >= LANGUAGE_ROMAJI_SHARE:
+        return "Japanese", min(probability, 0.5), False
+    if language == "Slovenian" and (clean_origin(origin) or "").startswith("Croatia"):
+        language, probability = KAJKAVIAN, min(probability, 0.5)
+    elif language == "Slovenian" and not _proven_by_words(language, _lyrics_only(text)):
+        language = SERBO_CROATIAN  # Serbian read as Slovenian (Milan Stanković - Ovo je Balkan)
     needs_origin = False
     if is_yugoslav(language):
         decided = yugoslav_language(text, year, origin, artist_languages)

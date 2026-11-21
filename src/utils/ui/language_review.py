@@ -10,13 +10,18 @@ stored lyrics read by langdetect) first for every such song, then the sites
 for at most max-songs-per-fetch of those still without a sure answer. Saved at
 once: what a site says, and a reading of the lyrics with LANGUAGE_DETECT_SURE
 in a language the artist isn't known not to sing. Asked at the end in one
-list: the other readings, and for a song nothing knows the language nearly all
+list: the other readings, what a never_sure source found (YouTube's audio
+language, last of the modules), and for a song nothing knows the language nearly all
 its artist's other songs have (LANGUAGE_ARTIST_MIN_SONGS / _SHARE) - ticked
 when the artist sings that language in at least half its songs. A Serbian /
 Croatian / Bosnian answer that neither the artist's country nor the year
 settles (language_names.yugoslav_language(), any module's) is never saved nor
 guessed: the owner is asked whether to type those by hand now or look them up
-again once the artists' origins are known (owner's choice, 2026-11-19).
+again once the artists' origins are known (owner's choice, 2026-11-19). A
+cover that isn't translated takes its original's stored language before any
+module is asked, saved at once (languages.original_language(), owner's rule,
+2026-11-20), and the Serbian / Croatian / Bosnian rule goes by its original's
+year and artist (languages.words_basis()).
 """
 
 from dataclasses import dataclass, replace
@@ -28,7 +33,7 @@ from utils.common.output import escape, review_header, show
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
 from utils.database.languages import (apply_spelling_fix, artist_languages, artist_share, has_language,
-                                      other_song_languages, songs_missing_language, spelling_fixes)
+                                      original_language, songs_missing_language, spelling_fixes, words_basis)
 from utils.discoveries.discoveries_manager import discover_language, load_discovery_modules
 from utils.discoveries.discovery_settings import LANGUAGES
 from utils.ui.prompts import ask_yes_no, stop_requested, tick_items, type_each, unattended_now
@@ -69,25 +74,28 @@ def unify_language_and_country_names() -> int:
 
 @dataclass
 class LanguageProposal:
-    """A language to ask the owner about. confidence: the lyrics reading's,
-    None for the artist's other songs' language."""
+    """A language to ask the owner about. confidence: the lyrics reading's;
+    module: the one that found it, None for the artist's other songs' language."""
     song: object
     language: str
     from_lyrics: bool
     confidence: float | None
     artist_share: float
     artist_songs: int
+    module: str | None = None
 
     def facts(self) -> dict:
         return {"language": self.language, "from_lyrics": self.from_lyrics, "confidence": self.confidence,
-                "artist_share": round(self.artist_share, 3), "artist_songs": self.artist_songs}
+                "artist_share": round(self.artist_share, 3), "artist_songs": self.artist_songs,
+                "module": self.module}
 
     @property
     def checked(self) -> bool:
-        return self.artist_share >= (0.5 if self.from_lyrics else LANGUAGE_ARTIST_MIN_SHARE)
+        return (self.artist_share >= (LANGUAGE_ARTIST_MIN_SHARE if self.module is None else 0.5)
+                and not may_be_translation(self.song.title, self.language))
 
     def label(self) -> str:
-        source = f"lyrics, {self.confidence:.2f}" if self.from_lyrics else "the artist's other songs"
+        source = f"lyrics, {self.confidence:.2f}" if self.from_lyrics else self.module or "the artist's other songs"
         known = f"; the artist: {round(self.artist_share * self.artist_songs)}/{self.artist_songs} songs" \
             if self.artist_songs else ""
         note = "; the lyrics may be a translation" if self.from_lyrics and may_be_translation(
@@ -97,7 +105,8 @@ class LanguageProposal:
 
 def _proposal(song, match, counts: dict) -> LanguageProposal:
     share, songs = artist_share(counts.get(song.artist_id), match.result.language)
-    return LanguageProposal(song, match.result.language, True, match.result.confidence, share, songs)
+    return LanguageProposal(song, match.result.language, not match.result.never_sure, match.result.confidence,
+                            share, songs, match.module_id)
 
 
 def _foreign(song, match, counts: dict) -> bool:
@@ -108,14 +117,29 @@ def _foreign(song, match, counts: dict) -> bool:
 
 
 def _country_rule(song, match):
-    """A site's Serbian / Croatian / Bosnian answer under the owner's rule (the
-    stored lyrics' reading has had it already, with the text)."""
+    """A site's (or YouTube's) Serbian / Croatian / Bosnian answer under the
+    owner's rule (the stored lyrics' reading has had it already, with the text)."""
     result = match.result
-    if result.from_song or not is_yugoslav(result.language):
+    if (result.from_song and not result.never_sure) or not is_yugoslav(result.language):
         return match
-    decided = yugoslav_language("", song.year, song.artist.origin, other_song_languages(song))
+    decided = yugoslav_language("", *words_basis(song))
     found = replace(result, language=decided) if decided else replace(result, needs_origin=True)
     return replace(match, result=found, sure=match.sure and decided is not None)
+
+
+def _from_originals(songs: list) -> list:
+    """Covers that aren't translated get their original's stored language,
+    saved at once (unattended too: a sure reading). Returns the other songs."""
+    left = []
+    for song in songs:
+        language = original_language(song)
+        if language is None:
+            left.append(song)
+            continue
+        song.language = language
+        show(f"{escape(song.artist.name)} - {escape(song.title)}: [green]{escape(language)}[/green] "
+             f"[dim](the original's)[/dim]")
+    return left
 
 
 def _look_up(songs: list, modules: list, counts: dict, guesses: dict, asked: list, undecided: dict) -> list:
@@ -124,6 +148,9 @@ def _look_up(songs: list, modules: list, counts: dict, guesses: dict, asked: lis
     needing the artist's origin into `undecided` (song id -> (song, match)),
     each song asked into `asked`. Returns the songs still without a sure
     language and not undecided (not those a stop left)."""
+    for _, _, module in modules:
+        if hasattr(module, "prepare"):  # asks about many songs at once (YouTube: 50 videos a request)
+            module.prepare(songs)
     left = []
     for position, song in enumerate(songs, 1):
         if stop_requested():  # the automation: its time is up, or the app waits
@@ -163,6 +190,9 @@ def fill_missing_languages() -> int:
         show("Every song has a language, or was looked up recently.")
         return 0
     show(f"{len(pending)} song(s) without a language.")
+    covers = len(pending)
+    pending = _from_originals(pending)
+    covers -= len(pending)
     counts = artist_languages(session)
     local = [module for module in modules if getattr(module[2], "LOCAL", False)]
     online = [module for module in modules if module not in local]
@@ -179,7 +209,7 @@ def fill_missing_languages() -> int:
     except KeyboardInterrupt:
         show("\nStopped - what was found so far is kept.")
     asked = list({song.id: song for song in asked_locally + asked_online}.values())
-    saved = sum(has_language(song) for song in asked)
+    saved = covers + sum(has_language(song) for song in asked)
     show(f"Saved the language of {saved} song(s).")
     # Only a song every module was asked about is given its artist's language, or remembered
     asked_all = asked_online if online else asked_locally
@@ -217,6 +247,7 @@ def _review(proposals: list[LanguageProposal]) -> int:
         return 0
     review_header(f"REVIEW: {len(proposals)} language(s) no source is sure of",
                   "Read from the lyrics without certainty, or in a language none of the artist's songs has; "
+                  "YouTube's audio language of the song's video (right about 94% of the time); "
                   "or nothing found and the artist's other songs nearly all in one language.",
                   "Pre-selected: the artist sings that language in most of its songs.")
     picked = tick_items("Tick the languages to save (space toggles, enter confirms):", proposals,

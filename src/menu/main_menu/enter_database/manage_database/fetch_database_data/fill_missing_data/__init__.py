@@ -30,7 +30,7 @@ def fill_missing_for_import(result) -> None:
     already there (`result.entries`, an ImportResult) - in one checkbox list,
     then those steps for just these songs, with the entries they were read
     from (a title's year, "Legenda (1991)", for the years). Genres aren't
-    offered yet. Albums go first: Years looks only at songs with an album."""
+    offered yet. Albums go first: Years looks a song with an album up by it."""
     entries = getattr(result, "entries", None) or {}
     if not entries:
         return
@@ -45,7 +45,7 @@ def fill_missing_for_import(result) -> None:
                                           checked=True))
     if without_year:
         choices.append(questionary.Choice(title=f"Years ({len(without_year)} song(s) without one, "
-                                                f"looked up for those with an album)", value=_YEARS, checked=True))
+                                                f"by the album, else the title)", value=_YEARS, checked=True))
     if not choices:
         return
     picked = questionary.checkbox(

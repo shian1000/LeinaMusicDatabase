@@ -1620,6 +1620,28 @@ def video_durations_via_api(video_ids, on_found=None) -> dict | None:
     return result
 
 
+def audio_languages_via_api(video_ids) -> dict | None:
+    """{video id: its snippet.defaultAudioLanguage, a BCP-47 code ("en",
+    "pt-BR", "zxx"), "" when the uploader set none or the video isn't listed},
+    batched (one quota unit per 50 videos). Only with the YOUTUBE_API_KEY -
+    never the OAuth token; None without it or when the API fails."""
+    if not Settings.youtube_api_key:
+        return None
+    batches = _videos_list(video_ids, "snippet", "audio languages")
+    if batches is None:
+        return None
+    result = {}
+    try:
+        for chunk, response in batches:
+            listed = {item["id"]: item.get("snippet", {}) for item in response.get("items", [])}
+            result.update({video_id: listed.get(video_id, {}).get("defaultAudioLanguage") or ""
+                           for video_id in chunk})
+    except Exception as exc:
+        flog(f"[YouTube API] videos.list (audio languages) failed: {exc}")
+        return None
+    return result
+
+
 def is_video_id_valid(video_id: str | None, timeout: int = 20) -> bool:
     """Check whether a stored YouTube video ID still resolves to a watchable
     video.

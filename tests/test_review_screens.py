@@ -289,7 +289,7 @@ def test_unsure_years_start_ticked_and_ticked_ones_are_saved(monkeypatch, capsys
     # The package's fill_missing_years() function shadows the module of that name
     fmy = importlib.import_module(
         "menu.main_menu.enter_database.manage_database.fetch_database_data.fill_missing_data.fill_missing_years")
-    songs = {name: SimpleNamespace(title=name) for name in ("a", "b", "c")}
+    songs = {name: SimpleNamespace(title=name, project_id=None) for name in ("a", "b", "c")}
     written = []
     monkeypatch.setattr(fmy, "edit_db_entry", lambda song, field, value: written.append((song.title, value)))
     monkeypatch.setattr("utils.common.text_utils.copy_to_clipboard", lambda text: None)

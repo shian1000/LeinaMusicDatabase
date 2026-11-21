@@ -6,12 +6,24 @@ step, the songs already stored are offered in a list (find_covers(),
 utils/ui/cover_review.py). An artist only covered keeps its row
 (artist_reassignment.is_unused()), merges follow through
 song_artists.reassign_additional_artist_links().
+
+songs.cover_translated (migration 0026): 1 = a translated cover, with words of
+its own in another language than the original's (Mistmorn's Ukrainian "Дарма"
+of American Football's "Never Meant"). Its lyrics are never looked up as the
+original's (discoveries_manager._lyrics_queries()), nor its language read from
+them; a cover that isn't translated takes its original's language
+(languages.original_language(), original_song() here).
 """
 from dataclasses import dataclass
 
+from sqlalchemy.orm import object_session
+
 from utils.common.cover_names import read_cover
 from utils.common.normalizer import normalize
+from utils.common.script_utils import matching_key
 from utils.database.datatables import Artist, Song
+from utils.database.latin_names import song_titles
+from utils.database.song_artists import song_has_artist_id
 from utils.common.artist_credits import split_synonyms
 
 
@@ -101,12 +113,59 @@ def set_covered_artist(songs: list[Song], artist: Artist | None) -> None:
         raise ValueError(f"'{artist.name}' is the artist of one of these songs")
     for song in songs:
         song.covered_artist = artist
+        _drop_translated_of_non_cover(song)
 
 
 def set_covered_title(songs: list[Song], title: str | None) -> None:
     """The original's title (None: not known). The caller commits."""
     for song in songs:
         song.covered_title = title
+        _drop_translated_of_non_cover(song)
+
+
+def is_marked_cover(song) -> bool:
+    """Marked as a cover: a covered artist or the original's title is stored."""
+    return bool(getattr(song, "covered_artist", None) is not None or getattr(song, "covered_artist_id", None)
+                or getattr(song, "covered_title", None))
+
+
+def is_translated(song) -> bool:
+    return bool(getattr(song, "cover_translated", None))
+
+
+def _drop_translated_of_non_cover(song) -> None:
+    if not is_marked_cover(song):
+        song.cover_translated = None
+
+
+def set_cover_translated(songs: list[Song], translated: bool) -> None:
+    """Mark covers as translated (words of their own in another language than
+    the original's) or not. ValueError, with nothing changed, for a song not
+    marked as a cover. The caller commits."""
+    if translated and not all(is_marked_cover(song) for song in songs):
+        raise ValueError("only a cover can be a translated cover - set its covered artist or title first")
+    for song in songs:
+        song.cover_translated = 1 if translated else None
+
+
+def _title_keys(titles) -> set[str]:
+    """Spelling-free keys of titles, across alphabets ("Kroŭ by vada" is "Кроў бы вада")."""
+    return {key for title in titles if title for key in (normalize(title), matching_key(title)) if key}
+
+
+def original_song(song, session=None) -> Song | None:
+    """The original of a cover of an artist, when music.db has it: a song of
+    the covered artist titled like the cover's covered_title or its own title,
+    not a cover itself; a plain song before a version of it. Reads only."""
+    covered_id = getattr(song, "covered_artist_id", None)
+    session = session or object_session(song)
+    if covered_id is None or session is None:
+        return None
+    keys = _title_keys([song.covered_title, song.title])
+    candidates = session.query(Song).filter(song_has_artist_id(covered_id), Song.id != song.id,
+                                            Song.covered_artist_id.is_(None), Song.covered_title.is_(None))
+    matches = [candidate for candidate in candidates if keys & _title_keys(song_titles(candidate))]
+    return min(matches, key=lambda candidate: (candidate.version_kind is not None, candidate.id), default=None)
 
 
 def is_known_work(session, name: str) -> bool:

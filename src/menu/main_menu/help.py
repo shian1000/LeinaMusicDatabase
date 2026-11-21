@@ -36,7 +36,8 @@ LIBRARIES = [
                "checks), brotli, pycryptodomex, websockets - are what YouTube needs today."),
     ("google-api-python-client, google-auth, google-auth-oauthlib",
      "The YouTube Data API: creating YouTube playlists from songs, reading private playlists, and "
-     "checking many videos at once with an API key."),
+     "checking many videos at once with an API key (whether they play, their lengths, their audio "
+     "language)."),
     ("langdetect, pycountry", "Guessing a song's language from its lyrics, and the language's name."),
     ("RapidFuzz", "Fuzzy comparison of names when copying songs' files from the music library."),
     ("universal_pathlib, smbprotocol", "Paths that may be a local folder or an smb:// network share "
@@ -248,10 +249,10 @@ While making a playlist from a folder - Users -> Enter user database -> "Create 
 Each of these (mp3 tags, a YouTube playlist, Leina Radio's requests) ends by asking which missing
 data to fill in for the imported songs - albums, then years (a year in a video's or file's title,
 'Song (1991)', is offered too). Later: Manage database -> Fetch database data -> "Fill missing data"
-(albums, years, genres, lyrics, languages for the whole catalog), "Check stored years" (a year
-later than the song's first release on MusicBrainz is a reissue's or a compilation's - offered to
-change, in one list), "Import covers from mp3 tags", and Settings -> Server -> "Index music
-library" to link the files.
+(albums, years, genres, lyrics, languages for the whole catalog; Years also checks the years
+already stored - one later than the song's first release on MusicBrainz is a reissue's or a
+compilation's, offered to change in one list), "Import covers from mp3 tags", and Settings ->
+Server -> "Index music library" to link the files.
 """,
     "Keeping the catalog clean": """
 All in Enter database -> Manage database:
@@ -277,6 +278,9 @@ All in Enter database -> Manage database:
     real artist and is shown "Project: Artist - Title". The dictionary, and stored songs to mark.
   - Find covers: songs whose titles say they're covers, marked with the artist covered and shown
     'Artist - Title (Original cover)'. For titles saying only 'cover' it asks whose song it is.
+    Then it asks which are translated covers - words of their own in another language (also Song
+    actions -> 'Set translated cover'): their lyrics are looked up only as their own, while a cover
+    singing the original's words takes the original song's language.
   - Resolve albums with several artists: one album title shared by different artists.
   - Resolve soundtrack album names: one soundtrack spelt several ways, brought to 'Title OST'.
   - Soundtrack works: films, games, anime a song gets credited to with no 'OST' in the name

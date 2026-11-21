@@ -281,7 +281,7 @@ What each library the program uses itself is for (also in the app: Help → Libr
 - **beautifulsoup4** — Reads the web pages the lookups get back (Wikipedia, Spotify, Google, Genius).
 - **selenium** — Drives a hidden Chrome/Chromium for the lookups that only work in a real browser (Google, Genius, Spotify).
 - **yt-dlp** — YouTube: searching videos for songs, whether a video still plays, importing playlists and downloading a song's audio. Its extras - deno and yt-dlp-ejs (YouTube's JavaScript checks), brotli, pycryptodomex, websockets - are what YouTube needs today.
-- **google-api-python-client, google-auth, google-auth-oauthlib** — The YouTube Data API: creating YouTube playlists from songs, reading private playlists, and checking many videos at once with an API key.
+- **google-api-python-client, google-auth, google-auth-oauthlib** — The YouTube Data API: creating YouTube playlists from songs, reading private playlists, and checking many videos at once with an API key (whether they play, their lengths, their audio language).
 - **langdetect, pycountry** — Guessing a song's language from its lyrics, and the language's name.
 - **RapidFuzz** — Fuzzy comparison of names when copying songs' files from the music library.
 - **universal_pathlib, smbprotocol** — Paths that may be a local folder or an smb:// network share (the music library on a NAS).

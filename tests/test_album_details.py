@@ -205,3 +205,6 @@ def test_the_manager_tries_the_next_module_after_a_reissues_year(monkeypatch):
     result = dm.discover_release_year_result("Andrzej Zaucha", "Anawa", False,
                                              [*modules, ("other", "Other", other)], album_songs=[song])
     assert result.year == 2005
+    # A project's recording (held=False) is years after its studio song by nature
+    assert dm.discover_release_year_result("Andrzej Zaucha", "Męskie Granie", False, modules, album_songs=[song],
+                                           held=False).year == 2014
