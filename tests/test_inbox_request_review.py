@@ -457,6 +457,28 @@ def test_a_field_correction_is_saved(env):
     assert _folder(env, pr.PROCESSED) == ["2026-10-14_09-00-00_001.db"]
 
 
+def test_a_covered_artist_is_marked_without_touching_the_title(env, capsys):
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", fields=[(4601, "covered_artist_id", None, "Radiohead")])
+    env["answers"].add(REVIEW_LABEL, 'Mark it as a cover of a new artist "Radiohead"')
+
+    review.resolve_new_requests()
+
+    song = env["songs"][4601]
+    assert song.covered_artist.name == "Radiohead" and song.title == "Chromatic"
+    assert "Now: Elise Trouw - Chromatic (Radiohead cover)" in capsys.readouterr().out
+
+
+def test_a_typed_covered_artist_cant_be_the_songs_own(env, capsys):
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", fields=[(4601, "covered_artist_id", None, "Radiohed")])
+    env["answers"].add(REVIEW_LABEL, "Type another artist", "Elise Trouw",
+                       "Type another artist", "Radiohead", 'Mark it as a cover of a new artist "Radiohead"')
+
+    review.resolve_new_requests()
+
+    assert env["songs"][4601].covered_artist.name == "Radiohead"
+    assert "the song's own artist" in capsys.readouterr().out
+
+
 def test_keeping_the_current_value_changes_nothing(env):
     _request(env["inbox"], "2026-10-14_09-00-00_001.db", fields=[(4601, "year", 2023, 2022)])
     env["answers"].add(REVIEW_LABEL, "Keep the current value (2023)")

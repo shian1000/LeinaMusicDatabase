@@ -62,3 +62,25 @@ reaches phones with the next copy for sharing and the next public release.
 
 Before the app reads the column it shows those rows as "Artist - Title". Nothing
 breaks, but the credit is no longer visible there.
+
+## The way back: marking covers in Leina Radio (2026-11-21)
+
+Answer to the app's `docs/handoffs/musicdatabase-cover-songs.md`: accepted as written, nothing to
+change on the app side.
+
+- `("songs", "covered_artist_id")` and `("songs", "covered_title")` are correctable fields now
+  (`request_format.CORRECTABLE_FIELDS`, `inbox_field_corrections.FIELDS`), so such request files
+  no longer wait in the inbox.
+- `covered_artist_id`: `new_value` is read as a name, trimmed, compared with `normalize()` (the
+  Latin form counts too). The review offers the existing artists of that name, else a new artist;
+  NULL clears only the covered artist. A name that is the song's own artist can't be stored (the
+  owner can only type another one). The automatic pass saves it from a user with
+  `apply_corrections` only when exactly one artist has that name and the old covered artist keeps a
+  song or another cover; otherwise the owner decides.
+- Taking it back works as you describe: a newer row naming the artist music.db has (NULL when
+  none) is "already set".
+- `covered_title`: plain text, empty = NULL.
+- A song left with neither column set is no cover any more, and its `cover_translated` is cleared
+  with it (that column isn't in the public copy yet, see
+  [`translated-covers-for-musicdatabaseapp.md`](translated-covers-for-musicdatabaseapp.md)).
+- `songs.title` is never touched by these corrections.

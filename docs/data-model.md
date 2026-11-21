@@ -282,6 +282,8 @@ aliases       other spellings, comma-separated
   no songs of its own: it isn't removed as unused, and merges carry the reference over.
   `Song.covered_title` (migration `0021`) is the original's title when it differs from the cover's, or
   when no artist can be named (a traditional song); only then does the credit show it.
+  Leina Radio sends both as field corrections, the covered artist by name (runbook → "Requests from
+  the phone").
   Owner's choice: a game whose soundtrack is covered goes in as the covered artist ("Power Blade 2"),
   a traditional song only as `covered_title` ("Bella Ciao"), never as an artist.
   `Song.cover_translated` (migration `0026`): 1 = a translated cover, with words of its own in another

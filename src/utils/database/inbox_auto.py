@@ -24,7 +24,9 @@ What it does with the files in new/:
   artist of that name, an album twin) nor leave the choice of renaming a
   whole album; the song's artist (songs.artist_id) only goes to an artist
   that exists, alone with that name and not on the song yet, and only when
-  the old artist keeps other songs (no new artist, no emptied one); a YouTube link correction (songs.youtube_video_id /
+  the old artist keeps other songs (no new artist, no emptied one), and a
+  covered artist (songs.covered_artist_id) by the same rule, or emptied when
+  that leaves the old one something; a YouTube link correction (songs.youtube_video_id /
   music_video_youtube_id) also needs its video to play here and not to be
   one found bad before for the song ("N/A" and empty need no check);
 - a song Leina Radio asked to have added is never added here (the owner
@@ -60,6 +62,7 @@ from utils.database.inbox_field_corrections import (
     collect_field_correction_cases,
     latin_form_to_check,
     rename_looks_like_other_artist,
+    replaced_artist,
     song_album_to_rename,
 )
 from utils.database.inbox_found_links import (
@@ -161,16 +164,18 @@ def field_correction_verdict(session, case, sender: str | None, permitted: bool)
         return "the song has another title now"
     if case.not_on_song:
         return "that artist / album isn't the song's any more"
-    if case.is_artist:
-        matches = artist_choices(session, case, case.new_value)
-        if not matches:
-            return "no artist of that name yet (a new one would be made)"
-        if len(matches) > 1:
-            return "several artists have that name"
-        if additional_artist_role(case.row, matches[0]):
-            return "that artist is already credited on the song"
+    if case.names_artist:
+        if case.new_value is not None:
+            matches = artist_choices(session, case, case.new_value)
+            if not matches:
+                return "no artist of that name yet (a new one would be made)"
+            if len(matches) > 1:
+                return "several artists have that name"
+            if case.is_artist and additional_artist_role(case.row, matches[0]):
+                return "that artist is already credited on the song"
         if artist_left_empty(session, case):
-            return "the song's artist would be left without songs"
+            return ("the covered artist would be left without songs or covers" if case.is_covered_artist
+                    else "the song's artist would be left without songs")
     if artist_twins(session, case, case.new_value):
         return "another artist already has that name (a merge?)"
     if rename_looks_like_other_artist(case, case.new_value):
@@ -259,11 +264,11 @@ def field_correction_blocker(session, case) -> str | None:
         return "the song it was corrected from is gone"
     if case.not_on_song:
         return "that artist / album isn't the song's any more"
-    if case.is_artist:
+    if case.names_artist and case.new_value is not None:
         matches = artist_choices(session, case, case.new_value)
         if len(matches) > 1:
             return "several artists have that name"
-        if matches and additional_artist_role(case.row, matches[0]):
+        if case.is_artist and matches and additional_artist_role(case.row, matches[0]):
             return "that artist is already credited on the song"
     if artist_twins(session, case, case.new_value):
         return "another artist already has that name (a merge?)"
@@ -286,8 +291,8 @@ def field_correction_facts(session, case, sender: str | None, permitted: bool) -
         "similarity": round(similarity(old, new), 3) if isinstance(old, str) and isinstance(new, str) else None,
         "changed_since": bool(case.changed_since), "other_values_asked": bool(case.earlier_values),
         "title_changed": bool(case.title_differs),
-        "new_artist": case.is_artist and not artist_choices(session, case, new),
-        "old_artist_left_empty": bool(case.is_artist and artist_left_empty(session, case)),
+        "new_artist": case.names_artist and new is not None and not artist_choices(session, case, new),
+        "old_artist_left_empty": bool(case.names_artist and artist_left_empty(session, case)),
         "looks_like_spelling_fix": not rename_looks_like_other_artist(case, new),
         "whole_album_could_be_renamed": song_album_to_rename(case) is not None,
         "latin_form_to_check": bool(latin_form_to_check(case, new)),
@@ -297,8 +302,11 @@ def field_correction_facts(session, case, sender: str | None, permitted: bool) -
 
 
 def _current_shown(case):
-    """The field's value as the report shows it: the song's artist by name, not id."""
-    return case.row.artist.name if case.is_artist else case.current
+    """The field's value as the report shows it: the song's (covered) artist by name, not id."""
+    if case.names_artist:
+        artist = replaced_artist(case)
+        return artist.name if artist is not None else None
+    return case.current
 
 
 def _applied(session, case, apply) -> bool:

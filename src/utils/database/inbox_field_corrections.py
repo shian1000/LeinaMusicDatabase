@@ -58,6 +58,15 @@ keeps its other songs; one left with none is the review's question. Taken
 back, new_value is the old artist's name: ALREADY_SET as soon as the song's
 artist is called that.
 
+A cover (app handoff musicdatabase-cover-songs.md): songs.covered_artist_id
+comes like songs.artist_id, the covered artist's NAME as new_value, or NULL =
+not a cover of an artist; answered with the same decisions, applied by
+covers.set_covered_artist() - an existing artist of that name, else a new one
+(it may have no songs of its own). Never the song's own artist
+(covered_artist_error()). songs.covered_title is plain text
+(covers.set_covered_title()). The title is never touched; a song left with
+neither is no cover, and loses its translated-cover mark.
+
 An artists.name correction (a rename of the row, all its songs) whose new
 name doesn't resemble the old one ("Paramore" -> "David Byrne") is more
 likely meant as "this song is another artist's": the review then offers
@@ -79,6 +88,7 @@ from utils.common.normalizer import normalize
 from utils.common.text_utils import title_resembles
 from utils.database.albums import album_key, album_twin, rename_album
 from utils.database.artist_reassignment import artists_named, set_primary_artist
+from utils.database.covers import set_covered_artist, set_covered_title
 from utils.database.datatables import Album, Artist, Song
 from utils.database.genres import clean_genres, set_song_genre
 from utils.database.inbox_requests import (
@@ -113,6 +123,7 @@ MUSIC_VIDEO = "music video"  # a video id
 GENRE = "genre"  # comma-separated genres, see utils/database/genres.py
 SONG_KIND = "song kind"  # constants.SONG_KINDS, empty = an ordinary song
 ARTIST = "artist"  # an artist's name: the song is credited to that artist
+COVERED_ARTIST = "covered artist"  # an artist's name: the song is a cover of that artist
 VIDEO_KINDS = (YOUTUBE_LINK, MUSIC_VIDEO)
 
 # What the phone may correct: (table, column) -> (kind, may be emptied).
@@ -130,6 +141,8 @@ FIELDS = {
     ("songs", "genre"): (GENRE, True),
     ("songs", "kind"): (SONG_KIND, True),
     ("songs", "artist_id"): (ARTIST, False),
+    ("songs", "covered_artist_id"): (COVERED_ARTIST, True),
+    ("songs", "covered_title"): (TEXT, True),
     ("artists", "name"): (TEXT, False),
     ("artists", "name_latin"): (TEXT, True),
     ("artists", "origin"): (TEXT, True),
@@ -153,6 +166,8 @@ FIELD_LABELS = {
     ("songs", "genre"): "song genre",
     ("songs", "kind"): "song or full album",
     ("songs", "artist_id"): "song's artist",
+    ("songs", "covered_artist_id"): "covered artist",
+    ("songs", "covered_title"): "original's title",
     ("artists", "name"): "artist's name",
     ("artists", "name_latin"): "artist's name in Latin letters",
     ("artists", "origin"): "artist's origin",
@@ -176,8 +191,10 @@ ACCEPT = "accepted"
 EDIT = "edited"
 RENAME_ALBUM = "renamed album"  # a songs.album correction applied to its whole album
 MERGE_ARTIST = "merged artist"  # an artists.name correction naming another artist
-MOVE_TO_ARTIST = "credited to artist"  # a songs.artist_id correction, value = the existing Artist
-NEW_ARTIST = "credited to new artist"  # a songs.artist_id correction, value = the new artist's name
+# A songs.artist_id / covered_artist_id correction, value = the existing Artist
+MOVE_TO_ARTIST = "credited to artist"
+# The same, value = the new artist's name
+NEW_ARTIST = "credited to new artist"
 REJECT = "rejected"
 
 
@@ -280,7 +297,8 @@ class FieldCorrectionCase:
     @property
     def error(self) -> str | None:
         """The phone's value can't be stored as it is (only editing is offered)."""
-        return coerce_field_value(self.table_name, self.column_name, self.latest.new_value)[1]
+        value, error = coerce_field_value(self.table_name, self.column_name, self.latest.new_value)
+        return error or covered_artist_error(self, value)
 
     @property
     def is_video(self) -> bool:
@@ -291,6 +309,16 @@ class FieldCorrectionCase:
     def is_artist(self) -> bool:
         """songs.artist_id: the value is an artist's name, not the id."""
         return (self.table_name, self.column_name) == ("songs", "artist_id")
+
+    @property
+    def is_covered_artist(self) -> bool:
+        """songs.covered_artist_id: an artist's name too, or empty."""
+        return (self.table_name, self.column_name) == ("songs", "covered_artist_id")
+
+    @property
+    def names_artist(self) -> bool:
+        """Either: the value names the artist to put on the song."""
+        return self.is_artist or self.is_covered_artist
 
     @property
     def video_id(self) -> str | None:
@@ -391,15 +419,28 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
     return list(cases.values())
 
 
+def _called(artist: Artist | None, name) -> bool:
+    """`artist` is called `name`, normalized, Latin form too."""
+    wanted = normalize(name or "")
+    return artist is not None and bool(wanted) and \
+        wanted in (normalize(artist.name or ""), normalize(artist.name_latin or ""))
+
+
 def holds(case: FieldCorrectionCase, value) -> bool:
-    """The database already has `value` (for songs.artist_id: the song's
-    artist is called that, normalized, Latin form too)."""
-    if case.is_artist:
-        artist = case.row.artist if case.row is not None else None
-        wanted = normalize(value or "")
-        return artist is not None and bool(wanted) and \
-            wanted in (normalize(artist.name or ""), normalize(artist.name_latin or ""))
+    """The database already has `value` (for songs.artist_id /
+    covered_artist_id: that artist is called that; an empty covered artist:
+    there's none)."""
+    if case.names_artist:
+        artist = replaced_artist(case)
+        return artist is None if value is None else _called(artist, value)
     return same_value(case.current, value)
+
+
+def covered_artist_error(case: FieldCorrectionCase, name) -> str | None:
+    """Why `name` can't be the song's covered artist: it's the song's own."""
+    if not case.is_covered_artist or case.row is None or not _called(case.row.artist, name):
+        return None
+    return f'"{name}" is the song\'s own artist'
 
 
 def _record_already_set(decisions: dict, case: FieldCorrectionCase) -> None:
@@ -475,11 +516,11 @@ def artist_twins(session, case: FieldCorrectionCase, name) -> list[Artist]:
 
 def credit_target_song(case: FieldCorrectionCase) -> Song | None:
     """The song a MOVE_TO_ARTIST / NEW_ARTIST answer credits to another
-    artist: a songs.artist_id correction's row, or for an artists.name
+    artist: a songs.artist_id / covered_artist_id correction's row, or for an artists.name
     correction the song it was made from, when this artist is that song's
     primary one (the phone may send a rename where only the song was meant).
     None when the case can't be answered that way."""
-    if case.is_artist:
+    if case.names_artist:
         return case.row
     if (case.table_name, case.column_name) == ("artists", "name") and case.row is not None \
             and case.song is not None and case.song.artist_id == case.row.id:
@@ -506,12 +547,25 @@ def artist_choices(session, case: FieldCorrectionCase, name) -> list[Artist]:
     return artists_named(session, name, exclude=song.artist)
 
 
-def artist_left_empty(session, case: FieldCorrectionCase) -> bool:
-    """Moving the song away would leave its artist without songs."""
+def replaced_artist(case: FieldCorrectionCase) -> Artist | None:
+    """The artist an answer crediting the song elsewhere takes off it: its
+    primary one, or for songs.covered_artist_id the covered one (None: none)."""
     song = credit_target_song(case)
-    if song is None or song.artist is None:
+    if song is None:
+        return None
+    return song.covered_artist if case.is_covered_artist else song.artist
+
+
+def artist_left_empty(session, case: FieldCorrectionCase) -> bool:
+    """Moving the song away would leave its artist without songs (a covered
+    artist: without songs and covers)."""
+    old = replaced_artist(case)
+    if old is None:
         return False
-    return count_artist_songs(session, song.artist_id) <= 1
+    if case.is_covered_artist:
+        return count_artist_songs(session, old.id) == 0 and \
+            session.query(Song).filter(Song.covered_artist_id == old.id).count() <= 1
+    return count_artist_songs(session, old.id) <= 1
 
 
 def album_title_twin(session, case: FieldCorrectionCase, title) -> Album | None:
@@ -563,14 +617,17 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
     (`value` = the existing Artist), NEW_ARTIST (`value` = a name, else the
     phone's) or ACCEPT (the one artist of the phone's name, a new one when
     there is none); `keep_old_as` keeps the old artist on the song as an
-    additional one (set_primary_artist()). The old artist is left as it is,
-    even with no songs. An artists.name correction may be answered with
+    additional one (set_primary_artist()). A songs.covered_artist_id one the
+    same way, the song marked as a cover of that artist (ACCEPT of an empty
+    value: of none). The old artist is left as it is, even with no songs. An artists.name correction may be answered with
     MOVE_TO_ARTIST / NEW_ARTIST too (credit_target_song()): only its song
     moves, the artist isn't renamed."""
-    if case.is_artist and decision in (ACCEPT, NEW_ARTIST, MOVE_TO_ARTIST):
+    if case.names_artist and decision in (ACCEPT, NEW_ARTIST, MOVE_TO_ARTIST):
         if decision == ACCEPT and case.error:
             raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
-        if decision == ACCEPT:
+        if decision == ACCEPT and case.new_value is None:
+            value = None  # songs.covered_artist_id: not a cover of an artist
+        elif decision == ACCEPT:
             matches = artist_choices(session, case, case.new_value)
             if len(matches) > 1:
                 raise ValueError(f'Several artists are called "{case.new_value}" - pick one')
@@ -578,6 +635,7 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
         elif decision == NEW_ARTIST:
             value, error = coerce_field_value(case.table_name, case.column_name,
                                               case.new_value if value is None else value)
+            error = error or ("can't be empty" if value is None else covered_artist_error(case, value))
             if error:
                 raise ValueError(error)
         elif not isinstance(value, Artist):
@@ -591,8 +649,8 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
                 raise ValueError(error)
         elif not isinstance(value, Artist):
             raise ValueError("MOVE_TO_ARTIST needs the Artist to credit the song to")
-    elif case.is_artist and decision != REJECT:
-        raise ValueError("The song's artist is answered with MOVE_TO_ARTIST or NEW_ARTIST")
+    elif case.names_artist and decision != REJECT:
+        raise ValueError(f"The {case.label} is answered with MOVE_TO_ARTIST or NEW_ARTIST")
     elif decision == ACCEPT:
         if case.error:
             raise ValueError(f"Leina Radio's value can't be stored: {case.error}")
@@ -617,7 +675,11 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
             session.flush()
         else:
             target = value
-        set_primary_artist(session, credit_target_song(case), target, keep_old_as)
+        if case.is_covered_artist:
+            set_covered_artist([case.row], target)
+        else:
+            set_primary_artist(session, credit_target_song(case), target, keep_old_as)
+        session.flush()
         value = target.id
     elif decision == MERGE_ARTIST:
         from utils.database.database_management import merge_artists_in_db
@@ -637,6 +699,10 @@ def apply_field_correction(session, case: FieldCorrectionCase, decision: str, va
             value = case.row.genre
         elif case.column_name == "kind":
             set_song_kind([case.row], value)
+        elif case.is_covered_artist:
+            set_covered_artist([case.row], None)
+        elif case.column_name == "covered_title":
+            set_covered_title([case.row], value)
         else:
             setattr(case.row, case.column_name, value)
         if case.column_name == "youtube_video_id":

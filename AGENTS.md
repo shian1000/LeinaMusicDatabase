@@ -174,7 +174,8 @@ non-trivial work in that area.
   `inbox_field_corrections.py` does the same for the phone's field corrections (title, year, an
   artist's origin, an album's title, a YouTube link or music video set by hand, ...; the song's
   artist, `songs.artist_id`, comes as a name and credits only that song to the artist of that name
-  via `set_primary_artist()`, never renaming the shared row; an `artists.name` rename to a name not
+  via `set_primary_artist()`, never renaming the shared row; a cover's `covered_artist_id` comes the
+  same way, by name, and `covered_title` as text, both through `covers.py`; an `artists.name` rename to a name not
   resembling the old one is offered as crediting only its song first, and never saved by the
   automatic pass), `inbox_found_links.py` for links the phone found for
   songs without one (grouped and decided with the dead links' `group_link_reports()` /

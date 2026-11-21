@@ -113,6 +113,10 @@ def _year(song_id=1, title="Chromatic", old=2019, new=2020):
     return ("songs", song_id, "year", old, new, song_id, title)
 
 
+def _covered(name, old=None):
+    return ("songs", 1, "covered_artist_id", old, name, 1, "Chromatic")
+
+
 def _run(env):
     return ia.auto_resolve(env["session"], pr.read_new_requests())
 
@@ -291,6 +295,8 @@ def test_correction_from_a_permitted_user_is_saved(env):
     ("ania_2026-10-14_10-00-00_001.db", _year(title="Chromatic (Live)"), "another title"),
     ("ania_2026-10-14_10-00-00_001.db", ("artists", 10, "name", "Elise Trouw", "Vulfpeck", 1, "Chromatic"),
      "another artist already has that name"),
+    ("ania_2026-10-14_10-00-00_001.db", _covered("Radiohead"), "a new one would be made"),
+    ("ania_2026-10-14_10-00-00_001.db", _covered("Elise Trouw"), "the song's own artist"),
 ])
 def test_correction_left_for_review_with_a_note(env, name, row, note):
     _request(env["inbox"], name, corrections=[row])
@@ -303,6 +309,16 @@ def test_correction_left_for_review_with_a_note(env, name, row, note):
     cases = fc.collect_field_correction_cases(env["session"], pr.read_review_requests())
     pr.load_case_checks(cases, max_age_hours=24)
     assert note in cases[0].auto_note
+
+
+def test_covered_artist_from_a_permitted_user_is_saved(env):
+    _request(env["inbox"], "ania_2026-10-14_10-00-00_001.db", corrections=[_covered("vulfpeck")])
+
+    result = _run(env)
+
+    assert env["songs"][0].covered_artist_id == 11 and env["songs"][0].artist_id == 10
+    [change] = result.changes
+    assert 'covered artist empty -> "Vulfpeck"' in change["text"]
 
 
 def test_latin_form_correction_from_a_permitted_user_is_saved(env):

@@ -38,7 +38,9 @@ from utils.database.inbox_field_corrections import (
     collect_field_correction_cases,
     credit_target_song,
     latin_form_to_check,
+    covered_artist_error,
     rename_looks_like_other_artist,
+    replaced_artist,
     replaced_video,
     song_album_to_rename,
 )
@@ -57,6 +59,7 @@ from utils.database.artist_reassignment import is_unused
 from utils.database.datatables import Artist
 from utils.database.song_artists import additional_artist_role, count_artist_songs, song_artist_label
 from utils.ui.artist_change import ask_old_artist_role, offer_removing_emptied
+from utils.common.cover_names import title_with_cover
 from utils.common.romanize import suggest_latin
 from utils.database.inbox_requests import (
     INBOX_DIR,
@@ -314,7 +317,7 @@ def _value(value) -> str:
 
 
 def _artist_ref(session, artist_id) -> str:
-    """The song's artist as shown: songs.artist_id by name."""
+    """The song's (covered) artist as shown: songs.artist_id by name."""
     artist = session.get(Artist, artist_id) if isinstance(artist_id, int) else None
     if artist is None:
         return f"#{artist_id} [dim](no longer in the database)[/dim]" if artist_id is not None else _value(None)
@@ -358,7 +361,7 @@ def _show_correction(session, case, position: str) -> None:
     if case.not_on_song:
         kind = "artist" if case.table_name == "artists" else "album"
         show(f"    [red]This {kind} isn't that song's any more - check it's the one meant.[/red]")
-    had, now = ((_artist_ref(session, report.old_value), _artist_ref(session, case.current)) if case.is_artist
+    had, now = ((_artist_ref(session, report.old_value), _artist_ref(session, case.current)) if case.names_artist
                 else (_field_value(case, report.old_value), _field_value(case, case.current)))
     show(f"    Leina Radio had: {had}")
     changed = "  [yellow](changed since Leina Radio's copy)[/yellow]" if case.changed_since else ""
@@ -373,6 +376,9 @@ def _show_correction(session, case, position: str) -> None:
         show(f"    [dim]Earlier asked for: {', '.join(_field_value(case, v) for v in case.earlier_values)}[/dim]")
     if case.is_artist:
         show("    [dim]Only this song moves to that artist - its current artist is not renamed.[/dim]")
+    elif case.is_covered_artist:
+        show("    [dim]Marks only this song" + (" as a cover of that artist" if case.new_value is not None
+             else " as no cover of an artist (its original's title stays)") + " - the title isn't changed.[/dim]")
     elif rename_looks_like_other_artist(case, case.new_value) and credit_target_song(case) is not None:
         show("    [yellow]The new name doesn't look like a spelling fix - maybe only this song is by another "
               "artist.[/yellow]")
@@ -402,21 +408,27 @@ def _value_notes(session, case, value) -> list:
 
 
 def _artist_target_choices(session, case, name, prefix: str = "") -> list:
-    """The answers crediting the song to an artist called `name`."""
+    """The answers crediting the song to (or marking it a cover of) an artist called `name`."""
+    verb, verb_new = (("Mark the song as a cover of", "Mark it as a cover of") if case.is_covered_artist
+                      else ("Credit the song to", "Credit it to"))
     choices = [questionary.Choice(
-        f'{prefix}Credit the song to "{twin.name}" (#{twin.id}, {count_artist_songs(session, twin.id)} song(s))',
+        f'{prefix}{verb} "{twin.name}" (#{twin.id}, {count_artist_songs(session, twin.id)} song(s))',
         (MOVE_TO_ARTIST, twin)) for twin in artist_choices(session, case, name)]
     also = " (another artist of that name)" if choices else ""
-    choices.append(questionary.Choice(f'{prefix}Credit it to a new artist "{name}"{also}', (NEW_ARTIST, name)))
+    choices.append(questionary.Choice(f'{prefix}{verb_new} a new artist "{name}"{also}', (NEW_ARTIST, name)))
     return choices
 
 
 def _correction_choices(session, case) -> list:
-    if case.is_artist:
+    if case.names_artist:
+        old = replaced_artist(case)
+        targets = ([] if case.error
+                   else [questionary.Choice("Save: no cover of an artist", (ACCEPT, None))] if case.new_value is None
+                   else _artist_target_choices(session, case, case.new_value))
         return [
-            *([] if case.error else _artist_target_choices(session, case, case.new_value)),
+            *targets,
             questionary.Choice("Type another artist", EDIT),
-            questionary.Choice(f'Keep "{case.row.artist.name}"', (REJECT, None)),
+            questionary.Choice(f"Keep {_plain(old.name if old is not None else None)}", (REJECT, None)),
             questionary.Choice(_SKIP, _SKIP),
             questionary.Choice(_STOP, _STOP),
         ]
@@ -464,9 +476,13 @@ def _ask_correction(session, case):
             return _STOP
         if answer != EDIT:
             return answer
-        if case.is_artist:
+        if case.names_artist:
             typed = questionary.text("Artist's name:", default=case.new_value or "").ask()
             if not typed or not typed.strip():
+                continue
+            error = covered_artist_error(case, typed.strip())
+            if error:
+                show(f"[red]{escape(error)}[/red]")
                 continue
             picked = questionary.select("Which artist?", choices=[
                 *_artist_target_choices(session, case, typed.strip()),
@@ -494,20 +510,22 @@ def _ask_correction(session, case):
 
 
 def _credit_to_artist(session, case, decision, value) -> None:
-    """A songs.artist_id answer, with the questions around it: what the old
-    artist becomes when the new one is already on the song, and what to do
-    with an old artist left without songs (as in the song editor)."""
+    """A songs.artist_id / covered_artist_id answer, with the questions around
+    it: what the old artist becomes when the new one is already on the song,
+    and what to do with an old artist left without songs (as in the song
+    editor) - a covered one only when another covered artist takes its place."""
     song = credit_target_song(case)
-    old = song.artist
+    old = replaced_artist(case)
     keep_old_as = None
-    if decision == MOVE_TO_ARTIST and additional_artist_role(song, value):
+    if decision == MOVE_TO_ARTIST and not case.is_covered_artist and additional_artist_role(song, value):
         keep_old_as = ask_old_artist_role(song, value)
         if keep_old_as is False:
             return
     apply_field_correction(session, case, decision, value, keep_old_as=keep_old_as)
-    show(f"Now: {escape(song_artist_label(song))} - {escape(song.title)}")
-    if is_unused(session, old):
-        offer_removing_emptied(session, [old], song.artist)
+    show(f"Now: {escape(song_artist_label(song))} - {escape(title_with_cover(song))}")
+    heir = song.covered_artist if case.is_covered_artist else song.artist
+    if old is not None and heir is not None and old.id != heir.id and is_unused(session, old):
+        offer_removing_emptied(session, [old], heir)
 
 
 def _review_field_corrections(session, requests) -> tuple[list, bool]:
@@ -541,7 +559,7 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
         if answer == _SKIP:
             continue
         decision, value = answer
-        if decision in (MOVE_TO_ARTIST, NEW_ARTIST):
+        if decision in (MOVE_TO_ARTIST, NEW_ARTIST) or (case.is_covered_artist and decision == ACCEPT):
             _credit_to_artist(session, case, decision, value)
             submit_global_database_session()
             continue

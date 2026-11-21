@@ -403,6 +403,15 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   [`docs/handoffs/song-kind-for-musicdatabaseapp.md`](../handoffs/song-kind-for-musicdatabaseapp.md)):
   `full_album` or empty (a song); applied through `song_kinds.set_song_kind()`, which files a full
   album with no album under its own title.
+  A cover (2026-11-21, app handoff `musicdatabase-cover-songs.md`, answer in
+  [`docs/handoffs/cover-songs-for-musicdatabaseapp.md`](../handoffs/cover-songs-for-musicdatabaseapp.md)):
+  `songs.covered_artist_id` comes like `songs.artist_id`, with the covered artist's name (NULL =
+  no cover of an artist) - an existing artist of that name is offered, else a new one; never the
+  song's own artist (`covered_artist_error()`, only editing is offered). `songs.covered_title` is
+  plain text. Both through `covers.set_covered_artist()` / `set_covered_title()`, so a song left
+  with neither loses `cover_translated`; the title is never touched. The automatic pass saves a
+  covered artist only when exactly one artist has that name, and leaves for review what would
+  leave the old covered artist with no song nor cover.
   YouTube links set by hand (2026-10-15, app handoff `musicdatabase-youtube-links-by-hand.md`,
   answer [`docs/handoffs/youtube-links-by-hand-for-musicdatabaseapp.md`](../handoffs/youtube-links-by-hand-for-musicdatabaseapp.md)):
   `songs.youtube_video_id` (a video id, `"N/A"` or NULL = search again) and

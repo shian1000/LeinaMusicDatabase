@@ -461,3 +461,92 @@ def test_artist_merge_happens_in_the_session_given(env, monkeypatch):
 
     assert s.get(Artist, 11) is None
     assert s.get(Song, 4603).artist_id == 10
+
+
+# ==================== covers ====================
+
+def _cover(old=None, new="Vulfpeck", row_id=4601, **extra):
+    return _row("songs", row_id, "covered_artist_id", old, new, **extra)
+
+
+def test_covered_artist_is_named_and_matched_to_an_artist(env):
+    s = env["session"]
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_cover()])
+    requests, [case] = _cases(env)
+
+    assert case.status == fc.OPEN and case.label == "covered artist"
+    assert fc.artist_choices(s, case, case.new_value) == [s.get(Artist, 11)]
+    fc.apply_field_correction(s, case, fc.ACCEPT)
+    s.commit()
+
+    song = s.get(Song, 4601)
+    assert song.covered_artist_id == 11 and song.artist_id == 10 and song.title == "Chromatic"
+    assert json.loads((env["inbox"] / "decisions.json").read_text())[case.key]["value"] == 11
+    # Sent again, it's already there
+    _, [again] = _cases(env)
+    assert again.status == fc.ALREADY_SET
+
+
+def test_a_covered_artist_not_in_the_database_is_made(env):
+    s = env["session"]
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_cover(new="  Radiohead ")])
+    _, [case] = _cases(env)
+
+    assert fc.artist_choices(s, case, case.new_value) == []
+    fc.apply_field_correction(s, case, fc.ACCEPT)
+    s.commit()
+
+    assert s.get(Song, 4601).covered_artist.name == "Radiohead"
+
+
+def test_the_songs_own_artist_cant_be_its_covered_one(env):
+    s = env["session"]
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [_cover(new="elise trouw")])
+    _, [case] = _cases(env)
+
+    assert case.error and case.status == fc.OPEN
+    with pytest.raises(ValueError):
+        fc.apply_field_correction(s, case, fc.ACCEPT)
+    with pytest.raises(ValueError):
+        fc.apply_field_correction(s, case, fc.NEW_ARTIST, "Elise Trouw")
+    assert s.get(Song, 4601).covered_artist_id is None and s.query(Artist).count() == 2
+
+
+def test_an_empty_covered_artist_unmarks_only_the_artist(env):
+    s = env["session"]
+    song = s.get(Song, 4601)
+    song.covered_artist_id, song.covered_title, song.cover_translated = 11, "Dean Town", 1
+    s.commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _cover(old=11, new=None),
+        _row("songs", 4602, "covered_artist_id", None, None, song_id=4602, title="Losing Sleep"),
+    ])
+    _, cases = _cases(env)
+
+    # No covered artist on the second song already
+    assert [c.status for c in cases] == [fc.OPEN, fc.ALREADY_SET]
+    fc.apply_field_correction(s, cases[0], fc.ACCEPT)
+    s.commit()
+
+    assert song.covered_artist_id is None
+    # Still a cover of "Dean Town", so still translated
+    assert song.covered_title == "Dean Town" and song.cover_translated == 1
+
+
+def test_covered_title_is_plain_text_and_emptying_it_ends_the_cover(env):
+    s = env["session"]
+    song = s.get(Song, 4601)
+    song.covered_title, song.cover_translated = "Bella Ciao", 1
+    s.commit()
+    _request(env["inbox"], "2026-10-14_10-00-00_001.db", [
+        _row("songs", 4601, "covered_title", "Bella Ciao", " "),
+        _row("songs", 4602, "covered_title", None, "Never Meant", song_id=4602, title="Losing Sleep"),
+    ])
+    _, cases = _cases(env)
+    for case in cases:
+        fc.apply_field_correction(s, case, fc.ACCEPT)
+    s.commit()
+
+    assert [c.label for c in cases] == ["original's title", "original's title"]
+    assert song.covered_title is None and song.cover_translated is None
+    assert s.get(Song, 4602).covered_title == "Never Meant"

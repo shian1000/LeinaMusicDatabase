@@ -14,6 +14,7 @@ CORRECTABLE_FIELDS = frozenset({
     ("songs", "title"), ("songs", "title_latin"), ("songs", "album"), ("songs", "language"), ("songs", "year"),
     ("songs", "track_number"), ("songs", "disc_number"), ("songs", "youtube_video_id"),
     ("songs", "music_video_youtube_id"), ("songs", "genre"), ("songs", "kind"), ("songs", "artist_id"),
+    ("songs", "covered_artist_id"), ("songs", "covered_title"),
     ("artists", "name"), ("artists", "name_latin"), ("artists", "origin"), ("artists", "synonyms"),
     ("albums", "title"), ("albums", "title_latin"), ("albums", "year"), ("albums", "type"),
 })
