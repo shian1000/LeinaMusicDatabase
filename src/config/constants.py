@@ -758,6 +758,7 @@ LANGUAGE_SYNONYMS = {
     "panjabi": "Punjabi",
     "nigerianpigdin": "Nigerian Pidgin",
     "kajkavian": "Croatian (Kajkavian)",  # the owner's one name for it (2026-11-20)
+    "madeuplatin": "Pseudo-Latin",  # the owner's one name for it (2026-11-21: Era, Vangelis, Nox Arcana)
     "unknown": LANGUAGE_UNKNOWN,
     "instrumental": LANGUAGE_INSTRUMENTAL,
 }

@@ -607,7 +607,9 @@ often wrong to save without the owner. Four modules:
   Kajkavian (unsure). Result: 95.6% / 97.3% (sure); of the 29 songs it changes against a label, 20
   better and 9 "worse" that are mostly real mixes the owner labelled with one language (Youssou
   N'Dour - 7 Seconds as "English / French") or wrong labels (Бумбокс - Этажи is Russian). Invented
-  languages (Era, Adiemus, Vangelis) are never read: no rule tells them (owner).
+  languages (Era, Adiemus, Vangelis) are never read: no rule tells them (owner); the owner sets them by
+  hand, as "Invented" or, for made-up Latin, "Pseudo-Latin" (one name: `LANGUAGE_SYNONYMS` turns "Made-up
+  Latin" into it).
   Third round (2026-11-21, after the owner reviewed a dry run of the 807 songs without a language:
   of 108 sure answers 14 wrong), measured the same way - 97.05% / 98.41% before (the labels had
   been corrected since), 97.17% / 98.49% after, 3 better, 1 more unsure, none worse: a line

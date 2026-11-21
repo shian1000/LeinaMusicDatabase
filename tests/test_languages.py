@@ -51,7 +51,7 @@ def session():
     ("Ga / Jamaican Patois", "Ga / Jamaican Patois"),  # capitalised: a name, not Irish's "ga"
     ("Croatian (Kajkavian)", "Croatian (Kajkavian)"),  # the owner's own names stay
     ("Kajkavian", "Croatian (Kajkavian)"),
-    ("Made-up Latin", "Made-up Latin"),
+    ("Made-up Latin", "Pseudo-Latin"),
     ("  ", None),
     (None, None),
 ])
