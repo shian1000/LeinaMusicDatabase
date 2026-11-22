@@ -89,6 +89,7 @@ from utils.database.inbox_requests import (
     save_case_checks,
 )
 from utils.database.inbox_song_requests import (
+    artist_as_musicbrainz_spells,
     collect_song_request_cases,
     mark_song_added,
     song_request_facts,
@@ -487,7 +488,9 @@ def _add_requested_songs(session, cases: list, senders: dict, may, result: AutoR
         if rule is None:
             case.auto_note = "no rule of yours (Settings -> Automation -> My rules) takes it"
             continue
-        taken.append((case, artist, title_as_musicbrainz_spells(artist, title), rule))
+        # The artist spelt as the database or MusicBrainz spells it, as the title
+        taken.append((case, artist_as_musicbrainz_spells(artist, title, matcher),
+                      title_as_musicbrainz_spells(artist, title), rule))
     if not taken:
         return
     # The import works in the menu's sessions: this one must hold no

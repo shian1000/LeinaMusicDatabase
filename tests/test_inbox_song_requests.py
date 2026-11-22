@@ -22,6 +22,7 @@ from utils.database import inbox_field_corrections as fc
 from utils.database import inbox_requests as pr
 from utils.database import inbox_song_requests as sr
 from utils.database.datatables import Artist, Base, RejectedSongRequest, SettledSongRequest, Song, SongIdChange
+from utils.discoveries.import_engine import LocalSongMatcher as RealLocalSongMatcher
 
 REQUEST_SQL = """
 CREATE TABLE request (format INTEGER NOT NULL, created_at TEXT NOT NULL, user_name TEXT, app TEXT NOT NULL);
@@ -739,7 +740,9 @@ def test_a_title_all_in_lower_case_is_added_as_musicbrainz_spells_it(env, monkey
         "name": "MusicBrainz agrees", "question": "song_request", "on": True,
         "conditions": [{"fact": "musicbrainz_title_similarity", "op": ">=", "value": 0.9},
                        {"fact": "closest_song_of_artist_score", "op": "<=", "value": 0.84}]}])
-    spellings = {"unseen": "Unseen", "ocean eyes": "Ocean Eyes (Remix)"}
+    # "Ócean Eyes": an accent apart, MusicBrainz still agrees on the title as
+    # stored; "Ocean Eyes (Remix)" would not (see the "(∆) Breezeblocks" test)
+    spellings = {"unseen": "Unseen", "ocean eyes": "Ócean Eyes"}
     monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
         "found": True, "title_similarity": 1.0, "artist_similarity": 1.0, "mb_score": 100,
         "corrected_title": spellings.get(title, title)})
@@ -758,7 +761,7 @@ def test_a_title_all_in_lower_case_is_added_as_musicbrainz_spells_it(env, monkey
 
     result = ia.auto_resolve(env["session"], pr.read_new_requests())
 
-    # Only the case differs: MusicBrainz's spelling; more than that: as asked.
+    # Only the case differs: MusicBrainz's spelling; more than that (an accent): as asked.
     # "Chromatic II" is too like the artist's own "Chromatic": left for review.
     assert sorted(imported) == [("Elise Trouw", "Unseen"), ("Elise Trouw", "ocean eyes")]
     assert result.to_review == 1
@@ -787,3 +790,109 @@ def test_migration_matches_the_model(tmp_path, migration, table, insert, stamp):
                 for c in inspect(engine).get_columns(table)}
     assert {name: nullable for name, (_, nullable) in migrated.items() if name != "id"} == \
         {name: nullable for name, (_, nullable) in modelled.items() if name != "id"}
+
+
+# ==================== "Preuzeti (2018.05)", 2026-11-22 ====================
+
+@pytest.mark.parametrize("artist, title, song_id", [
+    ("The Paper Kites", "Bloom lyrics", 3758),
+    ("Pokahontaz ft. Bob One", "Czarne lustra prod. White House", 3742),
+    ("dylan.pl", "dylan.pl: Adam dał imiona zwierzętom (Bob Dylan's 'Man Gave Names to All the Animals')", 6971),
+    ("Pezet", "Pezet: Szósty zmysł", 3800),
+])
+def test_a_title_with_request_junk_is_found_in_the_database(env, artist, title, song_id):
+    session = env["session"]
+    kites, pokahontaz, dylan, pezet = (Artist(name=n) for n in ("The Paper Kites", "Pokahontaz", "dylan.pl", "Pezet"))
+    session.add_all([Song(id=3758, title="Bloom", artist=kites), Song(id=3742, title="Czarne lustra", artist=pokahontaz),
+                     Song(id=6971, title="Adam dał imiona zwierzętom", artist=dylan),
+                     Song(id=3800, title="Szósty zmysł", artist=pezet)])
+    session.commit()
+    _request(env["inbox"], "2026-11-22_12-26-15_013.db", [{"title": title, "artist": artist}])
+
+    [case] = sr.collect_song_request_cases(session, pr.read_new_requests(),
+                                           matcher=RealLocalSongMatcher(session), fetch=False)
+
+    assert case.status == sr.ALREADY_IN_DATABASE and case.existing.id == song_id
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Bloom lyrics", "Bloom"),
+    ("Czarne lustra prod. White House", "Czarne lustra"),
+    ("Sam (prod. Gibbs)", "Sam"),
+    ("Adam dał imiona zwierzętom (Bob Dylan's 'Man Gave Names to All the Animals')", "Adam dał imiona zwierzętom"),
+    # Left alone: a version, a word that only starts like "prod", nothing left
+    ("Song (Live)", "Song (Live)"),
+    ("Prodigy Rising", "Prodigy Rising"),
+    ("Lyrics", "Lyrics"),
+])
+def test_title_without_request_junk(title, expected):
+    assert sr.title_without_request_junk(title, "Someone") == expected
+
+
+def _song_rule(env, monkeypatch, spellings):
+    """The owner's "MusicBrainz agrees" rule, check_spelling() answering
+    `spellings` ((artist, title) -> its result), and a fake import; the
+    (artist, title) pairs imported."""
+    from utils.common import automation_settings
+    from utils.discoveries import import_engine
+
+    automation_settings.save_user_rules([{
+        "name": "MusicBrainz agrees", "question": "song_request", "on": True,
+        "conditions": [{"fact": "musicbrainz_title_similarity", "op": ">=", "value": 0.99},
+                       {"fact": "musicbrainz_artist_similarity", "op": ">=", "value": 0.99},
+                       {"fact": "closest_song_of_artist_score", "op": "<=", "value": 0.84}]}])
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": True, "mb_score": 100, **spellings[(artist, title)]})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    imported = []
+
+    def fake_import(entries):
+        imported.extend((e.artist, e.title) for e in entries)
+        for entry in entries:
+            entry.song_id = 4700
+    monkeypatch.setattr(import_engine, "run_import_batch", fake_import)
+    return imported
+
+
+def test_the_artist_is_added_as_musicbrainz_spells_it_with_the_title(env, monkeypatch):
+    # "nina simone" was added as a new artist in lower case, the title as MusicBrainz spells it
+    from utils.common import automation_settings
+    imported = _song_rule(env, monkeypatch, {
+        ("nina simone", "my baby just cares for me"): {
+            "title_similarity": 1.0, "artist_similarity": 1.0,
+            "corrected_artist": "Nina Simone", "corrected_title": "My Baby Just Cares for Me"},
+        ("elise trouw", "unseen"): {"title_similarity": 1.0, "artist_similarity": 1.0,
+                                    "corrected_artist": "Elise Trouw", "corrected_title": "Unseen"},
+        ("alt-J", "Breezeblocks"): {"title_similarity": 1.0, "artist_similarity": 1.0,
+                                    "corrected_artist": "alt‐J", "corrected_title": "Breezeblocks"}})
+    _request(env["inbox"], "2026-11-22_12-26-15_013.db", [
+        {"title": "my baby just cares for me", "artist": "nina simone", "youtube_video_id": "eYSbUOoq4Vg"},
+        {"title": "unseen", "artist": "elise trouw"},
+        {"title": "Breezeblocks", "artist": "alt-J"}])
+
+    ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    assert sorted(imported) == [("Elise Trouw", "Unseen"),  # as the database spells it
+                                ("Nina Simone", "My Baby Just Cares for Me"),
+                                ("alt-J", "Breezeblocks")]  # not MusicBrainz's Unicode hyphen
+    automation_settings.CONFIG_PATH.unlink()
+
+
+def test_a_title_musicbrainz_has_without_its_symbols_waits_for_the_owner(env, monkeypatch):
+    # "(∆) Breezeblocks" rated 1.0 against MusicBrainz's "Breezeblocks"
+    # (normalized forms) and was added with the "(∆)"
+    from utils.common import automation_settings
+    imported = _song_rule(env, monkeypatch, {
+        ("alt-J", "(∆) Breezeblocks"): {"title_similarity": 1.0, "artist_similarity": 1.0,
+                                        "corrected_artist": "alt‐J", "corrected_title": "Breezeblocks"}})
+    _request(env["inbox"], "2026-11-22_12-26-15_013.db", [
+        {"title": "(∆) Breezeblocks", "artist": "alt-J", "youtube_video_id": "rVeMiVU77wo"}])
+
+    result = ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    assert imported == [] and result.to_review == 1
+    [case] = sr.collect_song_request_cases(env["session"], pr.read_review_requests(), matcher=env["matcher"])
+    facts = sr.song_request_facts(case, "alt-J", "(∆) Breezeblocks", {}, env["matcher"], False)
+    assert facts["musicbrainz_title_similarity"] < 0.9
+    automation_settings.CONFIG_PATH.unlink()

@@ -185,7 +185,9 @@ non-trivial work in that area.
   `song_request_facts()`, the import run unattended) - else the owner adds them (through
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
   `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
-  `feat_to_credits`), skips or rejects them; a rejected one goes to music.db's
+  `feat_to_credits`; an artist "A feat. B" is looked up as A's song crediting B before any artist
+  is made, `import_engine.find_song_of_main_artist()` - sanitize never splits an artist field,
+  the split review does), skips or rejects them; a rejected one goes to music.db's
   `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again; one
   found in the database or added goes to `settled_song_requests` (migration 0024, with the song's
   id, `record_settled_request()`; a trigger keeps `song_id` current), so the phone recognises its

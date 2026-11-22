@@ -406,7 +406,7 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
     # "Boję się" when there is one - kept apart from it when matching
     from sqlalchemy.orm import object_session
     from utils.database.versions import mark_new_song_version
-    mark_new_song_version(object_session(new_song_obj), new_song_obj)
+    mark_new_song_version(object_session(new_song_obj), new_song_obj, metadata.duration_s)
     if metadata.project:
         from sqlalchemy.orm import object_session
         from utils.database.projects import project_named, set_song_project
@@ -1085,13 +1085,7 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list, en
     ex_son = find_existing_song(metadata.title, existing_artists_songs, metadata.duration_s, metadata.feat_artists,
                                 metadata.project, metadata.is_cover)
     if ex_son is not None:
-        print("Yes, there is a song like this already. Skipping")
-        slog(f"    [SONG EXISTS] Exact match found", priority=1)
-        _backfill_youtube_link(metadata, ex_son)
-        if normalize(strip_feat_credits(ex_son.title)) == normalize(metadata.title):
-            # Its very title: the entry's guests are its guests (not a "(Live)" one's)
-            _credit_found_song(ex_son, metadata)
-        _remember(entries, ex_son, metadata)
+        _found_existing_song(metadata, ex_son, entries)
         return None, False
 
     slog("Couldn't find the song, trying spellchecking")
@@ -1110,6 +1104,48 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list, en
     new_song_obj = create_song_entry(metadata, artist_obj)
     _remember(entries, new_song_obj, metadata)
     return new_song_obj, False
+
+
+def _found_existing_song(metadata, song: Song, entries: dict | None) -> None:
+    """The entry is `song`, already in the database: its link filled in when
+    the song has none, its guests credited, remembered (_remember())."""
+    print("Yes, there is a song like this already. Skipping")
+    slog(f"    [SONG EXISTS] Exact match found", priority=1)
+    _backfill_youtube_link(metadata, song)
+    if normalize(strip_feat_credits(song.title)) == normalize(metadata.title):
+        # Its very title: the entry's guests are its guests (not a "(Live)" one's)
+        _credit_found_song(song, metadata)
+    _remember(entries, song, metadata)
+
+
+def find_song_of_main_artist(metadata: dict) -> Song | None:
+    """The song an entry whose artist is "A feat. B" already is among A's
+    songs, B read as one of its featured artists - when no artist is named
+    "A feat. B" and A is in the database by that very name; the entry's
+    feat_artists get B then (its song credits them). None otherwise, and the
+    import goes on as before (a new joined artist, split in
+    review_artist_splits() at the end). Without it "Pokahontaz feat. Bob One -
+    Czarne lustra" was added as a new artist's song next to Pokahontaz's own
+    #3742 and only split afterwards: a duplicate (2026-11-22). Looked up
+    before the artist is resolved or created."""
+    metadata = as_entry(metadata)
+    name = metadata.artist
+    proposal = propose_artist_split(name) if name else None
+    # Only a "feat." credit (proposal.feat): "A & B" may be one band's name
+    if not proposal or not proposal.feat or len(proposal.main) != 1:
+        return None
+    if _match_artist_locally(name)[0] is not None:
+        return None
+    main = find_matching_artist(proposal.main[0])
+    if main is None or name_key(proposal.main[0]) not in {name_key(n) for n in _names_of(main, False)}:
+        return None
+    feats = list(metadata.feat_artists or [])
+    feats += [n for n in proposal.feat if name_key(n) not in {name_key(f) for f in feats}]
+    song = find_existing_song(metadata.title, get_songs_from_db_session(artist_categories[2], main.id),
+                              metadata.duration_s, feats, metadata.project, metadata.is_cover)
+    if song is not None:
+        metadata.feat_artists = feats
+    return song
 
 
 def _credit_found_song(song: Song, metadata) -> None:
@@ -1285,6 +1321,13 @@ def run_import_batch(metadata_list: list, pre_skipped: list = None, late_entries
             return "skipped, no artist or title"
 
         print(f"{metadata.project}: " * bool(metadata.project) + f"{metadata.artist} - {metadata.title}")
+
+        if (main_song := find_song_of_main_artist(metadata)) is not None:
+            _found_existing_song(metadata, main_song, entries)
+            skipped_songs.append(label)
+            reason_for_skipping.append("Song already exists")
+            entry_timings[label] = {'total': time.time() - entry_start, 'artist': 0.0, 'song': 0.0}
+            return f"song exists, id {main_song.id} by its main artist (featuring {', '.join(metadata.feat_artists)})"
 
         artist_start = time.time()
         new_artist_obj, artist_is_pending = resolve_artist(metadata, artist_cache, pending_artist_conflicts)

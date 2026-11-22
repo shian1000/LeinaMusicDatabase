@@ -480,7 +480,27 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   is mostly the title: another artist's "Wena" scored 1.0) - the owner's "MusicBrainz agrees"
   rule requires it `<= 0.84`, so "czas pomyka" next to Voo Voo's "Czas pomyka II" (0.88) waits
   for review. A title the pass adds written all in lower / upper case takes MusicBrainz's
-  spelling of the same words (`title_as_musicbrainz_spells()`). An event's video title
+  spelling of the same words (`title_as_musicbrainz_spells()`).
+  Checked on "Preuzeti (2018.05)" (2026-11-22, 61 requests): the artist it adds is spelt as
+  music.db spells it, else as MusicBrainz does when they differ only in case
+  (`artist_as_musicbrainz_spells()`: "nina simone" -> "Nina Simone"; "alt-J" kept, not
+  MusicBrainz's "alt‐J"). `musicbrainz_title_similarity` is now at most how alike the title *as it
+  would be stored* and MusicBrainz's are, evening out only case, accents, apostrophe / dash /
+  quote characters and spaces (`_stored_title_similarity()`): check_spelling()'s own figure
+  compares normalized forms, which rated "(∆) Breezeblocks" 1.0 against "Breezeblocks", so the
+  rule added the "(∆)"; such a request now waits for review. The "already in the database"
+  check also tries the title without what only a request's title carries
+  (`title_without_request_junk()`, for the lookup only, never stored): an unbracketed producer
+  credit ("Czarne lustra prod. White House"), a trailing upload word of
+  `DUPLICATE_TITLE_EXTRA_JUNK` ("Bloom lyrics"), a bracket naming the song a cover is of
+  ("(Bob Dylan's 'Man Gave Names to All the Animals')"), the artist heading it before ":". A
+  request whose artist is nothing but a site-like name ("dylan.pl") keeps it - sanitize empties
+  such a field only for an mp3 tag or a YouTube channel, where something else names the artist
+  (`_EMPTIES_SITE_NAME_FIELDS`). The import finds an "A feat. B" entry's song among A's songs,
+  B credited as feat, before it makes the joined artist ("Pokahontaz feat. Bob One" - "Czarne
+  lustra" is #3742; `find_song_of_main_artist()`); a song A lacks still makes "A feat. B" and its
+  split review. A "... Mix" bracket on a recording as long as a full album or a mix is the mix's
+  name, never a remix version (`versions.names_a_mix()`). An event's video title
   "`<event 2018> | <artist> | <song>[ | <channel>]`" reads as that artist and song
   (`split_event_pipes()`, Leina Radio the same), and Years offers a version label's year
   ("Live, Fryderyki 2018") for review instead of looking the title up.

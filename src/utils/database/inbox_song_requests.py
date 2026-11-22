@@ -92,6 +92,7 @@ from functools import cache
 from config.constants import (
     ADDITIONAL_VIDEO_IMPORT,
     ARTIST_JOINING_WORDS,
+    DUPLICATE_TITLE_EXTRA_JUNK,
     GENERIC_TOPIC_CHANNELS,
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
     SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS,
@@ -99,7 +100,7 @@ from config.constants import (
     SONG_REQUEST_TITLE_ARTIST_MAX_WORDS,
 )
 from utils.common.debug import flog, mlog
-from utils.common.normalizer import name_key, normalize
+from utils.common.normalizer import fold_diacritics, name_key, normalize, normalize_apostrophes
 from utils.common.version_names import read_version
 from utils.database.additional_videos import apply_video_links, plan_video_links, song_for_video
 from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, SettledSongRequest, Song
@@ -113,7 +114,7 @@ from utils.database.inbox_requests import (
     parse_time,
     save_decision,
 )
-from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata
+from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata, strip_producer_credit, strip_trailing_junk_suffix
 from utils.common.song_entry import SongEntry
 
 # Settled statuses of their own
@@ -569,20 +570,55 @@ def _song_count(session, artist) -> int:
             + session.query(AdditionalSongArtist).filter(AdditionalSongArtist.artist_id == artist.id).count())
 
 
+# What a requested title may carry that the stored one doesn't, cut only to
+# look the song up - never stored (the cleanup keeps these: "Lyrics" may end
+# a title, "prod" start a word): a producer credit with no bracket ("Czarne
+# lustra prod. White House"), an upload word left at the end
+# (DUPLICATE_TITLE_EXTRA_JUNK: "Bloom lyrics"), a bracket naming the song a
+# cover is of ("Adam dał imiona zwierzętom (Bob Dylan's 'Man Gave Names to
+# All the Animals')"), and the artist heading it before a colon. 2026-11-22:
+# the three were added again or left to the owner
+_UNBRACKETED_PRODUCER_CREDIT_RE = re.compile(r"\s+(?:prod\b\.?|produced\s+by\b)\s*[^\s()\[\]].*$", re.IGNORECASE)
+_TRAILING_UPLOAD_WORDS_RE = re.compile(
+    r"[\s\-–—|:]+(?:" + "|".join(map(re.escape, sorted(DUPLICATE_TITLE_EXTRA_JUNK, key=len, reverse=True)))
+    + r")\s*$", re.IGNORECASE)
+_ORIGINAL_SONG_BRACKET_RE = re.compile(
+    r"\s*[(\[][^()\[\]]*?\w['’]s\s+['‘’\"“”„«][^()\[\]]+['‘’\"“”»]\s*[)\]]\s*$")
+
+
+def title_without_request_junk(title: str | None, artist: str | None) -> str | None:
+    """`title` without what only a request's title carries
+    (_UNBRACKETED_PRODUCER_CREDIT_RE and the rest) - for finding the song in
+    the database, never for storing; `title` itself when nothing is cut or
+    nothing would be left."""
+    if not title:
+        return title
+    cut = title
+    head, colon, rest = cut.partition(":")
+    if colon and rest.strip() and artist and name_key(head) == name_key(artist):
+        cut = rest.strip()
+    cut = _ORIGINAL_SONG_BRACKET_RE.sub("", cut)
+    cut = strip_producer_credit(_UNBRACKETED_PRODUCER_CREDIT_RE.sub("", cut))
+    cut = strip_trailing_junk_suffix(_TRAILING_UPLOAD_WORDS_RE.sub("", cut))
+    return cut.strip() or title
+
+
 def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
     for video_id in case.youtube_video_ids:
         song = song_for_video(session, video_id)
         if song is not None:
             return song
     metadata = case.metadata()
-    for suggestion in case.suggestions:
-        song = matcher.match(case.metadata(*suggestion))
+    readings = [case.metadata(*suggestion) for suggestion in case.suggestions]
+    for reading in readings:
+        song = matcher.match(reading)
         if song is not None:
             return song
     if is_generic_channel_artist(metadata.artist):
-        return None
+        return _without_request_junk(readings, matcher)
     if not metadata.artist:
-        return None
+        return _without_request_junk(readings, matcher)
+    readings.append(metadata)
     song = matcher.match(metadata)
     # The phone cut the artist off a video title at its first dash, so a
     # second one may start a description: "K. Pronko" / "Jestes Lekiem Na
@@ -598,7 +634,17 @@ def _song_in_database(session, case: SongRequestCase, matcher) -> Song | None:
         found = {s.id: s for a in _known_side_by_side(metadata.artist, matcher) or ()
                  if (s := matcher.match(metadata.copy_with(artist=a.name)))}
         song = next(iter(found.values())) if len(found) == 1 else None
-    return song
+    return song or _without_request_junk(readings, matcher)
+
+
+def _without_request_junk(readings: list, matcher) -> Song | None:
+    """The song one of `readings` is with its title's request junk cut
+    (title_without_request_junk()) - tried last, after the names as read."""
+    for reading in readings:
+        cut = title_without_request_junk(reading.title, reading.artist)
+        if cut != reading.title and (song := matcher.match(reading.copy_with(title=cut))) is not None:
+            return song
+    return None
 
 
 def collect_song_request_cases(session, requests: list[RequestFile], matcher=None,
@@ -782,6 +828,23 @@ def title_as_musicbrainz_spells(artist: str, title: str) -> str:
     return spelled if spelled.casefold() == title.casefold() else title
 
 
+def artist_as_musicbrainz_spells(artist: str, title: str, matcher) -> str:
+    """`artist` as the database spells it (an artist of that very name, any
+    case: _known_exactly()), else as MusicBrainz spells the same name when
+    they differ only in case ("nina simone" -> "Nina Simone", 2026-11-22: the
+    title was taken as MusicBrainz spells it, the artist added in lower
+    case); any other spelling as it is ("alt-J" stays, not MusicBrainz's
+    "alt‐J" with a Unicode hyphen). For a requested song the automatic pass
+    adds; check_spelling() is cached, song_request_facts() asked it already."""
+    from utils.common.text_utils import check_spelling
+
+    known = _known_exactly(artist, matcher)
+    if known is not None:
+        return known.name
+    spelled = check_spelling(artist, title).get("corrected_artist") or artist
+    return spelled if spelled.casefold() == artist.casefold() else artist
+
+
 def reject_song_request(session, case: SongRequestCase) -> None:
     """The owner doesn't want the song: published in rejected_song_requests,
     one row per distinct way the phone named it. The caller commits."""
@@ -809,6 +872,30 @@ def mark_song_added(session, case: SongRequestCase, artist: str | None, title: s
              **({"by": by} if by else {}))
 
 
+_DASHES_RE = re.compile(r"[\u2010-\u2015\u2212]")
+_QUOTES_RE = re.compile(r"[“”„«»]")
+
+
+def _spelled_alike_key(text: str) -> str:
+    """`text` with only what tells no title apart evened out: case, accents,
+    apostrophe, dash and quote characters, spaces."""
+    text = normalize_apostrophes(fold_diacritics(text or "")).casefold()
+    return " ".join(_QUOTES_RE.sub('"', _DASHES_RE.sub("-", text)).split())
+
+
+def _stored_title_similarity(stored: str, musicbrainz: str) -> float:
+    """How alike the title as it would be stored and MusicBrainz's are (0-1),
+    by more than normalize(), which drops every bracket and symbol: check_spelling()
+    rated "(∆) Breezeblocks" 1.0 against "Breezeblocks", so the owner's rule
+    ("MusicBrainz agrees", title similarity >= 0.99) added the title MusicBrainz
+    doesn't have (2026-11-22). 1.0 when they differ only as
+    _spelled_alike_key() evens out."""
+    from utils.common.text_utils import similarity
+
+    a, b = _spelled_alike_key(stored), _spelled_alike_key(musicbrainz)
+    return 1.0 if a == b else round(similarity(a, b), 3)
+
+
 def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: dict, matcher,
                        sender_may_add: bool) -> dict:
     """What the owner's rules for adding a requested song compare
@@ -819,12 +906,17 @@ def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: 
 
     spelling = check_spelling(artist, title)
     found = bool(spelling.get("found"))
+    title_similarity = spelling.get("title_similarity") if found else None
+    if title_similarity is not None and spelling.get("corrected_title"):
+        title_similarity = min(title_similarity, _stored_title_similarity(
+            case.metadata(artist, title_as_musicbrainz_spells(artist, title)).title,
+            case.metadata(artist, spelling["corrected_title"]).title))
     guesses = matcher.best_guesses(case.metadata(artist, title), 1, 0.0)
     users = {senders.get(r.file_name) for r in case.reports} - {None}
     known = _known_exactly(artist, matcher)
     return {
         "musicbrainz_found": found,
-        "musicbrainz_title_similarity": spelling.get("title_similarity") if found else None,
+        "musicbrainz_title_similarity": title_similarity,
         "musicbrainz_artist_similarity": spelling.get("artist_similarity") if found else None,
         "musicbrainz_score": spelling.get("mb_score") if found else None,
         "artist_known": known is not None,

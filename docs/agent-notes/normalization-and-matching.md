@@ -596,6 +596,13 @@ whether to read the file name: a tag artist that was only "y2meta.com" counts
 as missing. `extract_unknown_data()` strips them from the file name before
 `split_artist_title()`, which otherwise made the site the artist.
 
+Emptying a field that is *only* a site name is kept to the sources where
+something else names the artist (`pipeline._EMPTIES_SITE_NAME_FIELDS`: an mp3's
+tags - the file name -, a video's channel - the YouTube import asks). A song
+request has nothing else: its "dylan.pl" is a band's name, and emptying it
+skipped the request as "Missing artist or title" (2026-11-22). Clean names never
+empties a stored name anyway, so "stored" behaves as before.
+
 ## Full albums vs. tracks of the same name
 
 A full album (`songs.kind = 'full_album'`) is usually titled like its album,

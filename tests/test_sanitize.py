@@ -443,3 +443,15 @@ def test_a_lyrics_upload_named_outside_a_bracket_is_junk():
     # A bare "lyrics" may be the title's own word
     assert strip_trailing_junk_suffix("Love Lyrics") == "Love Lyrics"
     assert strip_trailing_junk_suffix("+ Lyrics") == "+ Lyrics"
+
+
+@pytest.mark.parametrize("source, kept", [(s.SOURCE_REQUEST, True), (s.SOURCE_MP3, False), (s.SOURCE_YOUTUBE, False)])
+def test_a_field_that_is_only_a_site_name_is_emptied_only_where_something_else_names_it(source, kept):
+    # A request's "dylan.pl" is a band (2026-11-22: skipped as "Missing artist
+    # or title"); an mp3 tag's "y2meta.com" makes the import read the file name
+    from utils.common.song_entry import SongEntry
+    title = "dylan.pl: Adam dał imiona zwierzętom (Bob Dylan's 'Man Gave Names to All the Animals')"
+    entry = s.sanitize_metadata(SongEntry({"artist_name": "dylan.pl", "title": title, "feat_artists": []},
+                                          source=source), source)
+    assert (entry["artist_name"] or None) == ("dylan.pl" if kept else None)
+    assert entry["title"] == "Adam dał imiona zwierzętom (Bob Dylan's 'Man Gave Names to All the Animals')"

@@ -435,3 +435,68 @@ def test_an_entry_held_back_for_a_similar_artist_has_its_song_too(env):
     env["answers"].append(True)
     result = ie.run_import_batch([_entry("Ramstein", "Sonne")])
     assert result.entry_for(result[0]).artist == "Ramstein"
+
+
+# ==================== Leina Radio's requests, 2026-11-22 ====================
+
+@pytest.mark.parametrize("artist", ["Pokahontaz feat. Bob One", "Pokahontaz ft. Bob One"])
+def test_an_a_feat_b_artist_finds_the_main_artists_song_before_any_artist_is_made(env, artist):
+    # "Czarne lustra" by "Pokahontaz feat. Bob One" was added as a new
+    # artist's song beside Pokahontaz's own #3742, split only afterwards
+    session = env["session"]
+    pokahontaz = _artist(session, "Pokahontaz")
+    session.add(Song(id=3742, title="Czarne lustra", artist=pokahontaz))
+    session.commit()
+    entry = ie.as_entry(_entry(artist, "Czarne lustra", youtube_video_id="Bij1mFZv98M"))
+
+    result = ie.run_import_batch([entry])
+
+    assert result == [] and entry.song_id == 3742
+    assert _songs(session) == [("Pokahontaz", "Czarne lustra")]
+    assert {a.name for a in session.query(Artist)} == {"Pokahontaz", "Bob One"}
+    song = session.get(Song, 3742)
+    assert [(link.artist.name, link.role) for link in song.additional_artist_links] == [("Bob One", "feat")]
+    assert song.youtube_video_id == "Bij1mFZv98M"
+    # Only the guest is new: no joined name to split
+    assert [[a.name for a in offer] for offer in env["split_offers"]] == [["Bob One"]]
+
+
+def test_an_a_feat_b_artist_with_a_song_the_main_artist_lacks_goes_on_as_before(env):
+    _artist(env["session"], "Mrozu", "Szerokie wody")
+
+    [song] = ie.run_import_batch([_entry("Mrozu feat. Tomson", "Nowa piosenka")])
+
+    # A new artist, offered for splitting at the end - the review's call
+    assert song.artist.name == "Mrozu feat. Tomson"
+    assert [a.name for a in env["split_offers"][0]] == ["Mrozu feat. Tomson"]
+
+
+def test_a_mix_as_long_as_a_full_album_keeps_its_name_whole(env):
+    # The owner's "SoulSearchAndDestroy - Summer Paradise (Future Funk -
+    # Vaporwave - Electronic Mix)", 45 minutes, was stored "Summer Paradise", a remix
+    title = "Summer Paradise (Future Funk - Vaporwave - Electronic Mix)"
+    [song] = ie.run_import_batch([_entry("SoulSearchAndDestroy", title, duration_s=2691)])
+
+    assert (song.title, song.version_kind, song.version_label) == (title, None, None)
+
+
+def test_a_mix_of_a_songs_length_is_still_a_remix(env):
+    [song] = ie.run_import_batch([_entry("Daft Punk", "One More Time (Club Mix)", duration_s=330)])
+
+    assert (song.title, song.version_kind, song.version_label) == ("One More Time", "remix", "Club Mix")
+
+
+def test_a_request_by_an_artist_named_like_a_domain_is_its_song(env):
+    # "dylan.pl" was emptied as a download site's name: "None - Adam dał
+    # imiona zwierzętom (reason - Missing artist or title)"
+    from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata
+    from utils.common.song_entry import SongEntry
+
+    session = env["session"]
+    dylan = _artist(session, "dylan.pl")
+    session.add(Song(id=6971, title="Adam dał imiona zwierzętom", artist=dylan))
+    session.commit()
+    entry = sanitize_metadata(SongEntry({"artist_name": "dylan.pl", "title": "Adam dał imiona zwierzętom",
+                                         "feat_artists": []}, source=SOURCE_REQUEST), SOURCE_REQUEST)
+
+    assert ie.run_import_batch([entry]) == [] and entry.song_id == 6971

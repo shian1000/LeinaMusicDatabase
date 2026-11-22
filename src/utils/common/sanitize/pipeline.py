@@ -113,15 +113,24 @@ class Step:
     switch: str = ""           # the Settings switch that turns it on or off (SWITCHES)
 
 
+# Where a field that is nothing but a site name is emptied: an mp3's tag
+# ("y2meta.com"), so the import reads the file name instead, and a video's
+# channel, so the YouTube import asks for the artist. A song request has
+# nothing else to read: its artist is a name the phone shows, and a band can
+# be named like a domain ("dylan.pl" - the request was skipped as "Missing
+# artist or title", 2026-11-22)
+_EMPTIES_SITE_NAME_FIELDS = frozenset({SOURCE_MP3, SOURCE_YOUTUBE})
+
+
 def _site_names(value: str, ctx: Context) -> str:
     # Only a name holding one changes - strip_site_names() alone also trims the
     # separators of any name ("edge_separators"). A field that is nothing but
-    # a site name is emptied (the mp3 import then reads the file name); a
-    # whole file name is left as it is
+    # a site name is emptied where something else names it
+    # (_EMPTIES_SITE_NAME_FIELDS), else kept; a whole file name is left as it is
     if not has_site_name(value):
         return value
     if ctx.stage == STAGE_FIELD and is_site_name(value):
-        return ""
+        return "" if ctx.source in _EMPTIES_SITE_NAME_FIELDS else value
     return strip_site_names(value)
 
 

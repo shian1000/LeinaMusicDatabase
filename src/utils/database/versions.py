@@ -16,11 +16,16 @@ utils/ui/version_review.py). Matching keeps versions and originals apart
 """
 from dataclasses import dataclass
 
-from config.constants import VERSION_KINDS
+import re
+
+from config.constants import VERSION_KINDS, VERSION_REMIX
 from utils.common.normalizer import normalize
 from utils.common.version_names import read_version
 from utils.database.datatables import Song
-from utils.database.song_kinds import sure_version
+from utils.database.song_kinds import looks_like_full_album, sure_version
+
+# A mix, a megamix, a mixtape - not "remix"
+_MIX_WORD_RE = re.compile(r"(?:^| )(?:mix|megamix|mixtape|minimix)(?: |$)")
 
 
 @dataclass
@@ -84,11 +89,25 @@ def apply_version_proposal(session, proposal: VersionProposal) -> None:
     session.flush()
 
 
-def mark_new_song_version(session, song: Song) -> None:
+def names_a_mix(reading, duration_s: int | None) -> bool:
+    """Is the "... Mix" marker `reading` read the name of a mix rather than a
+    remix - the recording being as long as a full album or a mix
+    (looks_like_full_album())? "Summer Paradise (Future Funk - Vaporwave -
+    Electronic Mix)", 45 minutes, was stored "Summer Paradise", a remix
+    (2026-11-22)."""
+    return (reading.kind == VERSION_REMIX and looks_like_full_album(None, duration_s)
+            and bool(_MIX_WORD_RE.search(normalize(reading.label or ""))))
+
+
+def mark_new_song_version(session, song: Song, duration_s: int | None = None) -> None:
     """A song just created whose title says it's a version: marked, the marker
-    cut, its original found among the artist's songs. The caller commits."""
+    cut, its original found among the artist's songs. Not a mix's name on a
+    recording `duration_s` long (names_a_mix()): the title stays whole. The
+    caller commits."""
     # A plain "version" is left to "Find versions": it may be the title itself
     if (reading := read_version(song.title)) is None or not sure_version(reading):
+        return
+    if names_a_mix(reading, duration_s):
         return
     set_version([song], reading.kind, reading.label, original_of(session, song, reading.title))
     song.title = reading.title
