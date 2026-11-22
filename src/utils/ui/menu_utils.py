@@ -71,7 +71,8 @@ def execute_menu_item(
     action_map: Dict[str, Callable[[], Optional[str]]], 
     exit_label: str = "Back", 
     one_time: bool = False,
-    clear: bool = True
+    clear: bool = True,
+    refresh: Optional[Callable[[], Dict[str, Callable[[], Optional[str]]]]] = None
 ) -> None:
     """
     Display a menu and execute the selected action.
@@ -84,6 +85,9 @@ def execute_menu_item(
         clear: If False, the screen isn't cleared before the menu is shown, so
             a table printed just above it (the songs or artists to act on)
             stays visible (default: True)
+        refresh: Builds the action map again before the menu is shown
+            again, for labels holding a count ("Resolve new requests (2)"
+            stayed after both were resolved, 2026-11-21)
     """
     if clear:
         clear_screen()
@@ -91,6 +95,9 @@ def execute_menu_item(
     running: bool = True
 
     while running:
+        if refresh is not None:
+            action_map = refresh()
+            choices = list(action_map.keys()) + [exit_label]
         choice: Optional[str] = questionary.select(prompt, choices=choices).ask()
         if choice not in choices or choice == exit_label:
             clear_screen()

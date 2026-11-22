@@ -126,6 +126,34 @@ def test_a_title_year_is_offered_when_no_module_finds_one(monkeypatch, capsys):
     assert "1991" in out and "from the title for" in out
 
 
+def test_a_version_naming_its_year_is_offered_that_year_not_looked_up(monkeypatch):
+    """Real case 2026-11-21: the live "Malinowy chruśniak + Polsko" (Live,
+    Fryderyki 2018) got the studio single's 2017 from the lookup."""
+    module = importlib.import_module(f"{_PKG}.fill_missing_years")
+    edits = []
+    _common(monkeypatch, module, edits)
+    monkeypatch.setattr(module, "_fill_years_known_in_database", lambda songs: [])
+    monkeypatch.setattr(module, "load_discovery_modules", lambda kind: ["module"])
+    monkeypatch.setattr(module, "release_year_from_stored_link", lambda songs: None)
+    monkeypatch.setattr(module, "artist_match_synonyms", lambda artist: [])
+    monkeypatch.setattr(module, "cyrillic_search_variant", lambda *a: None)
+    monkeypatch.setattr(module, "_finish", lambda touched: None)
+    looked_up = []
+    monkeypatch.setattr(module, "discover_release_year_result", lambda artist, query, *a, **k: looked_up.append(
+        query) or SimpleNamespace(year=2017, needs_review=False, source_url=None))
+    shown = []
+    monkeypatch.setattr(questionary, "checkbox",
+                        lambda message, choices: shown.extend(c.title for c in choices) or SimpleNamespace(ask=lambda: [0]))
+    live, studio = _song("Malinowy chruśniak + Polsko"), _song("Hej Hej!")
+    live.version_label = "Live, Fryderyki 2018"
+
+    module.fill_missing_years([live, studio], {})
+
+    assert looked_up == ["Hej Hej!"]
+    assert shown == ['Artist - Malinowy chruśniak + Polsko: 2018  (the version "Live, Fryderyki 2018")']
+    assert sorted(edits) == [("Hej Hej!", "year", "2017"), ("Malinowy chruśniak + Polsko", "year", "2018")]
+
+
 # ==================== the end of an import: what to fill in ====================
 
 def test_the_end_of_an_import_offers_albums_and_years_for_its_songs(monkeypatch, tmp_path):

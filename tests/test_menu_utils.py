@@ -85,3 +85,24 @@ def test_an_artist_search_that_stops_says_why(monkeypatch, capsys, found, allow_
     monkeypatch.setattr(menu_utils, "get_artists_from_db_session", lambda *a, **k: found)
     assert menu_utils.ask_for_entries_list(mode="Artist", allow_one_result=allow_one) is None
     assert message in capsys.readouterr().out
+
+
+def test_a_refreshed_menu_shows_the_new_labels_after_an_action(monkeypatch):
+    # "Resolve new requests (2)" stayed after both were resolved (2026-11-21)
+    waiting = [2]
+    shown = []
+
+    def resolve():
+        waiting[0] = 0
+
+    def actions():
+        return {f"Resolve new requests{f' ({waiting[0]})' if waiting[0] else ''}": resolve}
+
+    answers = iter(["Resolve new requests (2)", "Back"])
+    monkeypatch.setattr(menu_utils, "clear_screen", lambda: None)
+    monkeypatch.setattr(menu_utils.questionary, "select", lambda prompt, choices, **k: shown.append(list(choices))
+                        or type("Q", (), {"ask": lambda self: next(answers)})())
+
+    menu_utils.execute_menu_item("Manage database", actions(), refresh=actions)
+
+    assert shown == [["Resolve new requests (2)", "Back"], ["Resolve new requests", "Back"]]

@@ -712,6 +712,59 @@ def test_a_rule_of_the_owners_adds_a_requested_song_unattended(env, monkeypatch,
     automation_settings.CONFIG_PATH.unlink()
 
 
+def test_closest_song_of_artist_score_compares_only_the_artists_own_songs(env, monkeypatch):
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {"found": False})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "Chromatic II", "artist": "Elise Trouw"},
+                                                         {"title": "Chromatic", "artist": "Okean Elzy"},
+                                                         {"title": "Chromatic", "artist": "Nobody Known"}])
+    _, cases = _cases(env)
+    scores = {(c.latest.artist, c.latest.title): sr.song_request_facts(
+        c, c.latest.artist, c.latest.title, {}, env["matcher"], False)["closest_song_of_artist_score"]
+        for c in cases}
+
+    # Voo Voo's own "Czas pomyka II" against a requested "czas pomyka" (2026-11-21)
+    assert scores[("Elise Trouw", "Chromatic II")] > 0.85
+    # Another artist's song of the same title doesn't count, nor an unknown artist
+    assert scores[("Okean Elzy", "Chromatic")] == 0.0
+    assert scores[("Nobody Known", "Chromatic")] == 0.0
+
+
+def test_a_title_all_in_lower_case_is_added_as_musicbrainz_spells_it(env, monkeypatch):
+    from utils.common import automation_settings
+    from utils.discoveries import import_engine
+
+    automation_settings.save_user_rules([{
+        "name": "MusicBrainz agrees", "question": "song_request", "on": True,
+        "conditions": [{"fact": "musicbrainz_title_similarity", "op": ">=", "value": 0.9},
+                       {"fact": "closest_song_of_artist_score", "op": "<=", "value": 0.84}]}])
+    spellings = {"unseen": "Unseen", "ocean eyes": "Ocean Eyes (Remix)"}
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": True, "title_similarity": 1.0, "artist_similarity": 1.0, "mb_score": 100,
+        "corrected_title": spellings.get(title, title)})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    imported = []
+
+    def fake_import(entries):
+        imported.extend((e.artist, e.title) for e in entries)
+        for entry in entries:
+            entry.song_id = 4700
+    monkeypatch.setattr(import_engine, "run_import_batch", fake_import)
+    _request(env["inbox"], "2026-10-18_10-00-00_001.db", [{"title": "unseen", "artist": "Elise Trouw"},
+                                                         {"title": "ocean eyes", "artist": "Elise Trouw"},
+                                                         {"title": "Chromatic II", "artist": "Elise Trouw"}])
+
+    result = ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    # Only the case differs: MusicBrainz's spelling; more than that: as asked.
+    # "Chromatic II" is too like the artist's own "Chromatic": left for review.
+    assert sorted(imported) == [("Elise Trouw", "Unseen"), ("Elise Trouw", "ocean eyes")]
+    assert result.to_review == 1
+    automation_settings.CONFIG_PATH.unlink()
+
+
 @pytest.mark.parametrize("migration, table, insert, stamp", [
     ("0015_rejected_song_requests.sql", "rejected_song_requests", "(title) VALUES ('t')", "rejected_at"),
     ("0024_settled_song_requests.sql", "settled_song_requests", "(title, song_id) VALUES ('t', 1)", "settled_at"),

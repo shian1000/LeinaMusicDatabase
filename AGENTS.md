@@ -1097,6 +1097,9 @@ non-trivial work in that area.
   Radio", its name — never "the phone". Comments and docstrings may say phone. Permissions belong
   to a MusicDatabase user, not to a device. `tests/test_help_menu.py` checks the string literals of
   Help, the sharing wizard, `sharing_setup.py` and Settings for "phone(s)".
+- `execute_menu_item()` builds its labels once: a label holding a count ("Resolve new requests
+  (N)") needs `refresh=` (a function building the action map again), or it stays stale after the
+  action - as Manage database's did.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
   interrupt per item. Eleven places already do this: `run_import_batch()` (shared by every

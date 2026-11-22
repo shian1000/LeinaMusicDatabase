@@ -203,6 +203,12 @@ class SongRequestCase:
         return list(dict.fromkeys(r.spotify_track_id for r in self.reports if r.spotify_track_id))
 
     @property
+    def duration_s(self) -> int | None:
+        """The video's length as Leina Radio sent it (since 2026-11-21), else None."""
+        value = self._first("duration_s")
+        return int(value) if value else None
+
+    @property
     def sources(self) -> list[str]:
         return list(dict.fromkeys(SOURCE_LABELS.get(r.source, r.source) for r in self.reports))
 
@@ -747,6 +753,35 @@ def videos_saved_text(case: SongRequestCase) -> str:
                      + ([f"{added} video(s) saved as the song's additional videos"] if added else []))
 
 
+def _closest_title_of(artist, title: str) -> float:
+    """How alike `title` and the most alike title of `artist`'s own songs
+    are (0-1, normalized); 0.0 for an artist the database doesn't have.
+    closest_song_score compares the whole database, mostly by title: another
+    artist's "Wena" scored 1.0 for Kaliber 44's, while Voo Voo's own
+    "Czas pomyka II" (0.88) is what made the added "czas pomyka" doubtful
+    (2026-11-21)."""
+    from utils.common.text_utils import similarity
+
+    if artist is None:
+        return 0.0
+    wanted = normalize(title)
+    scores = [similarity(wanted, normalize(song.title)) for song in artist.songs if song.title]
+    return round(max(scores, default=0.0), 3)
+
+
+def title_as_musicbrainz_spells(artist: str, title: str) -> str:
+    """`title` written all in lower or upper case ("czas pomyka") as
+    MusicBrainz spells the same words ("Czas pomyka"), for a requested song
+    the automatic pass adds; any other title as it is. check_spelling() is
+    cached, song_request_facts() asked it already."""
+    from utils.common.text_utils import check_spelling
+
+    if title not in (title.lower(), title.upper()):
+        return title
+    spelled = check_spelling(artist, title).get("corrected_title") or title
+    return spelled if spelled.casefold() == title.casefold() else title
+
+
 def reject_song_request(session, case: SongRequestCase) -> None:
     """The owner doesn't want the song: published in rejected_song_requests,
     one row per distinct way the phone named it. The caller commits."""
@@ -786,14 +821,17 @@ def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: 
     found = bool(spelling.get("found"))
     guesses = matcher.best_guesses(case.metadata(artist, title), 1, 0.0)
     users = {senders.get(r.file_name) for r in case.reports} - {None}
+    known = _known_exactly(artist, matcher)
     return {
         "musicbrainz_found": found,
         "musicbrainz_title_similarity": spelling.get("title_similarity") if found else None,
         "musicbrainz_artist_similarity": spelling.get("artist_similarity") if found else None,
         "musicbrainz_score": spelling.get("mb_score") if found else None,
-        "artist_known": _known_exactly(artist, matcher) is not None,
+        "artist_known": known is not None,
         "closest_song_score": round(guesses[0][1], 3) if guesses else 0.0,
+        "closest_song_of_artist_score": _closest_title_of(known, title),
         "has_youtube_video": bool(case.youtube_video_ids),
+        "video_minutes": round(case.duration_s / 60, 1) if case.duration_s else None,
         "names_from": case.suggested_from if case.suggested == (artist, title) else "the request",
         "requests": len(case.reports),
         "users": len(users),

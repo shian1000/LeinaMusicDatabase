@@ -413,6 +413,26 @@ def lists_artists_with_pipes(text: str) -> bool:
                 and _SPACED_SEPARATOR_RE.search(text, pipe.end()))
 
 
+_EVENT_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def split_event_pipes(text: str) -> tuple[str, str] | None:
+    """(artist, song) of an event's whole video title, "<event with its
+    year> | <artist> | <song>", maybe with a last "| <channel>" ("FRYDERYKI
+    2018 | Daria Zawiałow & Krzysztof Zalewski | Malinowy chruśniak + Polsko
+    | Gala Fryderyk", which the "| suffix" cut to the event alone,
+    2026-11-21); None for any other text: with a " - ", three or four parts
+    only, the first naming a year. Leina Radio's _splitEventPipes()
+    (lib/src/data/youtube_playlist.dart) reads it the same way, a fourth
+    part only when it is the channel's name."""
+    if _SPACED_SEPARATOR_RE.search(text):
+        return None
+    parts = [part.strip() for part in _PIPE_RE.split(text)]
+    if len(parts) not in (3, 4) or not all(parts) or not _EVENT_YEAR_RE.search(parts[0]):
+        return None
+    return parts[1], parts[2]
+
+
 # Uploaders routinely tack promo hashtags onto the end of a title (e.g.
 # "Nocą (Official Audio) #Zostańwdomu #KulturalnaStrefa") - never part of the
 # song title itself. Only at the end and only "#" + a letter: "Funk #49" and

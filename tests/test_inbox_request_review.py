@@ -150,7 +150,7 @@ def env(tmp_path, monkeypatch):
 
 def _request(inbox: Path, name: str, dead=(), found=(), fields=(), songs=()) -> Path:
     """dead: (song_id, title, dead id, replacement); found: (song_id, title,
-    video id); fields: (row_id, column, old, new) on songs; songs: (artist, title)."""
+    video id); fields: (row_id, column, old, new) on songs; songs: (artist, title[, duration_s])."""
     path = inbox / pr.REVIEW / name
     conn = sqlite3.connect(str(path))
     with conn:
@@ -165,9 +165,9 @@ def _request(inbox: Path, name: str, dead=(), found=(), fields=(), songs=()) -> 
         for row_id, column, old, new in fields:
             conn.execute("INSERT INTO field_corrections VALUES ('songs', ?, ?, ?, ?, ?, 'Chromatic', "
                          "'Elise Trouw', ?)", (row_id, column, old, new, row_id, WHEN))
-        for artist, title in songs:
-            conn.execute("INSERT INTO song_requests (title, artist, source, requested_at) "
-                         "VALUES (?, ?, 'youtube', ?)", (title, artist, WHEN))
+        for artist, title, *duration in songs:
+            conn.execute("INSERT INTO song_requests (title, artist, duration_s, source, requested_at) "
+                         "VALUES (?, ?, ?, 'youtube', ?)", (title, artist, (duration or [None])[0], WHEN))
     conn.close()
     return path
 
@@ -572,6 +572,20 @@ def test_a_rejected_song_is_published_for_leina_radio(env):
     assert (rejected.artist, rejected.title) == ("Vulfpeck", "Dean Town")
     assert env["imported"] == []
     assert _folder(env, pr.PROCESSED) == ["2026-10-14_09-00-00_001.db"]
+
+
+def test_a_video_as_long_as_a_mix_is_flagged_with_its_length(env, capsys):
+    # Real case 2026-11-21: a 32-minute mix asked for as "<mix name> - After Dark"
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db",
+             songs=[("Songs that actually match the vibe of Mr. Kitty", "After Dark", 1939),
+                    ("Vulfpeck", "Dean Town", 215)])
+    env["answers"].add(REVIEW_LABEL, "Skip for now", "Skip for now")
+
+    review.resolve_new_requests()
+
+    out = capsys.readouterr().out
+    assert "Length:       32:19" in out and "Length:       3:35" in out
+    assert out.count("as long as a full album or a mix") == 1
 
 
 def test_a_generic_channel_offers_each_credited_artist_and_never_itself(env, monkeypatch, capsys):

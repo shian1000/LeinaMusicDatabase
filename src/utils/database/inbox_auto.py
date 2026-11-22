@@ -92,6 +92,7 @@ from utils.database.inbox_song_requests import (
     collect_song_request_cases,
     mark_song_added,
     song_request_facts,
+    title_as_musicbrainz_spells,
     videos_saved_text,
 )
 from utils.database.song_artists import additional_artist_role, song_artist_label
@@ -486,7 +487,7 @@ def _add_requested_songs(session, cases: list, senders: dict, may, result: AutoR
         if rule is None:
             case.auto_note = "no rule of yours (Settings -> Automation -> My rules) takes it"
             continue
-        taken.append((case, artist, title, rule))
+        taken.append((case, artist, title_as_musicbrainz_spells(artist, title), rule))
     if not taken:
         return
     # The import works in the menu's sessions: this one must hold no

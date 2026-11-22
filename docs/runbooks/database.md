@@ -328,7 +328,8 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   or albums, a video found bad or not checked. A song a rule takes is added through
   `run_import_batch()` inside `prompts.unattended()`: its "use the similar song / artist?"
   questions are `import_existing_song` / `import_existing_artist`, answered by the owner's rules
-  for them, else no (a new song or artist - require `closest_song_score` / `artist_known` in the
+  for them, else no (a new song or artist - require `closest_song_of_artist_score` (not
+  `closest_song_score`, mostly the title across all artists) / `artist_known` in the
   `song_request` rule to keep that from happening). The `add_songs` permission is only a fact. The owner's answers (no `by` in `decisions.json`) go into the decision log with the
   pass's note, `data/decision_log.jsonl` (`utils/common/decision_log.py`), as do every
   `tick_items()` / `ask_yes_no()` answer, under the menu entry or "Run all" step they were asked
@@ -472,6 +473,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   from `Inbox/processed/` and `decisions.json` (`run_settled_requests_backfill()`, at the start
   that applied the migration; with the data drive missing then, nothing is backfilled - run
   `backfill_settled_requests()` by hand).
+  Checked on "Dla Ani 2" (2026-11-21): the review shows the video's length (`duration_s`, sent by
+  Leina Radio since that day) and flags 20 minutes and more (`FULL_ALBUM_MIN_DURATION_S`) as a
+  likely mix or full album, whose names may be the video's; the rules get it as `video_minutes`.
+  `closest_song_of_artist_score` compares only the artist's own songs (`closest_song_score`
+  is mostly the title: another artist's "Wena" scored 1.0) - the owner's "MusicBrainz agrees"
+  rule requires it `<= 0.84`, so "czas pomyka" next to Voo Voo's "Czas pomyka II" (0.88) waits
+  for review. A title the pass adds written all in lower / upper case takes MusicBrainz's
+  spelling of the same words (`title_as_musicbrainz_spells()`). An event's video title
+  "`<event 2018> | <artist> | <song>[ | <channel>]`" reads as that artist and song
+  (`split_event_pipes()`, Leina Radio the same), and Years offers a version label's year
+  ("Live, Fryderyki 2018") for review instead of looking the title up.
   A request carrying a YouTube channel as the artist and the whole video title as the title
   ("familyboombox" / "Бумбокс - Твiй на 100%", Leina Radio's search results before
   [`youtube-search-requests-for-musicdatabaseapp.md`](../handoffs/youtube-search-requests-for-musicdatabaseapp.md))

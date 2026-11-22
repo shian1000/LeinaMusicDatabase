@@ -141,7 +141,13 @@ would still lose its guest - not seen on the catalog, not handled yet. The
 first "|" (`lists_artists_with_pipes()`, "MIUOSH | SMOLIK | NOSPR - Wizje"):
 cutting it left "MIUOSH", which the channel fallback read as a title by
 "FDGREC". Of the 23 titles with a "|" in the logs (2026-11-05) only that form
-changes. A title with no " - " at all ("Golan | Strong Faith") is still cut.
+changes. A title with no " - " at all ("Golan | Strong Faith") is still cut -
+except an event's "<event 2018> | <artist> | <song>[ | <channel>]"
+(`split_event_pipes()`, a year in the first of three or four parts; "FRYDERYKI
+2018 | Daria Zawiałow & Krzysztof Zalewski | Malinowy chruśniak + Polsko | Gala
+Fryderyk" was cut to the event, 2026-11-21), rewritten to "artist - song".
+Leina Radio reads it the same way but takes a fourth part only when it is the
+channel's name; with no channel here, any fourth part is dropped.
 Measured before and after on 42,517 names (the catalog read as each source,
 Clean names, the library's tags and file names): 6 differ, all better
 ("Gdzie jest M? - feat. Spinache, Ment XXL" -> "Gdzie jest M?" + both guests,

@@ -264,6 +264,19 @@ def test_pipe_before_the_only_dash_lists_the_artists(title, artist, song):
     assert (metadata["artist_name"], metadata["title"]) == (artist, song)
 
 
+@pytest.mark.parametrize("title, artist, song", [
+    # Real case 2026-11-21: cut to "FRYDERYKI 2018", by the channel
+    ("FRYDERYKI 2018 | Daria Zawiałow & Krzysztof Zalewski | Malinowy chruśniak + Polsko | Gala Fryderyk",
+     "Daria Zawiałow & Krzysztof Zalewski", "Malinowy chruśniak + Polsko"),
+    ("Opole 2017 | Kayah | Testosteron", "Kayah", "Testosteron"),
+    # No year in the first part: a "| suffix" as before
+    ("Testosteron | Kayah | TVP Rozrywka", "Gala Fryderyk", "Testosteron"),
+])
+def test_an_events_pipes_name_the_artist_and_the_song(title, artist, song):
+    metadata = _build(title, channel="Gala Fryderyk")
+    assert (metadata["artist_name"], metadata["title"]) == (artist, song)
+
+
 def test_pipes_listing_artists_are_only_for_a_title_still_to_be_split():
     # A stored or tagged title has no artists in it, so its "| ..." stays a suffix
     assert sanitize.sanitize_field("Song | Label - Records", sanitize.TITLE, sanitize.SOURCE_YOUTUBE) == "Song"

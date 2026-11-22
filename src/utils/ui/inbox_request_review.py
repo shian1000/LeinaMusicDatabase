@@ -58,6 +58,7 @@ from utils.database.latin_names import LATIN_COLUMNS, name_of
 from utils.database.artist_reassignment import is_unused
 from utils.database.datatables import Artist
 from utils.database.song_artists import additional_artist_role, count_artist_songs, song_artist_label
+from utils.database.song_kinds import looks_like_full_album
 from utils.ui.artist_change import ask_old_artist_role, offer_removing_emptied
 from utils.common.cover_names import title_with_cover
 from utils.common.romanize import suggest_latin
@@ -600,6 +601,12 @@ def _show_song_request(case, position: str) -> None:
     if other:
         show(f"    Also asked for as {', '.join(_colored_song_label(*pair) for pair in other)}")
     show(f"    From:         {escape(', '.join(case.sources))}")
+    if case.duration_s:
+        minutes, seconds = divmod(case.duration_s, 60)
+        # A 32-minute mix came named "<mix name> - After Dark" (2026-11-21)
+        hint = ("  [yellow]as long as a full album or a mix - its names may be the video's, not a song's"
+                "[/yellow]" if looks_like_full_album(None, case.duration_s) else "")
+        show(f"    Length:       {minutes}:{seconds:02d}{hint}")
     album, year = case.metadata()["album"], case.metadata()["year"]
     if album or year:
         show(f"    Album, year:  {escape(str(album or '-'))}, {year or '-'}")

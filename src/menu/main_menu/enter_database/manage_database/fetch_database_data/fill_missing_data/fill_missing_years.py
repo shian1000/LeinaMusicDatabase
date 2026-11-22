@@ -109,6 +109,12 @@ def _fill_empty_years(songs, entries) -> tuple[list, int]:
             singles.append(songs[0])
             del groups[key]
 
+    # A version naming its year ("Malinowy chruśniak + Polsko" (Live,
+    # Fryderyki 2018)) is that performance: a lookup of its title finds the
+    # studio single's year instead (2017, 2026-11-21) - offered for review
+    dated_versions = [song for song in singles if _version_year(song)]
+    singles = [song for song in singles if song not in dated_versions]
+
     print("Preparing fetch modules . . . ")
 
     # (label, year_or_None, [songs]) collected here, paired by index with
@@ -120,6 +126,11 @@ def _fill_empty_years(songs, entries) -> tuple[list, int]:
     # anything is written.
     review_results = []
     looked_at = []  # the songs whose year was looked up (not those left by a stop)
+    for song in dated_versions:
+        print(f"Year {YELLOW}{_version_year(song)}{RESET} from the version of {YELLOW}{song.artist.name} - "
+              f"{song.title}{RESET} (to review at the end)")
+        review_results.append((f"{song.artist.name} - {song.title}", _version_year(song), [song],
+                               f'the version "{song.version_label}"'))
 
     try:
         modules = load_discovery_modules(YEARS)
@@ -244,6 +255,15 @@ def _fill_years_known_in_database(songs) -> list:
             edit_db_entry(song, "year", str(year))
             touched.append(song)
     return touched
+
+
+_VERSION_YEAR_RE = re.compile(r"\b" + YEAR + r"\b")
+
+
+def _version_year(song) -> int | None:
+    """The year a song's version label names ("Live, Fryderyki 2018"), else None."""
+    match = _VERSION_YEAR_RE.search(getattr(song, "version_label", None) or "")
+    return int(match.group()) if match else None
 
 
 def _years_from_titles(results, entries, review_results) -> list:

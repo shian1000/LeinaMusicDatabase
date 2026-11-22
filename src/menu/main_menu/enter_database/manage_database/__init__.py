@@ -358,9 +358,9 @@ def run_unattended_steps(keys) -> list[tuple[str, str]]:
     return taken
 
 
-def manage_database():
+def _manage_database_actions() -> dict:
     waiting = count_new_requests()
-    action_map = {
+    return {
         "Run all clean-ups and lookups in order": run_all_steps,
         # Songs added from the requests: offered their missing data right after
         f"Resolve new requests{f' ({waiting})' if waiting else ''}":
@@ -389,4 +389,6 @@ def manage_database():
     }
 
 
-    execute_menu_item("Manage database", action_map)
+def manage_database():
+    # Built again each time: the count of new requests changes under it
+    execute_menu_item("Manage database", _manage_database_actions(), refresh=_manage_database_actions)
