@@ -47,6 +47,10 @@ CREATE TABLE settled_song_requests (
 - **`song_id` is always current**: a trigger moves rows to the kept song on a merge and deletes
   them with a deleted song (as for `additional_youtube_videos`). The phone still goes through
   `current()`, which costs nothing.
+- **A deleted song's requests** (2026-11-24, nothing to change in the app): the owner may now
+  delete a requested song together with rejecting its requests, and reject later the requests of
+  songs deleted before - their settled rows become `rejected_song_requests` rows, the names, video
+  and Spotify track as the request sent them, so Leina Radio shows those tracks as rejected.
 - **Backfill:** requests settled before the table are written once, from MusicDatabase's
   `Inbox/processed/` and `decisions.json`, at the start that applies the migration (~206 of
   ~210 old requests on 2026-11-18).

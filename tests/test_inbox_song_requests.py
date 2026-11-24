@@ -5,6 +5,7 @@ or Spotify track), rejecting into music.db's rejected_song_requests, the
 metadata handed to the import, and the automatic pass never adding a song.
 Temp-file SQLite; the local song matcher is faked."""
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -638,6 +639,134 @@ def test_the_backfill_records_requests_settled_before_the_table(env):
 
     assert sorted((r.title, r.song_id) for r in session.query(SettledSongRequest)) == [
         ("Chromatic", 1), ("[1-01] Cave Story (Main Theme)", 3), ("Вахтёрам Live", 2)]
+
+
+# ---- requested songs that get deleted ---------------------------------------------------------
+# The real case (2026-11-24): two songs requests added on 2026-11-22, deleted by the owner
+# with "Delete it anyway" - their settled rows went with them, and Leina Radio, which asks
+# for a song only once, showed both tracks as outside the database for good.
+
+NIZZA = ("Зе Інтерв'юер", "5'NIZZA. Анонс. Скоро", "D6Jc9-uyQCc")
+CURE = ("Kawa i Awangarda", "The Cure", "GMmTW6I8vjI")
+REAL_FILE = "shianman_2026-11-22_12-26-15_013.db"
+
+
+def _logged_session(env):
+    """A session whose deletions are logged in song_id_changes (firing the
+    triggers), as music.db's."""
+    from utils.database.song_references import register_song_reference_sync
+
+    factory = sessionmaker(bind=env["session"].get_bind())
+    register_song_reference_sync(factory)
+    return factory()
+
+
+def _added_on_2026_11_22(env, session) -> dict:
+    """Songs #6969 / #6970 as the requests added them, their settled rows, the
+    request file in processed/ and the answers in decisions.json; the songs."""
+    ze, kawa = Artist(id=6001, name="Зе Інтерв'юер"), Artist(id=6002, name="Kawa i Awangarda")
+    songs = {6969: Song(id=6969, title="5'NIZZA. Анонс", artist=ze, youtube_video_id=NIZZA[2]),
+             6970: Song(id=6970, title="Muzyka na jesień (The Cure, Talk Talk, Foghorn)", artist=kawa,
+                        youtube_video_id=CURE[2])}
+    session.add_all(songs.values())
+    decisions = {}
+    for (artist, title, video), song in zip((NIZZA, CURE), songs.values()):
+        session.add(SettledSongRequest(artist=artist, title=title, youtube_video_id=video, song_id=song.id,
+                                       settled_at="2026-11-22T15:05:37+01:00"))
+        decisions[f"song:{sr.song_key(artist, title)}"] = {
+            "decision": sr.ADD, "artist": artist, "title": title, "decided_at": "2026-11-22T15:05:37+01:00",
+            "files": [REAL_FILE], "added_as": {"artist": artist, "title": song.title, "song_id": song.id}}
+    session.commit()
+    _request(env["inbox"], REAL_FILE, [
+        {"title": NIZZA[1], "artist": NIZZA[0], "youtube_video_id": NIZZA[2], "duration_s": 223,
+         "requested_at": "2026-11-22T12:26:24+01:00"},
+        {"title": CURE[1], "artist": CURE[0], "youtube_video_id": CURE[2], "duration_s": 523,
+         "requested_at": "2026-11-22T12:26:30+01:00"},
+        {"title": "Chromatic", "artist": "Elise Trouw"},  # settled as a song still there
+    ], folder="processed")
+    (env["inbox"] / pr.DECISIONS_FILE).write_text(json.dumps(decisions, ensure_ascii=False))
+    return songs
+
+
+def _rejected(session) -> list:
+    return [(r.artist, r.title, r.youtube_video_id)
+            for r in session.query(RejectedSongRequest).order_by(RejectedSongRequest.id)]
+
+
+def test_deleting_a_requested_song_can_reject_its_requests(env):
+    session = _logged_session(env)
+    songs = _added_on_2026_11_22(env, session)
+
+    for song_id in (6969, 6970):
+        assert sr.reject_settled_requests(session, song_id) == 1
+        session.delete(songs[song_id])
+    session.commit()
+
+    # The rows reject_song_request() writes, as Leina Radio named them; no settled row left
+    assert _rejected(session) == [NIZZA, CURE]
+    assert session.query(SettledSongRequest).count() == 0
+    assert sorted((c.old_song_id, c.new_song_id) for c in session.query(SongIdChange)) == \
+        [(6969, None), (6970, None)]
+    decisions = pr.load_decisions()
+    nizza = decisions[f"song:{sr.song_key(*NIZZA[:2])}"]
+    assert (nizza["decision"], nizza["files"], nizza["deleted_song_id"]) == (sr.REJECT, [REAL_FILE], 6969)
+    assert nizza["was_added_as"] == {"artist": NIZZA[0], "title": "5'NIZZA. Анонс", "song_id": 6969}
+    # Nothing left to list as deleted, and the video asked for again is rejected before
+    assert sr.deleted_song_requests(session) == []
+    _request(env["inbox"], "2026-11-25_10-00-00_001.db",
+             [{"title": "5'NIZZA. Анонс", "artist": "Зе Інтервʼюер", "youtube_video_id": NIZZA[2]}])
+    _, [case] = _cases(env)
+    assert case.status == sr.REJECTED_BEFORE
+    session.close()
+
+
+def test_requests_of_songs_deleted_earlier_are_found_and_can_be_rejected(env):
+    session = _logged_session(env)
+    songs = _added_on_2026_11_22(env, session)
+    # Deleted plainly ("Delete it anyway"): the trigger dropped the settled rows
+    for song in songs.values():
+        session.delete(song)
+    session.commit()
+    assert session.query(SettledSongRequest).count() == 0
+    # Not listed: one merged into a song still there, an older answer without the song id,
+    # one rejected since
+    decisions = pr.load_decisions()
+    decisions["song:" + sr.song_key("Elise Trouw", "Chromatic (Live)")] = {
+        "decision": sr.ADD, "added_as": {"artist": "Elise Trouw", "title": "Chromatic (Live)", "song_id": 77}}
+    decisions["song:" + sr.song_key("Elise Trouw", "Old")] = {
+        "decision": sr.ADD, "added_as": {"artist": "Elise Trouw", "title": "Old"}}
+    decisions["song:" + sr.song_key("Elise Trouw", "Unwanted")] = {
+        "decision": sr.ADD, "artist": "Elise Trouw", "title": "Unwanted", "added_as": {"song_id": 78}}
+    session.add_all([SongIdChange(old_song_id=77, new_song_id=1), SongIdChange(old_song_id=78, new_song_id=None),
+                     RejectedSongRequest(artist="Elise Trouw", title="Unwanted", rejected_at="x")])
+    session.commit()
+
+    items = sr.deleted_song_requests(session, decisions)
+
+    assert [(i.song_id, i.case.latest.artist, i.case.latest.title, i.case.youtube_video_ids) for i in items] == [
+        (6969, NIZZA[0], NIZZA[1], [NIZZA[2]]), (6970, CURE[0], CURE[1], [CURE[2]])]
+    assert items[0].added_as["title"] == "5'NIZZA. Анонс"
+    assert {r.file_name for i in items for r in i.case.reports} == {REAL_FILE}
+
+    for item in items:
+        sr.reject_deleted_song_request(session, item)
+    session.commit()
+
+    assert _rejected(session)[1:] == [NIZZA, CURE]
+    assert pr.load_decisions()[items[1].case.key]["decision"] == sr.REJECT
+    assert pr.load_decisions()[items[1].case.key]["files"] == [REAL_FILE]
+    assert sr.deleted_song_requests(session) == []
+    session.close()
+
+
+def test_a_deleted_songs_request_without_its_file_is_listed_by_its_names(env):
+    decisions = {"song:" + sr.song_key(*CURE[:2]): {
+        "decision": sr.ADD, "artist": CURE[0], "title": CURE[1], "decided_at": "2026-11-22T15:05:37+01:00",
+        "files": ["gone_2026-11-22_12-26-15_013.db"], "added_as": {"song_id": 6970}}}
+
+    [item] = sr.deleted_song_requests(env["session"], decisions)
+
+    assert (item.case.latest.artist, item.case.latest.title, item.case.youtube_video_ids) == (CURE[0], CURE[1], [])
 
 
 def test_a_file_missing_a_required_column_is_rejected(env):

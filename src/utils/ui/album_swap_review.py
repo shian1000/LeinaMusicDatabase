@@ -16,7 +16,7 @@ def review_swapped_albums(found: list) -> list:
     swapped = tick_album_pairs(found, [f"{len(found)} song(s) with an album found only with the artist and title swapped",
                                        "Ticked: the artist and title are swapped and the album is saved.",
                                        "Unticked: the song stays as it is, without an album."],
-                               "Swap and save which?", "Nothing swapped.")
+                               "Swap and save which?", "Nothing swapped.", swapped=True)
     if not swapped:
         return []
     session, _ = require_global_database_sessions()

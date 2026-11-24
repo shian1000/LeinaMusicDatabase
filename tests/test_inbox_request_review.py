@@ -604,3 +604,59 @@ def test_a_generic_channel_offers_each_credited_artist_and_never_itself(env, mon
     [entry] = env["imported"]
     assert (entry["artist_name"], entry["title"], entry["feat_artists"]) == \
         ("Fisz Emade Tworzywo", "Śniadanie", ["Natalia Przybysz"])
+
+
+# ==================== songs deleted since they were asked for ====================
+
+def test_requests_of_songs_deleted_since_are_listed_and_can_be_rejected(env, capsys):
+    # The real case (2026-11-24): #6969 / #6970, added from these requests on
+    # 2026-11-22 and deleted with "Delete it anyway"; nothing waits in review/
+    from utils.database.datatables import SongIdChange
+
+    real_file = "shianman_2026-11-22_12-26-15_013.db"
+    requests = [("Зе Інтерв'юер", "5'NIZZA. Анонс. Скоро", "D6Jc9-uyQCc", 6969, "5'NIZZA. Анонс"),
+                ("Kawa i Awangarda", "The Cure", "GMmTW6I8vjI", 6970,
+                 "Muzyka na jesień (The Cure, Talk Talk, Foghorn)")]
+    path = env["inbox"] / pr.PROCESSED / real_file
+    path.parent.mkdir()
+    conn = sqlite3.connect(str(path))
+    with conn:
+        conn.executescript(REQUEST_SQL)
+        conn.execute("INSERT INTO request VALUES (1, ?, 'shianman', 'Leina Radio')", (WHEN,))
+        for artist, title, video, _, _ in requests:
+            conn.execute("INSERT INTO song_requests (title, artist, youtube_video_id, source, requested_at) "
+                         "VALUES (?, ?, ?, 'youtube', ?)", (title, artist, video, WHEN))
+    conn.close()
+    (env["inbox"] / pr.DECISIONS_FILE).write_text(json.dumps({
+        f"song:{sr.song_key(artist, title)}": {
+            "decision": sr.ADD, "artist": artist, "title": title, "files": [real_file],
+            "added_as": {"artist": artist, "title": added_title, "song_id": song_id}}
+        for artist, title, _, song_id, added_title in requests}, ensure_ascii=False))
+    env["session"].add_all([SongIdChange(old_song_id=6969, new_song_id=None),
+                            SongIdChange(old_song_id=6970, new_song_id=None)])
+    env["session"].commit()
+    env["answers"].add(REVIEW_LABEL, "Reject", "Skip for now")
+
+    review.resolve_new_requests()
+
+    out = capsys.readouterr().out
+    assert "Songs Leina Radio asked for, deleted since: 2" in out
+    assert "2 song(s) Leina Radio asked for were deleted since:" in out
+    assert "https://youtu.be/D6Jc9-uyQCc" in out and "#6970, deleted since" in out
+    assert env["answers"].selects[1][1] == ["Reject - Leina Radio won't ask for it again", review._SKIP,
+                                            review._STOP]
+    rows = [(r.artist, r.title, r.youtube_video_id) for r in env["session"].query(RejectedSongRequest)]
+    assert rows == [requests[0][:3]]
+
+    # The skipped one is asked again next time, and rejected then
+    env["answers"].add(REVIEW_LABEL, "Reject")
+    review.resolve_new_requests()
+
+    assert "1 song(s) Leina Radio asked for were deleted since:" in capsys.readouterr().out
+    rows = [(r.artist, r.title, r.youtube_video_id) for r in env["session"].query(RejectedSongRequest)]
+    assert rows == [r[:3] for r in requests]
+    assert {d["decision"] for d in _decisions(env).values()} == {sr.REJECT}
+    assert _folder(env, pr.PROCESSED) == [real_file]
+
+    review.resolve_new_requests()
+    assert "No new requests in the inbox." in capsys.readouterr().out

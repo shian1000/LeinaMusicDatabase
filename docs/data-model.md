@@ -95,7 +95,9 @@ aliases       other spellings, comma-separated
   song even when its own matcher can't (a file on the phone with no video, "[1-01] Cave Story
   (Main Theme)"); handoff [`handoffs/settled-song-requests-for-musicdatabaseapp.md`](handoffs/settled-song-requests-for-musicdatabaseapp.md).
   `inbox_song_requests.record_settled_request()`, from `_settle()` and `mark_song_added()`; the
-  inbox settles a later request matching a row as that song without matching. Public on GitHub.
+  inbox settles a later request matching a row as that song without matching. A deleted song's
+  rows go with it (trigger); deleting one "and rejecting the request(s)" moves them to
+  `rejected_song_requests` first (`reject_settled_requests()`). Public on GitHub.
 
 - `additional_youtube_videos` — a song's YouTube videos other than its own link, only for telling
   which song a video is (Leina Radio looks a played video up here after `songs.youtube_video_id`,
@@ -125,8 +127,15 @@ aliases       other spellings, comma-separated
   [`agent-notes/database-search.md`](agent-notes/database-search.md) and
   [`agent-notes/normalization-and-matching.md`](agent-notes/normalization-and-matching.md).
 - `Artist.synonyms` — comma-separated alternate names for the same artist (e.g. a fan channel using
-  a translated name). Consumed by the YouTube matching layer; see
-  [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md).
+  a translated name; Leina Radio splits it on commas). Consumed by search and every matcher; see
+  [`agent-notes/youtube-search-matching.md`](agent-notes/youtube-search-matching.md). Written by
+  merges (`merge_artist_synonyms()`) and by the owner - the artist editor's "synonyms" entry
+  (Manage database → Manual management → Edit artist, or Artist actions → Edit) and Artist
+  actions → "Add synonym" / "Remove synonym" - all through `song_artists.set_artist_synonyms()`:
+  trimmed, empties and repeats after `normalize()` dropped, the artist's own name / Latin form
+  dropped, joined by ", ", none = NULL. Nothing caches them across a pass (`LocalSongMatcher` /
+  `ArtistPool` are made per run; the library index rematches because `catalog_fingerprint`
+  hashes them); the sharing copy carries the column as part of music.db.
 - Latin forms (migration 0011): `songs.title_latin`, `artists.name_latin`, `albums.title_latin` —
   the owner's Latin spelling of a name in another alphabet ("Кино" → "Kino"), free text, NULL =
   none. Leina Radio shows them as "Кино (Kino)" (album via `songs.album_id`; `songs.album` has no

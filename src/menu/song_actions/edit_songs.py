@@ -1,5 +1,6 @@
 import questionary
-from utils.ui.prompts import ask_yes_no, choose
+from utils.ui.prompts import ask_yes_no, choose, tick_items
+from utils.common.artist_credits import split_synonyms
 from utils.database.datatables import Song, Artist, artist_categories, song_categories
 from utils.database.database_sessions import submit_global_database_session
 from utils.ui.menu_utils import pick_from_db_objects, search_and_pick_db_object
@@ -17,6 +18,7 @@ from utils.database.song_artists import (
     add_additional_artist,
     remove_additional_artist,
     set_additional_artist_role,
+    set_artist_synonyms,
     song_artist_label,
 )
 from config.constants import ADDITIONAL_ARTIST_ROLE_MAIN, ADDITIONAL_ARTIST_ROLE_FEAT, ALBUM_TYPE_SINGLE
@@ -32,7 +34,7 @@ from utils.ui.version_review import set_version_of_songs
 from utils.common.version_names import version_marker
 from utils.ui.project_review import set_project_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
-from utils.ui.song_delete_review import merge_instead_of_deleting
+from utils.ui.song_delete_review import merge_instead_of_deleting, reject_requests_before_deleting
 from utils.database.song_kinds import kind_label
 from utils.ui.artist_change import change_songs_artist, pick_or_create_artist, rename_artist, swap_titles_and_artist_names
 
@@ -114,6 +116,34 @@ def edit_other_titles(song: Song) -> None:
     print(f"Other titles of {song.title}: {song.other_titles or '—'}")
 
 
+def edit_artist_synonyms(artist: Artist) -> None:
+    """The artist's synonyms (other names it goes by - a channel name, a
+    spelling): untick the wrong ones, type new ones; saved cleaned by
+    set_artist_synonyms()."""
+    current = split_synonyms(artist.synonyms)
+    print(f"Synonyms of {artist.name}:")
+    for name in current:
+        print(f"  {name}")
+    if not current:
+        print("  —")
+    kept = current
+    if current:
+        kept = tick_items("Which to keep?", current, label=lambda name: name, checked=True)
+        if kept is None:
+            print("Aborted")
+            return
+    typed = questionary.text("Add synonyms (comma-separated, empty = none):").ask()
+    if typed is None:
+        print("Aborted")
+        return
+    old = set_artist_synonyms(artist, [*kept, typed])
+    if (old or None) == artist.synonyms:
+        print(f"Synonyms of '{artist.name}' unchanged: '{old or '---'}'")
+        return
+    submit_global_database_session()
+    print(f"Updated synonyms for '{artist.name}': '{old or '---'}' --> '{artist.synonyms or '---'}'")
+
+
 def edit_entry_menu(mode: str = None, db_object = None):
     if db_object is None:
         if mode not in ("Artist", "Song"):
@@ -156,6 +186,8 @@ def edit_entry_menu(mode: str = None, db_object = None):
         latin_rows[f"name in Latin letters ({latin_of(db_object) or '—'})"] = db_object
     for label, row in latin_rows.items():
         actions[label] = lambda row=row: edit_latin_form(row)
+    if mode == "Artist":
+        actions[f"synonyms ({db_object.synonyms or '—'})"] = lambda: edit_artist_synonyms(db_object)
     if mode == "Song":
         songs = [db_object]
         actions.update({
@@ -220,6 +252,8 @@ def _delete_entry(db_object, mode: str = None) -> None:
             return
     if not ask_yes_no(f"Do you really want to delete {label}?"):
         print("Aborted")
+        return
+    if isinstance(db_object, Song) and not reject_requests_before_deleting(remaining):
         return
     try:
         delete_db_entry(db_object)

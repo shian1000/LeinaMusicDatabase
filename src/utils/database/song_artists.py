@@ -20,6 +20,7 @@ from config.constants import (
 )
 from utils.database.datatables import AdditionalSongArtist, Artist, Song
 from utils.database.latin_names import artist_match_synonyms
+from utils.common.artist_credits import split_synonyms
 from utils.common.normalizer import normalize
 
 
@@ -135,6 +136,27 @@ def merge_artist_synonyms(merge_to: Artist, merge_from: Artist) -> None:
             seen.add(key)
             merged.append(name.strip())
     merge_to.synonyms = ", ".join(merged) or None
+
+
+def set_artist_synonyms(artist: Artist, names) -> str | None:
+    """Replace the artist's synonyms (artists.synonyms, the other names it
+    goes by) with `names`, cleaned: each trimmed (a name holding a comma
+    would read as two, so it's split - split_synonyms()), empty ones and
+    repeats after normalize() dropped (the first spelling stays), and so is
+    one equal to the artist's own name or its Latin form. Stored joined by
+    ", ", none = NULL. Returns the old text. Caller commits.
+    Every edit of the list goes through here - the editor, Artist actions'
+    "Add synonym" / "Remove synonym"; merges use merge_artist_synonyms()."""
+    old = artist.synonyms
+    seen = {normalize(artist.name or ""), normalize(getattr(artist, "name_latin", None) or "")}
+    kept = []
+    for name in (part for value in names for part in split_synonyms(value)):
+        key = normalize(name)
+        if key and key not in seen:
+            seen.add(key)
+            kept.append(name)
+    artist.synonyms = ", ".join(kept) or None
+    return old
 
 
 def reassign_additional_artist_links(session, from_id: int, to_id: int) -> None:

@@ -39,6 +39,10 @@ class DiscoveryResult:
     compilation, see constants.DISCOVERY_ALBUM_TYPES.
     album_ids: the release's id on the site, by its `albums` column
     (constants.ALBUM_EXTERNAL_ID_COLUMNS).
+    release_kind: the kind of version the release itself is (constants.
+    VERSION_LIVE for a live album: MusicBrainz's "Live" release group) - a
+    live version takes only a live release's album and year unasked
+    (version_names.lookup_fits_version()).
     """
     album: str
     matched_title: Optional[str] = None
@@ -50,6 +54,7 @@ class DiscoveryResult:
     year: Optional[int] = None
     album_type: Optional[str] = None
     album_ids: dict = field(default_factory=dict)
+    release_kind: Optional[str] = None
 
 
 @dataclass
@@ -63,13 +68,15 @@ class YearDiscoveryResult:
 
     needs_review marks a year that's only a guess (e.g. a YouTube upload
     date) - the caller shows it to the user instead of writing it straight
-    away. source_url is what to show them alongside it.
+    away. source_url is what to show them alongside it. release_kind: as
+    DiscoveryResult's, of the release the year is of.
     """
     year: int
     matched_title: Optional[str] = None
     matched_artist: Optional[str] = None
     needs_review: bool = False
     source_url: Optional[str] = None
+    release_kind: Optional[str] = None
 
 
 @dataclass

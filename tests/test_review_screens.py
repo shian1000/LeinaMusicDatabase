@@ -299,7 +299,8 @@ def test_unsure_years_start_ticked_and_ticked_ones_are_saved(monkeypatch, capsys
     typed = iter(["20245", "1987"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
 
-    reviews = [("A", 2016, [songs["a"]], "u1"), ("B", 2020, [songs["b"]], "u2"), ("C", 2021, [songs["c"]], "u3")]
+    reviews = [("A", 2016, [songs["a"]], "u1", None), ("B", 2020, [songs["b"]], "u2", None),
+               ("C", 2021, [songs["c"]], "u3", None)]
     touched = fmy._review_unsure_years(reviews)
 
     assert shown == [[True, True, True]]
@@ -365,3 +366,16 @@ def test_picking_a_user_offers_back_in_both_menus(monkeypatch):
     assert users_menu._pick_user("Which user?") is None
     assert moods_menu._pick_user("Whose moods?") == "bob"
     assert offered == [["ania", "bob", "Back"]] * 2
+
+
+def test_album_review_lists_read_artist_then_title(monkeypatch):
+    # Every other list reads "Artist - Title"; the Albums lists had the two swapped (2026-11-24)
+    from utils.ui import album_guess_review as agr
+    song = SimpleNamespace(title="The Last Time", artist=SimpleNamespace(name="The Rolling Stones"))
+    labels = []
+    monkeypatch.setattr(agr, "review_header", lambda *notes: None)
+    monkeypatch.setattr(agr, "tick_items", lambda question, items, label: labels.extend(label(i) for i in items) or [])
+    monkeypatch.setattr(agr, "say", lambda text: None)
+    agr.tick_album_pairs([(song, SimpleNamespace(album="The Last Time"))], ["note"], "Which?", "None.")
+    text = "".join(part for _, part in labels[0])
+    assert text.startswith("The Rolling Stones - The Last Time")

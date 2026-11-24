@@ -272,6 +272,43 @@ other tracks are B-sides, not the album). Rules that keep the cache from giving 
 - **It lives for one run only and stores nothing.** Spotify / iTunes could fill `load_tracks` the
   same way from their album pages; they don't yet. Tests: `tests/test_album_track_cache.py`.
 
+### A live version takes only a live release's album and year
+
+Albums and Years look a song up by artist and title - a version's title is stored without its
+marker - and the sources pick the original's release: MusicBrainz's pickers skip "Live" release
+groups on purpose (`_SKIPPED_SECONDARY_TYPES`), and the tracklist cache keys on the bare title.
+"The Rolling Stones - The Last Time" (live, a later performance) got the 1965 studio single's
+album and year that way on 2026-11-22. Owner's rule (2026-11-24): for a song whose `version_kind`
+is in `constants.VERSIONS_NEEDING_OWN_RELEASE` (only `live` so far - another kind joins that set,
+nothing else changes) a found value is saved unasked only when
+`version_names.lookup_fits_version(song, titles, release_kind)` holds - the release's or the
+matched recording's title reads as that version (`reads_as_version()`: `read_version()`'s marker,
+"... (Live at ...)", "Hits - Live", or a release titled as one, "Live at Leeds", "Live in
+Gdańsk", "Koncert w Jarocinie", not "Live Through This") or the source says the release is one
+(`DiscoveryResult` / `YearDiscoveryResult.release_kind`, `AlbumMatch` carries it with
+`matched_title`; MusicBrainz sets `live` from the release group's secondary types,
+`_SECONDARY_TYPE_VERSION_KINDS`). One check, applied in:
+- **Albums** (`fill_missing_albums()`, the menu, Run all, the import's fill-in, the timer): a sure
+  match that doesn't fit goes to `review_version_albums()` (`utils/ui/album_guess_review.py`, at
+  the end with the other Albums lists, none ticked, no rule: unattended nothing is saved). A
+  ticked one is saved with its details (`_save_album_details()`: the release's year too). The
+  fallbacks (the album off the song's own YouTube link, "Singles" for a cover-like name) go
+  through the same check - they carry no recording title.
+- **Album details**: a live version's year isn't held against the studio song's first release
+  (`year_after_the_song()` would call a live album's year a reissue's).
+- **Years** (`_collect()`): per song, so an album's studio songs keep the year while its live ones
+  are held; a held year goes into `_review_unsure_years()` unticked (an unticked one asks for the
+  right year, empty = none) with no facts, so neither the built-in `years_unsure` rule nor an
+  owner's rule takes it unattended. Looked up with `held=False` (as a project's recording), or
+  a live release's year would be dropped as later than the studio song. Not checked: a Spotify
+  page the owner stored on the song (`release_year_from_stored_link()`), a project's release
+  (always reviewed), a version label's year ("Live, Fryderyki 2018"), a year in the imported
+  title, `get_known_album_year()` (the stored album's) and "Check stored years" (skips versions).
+Left as it was: MusicBrainz still never picks a live release for an album or a single's year, so
+a live version's album from it is usually held now rather than found - searching live releases for
+a live version would need the modules to know the version (they get artist and title only).
+Tests: `tests/test_live_version_lookups.py`.
+
 ## Release-year lookups ("Fill missing data -> Years") and `get_release_year()`
 
 A second, independent duck-typed contract alongside `get_album_name()`: a module can optionally

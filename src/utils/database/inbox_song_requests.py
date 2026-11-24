@@ -18,7 +18,10 @@ to settled_song_requests (migration 0024) with the song's id, one row per way
 the phone named it: Leina Radio recognises its track as that song from the
 next copy on even when nothing else connects them (a file on the phone with
 no video, names its matcher can't reconcile), and a later request matching a
-row is settled as that song without matching again.
+row is settled as that song without matching again. A requested song being
+deleted can take its requests along as rejections (reject_settled_requests());
+the ones added as a song deleted earlier are found again for the review by
+deleted_song_requests() - see "Requested songs that get deleted" below.
 
 Cases: one per song, by normalized artist + title, from every report of
 every file. Settled without asking (the automatic pass too):
@@ -103,15 +106,19 @@ from utils.common.debug import flog, mlog
 from utils.common.normalizer import fold_diacritics, name_key, normalize, normalize_apostrophes
 from utils.common.version_names import read_version
 from utils.database.additional_videos import apply_video_links, plan_video_links, song_for_video
-from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, SettledSongRequest, Song
+from utils.database.datatables import AdditionalSongArtist, RejectedSongRequest, SettledSongRequest, Song, SongIdChange
 from utils.database.latin_names import artist_synonyms
 from utils.database.inbox_requests import (
     DECIDED,
     OPEN,
     RequestFile,
     SongRequestReport,
+    find_request_file,
+    load_decisions,
     now_iso,
     parse_time,
+    read_request_file,
+    resolve_song_id,
     save_decision,
 )
 from utils.common.sanitize import SOURCE_REQUEST, sanitize_metadata, strip_producer_credit, strip_trailing_junk_suffix
@@ -845,9 +852,10 @@ def artist_as_musicbrainz_spells(artist: str, title: str, matcher) -> str:
     return spelled if spelled.casefold() == artist.casefold() else artist
 
 
-def reject_song_request(session, case: SongRequestCase) -> None:
+def reject_song_request(session, case: SongRequestCase, **extra) -> None:
     """The owner doesn't want the song: published in rejected_song_requests,
-    one row per distinct way the phone named it. The caller commits."""
+    one row per distinct way the phone named it; `extra` goes into the
+    decision. The caller commits."""
     seen = set()
     for report in case.reports:
         row = (report.artist, report.title, report.youtube_video_id, report.spotify_track_id)
@@ -857,7 +865,7 @@ def reject_song_request(session, case: SongRequestCase) -> None:
         session.add(RejectedSongRequest(artist=report.artist, title=report.title,
                                         youtube_video_id=report.youtube_video_id,
                                         spotify_track_id=report.spotify_track_id, rejected_at=now_iso()))
-    _decided(case, REJECT, session=session)
+    _decided(case, REJECT, session=session, **extra)
 
 
 def mark_song_added(session, case: SongRequestCase, artist: str | None, title: str, song_id: int,
@@ -870,6 +878,119 @@ def mark_song_added(session, case: SongRequestCase, artist: str | None, title: s
     record_settled_request(session, case, song_id)
     _decided(case, ADD, session=session, added_as={"artist": artist, "title": title, "song_id": song_id},
              **({"by": by} if by else {}))
+
+
+# --------------------
+# Requested songs that get deleted
+# --------------------
+# Leina Radio asks for a song once (any request it sent, answered or not,
+# blocks asking again - app handoff musicdatabase-song-requests.md), and the
+# trigger of migration 0024 drops a song's settled_song_requests rows with
+# the song. So a requested song deleted plainly leaves its track outside the
+# database for good: never asked for again, and never rejected unless
+# MusicDatabase rejects it (2026-11-24, #6969 / #6970). Removing the settled
+# row wouldn't make Leina Radio ask again, so the only answer is a rejection.
+
+def reject_settled_requests(session, song_id: int, decisions: dict | None = None) -> int:
+    """Song `song_id` is about to be deleted and the owner doesn't want it
+    back: each request settled as it (settled_song_requests) is rejected the
+    way reject_song_request() rejects one - its rows in rejected_song_requests,
+    as the phone named it, the decision saved when `session` commits (the
+    files and what it was added as kept from the old answer in `decisions`,
+    default decisions.json) - and its settled rows removed. How many
+    requests (one per artist + title); the caller deletes the song and
+    commits."""
+    rows = (session.query(SettledSongRequest).filter(SettledSongRequest.song_id == song_id)
+            .order_by(SettledSongRequest.id).all())
+    if not rows:
+        return 0
+    decisions = load_decisions() if decisions is None else decisions
+    groups: dict[str, list] = {}
+    for row in rows:
+        groups.setdefault(song_key(row.artist, row.title), []).append(row)
+    for key, group in groups.items():
+        earlier = decisions.get(f"song:{key}") or {}
+        case = SongRequestCase([SongRequestReport(
+            file_name="", title=row.title, artist=row.artist, album=None, year=None, duration_s=None,
+            youtube_video_id=row.youtube_video_id, spotify_track_id=row.spotify_track_id, source="",
+            requested_at=row.settled_at) for row in group])
+        reject_song_request(session, case, deleted_song_id=song_id, files=earlier.get("files") or [],
+                            **({"was_added_as": earlier["added_as"]} if earlier.get("added_as") else {}))
+        for row in group:
+            session.delete(row)
+    # Before the song's deletion is flushed: its song_id_changes row fires the
+    # trigger deleting these rows, and an ORM delete matching none then fails
+    session.flush()
+    return len(groups)
+
+
+@dataclass
+class DeletedSongRequest:
+    """A request the owner added (or the automatic pass did) as a song that
+    was deleted since, not merged: Leina Radio shows its track as outside
+    the database and won't ask for it again."""
+    case: SongRequestCase
+    song_id: int  # the song it was added as
+    added_as: dict  # the decision's added_as (artist, title, song_id)
+
+
+def deleted_song_requests(session, decisions: dict | None = None) -> list[DeletedSongRequest]:
+    """Every song request decisions.json (or `decisions`) records as added
+    whose song is gone - song_id_changes followed (a merge is the kept song),
+    the chain ending in a deletion or a song that isn't there - and that
+    nothing answers since: no rejected_song_requests or settled_song_requests
+    row by its names, video or Spotify track. Its reports are read from the
+    request files the answer names (any inbox folder), else made of the
+    decision's names. Never answered automatically. Order: decisions.json's."""
+    decisions = load_decisions() if decisions is None else decisions
+    added = [(key, entry) for key, entry in decisions.items()
+             if key.startswith("song:") and isinstance(entry, dict) and entry.get("decision") == ADD
+             and isinstance((entry.get("added_as") or {}).get("song_id"), int)]
+    if not added:
+        return []
+    moved = {old: new for old, new in session.query(SongIdChange.old_song_id, SongIdChange.new_song_id)
+             .order_by(SongIdChange.id)}
+    known = _request_rows(session, RejectedSongRequest), _request_rows(session, SettledSongRequest)
+    found = []
+    for key, entry in added:
+        song_id = entry["added_as"]["song_id"]
+        current = resolve_song_id(song_id, moved)
+        if current is not None and session.get(Song, current) is not None:
+            continue
+        reports = _reports_of_decision(key, entry)
+        keys = [k for r in reports for k in _request_keys(r.artist, r.title, r.youtube_video_id, r.spotify_track_id)]
+        if any(k in rows for rows in known for k in keys):
+            continue
+        found.append(DeletedSongRequest(SongRequestCase(reports), song_id, entry["added_as"]))
+    return found
+
+
+def _reports_of_decision(key: str, entry: dict) -> list[SongRequestReport]:
+    """The reports of the case answered under `key` in the files `entry`
+    names; one made of the answer's own names when none can be read."""
+    reports = []
+    for name in entry.get("files") or []:
+        path = find_request_file(name) if isinstance(name, str) else None
+        if path is None:
+            continue
+        request = read_request_file(path)
+        if request.error or not request.supported:
+            continue
+        reports += [r for r in request.song_requests if f"song:{song_key(r.artist, r.title)}" == key]
+    if reports:
+        return reports
+    files = [name for name in entry.get("files") or [] if isinstance(name, str)]
+    return [SongRequestReport(file_name=files[0] if files else "", title=entry.get("title") or "",
+                              artist=entry.get("artist"), album=None, year=None, duration_s=None,
+                              youtube_video_id=None, spotify_track_id=None, source="",
+                              requested_at=entry.get("decided_at") or "")]
+
+
+def reject_deleted_song_request(session, item: DeletedSongRequest) -> None:
+    """The owner rejects a request whose song was deleted: as
+    reject_song_request(), the answer replacing the old "added" one. The
+    caller commits."""
+    reject_song_request(session, item.case, deleted_song_id=item.song_id, was_added_as=item.added_as)
 
 
 _DASHES_RE = re.compile(r"[\u2010-\u2015\u2212]")
@@ -938,7 +1059,7 @@ def _decided(case: SongRequestCase, decision: str, session=None, **extra) -> Non
         "artist": case.latest.artist,
         "title": case.latest.title,
         "decided_at": now_iso(),
-        "files": sorted({r.file_name for r in case.reports}),
+        "files": sorted({r.file_name for r in case.reports if r.file_name}),
         **extra,
     }, session)
     case.status = DECIDED

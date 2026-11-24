@@ -62,6 +62,16 @@ def test_the_manager_keeps_believable_values_and_the_module_id():
 
     assert (match.year, match.album_type, match.source) == (1973, "ep", "spotify_api_fetcher")
     assert match.album_ids == {"spotify_album_id": "x", "itunes_collection_id": 5}
+    assert (match.matched_title, match.release_kind) == ("Song", None)
+
+
+def test_the_manager_keeps_the_recording_found_and_a_live_release():
+    # what a live version's check reads (version_names.lookup_fits_version())
+    result = DiscoveryResult("Shine a Light", "The Last Time (Live)", "Artist", release_kind="live")
+
+    match = dm._call_module_match(_module(result), "m", "M", "Artist", "The Last Time")
+
+    assert (match.matched_title, match.release_kind) == ("The Last Time (Live)", "live")
 
 
 def test_the_manager_discards_a_bad_year_type_and_unknown_or_empty_ids():
@@ -178,6 +188,18 @@ def test_a_sources_year_later_than_the_song_first_came_out_is_left_out(session, 
 
     assert (song.year, song.album_entry.year) == (None, None)
     assert asked == [("Artist", "Stwardnieje ci łza")]
+
+
+def test_a_live_versions_year_isnt_held_against_the_studio_songs_first_release(session, monkeypatch):
+    # a live album is later than the song by nature, not a reissue
+    song = _song(session, "The Last Time", "Shine a Light", version_kind="live")
+    asked = []
+    modules = [(YEARS_MODULE, "MusicBrainz", _first_appearance_module(1965, asked))]
+    monkeypatch.setattr(fill_albums, "enabled_module_ids", lambda kind: {YEARS_MODULE, "spotify_fetcher"})
+
+    fill_albums._save_album_details([(song, _match("Shine a Light", source="spotify_fetcher", year=2008))], modules)
+
+    assert (song.year, asked) == (2008, [])
 
 
 def test_a_year_close_to_the_first_release_stays_and_musicbrainz_isnt_asked_about_its_own(session):

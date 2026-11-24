@@ -1,4 +1,5 @@
 from utils.common.project_names import song_project_name
+from utils.common.version_names import lookup_fits_version, version_needing_own_release
 from utils.database.database_getter import get_songs_with_empty_category
 from utils.database.database_management import edit_db_entry
 from utils.common.automation_settings import recent_misses, remember_misses
@@ -15,7 +16,7 @@ from utils.discoveries.discoveries_manager import (
     load_discovery_modules,
     year_after_the_song,
 )
-from utils.ui.album_guess_review import review_album_guesses
+from utils.ui.album_guess_review import review_album_guesses, review_version_albums
 from utils.ui.album_swap_review import review_swapped_albums
 from utils.ui.soundtrack_review import review_soundtrack_guesses
 from utils.database.soundtrack_albums import guess_soundtrack_album, known_soundtrack_works, list_album_work, listed_works
@@ -41,7 +42,8 @@ def _save_album_details(saved, modules=()):
     AlbumMatch) pairs just saved, into what's still empty: the song's year -
     the album row's if it has one, else the source's, only from a module
     enabled for Years too and never one later than the song first came out
-    (year_after_the_song(), asked of `modules`) - and the album row's year,
+    (year_after_the_song(), asked of `modules`; not for a live version, by
+    nature later, whose album was a live one or the owner's pick) - and the album row's year,
     type and ids on the other sites. Once the songs are flushed, so they're
     on their album rows."""
     saved = [(song, match) for song, match in saved
@@ -54,7 +56,8 @@ def _save_album_details(saved, modules=()):
     for song, match in saved:
         album = song.album_entry
         year = match.year if match.source in year_sources else None
-        if year_after_the_song(year, song.artist.name, song.title, modules, source=match.source):
+        if not version_needing_own_release(song) and year_after_the_song(year, song.artist.name, song.title,
+                                                                           modules, source=match.source):
             year = None
         if song.year is None and (album is not None and album.year or year):
             edit_db_entry(song, "year", str(album.year if album is not None and album.year else year))
@@ -103,6 +106,9 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     album_guesses = []
     # (song, album) where the song's artist may be the game or film itself
     soundtrack_guesses = []
+    # (song, AlbumMatch) of a live version whose album found isn't a live one: most
+    # likely the studio original's (lookup_fits_version())
+    version_finds = []
     known_works = listed = None  # read at the first song no module found an album for
 
     print("Preparing fetch modules . . . ")
@@ -138,6 +144,11 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
                 elif guess:
                     print(f"The artist may be a soundtrack: {YELLOW}{guess}{RESET}, asking about it at the end")
                     soundtrack_guesses.append((song, guess))
+            elif not lookup_fits_version(song, [match.album, getattr(match, "matched_title", None)],
+                                         getattr(match, "release_kind", None)):
+                print(f"Album {YELLOW}{match.album}{RESET} found for the {song.version_kind} version isn't "
+                      f"a {song.version_kind} release (likely the original's), asking about it at the end")
+                version_finds.append((song, match))
             else:
                 if match.album == SINGLES_ALBUM:
                     warn(f"{label}{RESET} is a single. Added to {YELLOW}{match.album}")
@@ -162,7 +173,8 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     for song, album, match in list(found.values()):
         if album is not None:
             save(song, album, match)
-    for song, match in [*review_album_guesses(album_guesses), *review_swapped_albums(swapped_finds)]:
+    for song, match in [*review_album_guesses(album_guesses), *review_swapped_albums(swapped_finds),
+                        *review_version_albums(version_finds)]:
         save(song, match.album, match)
     for song, album in review_soundtrack_guesses(soundtrack_guesses):
         save(song, album)

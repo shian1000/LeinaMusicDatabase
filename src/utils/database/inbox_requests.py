@@ -338,6 +338,18 @@ def _request_paths(folder: str) -> list[Path]:
                   if p.is_file() and p.suffix == ".db" and not p.name.startswith("."))
 
 
+def find_request_file(name: str) -> Path | None:
+    """The request file of that name in whichever inbox folder holds it
+    (processed/ first - where a settled request's file is), else None."""
+    if not inbox_available() or not name or Path(name).name != name:
+        return None
+    for folder in (PROCESSED, REVIEW, VALID, NEW):
+        path = INBOX_DIR / folder / name
+        if path.is_file():
+            return path
+    return None
+
+
 def new_request_paths() -> list[Path]:
     """Request files no step has settled yet (new/ and valid/), oldest name
     first; [] when the data drive isn't there."""

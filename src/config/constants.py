@@ -628,6 +628,14 @@ VERSION_KIND_LABELS = {
     VERSION_OTHER: "Version",
 }
 VERSION_KINDS = tuple(VERSION_KIND_LABELS)
+# Versions an album / year lookup can't tell from their original: it searches by artist and the
+# title, stored without the marker, and takes the original's release ("The Rolling Stones - The
+# Last Time", live, got the 1965 studio single's album and year, 2026-11-22). A value found for
+# one is saved without asking only when the release itself is that kind of version - its title
+# reads so ("... (Live at ...)", "Live in ...") or the source says (MusicBrainz's "Live" release
+# group) -, else the owner reviews it, and nothing of it is saved unattended (owner, 2026-11-24;
+# version_names.lookup_fits_version()). Only live so far: another kind joins here.
+VERSIONS_NEEDING_OWN_RELEASE = frozenset({VERSION_LIVE})
 # A recording at least this long (a library file, a YouTube video) may be a
 # whole album: a candidate in the review, and a full album's YouTube search
 # takes only videos this long. A file or video this long may match a song too

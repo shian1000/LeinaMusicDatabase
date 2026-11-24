@@ -251,7 +251,10 @@ data to fill in for the imported songs - albums, then years (a year in a video's
 'Song (1991)', is offered too). Later: Manage database -> Fetch database data -> "Fill missing data"
 (albums, years, genres, lyrics, languages for the whole catalog; Years also checks the years
 already stored - one later than the song's first release on MusicBrainz is a reissue's or a
-compilation's, offered to change in one list), "Import covers from mp3 tags", and Settings ->
+compilation's, offered to change in one list; a live version takes an album or year only from a
+live release - '... (Live at ...)', 'Live in ...', a live album on MusicBrainz -, the rest is asked
+at the end, unticked, since a lookup by artist and title finds the studio original's; the timer
+never saves those), "Import covers from mp3 tags", and Settings ->
 Server -> "Index music library" to link the files.
 """,
     "Keeping the catalog clean": """
@@ -267,6 +270,9 @@ All in Enter database -> Manage database:
     songs": near duplicates ('feat.', '(Visualiser)') in one list to tick, and - unticked - one
     title credited to two different artists who share another artist or a link.
   - Merge artists / Divide artists: by hand, when one artist row is really two, or two are one.
+  - Manual management -> "Edit artist" -> synonyms: the other names an artist goes by (a channel
+    name, another spelling), which search, matching and Leina Radio use. Untick the wrong ones,
+    type new ones separated by commas.
   - Split joined artist names: 'A & B' stored as one artist.
   - Find songs with artist and title swapped: 'Renegade - Styx' - a title that is another artist's
     name, by an artist with no other song - in one list to tick.

@@ -10,9 +10,11 @@ pass's check while it's fresh) and the questions come after, in one go: dead
 links first, then links found for songs without one (inbox_found_links.py),
 then field corrections (inbox_field_corrections.py), then songs Leina Radio
 asked to have added (inbox_song_requests.py; the approved ones go through the
-import together at the end of that part). Anything
-skipped stays in review/ for next time. The screen also lists what the
-automatic pass changed."""
+import together at the end of that part), last the songs Leina Radio asked
+for that were added and deleted since (inbox_song_requests.deleted_song_requests(),
+only rejecting or skipping them - Leina Radio never asks for a song twice).
+Anything skipped stays in review/ for next time. The screen also lists what
+the automatic pass changed."""
 
 import questionary
 from utils.ui.prompts import ask_yes_no, choose
@@ -47,8 +49,10 @@ from utils.database.inbox_field_corrections import (
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
 from utils.database.inbox_song_requests import (
     collect_song_request_cases,
+    deleted_song_requests,
     is_generic_channel_artist,
     mark_song_added,
+    reject_deleted_song_request,
     reject_song_request,
     videos_saved_text,
 )
@@ -718,6 +722,41 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
     return cases, stopped
 
 
+def _review_deleted_requests(session) -> bool:
+    """The songs Leina Radio asked for that were added and deleted since:
+    reject each (Leina Radio then shows it as rejected) or skip it. Whether
+    the owner stopped."""
+    items = deleted_song_requests(session)
+    if not items:
+        return False
+    show(f"\n{len(items)} song(s) Leina Radio asked for were deleted since:")
+    show("    [dim]Leina Radio won't ask for them again by itself - it shows them as not in the database.[/dim]")
+    for i, item in enumerate(items, 1):
+        report = item.case.latest
+        show(f"\n[{i}/{len(items)}] {_colored_song_label(report.artist, report.title)}")
+        added = item.added_as
+        show(f"    Added as:     {_colored_song_label(added.get('artist'), added.get('title') or '?')}"
+             f"  [dim](#{item.song_id}, deleted since)[/dim]")
+        for video_id in item.case.youtube_video_ids:
+            show(f"    YouTube:      {_url(video_id)}")
+        for track_id in item.case.spotify_track_ids:
+            show(f"    Spotify:      https://open.spotify.com/track/{track_id}")
+        files = {r.file_name for r in item.case.reports if r.file_name}
+        if files:
+            show(f"    [dim]Asked {escape(report.requested_at or '?')}, in {escape(describe_files(files))}[/dim]")
+        answer = questionary.select("What should the database do?", choices=[
+            questionary.Choice("Reject - Leina Radio won't ask for it again", _REJECT_SONG),
+            questionary.Choice(_SKIP, _SKIP),
+            questionary.Choice(_STOP, _STOP),
+        ]).ask()
+        if answer in (None, _STOP):
+            return True
+        if answer == _REJECT_SONG:
+            reject_deleted_song_request(session, item)
+            submit_global_database_session()
+    return False
+
+
 def show_auto_changes(entries: list[dict]) -> None:
     for entry in entries:
         when = (entry.get("at") or "?")[:16].replace("T", " ")
@@ -749,12 +788,17 @@ def resolve_new_requests(after_import=None) -> None:
         show(f"The inbox isn't available: {inbox_unavailable_message()}")
         return
     new_count, review_count = len(new_request_paths()), len(review_request_paths())
+    session = open_and_set_global_database_sessions()[0]
+    deleted_count = len(deleted_song_requests(session))
     history = auto_report()
     show(f"New request files (not checked yet): {new_count}")
     show(f"Waiting for your review (checked automatically): {review_count}")
+    if deleted_count:
+        show(f"Songs Leina Radio asked for, deleted since: {deleted_count}")
     review_label = "Review the requests"
     history_label = f"Show what the automatic check changed ({len(history)})"
-    choices = ([review_label] if new_count or review_count else []) + ([history_label] if history else [])
+    choices = (([review_label] if new_count or review_count or deleted_count else [])
+               + ([history_label] if history else []))
     if not choices:
         show("No new requests in the inbox.")
         return
@@ -766,12 +810,17 @@ def resolve_new_requests(after_import=None) -> None:
     if answer != review_label:
         return
 
-    session = open_and_set_global_database_sessions()[0]
     if new_count:
         _auto_pass(session)
     requests = read_review_requests()
-    if not requests:
-        return
+    stopped = _review_request_files(session, requests, after_import) if requests else False
+    if not stopped:
+        _review_deleted_requests(session)
+
+
+def _review_request_files(session, requests: list, after_import=None) -> bool:
+    """Every part of resolve_new_requests() about the files in review/;
+    whether the owner stopped."""
     show(f"\n{len(requests)} request file(s) to review.")
 
     for request in [r for r in requests if r.error]:
@@ -831,3 +880,4 @@ def resolve_new_requests(after_import=None) -> None:
         show(f"\n{len(moved)} request file(s) done - moved to {INBOX_DIR / 'processed'}.")
     if left:
         show(f"{len(left)} request file(s) stay in the inbox for next time.")
+    return stopped

@@ -401,3 +401,60 @@ def test_deleting_a_used_song_offers_the_merge_instead(session, monkeypatch):
     for answer, expected in ((review._DELETE, [other]), (review._KEEP, [])):
         monkeypatch.setattr(review.questionary, "select", lambda message, choices, a=answer: _Answer(a))
         assert review.merge_instead_of_deleting([other]) == expected
+
+
+def test_a_requested_song_can_be_deleted_with_its_requests_rejected(session, monkeypatch, tmp_path):
+    # Real case 2026-11-24: #6969 deleted plainly, its settled request went with it and
+    # Leina Radio, asking for a song only once, could never have it rejected
+    from utils.database import database_sessions
+    from utils.database import inbox_requests as pr
+    from utils.database.datatables import RejectedSongRequest, SettledSongRequest
+    from utils.database.song_references import SongUses
+    review = importlib.import_module("utils.ui.song_delete_review")
+
+    monkeypatch.setattr(pr, "INBOX_DIR", tmp_path)
+    monkeypatch.setattr(pr, "inbox_available", lambda: True)
+    monkeypatch.setattr(database_sessions, "_GLOBAL_DATABASE_SESSION", (session, None))
+    song = Song(id=6969, title="5'NIZZA. Анонс", artist=Artist(name="Зе Інтерв'юер"), youtube_video_id="D6Jc9-uyQCc")
+    session.add(song)
+    session.flush()
+    session.add(SettledSongRequest(artist="Зе Інтерв'юер", title="5'NIZZA. Анонс. Скоро",
+                                   youtube_video_id="D6Jc9-uyQCc", song_id=6969, settled_at="x"))
+    session.commit()
+    uses = {"value": SongUses(requests=1)}
+    monkeypatch.setattr(review, "song_uses", lambda song_id: uses["value"])
+    offered = []
+
+    def select(message, choices):
+        offered.append([c.title for c in choices if isinstance(c.title, str)])
+        return _Answer(review._DELETE_AND_REJECT)
+
+    monkeypatch.setattr(review.questionary, "select", select)
+
+    remaining = review.merge_instead_of_deleting([song])
+
+    assert offered[0] == [review._SEARCH, review._DELETE,
+                          "Delete it and reject the request - Leina Radio won't ask for it again", review._KEEP]
+    assert remaining == [song] and remaining.reject_requests == {6969}
+    assert review.reject_requests_before_deleting(remaining)
+    session.delete(song)
+    session.commit()
+    assert [(r.artist, r.title, r.youtube_video_id) for r in session.query(RejectedSongRequest)] == \
+        [("Зе Інтерв'юер", "5'NIZZA. Анонс. Скоро", "D6Jc9-uyQCc")]
+    assert session.query(SettledSongRequest).count() == 0
+    assert [(c.old_song_id, c.new_song_id) for c in session.query(SongIdChange)] == [(6969, None)]
+
+    # Plural with several requests; not offered without any
+    other = Song(title="Muzyka na jesień", artist=Artist(name="Kawa i Awangarda"))
+    session.add(other)
+    session.commit()
+    for value, label in ((SongUses(requests=2, playlists=1), "the requests -"), (SongUses(playlists=1), None)):
+        uses["value"], offered[:] = value, []
+        monkeypatch.setattr(review.questionary, "select",
+                            lambda message, choices: offered.append([c.title for c in choices
+                                                                     if isinstance(c.title, str)]) or _Answer(review._KEEP))
+        assert review.merge_instead_of_deleting([other]) == []
+        rejecting = [t for t in offered[0] if t.startswith("Delete it and reject")]
+        assert (label in rejecting[0]) if label else rejecting == []
+    # Nothing to reject: nothing done
+    assert review.reject_requests_before_deleting([other])

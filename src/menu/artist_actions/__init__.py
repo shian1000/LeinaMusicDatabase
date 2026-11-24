@@ -6,6 +6,7 @@ from utils.database.database_management import ArtistHasSongsError, delete_db_en
 from utils.ui.display_utils import display_artists
 from menu.song_actions.edit_songs import HAS_SONGS_HINT, edit_entry_menu
 from utils.common.artist_credits import split_synonyms
+from utils.database.song_artists import set_artist_synonyms
 
 
 def add_synonym_menu(artist_objects):
@@ -21,15 +22,12 @@ def add_synonym_menu(artist_objects):
         print("Aborted")
         return
 
-    existing_synonyms = split_synonyms(artist.synonyms)
-    if synonym.lower() in (s.lower() for s in existing_synonyms):
-        print(f"'{synonym}' is already a synonym of {artist.name}")
+    old = set_artist_synonyms(artist, [*split_synonyms(artist.synonyms), synonym])
+    if old == artist.synonyms:
+        print(f"'{synonym.strip()}' is already a synonym or the name of {artist.name}")
         return
-
-    existing_synonyms.append(synonym)
-    artist.synonyms = ", ".join(existing_synonyms)
     submit_global_database_session()
-    print(f"Added '{synonym}' as a synonym of {artist.name}")
+    print(f"Updated synonyms for '{artist.name}': '{old or '---'}' --> '{artist.synonyms}'")
 
 
 def remove_synonym_menu(artist_objects):
@@ -51,8 +49,7 @@ def remove_synonym_menu(artist_objects):
         print("Aborted")
         return
 
-    remaining = [s for s in existing_synonyms if s not in to_remove]
-    artist.synonyms = ", ".join(remaining) or None
+    set_artist_synonyms(artist, [s for s in existing_synonyms if s not in to_remove])
     submit_global_database_session()
     print(f"Removed {', '.join(repr(s) for s in to_remove)} from the synonyms of {artist.name}")
 
@@ -79,7 +76,7 @@ def remove_artists(artist_objects):
 
 
 def edit_artist_menu(artist_objects):
-    """The artist row itself - its name, origin, Latin form - for all its
+    """The artist row itself - its name, origin, Latin form, synonyms - for all its
     songs. Crediting one song to another artist is in Song actions."""
     if len(artist_objects) > 1:
         artist = pick_from_db_objects(artist_objects, question="Which artist do you want to edit?")

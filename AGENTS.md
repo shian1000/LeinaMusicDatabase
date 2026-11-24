@@ -193,7 +193,13 @@ non-trivial work in that area.
   id, `record_settled_request()`; a trigger keeps `song_id` current), so the phone recognises its
   track as that song when nothing else connects them, and a later request matching a row (names,
   video or Spotify track as sent) is that song without matching ([handoff](docs/handoffs/settled-song-requests-for-musicdatabaseapp.md);
-  backfilled once from `Inbox/processed/` at the start the migration lands). Videos found bad (gone, unplayable, or wrong for a song) are remembered in
+  backfilled once from `Inbox/processed/` at the start the migration lands). The trigger drops a
+  deleted song's rows, and Leina Radio asks for a song only once, so a requested song deleted
+  plainly is outside the database on the phone for good: the delete dialog offers rejecting its
+  requests with it (`reject_settled_requests()`, through `reject_song_request()`), and "Resolve new
+  requests" ends with the requests `decisions.json` has as added whose song is gone since
+  (`deleted_song_requests()`, only reject / skip, never the automatic pass; runbook → "Deleting a
+  requested song"). Videos found bad (gone, unplayable, or wrong for a song) are remembered in
   music.db's `bad_youtube_videos` (migration 0010, `inbox_requests.mark_bad_videos()`), so a later
   request naming one is turned down without asking YouTube again, and the phone, which reads the
   table, stops using them. A trigger on `song_id_changes` keeps its `song_id` current. `inbox_auto.py` is the automatic pass: a
@@ -338,6 +344,15 @@ non-trivial work in that area.
   unless the rest names a genre ("Disco Version", "wersja rock": `song_kinds.sure_version()`; a
   song request "Heart Of Glass (Disco Version)" was settled as the plain song, 2026-11-13);
   `song_titles()` and `find_existing_song()` compare the marked title too; duplicates are keyed by it.
+  Albums and Years look a song up by artist and title, so a version gets its original's release:
+  for a kind in `constants.VERSIONS_NEEDING_OWN_RELEASE` (only live so far, owner 2026-11-24) a
+  found album / year is saved unasked only when `version_names.lookup_fits_version()` holds (the
+  release's or matched recording's title reads as live, or the source's `release_kind` says so -
+  MusicBrainz's "Live" release group); else it goes to that step's review unticked and the timer
+  never saves it. Every lookup writing `songs.album` / `songs.year` for a song (`fill_missing_albums()`
+  incl. `_save_album_details()`, `fill_missing_years._collect()`) goes through that one check -
+  a new one must too ([discovery-modules note](docs/agent-notes/discovery-modules.md) → "A live
+  version takes only a live release's album and year").
   Merges move the versions (`move_versions()`), a deleted original is dropped from its versions
   (`song_references`' flush listener).
   `soundtrack_albums.py` — a soundtrack's album is "<work> OST" (`utils/common/soundtrack_names.py`
@@ -384,7 +399,10 @@ non-trivial work in that area.
   (`merge_candidates()`; `utils/ui/song_delete_review.py`, every song-deleting menu path): a deletion
   leaves the playlists' tracks without a song, which is how five wrongly read folder-playlist songs
   got lost on 2026-10-17/18, and two duplicates a request added left Leina Radio's tracks of their
-  videos unrecognised on 2026-11-18.
+  videos unrecognised on 2026-11-18. A song with settled requests is also offered "Delete it and
+  reject the request(s)": `merge_instead_of_deleting()` returns a `SongsToDelete` list, and every
+  caller runs `reject_requests_before_deleting()` after its yes and before `delete_db_entry()` (a
+  new song-deleting path must too).
   The groups left unticked can be remembered on a yes (`data/song_duplicate_ignore.json`, sets of
   song ids); a group is left out while all its songs were in one remembered group.
   `artist_reassignment.py` — crediting a song to another artist row (`set_primary_artist()`)
@@ -409,7 +427,10 @@ non-trivial work in that area.
   `song_artists.py` — the only way to read/query a song's artists (primary `songs.artist_id` +
   `additional_song_artists`, role `main`/`feat`): labels, search filters, YouTube credits, and
   `reassign_additional_artist_links()` plus `merge_artist_synonyms()`, which every artist merge must
-  call (the latter keeps the deleted row's synonyms and name, otherwise lost with it).
+  call (the latter keeps the deleted row's synonyms and name, otherwise lost with it). Any other
+  write of `artists.synonyms` goes through `set_artist_synonyms(artist, names)` (trims, drops
+  empties, repeats after `normalize()` and the artist's own name / Latin form; none = NULL) - the
+  artist editor's "synonyms" entry and Artist actions → "Add synonym" / "Remove synonym" use it.
   `albums.py` owns `albums` / `album_covers` and keeps `songs.album_id` in step with the
   `songs.album` text through a `before_flush` listener on the music session factory. Change the
   text and the row follows; never set `album_id` by hand. Raw-SQL artist merges bypass the listener,
@@ -1104,7 +1125,7 @@ non-trivial work in that area.
   action - as Manage database's did.
 - A loop that finds several things needing a yes/no decision (a near-duplicate, a spelling
   correction, a junk-looking field) should queue them and ask in one batch after the loop, not
-  interrupt per item. Eleven places already do this: `run_import_batch()` (shared by every
+  interrupt per item. Twelve places already do this: `run_import_batch()` (shared by every
   importer — mp3-tag and YouTube-playlist import both feed it, see below),
   `check_spelling_menu()`, `seek_nonsense_names()`, and `import_from_playlist.py`'s
   `_review_artist_title_swaps()` (flags a parsed title that matches an existing artist, then asks
@@ -1117,13 +1138,16 @@ non-trivial work in that area.
   (`utils/ui/artist_split_review.py`, one checkbox list of joined artist names to split), and
   `fill_missing_years.py`'s `_review_unsure_years()` (one checkbox list of years a module flagged
   `needs_review`, e.g. YouTube upload dates, or an imported title named - `fill_missing_years(songs,
-  entries)`; all ticked, the ticked ones saved), and `review_swapped_albums()`
+  entries)`; all ticked, the ticked ones saved - but a live version's year of a release that isn't
+  live, held by `_collect()`, starts unticked and has no facts, so nothing unattended takes it), and `review_swapped_albums()`
   (`utils/ui/album_swap_review.py`, end of Fill missing data → Albums: songs whose album was found
   only with artist and title swapped, none ticked, see `docs/agent-notes/discovery-modules.md`), and
   `review_album_guesses()` (`utils/ui/album_guess_review.py`, same place: albums only a
   `needs_review` source knew - Google's panel - none ticked), and
   `review_soundtrack_guesses()` (`utils/ui/soundtrack_review.py`, same place: artist names that may
-  be a game or film, none ticked; these three Albums lists are one `tick_album_pairs()`), and
+  be a game or film, none ticked), and `review_version_albums()` (same file as the guesses: a
+  live version's album that isn't a live release, none ticked; these four Albums lists are one
+  `tick_album_pairs()`, with no rule - unattended they save nothing), and
   `offer_album_resolution()` (`utils/ui/album_resolution_review.py`, end of `run_import_batch()`:
   the album titles its new songs share with other artists) — see
   `docs/agent-notes/import-pipeline.md` for the fullest write-up (dedup-by-shared-object gotcha
@@ -1137,8 +1161,8 @@ non-trivial work in that area.
   (`edit_entry_menu()` in `edit_songs.py`) and Song actions offer "artist" / "Change artist"
   (`utils/ui/artist_change.change_songs_artist()` → `artist_reassignment.set_primary_artist()`:
   the song is credited to another, found or new, artist; an artist left without songs can be
-  merged into it or deleted), while the artist's name / origin / Latin form are edited only from
-  Artist actions → Edit (renaming onto an existing name offers a merge). Spell check and Clean names
+  merged into it or deleted), while the artist's name / origin / Latin form / synonyms are edited only from
+  Artist actions → Edit (= Manual management → "Edit artist") (renaming onto an existing name offers a merge). Spell check and Clean names
   never rename an artist onto a name another artist already has (`artist_change.has_artist_twin()`):
   that rename is held and asked at the end with the same merge offer
   (`review_held_artist_renames()`). `edit_db_entry()` changes only `EDITABLE_SONG_FIELDS` /

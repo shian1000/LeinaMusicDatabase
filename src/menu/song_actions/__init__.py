@@ -22,7 +22,7 @@ from utils.ui.cover_review import set_covered_artist_of_songs, set_covered_title
 from utils.ui.version_review import set_version_of_songs
 from utils.ui.project_review import set_project_of_songs
 from utils.ui.song_kind_prompt import set_kind_of_songs
-from utils.ui.song_delete_review import merge_instead_of_deleting
+from utils.ui.song_delete_review import merge_instead_of_deleting, reject_requests_before_deleting
 
 def remove_check_protection(songs_objects):
     for song in songs_objects:
@@ -168,6 +168,8 @@ def remove_songs_from_database(songs_objects):
         print("Aborted")
         return
 
+    if not reject_requests_before_deleting(remaining):
+        return
     songs_objects = remaining
     for song in songs_objects:
         delete_db_entry(song)

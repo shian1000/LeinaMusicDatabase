@@ -29,6 +29,7 @@ from config.constants import (SINGLES_ALBUM, MANUAL_YEAR_SAMPLE_SONGS, MUSICBRAI
                               SONG_KIND_FULL_ALBUM, YEAR_CHECKED_TAG)
 from utils.common.normalizer import compare, normalize
 from utils.common.script_utils import cyrillic_search_variant
+from utils.common.version_names import lookup_fits_version, version_needing_own_release
 
 
 def fill_missing_years(songs: list | None = None, entries: dict | None = None):
@@ -121,16 +122,17 @@ def _fill_empty_years(songs, entries) -> tuple[list, int]:
     # what was queried so the "fill up manually" step can show the user
     # what to search for.
     results = []
-    # (label, year, [songs], source_url) for years a module flagged
+    # (label, year, [songs], source_url, held) for years a module flagged
     # needs_review (YouTube upload dates) - shown to the user before
-    # anything is written.
+    # anything is written. held: the version kind of songs whose year is of
+    # a release that isn't that version (_collect()), else None.
     review_results = []
     looked_at = []  # the songs whose year was looked up (not those left by a stop)
     for song in dated_versions:
         print(f"Year {YELLOW}{_version_year(song)}{RESET} from the version of {YELLOW}{song.artist.name} - "
               f"{song.title}{RESET} (to review at the end)")
         review_results.append((f"{song.artist.name} - {song.title}", _version_year(song), [song],
-                               f'the version "{song.version_label}"'))
+                               f'the version "{song.version_label}"', None))
 
     try:
         modules = load_discovery_modules(YEARS)
@@ -140,16 +142,21 @@ def _fill_empty_years(songs, entries) -> tuple[list, int]:
 
         # (label, artist, album / single's title / project, is it a single, its songs, what else the
         # lookup takes, is it a project's)
+        # A live version's year is held against nothing (`held`): a live
+        # release is later than the studio song by nature, and a year of
+        # one that isn't live is reviewed anyway (_collect())
         lookups = [(f"{artist_name} - {album_name}", artist_name, album_name, False, songs,
                     {"album_songs": songs, "alt_script_query": cyrillic_search_variant(
-                        album_name, [artist_name, *(s.title for s in songs)])}, False)
+                        album_name, [artist_name, *(s.title for s in songs)]),
+                     "held": not version_needing_own_release(songs[0])}, False)
                    for (artist_name, album_name), songs in groups.items()]
         lookups += [(f"{artist_name} - {project} ({', '.join(s.title for s in songs)})", artist_name, project,
                      False, songs, {"album_songs": songs, "held": False}, True)
                     for (artist_name, project), songs in projects.items()]
         lookups += [(f"{song.artist.name} - {song.title}", song.artist.name, song.title, True, [song],
                      {"song": song, "alt_script_query": cyrillic_search_variant(
-                         song.title, [song.artist.name, song.album])}, False)
+                         song.title, [song.artist.name, song.album]),
+                     "held": not version_needing_own_release(song)}, False)
                     for song in singles]
         try:
             for label, artist_name, name, single, songs, extra, project in lookups:
@@ -159,13 +166,15 @@ def _fill_empty_years(songs, entries) -> tuple[list, int]:
                 looked_at += songs
                 print()
                 print(f"Checking release year for {'single ' if single else ''}{YELLOW}{label}{RESET}")
-                result = (release_year_from_stored_link(songs)
-                          or discover_release_year_result(artist_name, name, single, modules,
-                                                          artist_match_synonyms(songs[0].artist), **extra))
+                stored = release_year_from_stored_link(songs)
+                result = stored or discover_release_year_result(artist_name, name, single, modules,
+                                                                artist_match_synonyms(songs[0].artist), **extra)
                 if project and result is not None and not result.needs_review:
                     result = replace(result, needs_review=True, source_url=(
                         f'the release "{result.matched_title}"' if result.matched_title else f"a release of {name}"))
-                _collect(label, result, songs, results, review_results)
+                # A Spotify page the owner stored, a project's release: the
+                # recording's own, not one found by its title
+                _collect(label, result, songs, results, review_results, own_release=bool(stored) or project)
         except KeyboardInterrupt:
             # The lookups are slow (a browser per module): keep what was found
             print("\nStopped - the years found so far are saved.")
@@ -279,19 +288,38 @@ def _years_from_titles(results, entries, review_results) -> list:
         if year is None and hinted and len({y for y, _ in hinted}) == 1:
             title_year, entry = hinted[0]
             print(f"Year {YELLOW}{title_year}{RESET} from the title for {YELLOW}{label}{RESET} (to review at the end)")
-            review_results.append((label, title_year, songs, f'the title "{entry.raw_text or entry.title}"'))
+            review_results.append((label, title_year, songs, f'the title "{entry.raw_text or entry.title}"', None))
         else:
             left.append((label, year, songs))
     return left
 
 
-def _collect(label, result, songs, results, review_results) -> None:
+def _collect(label, result, songs, results, review_results, own_release: bool = False) -> None:
+    """File a lookup's `result` for `songs` under `results` (saved) or
+    `review_results` (unsure). A live version's year is of its release only
+    when that release is live too (version_names.lookup_fits_version()):
+    otherwise it is most likely the studio original's ("The Rolling Stones -
+    The Last Time", live, got 1965) and goes to the review apart, unticked -
+    unless the result is the recording's own (`own_release`)."""
+    matched = getattr(result, "matched_title", None)
+    held = [] if result is None or own_release else [
+        song for song in songs if not lookup_fits_version(song, [matched], getattr(result, "release_kind", None))]
+    if held:
+        kind = version_needing_own_release(held[0])
+        held_label = label if len(held) == len(songs) else f"{label} ({', '.join(song.title for song in held)})"
+        print(f"Found year {YELLOW}{result.year}{RESET} for the {kind} version {YELLOW}{held_label}{RESET}, "
+              f"of a release that isn't {kind} (to review at the end)")
+        release = f'the release "{matched}"' if matched else "the release found"
+        review_results.append((held_label, result.year, held, f"{release} isn't {kind}, maybe the original's", kind))
+        songs = [song for song in songs if not any(song is h for h in held)]
+        if not songs:
+            return
     if result is None:
         print(f"Couldn't find release year for {YELLOW}{label}{RESET}")
         results.append((label, None, songs))
     elif result.needs_review:
         print(f"Found year {YELLOW}{result.year}{RESET} for {YELLOW}{label}{RESET} (unsure, to review at the end)")
-        review_results.append((label, result.year, songs, result.source_url))
+        review_results.append((label, result.year, songs, result.source_url, None))
     else:
         print(f"Found year {YELLOW}{result.year}{RESET} for {YELLOW}{label}{RESET} ({len(songs)} song(s))")
         results.append((label, result.year, songs))
@@ -325,17 +353,24 @@ def _review_unsure_years(review_results) -> list:
     is often not the release date), a title named or a project's release
     gave, all ticked: like every other checkbox
     review, the ticked ones are saved. Unticked ones ask for the right year
-    (empty = leave the song without one). Returns the songs that got a year."""
+    (empty = leave the song without one). A live version's year of a release
+    that isn't live (`held`, _collect()) starts unticked and is never taken
+    unattended, by the built-in rule or the owner's (no facts). Returns the
+    songs that got a year."""
     if not review_results:
         return []
 
+    held = sum(1 for found in review_results if found[4])
     review_header(f"REVIEW: {len(review_results)} unsure release year(s), taken from a YouTube video's date "
-                  f"or a title, or a project's release")
+                  f"or a title, or a project's release" + (", or of a release that isn't the version's" if held else ""),
+                  *([f"Unticked: {held} version(s) with the year of a release that isn't that version - looked up "
+                     "by artist and title, it is most likely the original's. Tick one only if it's right."]
+                    if held else []))
     selected = tick_items("Save the ticked years; untick a wrong one to type it (space toggles, enter confirms):",
                           review_results,
                           lambda found: f"{found[0]}: {found[1]}" + (f"  ({found[3]})" if found[3] else ""),
-                          checked=True, rule="years_unsure",
-                          facts=lambda found: {"year": found[1], "songs": len(found[2]),
+                          checked=lambda found: not found[4], rule="years_unsure",
+                          facts=lambda found: None if found[4] else {"year": found[1], "songs": len(found[2]),
                                                "from_title": str(found[3] or "").startswith("the title"),
                                                "from_youtube": "youtu" in str(found[3] or "").lower(),
                                                "project": found[2][0].project_id is not None})
@@ -345,7 +380,7 @@ def _review_unsure_years(review_results) -> list:
 
     touched = []
     for found in review_results:
-        label, year, songs, _ = found
+        label, year, songs, _, _ = found
         # Unattended, nothing is typed: an untaken year leaves the song without one
         if not any(found is s for s in selected):
             year = _ask_year(label, "Right year (put nothing to leave it empty): ", f"{label} (found {year})")

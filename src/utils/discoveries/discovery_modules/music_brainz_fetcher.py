@@ -18,6 +18,7 @@ from config.constants import (
     MUSICBRAINZ_REISSUE_AFTER_YEARS,
     MUSICBRAINZ_VARIOUS_ARTISTS_ID,
     MUSICBRAINZ_WS_ROOT,
+    VERSION_LIVE,
 )
 from utils.common.language_names import clean_language, code_name
 from utils.common.musicbrainz_client import lucene_quote, mb_get
@@ -198,6 +199,16 @@ def _album_type(release) -> str | None:
     return {"Album": ALBUM_TYPE_ALBUM, "EP": ALBUM_TYPE_EP}.get(release_group.get("primary-type", ""))
 
 
+# Release group secondary types saying which kind of version the release is
+# (DiscoveryResult.release_kind): a live version takes a live album's album and year
+_SECONDARY_TYPE_VERSION_KINDS = {"Live": VERSION_LIVE}
+
+
+def _release_kind(release_group) -> str | None:
+    types = (release_group or {}).get("secondary-type-list") or []
+    return next((kind for name, kind in _SECONDARY_TYPE_VERSION_KINDS.items() if name in types), None)
+
+
 def _album_result(title: str, recording, release, artist: str, recordings) -> DiscoveryResult:
     matched_title, matched_artist = _recording_title_artist(recording, artist)
     track_number, disc_number = _track_position(release)
@@ -211,7 +222,8 @@ def _album_result(title: str, recording, release, artist: str, recordings) -> Di
                            load_tracks=_tracks_loader(release),
                            year=None if reissue else _release_group_year(recordings, release),
                            album_type=_album_type(release),
-                           album_ids={"musicbrainz_release_group_id": group_id} if group_id else {})
+                           album_ids={"musicbrainz_release_group_id": group_id} if group_id else {},
+                           release_kind=_release_kind(release.get("release-group")))
 
 
 def _release_title(release) -> str:
@@ -459,7 +471,8 @@ def _release_year_from_artist_recordings(artist: str, album: str, delay: float) 
             if year:
                 time.sleep(delay)
                 return YearDiscoveryResult(year=year, matched_title=title,
-                                           matched_artist=_credited_name_like(recording, artist))
+                                           matched_artist=_credited_name_like(recording, artist),
+                                           release_kind=_release_kind(release.get("release-group")))
     return None
 
 
@@ -541,7 +554,8 @@ def get_release_year(artist: str, query: str, is_single: bool, delay: float = 1.
                 matched_artist = credit.get("name") or credit["artist"]["name"]
             except (KeyError, IndexError, TypeError, AttributeError):
                 matched_artist = ""
-            return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist)
+            return YearDiscoveryResult(year=year, matched_title=title, matched_artist=matched_artist,
+                                       release_kind=_release_kind(release_group))
 
         return _release_year_from_artist_recordings(artist, query, delay)
 

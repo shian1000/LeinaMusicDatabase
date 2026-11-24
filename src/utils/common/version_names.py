@@ -18,6 +18,7 @@ from config.constants import (
     VERSION_LIVE,
     VERSION_OTHER,
     VERSION_REMIX,
+    VERSIONS_NEEDING_OWN_RELEASE,
 )
 from utils.common.normalizer import normalize
 from utils.common.title_patterns import YOUTUBE_BRACKETED
@@ -116,3 +117,44 @@ def title_with_version(song) -> str:
     title as it is."""
     marker = version_marker(song)
     return f"{song.title} {marker}" if marker else song.title
+
+
+# A release titled only as a live recording: "Live at Leeds", "Live in Gdańsk", "Koncert w
+# Jarocinie", "Stones Live" - read_version() needs a bracket or a dash. Not any "Live ..."
+# ("Live Through This", "Live and Let Die" are studio records), only one saying where.
+_RELEASE_TITLE_RES = {
+    VERSION_LIVE: re.compile(r"^(?:live|na zywo|koncert\w*|concert) (?:at|in|from|on|aus|au|w|we|z|ze|na|u|v)(?: |$)"
+                             r"|(?:^| )(?:live|na zywo)$"),
+}
+
+
+def reads_as_version(title: str | None, kind: str) -> bool:
+    """Does a release's or recording's title say it is a `kind` version - by
+    its marker ("The Last Time (Live at the Beacon Theatre)", "Hits - Live")
+    or, for a release, by what it is titled ("Live at Leeds")?"""
+    if not title:
+        return False
+    reading = read_version(title)
+    if reading is not None and reading.kind == kind:
+        return True
+    pattern = _RELEASE_TITLE_RES.get(kind)
+    return bool(pattern and pattern.search(normalize(title)))
+
+
+def version_needing_own_release(song) -> str | None:
+    """The song's version kind when a lookup by its artist and title can't
+    tell it from the original (constants.VERSIONS_NEEDING_OWN_RELEASE), else None."""
+    kind = getattr(song, "version_kind", None)
+    return kind if kind in VERSIONS_NEEDING_OWN_RELEASE else None
+
+
+def lookup_fits_version(song, titles, release_kind: str | None = None) -> bool:
+    """May an album or year an artist-and-title lookup found be saved on
+    `song` without asking? Always for a song that isn't such a version
+    (version_needing_own_release()); for one, only when the release found is
+    that kind of version too: one of `titles` (the release's, the matched
+    recording's) reads so, or the source says (`release_kind`, e.g.
+    MusicBrainz's "Live" release group). Else the owner reviews the value -
+    a live take otherwise gets the studio single's album and year."""
+    kind = version_needing_own_release(song)
+    return kind is None or release_kind == kind or any(reads_as_version(title, kind) for title in titles)

@@ -246,9 +246,10 @@ def _match_resembles(result, queried_artist: str, queried_title: str, module_nam
 class AlbumMatch:
     """An album found for a song, with the song's place on it when the
     module knew it (None = unknown; disc None also means a one-disc album).
-    load_tracks, needs_review, year, album_type, album_ids: the module's,
-    checked, see DiscoveryResult. source: the module's id (None for a
-    fallback)."""
+    load_tracks, needs_review, year, album_type, album_ids, matched_title,
+    release_kind: the module's, checked, see DiscoveryResult (matched_title:
+    the recording or track it was found by). source: the module's id (None
+    for a fallback)."""
     album: str
     track_number: int | None = None
     disc_number: int | None = None
@@ -258,6 +259,8 @@ class AlbumMatch:
     album_type: str | None = None
     album_ids: dict = field(default_factory=dict)
     source: str | None = None
+    matched_title: str | None = None
+    release_kind: str | None = None
 
 
 def _call_module(module, module_id: str, module_name: str, artist: str, title: str,
@@ -304,7 +307,9 @@ def _call_module_match(module, module_id: str, module_name: str, artist: str, ti
                       result.album_type if result.album_type in DISCOVERY_ALBUM_TYPES else None,
                       {column: value for column, value in ids.items()
                        if column in ALBUM_EXTERNAL_ID_COLUMNS and _is_external_id(value)},
-                      module_id)
+                      module_id,
+                      result.matched_title if isinstance(result.matched_title, str) else None,
+                      result.release_kind if isinstance(result.release_kind, str) else None)
 
 
 def _is_external_id(value) -> bool:
@@ -379,7 +384,8 @@ class AlbumTrackCache:
                 known[key] = AlbumMatch(match.album, _positive_int(track.track_number),
                                         _positive_int(track.disc_number), year=match.year,
                                         album_type=match.album_type, album_ids=match.album_ids,
-                                        source=match.source)
+                                        source=match.source, matched_title=track.title,
+                                        release_kind=match.release_kind)
                 added += 1
         if added:
             print(f"Remembered {added} tracks of {match.album} for the other songs of {song.artist.name}")

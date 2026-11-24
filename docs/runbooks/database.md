@@ -462,8 +462,10 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   title corrected; the approved ones go through `run_import_batch()` together), skip, or reject.
   A rejection is a row of music.db's `rejected_song_requests` (migration 0015), read by the phone
   with the next copy for sharing, so it doesn't ask again; a later request matching one by artist +
-  title (normalized), YouTube video or Spotify track is settled without asking. Delete a row (app
-  closed) to let Leina Radio ask for that song again; to review a rejection made by mistake, also
+  title (normalized), YouTube video or Spotify track is settled without asking. Deleting a row (app
+  closed) only stops the phone showing the track as rejected - it asks for a song once ever (its
+  outbox remembers what it sent; seen 2026-11-24: "already requested: 2"), so it won't ask again by
+  itself; add a wanted song by hand instead. To review a rejection made by mistake, also
   move its entry out of `Inbox/decisions.json` (into `decisions_reopened_<date>.json`, as on
   2026-11-18 and 2026-11-21) and its file from `processed/` back to `review/` - the menu has no
   undo. The other way round, a song found in the
@@ -473,6 +475,28 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   from `Inbox/processed/` and `decisions.json` (`run_settled_requests_backfill()`, at the start
   that applied the migration; with the data drive missing then, nothing is backfilled - run
   `backfill_settled_requests()` by hand).
+  **Deleting a requested song** (2026-11-24): Leina Radio asks for a song only once (any request
+  it sent blocks asking again), and the settled rows go with a deleted song (the trigger), so a
+  plain "Delete it anyway" leaves its track outside the database for good - never asked for again,
+  and nothing left to reject (#6969 / #6970, deleted that day). The delete dialog
+  (`utils/ui/song_delete_review.py`) therefore also offers, for a song used by Leina Radio
+  requests, "Delete it and reject the request(s) - Leina Radio won't ask for it again": once the
+  deletion is confirmed, each settled request becomes `rejected_song_requests` rows as a rejection
+  in the review writes them (`inbox_song_requests.reject_settled_requests()` →
+  `reject_song_request()`), its settled rows removed, and the answer replaces the "added" one in
+  `decisions.json` (`deleted_song_id`, `was_added_as`, the files kept). Leina Radio then shows the
+  track as rejected by the database.
+  **Requests whose song was deleted earlier**: "Resolve new requests" lists, after everything in
+  `review/` (also when nothing else waits; the start screen counts them as "Songs Leina Radio asked
+  for, deleted since"), every request `decisions.json` records as added whose song is gone -
+  `song_id_changes` followed, a merge being the kept song - and that no rejected or settled row
+  answers since (`deleted_song_requests()`; the reports read from the request files the answer
+  names, else its names alone). Only an answer with the song id counts (since 2026-11-18;
+  older ones name only the artist and title); a request settled as "already in the database" leaves no answer, so one of
+  those deleted plainly can't be found this way. Per item: "Reject - Leina Radio won't ask for it
+  again" (`reject_deleted_song_request()`), "Skip for now" (asked again next time) or stop. No
+  "ask again" choice: removing a settled row doesn't make Leina Radio ask again. The automatic
+  pass never answers these.
   Checked on "Dla Ani 2" (2026-11-21): the review shows the video's length (`duration_s`, sent by
   Leina Radio since that day) and flags 20 minutes and more (`FULL_ALBUM_MIN_DURATION_S`) as a
   likely mix or full album, whose names may be the video's; the rules get it as `video_minutes`.
