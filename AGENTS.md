@@ -258,7 +258,7 @@ non-trivial work in that area.
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
   spelling music.db already uses); never assign `song.genre` raw text.
   `languages.py` — `songs.language` (Leina Radio's stats "Języki" and search use the exact value):
-  ISO 639-3 codes, one per language (owner, 2026-11-25; macrolanguages as such - `zho`, `nor`,
+  ISO 639-3 codes, one per language ([ADR-0008](docs/decisions/0008-language-codes.md); macrolanguages as such - `zho`, `nor`,
   `hbs` beside `hrv` / `srp`), several joined by " / " (`eng / jpn`), `LANGUAGE_UNKNOWN` `"und"` the
   imports' placeholder, `LANGUAGE_INSTRUMENTAL` `"zxx"` = no words, ISO's local-use range for what it
   has no code for (`qiv` invented, `qpl` pseudo-Latin, `qpd` Podlachian, `constants.LANGUAGE_NAMES`).

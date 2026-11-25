@@ -39,8 +39,10 @@ this index is the map of everything else.
   [ADR-0006](decisions/0006-lite-sharing-server.md) (a plan, with its base running in `wired/`: MusicDatabaseWired,
   a public FastAPI sharing server on a shared standard-library core, the same API as today's server,
   working with this program as MusicDatabaseHomeServer, every imported library approved by the owner
-  and enforced by an allow-list test), and [ADR-0007](decisions/0007-song-versions.md) (versions of a
-  song - live, remix, acoustic - as rows of their own linked to the original).
+  and enforced by an allow-list test), [ADR-0007](decisions/0007-song-versions.md) (versions of a
+  song - live, remix, acoustic - as rows of their own linked to the original), and
+  [ADR-0008](decisions/0008-language-codes.md) (a song's language stored as ISO 639-3 codes, one
+  per language, names only read and shown).
   Don't write one for an ordinary refactor.
 
 ## Temporary / point-in-time records
