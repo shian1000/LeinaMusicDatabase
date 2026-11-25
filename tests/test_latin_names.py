@@ -71,26 +71,26 @@ def _song(session, title, artist, **kw):
 @pytest.mark.parametrize("text, language, origin, expected", [
     # English-style Russian, as the owner spelled names before
     ("Кино", None, None, "Kino"),
-    ("Группа крови", "Russian", None, "Gruppa krovi"),
+    ("Группа крови", "rus", None, "Gruppa krovi"),
     ("Земфира", None, None, "Zemfira"),
     ("Алёна", None, None, "Alyona"),
     ("ЖУКИ", None, None, "ZHUKI"),
     ("Чайковский", None, None, "Chaykovsky"),
     ("Елена", None, None, "Yelena"),
     # Ukrainian national system: y- forms only at the start of a word, зг -> zgh
-    ("Океан Ельзи", "Ukrainian", None, "Okean Elzy"),
+    ("Океан Ельзи", "ukr", None, "Okean Elzy"),
     ("Мене вже немає", None, None, "Mene vzhe nemaie"),
     ("Їжак Згода", None, None, "Yizhak Zghoda"),
     ("Зелені очі", None, None, "Zeleni ochi"),
     # Belarusian Lacinka: by the language field, its own letters or the origin
-    ("Іголкі", "Belarusian", None, "Ihołki"),
+    ("Іголкі", "bel", None, "Ihołki"),
     ("Шэры камень", None, None, "Šery kamień"),
     ("Ціха", None, "Belarus - White Ruthenia - Minsk", "Cicha"),
     ("Ціха", None, None, "Tsikha"),  # і alone: Ukrainian unless the origin says otherwise
     # Russian words of a Belarusian band fall back to Russian for и
-    ("Ляпис Трубецкой", "Belarusian", None, "Lapis Trubieckoj"),
+    ("Ляпис Трубецкой", "bel", None, "Lapis Trubieckoj"),
     ("Бумбокс", None, "Ukraine", "Bumboks"),
-    ("Ђорђе Балашевић", "Serbian", None, "Đorđe Balašević"),
+    ("Ђорђе Балашевић", "srp", None, "Đorđe Balašević"),
     ("Μπουζούκι", None, None, "Bouzouki"),
     ("ქართული", None, None, "Kartuli"),
     ("방탄소년단", None, None, "Bangtansonyeondan"),
@@ -99,22 +99,22 @@ def _song(session, title, artist, **kw):
     ("ファンタジー", None, None, "Fantasy"),  # cutlet spells a loanword as English does
     ("君の名は", None, None, "Kimi no na wa"),
     ("TK from 凛として時雨", None, None, "TK from rinto shite shigure"),
-    ("費玉清", "Chinese", None, "Fei Yu Qing"),
+    ("費玉清", "zho", None, "Fei Yu Qing"),
     ("河图", None, None, "He Tu"),  # a simplified character Japanese doesn't write
-    ("海闊天空", "Cantonese", None, "Hoi Fut Tin Hung"),
+    ("海闊天空", "yue", None, "Hoi Fut Tin Hung"),
     ("ペルソナ4 オリジナル・サウンドトラック", None, None, "Persona 4 original soundtrack"),
-    ("Щурците", "Bulgarian", None, "Shturtsite"),
+    ("Щурците", "bul", None, "Shturtsite"),
     # Arabic: mishkal's vowels, pausal forms, the article's sun letters
-    ("حبيبي", "Arabic", None, "Habibi"),
+    ("حبيبي", "ara", None, "Habibi"),
     ("الشاب خالد", None, None, "Ash-shabb khalid"),
-    ("Мен - тыва мен", "Tuvan", None, "Men - tyva men"),
+    ("Мен - тыва мен", "tyv", None, "Men - tyva men"),
     ("John Park(존박)", None, None, "John Park(Jonbak)"),
 ])
 def test_suggests_a_readable_latin_form(text, language, origin, expected):
     assert suggest_latin(text, language, origin) == expected
 
 
-@pytest.mark.parametrize("text, language", [("کوک", "Persian"), ("Rock", None),
+@pytest.mark.parametrize("text, language", [("کوک", "fas"), ("Rock", None),
                                             ("Bôa", None), ("", None), (None, None)])
 def test_no_suggestion_for_persian_or_latin_names(text, language):
     assert suggest_latin(text, language) is None
@@ -166,7 +166,7 @@ def test_missing_latin_forms_lists_non_latin_names_without_a_form(session):
     kino = _artist(session, "Кино")
     done = _artist(session, "Земфира", name_latin="Zemfira")
     _artist(session, "Vulfpeck")
-    _song(session, "Группа крови", kino, album="Группа крови", language="Russian")
+    _song(session, "Группа крови", kino, album="Группа крови", language="rus")
     _song(session, "Хочу перемен", kino, album=SINGLES_ALBUM)  # its single album copies the song's form
     _song(session, "Искала", done, title_latin="Iskala", album="14 недель тишины")
     _song(session, "کوک", done)
@@ -254,7 +254,7 @@ def test_youtube_search_retries_with_the_latin_title(monkeypatch):
 
 
 def test_alternative_titles_skip_repeats():
-    assert m._alternative_titles("Ihołki", "Belarusian", "Ihołki") == ["Іголкі"]
+    assert m._alternative_titles("Ihołki", "bel", "Ihołki") == ["Іголкі"]
     assert m._alternative_titles("Song", None, " ") == []
 
 
@@ -344,19 +344,19 @@ def test_fill_latin_forms_with_nothing_missing_says_so(session, monkeypatch, cap
 
 
 @pytest.mark.parametrize("text, language, origin, expected", [
-    ("Кино", "Russian", None, ("Russian", "language")),
+    ("Кино", "rus", None, ("Russian", "language")),
     ("Шэры камень", None, None, ("Belarusian Lacinka", "letters")),
     ("Ціха", None, "Belarus - White Ruthenia - Minsk", ("Belarusian Lacinka", "origin")),
     ("Кино", None, None, ("Russian", "guess")),
     ("Μπουζούκι", None, None, ("Greek", "alphabet")),
     ("ファンタジー", None, None, ("Japanese (Hepburn)", "alphabet")),
     ("君の名は", None, None, ("Japanese (Hepburn)", "letters")),
-    ("星野源", "Japanese", None, ("Japanese (Hepburn)", "language")),
+    ("星野源", "jpn", None, ("Japanese (Hepburn)", "language")),
     ("椎名林檎", None, None, ("Japanese (Hepburn)", "guess")),
     ("河图", None, None, ("Chinese (pinyin)", "letters")),
     ("海闊天空", None, "Hong Kong", ("Cantonese (Jyutping)", "origin")),
-    ("حبيبي", "Arabic", None, ("Arabic", "vowels")),  # mishkal's vowels are only guessed
-    ("کوک", "Persian", None, None),
+    ("حبيبي", "ara", None, ("Arabic", "vowels")),  # mishkal's vowels are only guessed
+    ("کوک", "fas", None, None),
     ("Rock", None, None, None),
 ])
 def test_latin_basis_says_what_chose_the_transcription(text, language, origin, expected):
@@ -366,7 +366,7 @@ def test_latin_basis_says_what_chose_the_transcription(text, language, origin, e
 
 def test_the_list_shows_the_transcription_and_what_chose_it(session):
     from utils.ui import latin_forms_review as review
-    _song(session, "Группа крови", _artist(session, "Latin Band"), language="Russian")
+    _song(session, "Группа крови", _artist(session, "Latin Band"), language="rus")
     [candidate] = ln.missing_latin_forms(session, (ln.SONG,))
 
     assert "Gruppa krovi   [Russian, the song's language]" in review._describe(candidate)
@@ -379,10 +379,10 @@ def test_unattended_fill_latin_forms_saves_only_what_its_rule_is_sure_of(session
     from utils.ui import latin_forms_review as review
     from utils.ui.prompts import unattended
     band = _artist(session, "Latin Band")
-    sure = _song(session, "Группа крови", band, language="Russian")
+    sure = _song(session, "Группа крови", band, language="rus")
     kana = _song(session, "ちょっと", band)
     guessed = _song(session, "Кукушка", band)
-    arabic = _song(session, "حبيبي", band, language="Arabic")
+    arabic = _song(session, "حبيبي", band, language="ara")
     monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(review, "submit_global_database_session", session.flush)
 

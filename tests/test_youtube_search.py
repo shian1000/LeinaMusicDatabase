@@ -1113,7 +1113,7 @@ def test_search_video_ytdlp_retries_transliterated_when_nothing_found_originally
         "Adzinoctva": [{"id": "rightVideoId", "title": "Test Artist - Adzinoctva", "channel": "Test Artist - Topic"}],
     }))
 
-    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="bel")
 
     assert video_id == "rightVideoId"
 
@@ -1128,7 +1128,7 @@ def test_search_video_ytdlp_prefers_transliterated_official_release_over_non_off
         "Adzinoctva": [{"id": "officialVideoId", "title": "Adzinoctva", "channel": "Test Artist - Topic"}],
     }))
 
-    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="bel")
 
     assert video_id == "officialVideoId"
 
@@ -1142,7 +1142,7 @@ def test_search_video_ytdlp_keeps_original_pick_when_transliterated_retry_is_als
         "Adzinoctva": [{"id": "altVideoId", "title": "Test Artist - Adzinoctva (also live)", "channel": "Someone Else"}],
     }))
 
-    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Belarusian")
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="bel")
 
     assert video_id == "originalVideoId"
 
@@ -1164,7 +1164,7 @@ def test_search_video_ytdlp_does_not_retry_for_non_transliterable_language(monke
 
     monkeypatch.setattr(m.subprocess, "run", fake_run)
 
-    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="Polish")
+    video_id = m.search_video_ytdlp("Test Artist", "Адзіноцтва", language="pol")
 
     assert video_id is None
     assert len(captured_queries) == 1  # no second attempt for a non-transliterable language

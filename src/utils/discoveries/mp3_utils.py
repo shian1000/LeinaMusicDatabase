@@ -6,7 +6,7 @@ from pathlib import Path
 from mutagen.easyid3 import EasyID3
 from mutagen.mp3 import MP3
 
-from config.constants import PLACEHOLDER_TAG_ALBUMS, PLACEHOLDER_TAG_ARTISTS, PLACEHOLDER_TAG_TITLE_WORDS
+from config.constants import LANGUAGE_UNKNOWN, PLACEHOLDER_TAG_ALBUMS, PLACEHOLDER_TAG_ARTISTS, PLACEHOLDER_TAG_TITLE_WORDS
 from utils.common.debug import flog, slog
 
 from utils.common.normalizer import normalize, extract_unknown_data
@@ -46,7 +46,7 @@ def extract_mp3_metadata(file: Path) -> dict:
     if album and _PLACEHOLDER_ALBUM_RE.fullmatch(album.strip()):
         album = None
     year = easy.get("date", [None])[0]
-    language = easy.get("language", ["Unknown"])[0]
+    language = easy.get("language", [LANGUAGE_UNKNOWN])[0]
 
     origin = None
     if audio.tags:
@@ -54,7 +54,7 @@ def extract_mp3_metadata(file: Path) -> dict:
         if comments and comments[0].text:
             origin = comments[0].text[0]
 
-    if language == "Unknown" and audio.tags:
+    if language == LANGUAGE_UNKNOWN and audio.tags:
         for tag in audio.tags.getall("TXXX"):
             if tag.desc.lower() == "language" and tag.text:
                 language = tag.text[0]
@@ -105,7 +105,7 @@ def extract_metadata_with_fallback(file: Path) -> dict:
         artist_name, title = extract_unknown_data(file)
         slog(f"[METADATA FALLBACK] Extracted from filename: artist='{artist_name}', title='{title}'")
 
-        tags = metadata or {"album": None, "year": None, "language": "Unknown", "origin": None}
+        tags = metadata or {"album": None, "year": None, "language": LANGUAGE_UNKNOWN, "origin": None}
         if not artist_name:
             if tags.get("artist_name") not in _MISSING_ARTISTS:
                 artist_name = tags["artist_name"]

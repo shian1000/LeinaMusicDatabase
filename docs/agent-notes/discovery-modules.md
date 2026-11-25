@@ -538,7 +538,7 @@ left in brackets is a credit or a note, not other words.
 gets its original's plain text (`lyrics_store.original_lyrics()`, never the synced lines). A
 candidate with `instrumental` (LRCLIB and Genius both say so) isn't saved at once: the run ends
 with a checkbox list of those (ticked) and the songs nothing had words for (unticked), and the
-ticked ones get `language` "Instrumental", never looked up again. MusicBrainz was tried for this
+ticked ones get `language` "zxx" (`LANGUAGE_INSTRUMENTAL`), never looked up again. MusicBrainz was tried for this
 and doesn't help (instrumental recordings mostly have no work at all); Spotify's
 "instrumentalness" (audio features) is closed to new apps since November 2024.
 
@@ -597,7 +597,8 @@ Polish songs and data errors (a swapped artist and title).
 ## Language lookups ("Fill missing data -> Languages") and `get_language()`
 
 The fourth kind (`discovery_settings.LANGUAGES`), `LanguageDiscoveryResult`: the language as
-stored (`language_names.clean_language()`), `confidence` (a guess, 0-1) or None when the source
+stored (`language_names.clean_language()`: ISO 639-3 codes, "eng / jpn" - the rules below work in
+codes too, a module turns its source's code or name into one with `language_code()`), `confidence` (a guess, 0-1) or None when the source
 says it outright, `from_song` when read from the song's own data, `never_sure` for a source too
 often wrong to save without the owner. Four modules:
 

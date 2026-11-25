@@ -34,24 +34,35 @@ def session():
 
 
 @pytest.mark.parametrize("typed, stored", [
-    ("english", "English"),
-    ("Finish", "Finnish"),  # LANGUAGE_SYNONYMS
-    ("Slovakian", "Slovak"),
-    ("Nigerian Pigdin / Yoruba", "Nigerian Pidgin / Yoruba"),
-    ("eng", "English"),  # ISO codes as mp3 tags write them
-    ("de", "German"),
-    ("ger", "German"),
-    ("ell", "Greek"),  # pycountry's "Modern Greek (1453-)"
-    ("zxx", "Instrumental"),
-    ("und", "Unknown"),
-    ("English, Japanese", "English / Japanese"),
-    ("English/English;english", "English"),
-    ("Unknown / Polish", "Polish"),
-    ("unknown", "Unknown"),
-    ("Ga / Jamaican Patois", "Ga / Jamaican Patois"),  # capitalised: a name, not Irish's "ga"
-    ("Croatian (Kajkavian)", "Croatian (Kajkavian)"),  # the owner's own names stay
-    ("Kajkavian", "Croatian (Kajkavian)"),
-    ("Made-up Latin", "Pseudo-Latin"),
+    ("english", "eng"),
+    ("English", "eng"),
+    ("Finish", "fin"),  # LANGUAGE_SYNONYMS
+    ("Slovakian", "slk"),
+    ("Nigerian Pigdin / Yoruba", "pcm / yor"),
+    ("eng", "eng"),  # ISO codes as mp3 tags write them
+    ("de", "deu"),
+    ("ger", "deu"),
+    ("ell", "ell"),
+    ("Greek", "ell"),  # pycountry's "Modern Greek (1453-)"
+    ("nb", "nor"),  # a macrolanguage's member: one code per language
+    ("zxx", "zxx"),
+    ("Instrumental", "zxx"),
+    ("No Language", "zxx"),
+    ("und", "und"),
+    ("English, Japanese", "eng / jpn"),
+    ("English/eng;english", "eng"),
+    ("Unknown / Polish", "pol"),
+    ("unknown", "und"),
+    ("Ga / Jamaican Patois", "gaa / jam"),  # capitalised: a name, not Irish's "ga"
+    ("Croatian (Kajkavian)", "kjv"),  # the owner's own names
+    ("Kajkavian", "kjv"),
+    ("Croatian (Čakavian)", "ckm"),
+    ("Made-up Latin", "qpl"),  # ISO's local-use codes for what it has none for
+    ("Invented", "qiv"),
+    ("Podlachian", "qpd"),
+    ("Ruthenian", "rue"),
+    ("Berber", "shi"),
+    ("Klingonish", "Klingonish"),  # no code: kept as written
     ("  ", None),
     (None, None),
 ])
@@ -65,7 +76,7 @@ def test_every_orm_write_is_cleaned(session):
     session.flush()
     song.language = "english / pol"
 
-    assert song.language == "English / Polish"
+    assert song.language == "eng / pol"
 
 
 def _stored(session, *languages):
@@ -79,9 +90,9 @@ def _stored(session, *languages):
 
 
 def test_only_spellings_that_change_are_listed_most_used_first(session):
-    _stored(session, "Finish", "english", "english", "Polish", "Interslavic", None)
+    _stored(session, "Finish", "english", "english", "pol", "isv", "Polish", None)
 
-    assert spelling_fixes(session, "language") == [("english", "English", 2), ("Finish", "Finnish", 1)]
+    assert spelling_fixes(session, "language") == [("english", "eng", 2), ("Finish", "fin", 1), ("Polish", "pol", 1)]
 
 
 def _tick(monkeypatch, pick):
@@ -95,14 +106,14 @@ def _tick(monkeypatch, pick):
 
 
 def test_unify_changes_only_the_ticked_spellings(session, monkeypatch):
-    _stored(session, "Finish", "Finish", "Portugeese", "Polish")
+    _stored(session, "Finish", "Finish", "Portugeese", "pol")
     monkeypatch.setattr(language_review, "open_and_set_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(language_review, "submit_global_database_session", session.commit)
     _tick(monkeypatch, lambda titles: [t for t in titles if t.startswith("language: 'Finish'")])
 
     assert language_review.unify_language_and_country_names() == 2
     languages = sorted(language for (language,) in session.execute(text("SELECT language FROM songs")))
-    assert languages == ["Finnish", "Finnish", "Polish", "Portugeese"]
+    assert languages == ["Portugeese", "fin", "fin", "pol"]
 
 
 def test_unify_cancelled_changes_nothing(session, monkeypatch):
@@ -117,7 +128,7 @@ def test_unify_cancelled_changes_nothing(session, monkeypatch):
 
 
 def test_nothing_to_unify(session, monkeypatch):
-    _stored(session, "English", "Polish / English")
+    _stored(session, "eng", "pol / eng")
     monkeypatch.setattr(language_review, "open_and_set_global_database_sessions", lambda: (session, None))
 
     assert language_review.unify_language_and_country_names() == 0
@@ -139,22 +150,22 @@ EKAVIAN = ("Koju pesmu hoćete? Nebo je plavo i ja sam ovde sa tobom sve do kraj
 def test_the_alphabet_and_letters_narrow_the_languages():
     from utils.common.language_names import language_of_text
 
-    assert language_of_text(BELARUSIAN)[0] == "Belarusian"  # langdetect knows none
-    assert language_of_text(UKRAINIAN)[0] == "Ukrainian"
-    assert language_of_text(ENGLISH)[0] == "English"
+    assert language_of_text(BELARUSIAN)[0] == "bel"  # langdetect knows none
+    assert language_of_text(UKRAINIAN)[0] == "ukr"
+    assert language_of_text(ENGLISH)[0] == "eng"
     assert language_of_text("Хайрын зөөлөн мэлмийгээр намайг чи ширтэнэ дээ, хамгийн сайхан үгээр намайг чи "
-                            "дуудна даа үүрд мөнхөд")[0] == "Mongolian"
+                            "дуудна даа үүрд мөнхөд")[0] == "mon"
     assert language_of_text("Мен сені сүйемін, қазақ жерім, әнім менің, туған елім, ғасырлар бойы ән шырқаймын "
-                            "далада, ата-анам, туған жерім")[0] == "Kazakh"
+                            "далада, ата-анам, туған жерім")[0] == "kaz"
     assert language_of_text("Две лири, една песна, ѕвездите сјаат над Охрид, ќе те чекам до зори, моја мила "
-                            "девојко, ќе те сакам секогаш")[0] == "Macedonian"
+                            "девојко, ќе те сакам секогаш")[0] == "mkd"
     assert language_of_text("אַז דער רבי אלימלך איז געווען זייער פֿריילעך, האָט ער אויסגעטאָן די תפֿילין און "
-                            "אָנגעטאָן די ברילן, און ער האָט גערופֿן די פֿידלער")[0] == "Yiddish"
+                            "אָנגעטאָן די ברילן, און ער האָט גערופֿן די פֿידלער")[0] == "yid"
     # ŭ is Lacinka; č / š / ž with ś and ł too - but not a Polish text holding one name with č
     assert language_of_text("Biehla staroža z čystaha polia, dzie ŭ travie hulaje viecier i niasie halasy pa "
-                            "ŭsim lesie i ŭsim poli")[0] == "Belarusian"
+                            "ŭsim lesie i ŭsim poli")[0] == "bel"
     assert language_of_text("Jechałem przez miasto, Ivan Kačić śpiewał w radiu, a ja myślałem o tobie przez cały "
-                            "dzień i noc, aż do rana")[0] == "Polish"
+                            "dzień i noc, aż do rana")[0] == "pol"
 
 
 def test_a_second_script_adds_its_language_and_credits_are_no_lyrics():
@@ -162,22 +173,22 @@ def test_a_second_script_adds_its_language_and_credits_are_no_lyrics():
 
     korean = ("여긴 서울특별시 우리가 사는 곳 오늘도 내일도 영원히 함께해 사랑해 너를 우리는 언제나 여기 있어 "
               "we live here every day and night, we love it here, this is our home and our city forever")
-    assert language_of_text(korean)[0] == "Korean / English"
+    assert language_of_text(korean)[0] == "kor / eng"
     assert language_of_text("Lời: Dennis Lyxzén / David Sandström\nNhạc: Refused\nI never fade away") is None
     assert language_of_text("Lake") is None  # too few letters to tell
 
 
 @pytest.mark.parametrize("text, title, origin, others, year, language", [
-    (CROATIAN, "Savana", None, ["Bosnian", "Bosnian"], 2017, "Bosnian"),  # the artist's other songs
-    (CROATIAN, "Klasika", None, [], 1984, "Serbo-Croatian"),  # made in Yugoslavia
-    (CROATIAN, "Pjesma", "Croatia - Zagreb", [], 1990, "Serbo-Croatian"),
-    (CROATIAN, "Pjesma", "Croatia - Zagreb", [], 1995, "Croatian"),
-    (EKAVIAN, "Nebo", "#Serbia - Belgrade", [], 2004, "Serbo-Croatian"),  # Serbia left in 2006
-    (EKAVIAN, "Suženi snovi", None, [], 2016, "Serbian"),  # ekavian: Serbia
-    (CROATIAN, "Pjesma", "Montenegro - Podgorica", [], 2010, "Serbian"),
-    (CROATIAN.replace("sunce", "śunce"), "Pjesma", "Montenegro - Podgorica", [], 2010, "Montenegrin"),
-    (CROATIAN, "Brijuni", "Bosna and Herzegovina", [], 2013, "Bosnian"),  # the owner's spelling of the country
-    (CROATIAN, "Pjesma", "Crna Gora", [], 2010, "Serbian"),
+    (CROATIAN, "Savana", None, ["bos", "bos"], 2017, "bos"),  # the artist's other songs
+    (CROATIAN, "Klasika", None, [], 1984, "hbs"),  # made in Yugoslavia
+    (CROATIAN, "Pjesma", "Croatia - Zagreb", [], 1990, "hbs"),
+    (CROATIAN, "Pjesma", "Croatia - Zagreb", [], 1995, "hrv"),
+    (EKAVIAN, "Nebo", "#Serbia - Belgrade", [], 2004, "hbs"),  # Serbia left in 2006
+    (EKAVIAN, "Suženi snovi", None, [], 2016, "srp"),  # ekavian: Serbia
+    (CROATIAN, "Pjesma", "Montenegro - Podgorica", [], 2010, "srp"),
+    (CROATIAN.replace("sunce", "śunce"), "Pjesma", "Montenegro - Podgorica", [], 2010, "cnr"),
+    (CROATIAN, "Brijuni", "Bosna and Herzegovina", [], 2013, "bos"),  # the owner's spelling of the country
+    (CROATIAN, "Pjesma", "Crna Gora", [], 2010, "srp"),
 ])
 def test_serbian_croatian_bosnian_go_by_country_and_year(text, title, origin, others, year, language):
     from utils.common.language_names import song_language
@@ -188,28 +199,28 @@ def test_serbian_croatian_bosnian_go_by_country_and_year(text, title, origin, ot
 def test_without_the_artists_country_a_later_song_waits_for_it():
     from utils.common.language_names import song_language
 
-    assert song_language(CROATIAN, "Pjesma", "Artist", None, [], 2015)[::2] == ("Croatian", True)
-    assert song_language(CROATIAN, "Pjesma", "Artist", None, [], None)[::2] == ("Croatian", True)
+    assert song_language(CROATIAN, "Pjesma", "Artist", None, [], 2015)[::2] == ("hrv", True)
+    assert song_language(CROATIAN, "Pjesma", "Artist", None, [], None)[::2] == ("hrv", True)
 
 
 def test_lyrics_in_a_language_the_titles_script_doesnt_write_may_be_a_translation():
     from types import SimpleNamespace
     from utils.common.language_names import may_be_translation, song_language
 
-    assert may_be_translation("ビバリウム", "English") and may_be_translation("Капитал", "English")
+    assert may_be_translation("ビバリウム", "eng") and may_be_translation("Капитал", "eng")
     # Lacinka under a Cyrillic title, romaji under a Japanese one, a mixed value or a Latin title: no
-    assert not may_be_translation("Палон", "Belarusian")
-    assert not may_be_translation("뛰어", "Korean / English")
-    assert not may_be_translation("夜のシルエット (Night Silhouette)", "Japanese")
-    assert not may_be_translation("Herz", "English")
+    assert not may_be_translation("Палон", "bel")
+    assert not may_be_translation("뛰어", "kor / eng")
+    assert not may_be_translation("夜のシルエット (Night Silhouette)", "jpn")
+    assert not may_be_translation("Herz", "eng")
     # Cyrillic letters the language hasn't: a Ukrainian title isn't Russian, a Russian one isn't Belarusian
-    assert may_be_translation("ДАЛІ МИ САМІ", "Russian") and may_be_translation("Завируха", "Belarusian")
-    assert not may_be_translation("ДАЛІ МИ САМІ", "Ukrainian") and not may_be_translation("ДАЛІ МИ САМІ", "Russian / Ukrainian")
+    assert may_be_translation("ДАЛІ МИ САМІ", "rus") and may_be_translation("Завируха", "bel")
+    assert not may_be_translation("ДАЛІ МИ САМІ", "ukr") and not may_be_translation("ДАЛІ МИ САМІ", "rus / ukr")
     # not ticked at first, however many of the artist's songs are Russian (Сергій Бабкін)
     babkin = SimpleNamespace(title="ДАЛІ МИ САМІ")
-    assert not language_review.LanguageProposal(babkin, "Russian", False, None, 1.0, 3).checked
-    assert language_review.LanguageProposal(babkin, "Ukrainian", False, None, 1.0, 3).checked
-    assert song_language(ENGLISH, "ビバリウム", "Ado")[:2] == ("English", 0.5)  # never saved without the owner
+    assert not language_review.LanguageProposal(babkin, "rus", False, None, 1.0, 3).checked
+    assert language_review.LanguageProposal(babkin, "ukr", False, None, 1.0, 3).checked
+    assert song_language(ENGLISH, "ビバリウム", "Ado")[:2] == ("eng", 0.5)  # never saved without the owner
 
 
 def test_romaji_and_rarely_right_readings():
@@ -217,10 +228,10 @@ def test_romaji_and_rarely_right_readings():
 
     romaji = ("Machi no zawameki ga mimi ni nokoru yoru no shiruetto kimi no koe ga kikoeru kimi to futari de "
               "aruita michi")
-    assert song_language(romaji, "夜のシルエット", "Chill City Pop")[0] == "Japanese"
-    assert song_language(romaji, "Night Silhouette", "Chill City Pop", None, ["Japanese", "Japanese"])[0] == "Japanese"
+    assert song_language(romaji, "夜のシルエット", "Chill City Pop")[0] == "jpn"
+    assert song_language(romaji, "Night Silhouette", "Chill City Pop", None, ["jpn", "jpn"])[0] == "jpn"
     language, probability, _ = song_language(romaji, "Night Silhouette", "Chill City Pop")
-    if language in ("Swahili", "Somali", "Yoruba"):  # whatever langdetect makes of it, never sure
+    if language in ("swa", "som", "yor"):  # whatever langdetect makes of it, never sure
         assert probability <= 0.5
 
 
@@ -243,17 +254,17 @@ def test_a_text_holding_a_translation_is_not_read():
 
 @pytest.mark.parametrize("text, language, sure", [
     ("Wróc na Kaszëbë, tam gdze mòja chëcz stoji, tam gdze mòrze szumi i wiater wieje, tam jô bëc chcã do "
-     "kùńca dniów", "Kashubian", True),  # ò ù ë beside a Polish reading
+     "kùńca dniów", "csb", True),  # ò ù ë beside a Polish reading
     ("Sıra-sıra djezveler qaynar da qaynarlar, alimenin qaşları oynar da oynarlar, sıra-sıra djezveler "
-     "qaynar da qaynarlar", "Crimean Tatar", False),
+     "qaynar da qaynarlar", "crh", False),
     ("Quel flor qu'tita murchá, quel criancá qu'tita tchorá, quel nuvem qu'tita passá, é sodade, é tristeza, "
-     "é lembranca di nha infância", "Cape Verdean Creole", False),
+     "é lembranca di nha infância", "kea", False),
     ("Þú ert ljósið mitt og ég elska þig, þegar sólin sest yfir fjörðinn þá hugsa ég um þig alla nóttina, og "
-     "þegar vindurinn blæs yfir hafið þá syng ég lagið okkar aftur og aftur", "Icelandic", True),  # read as Hungarian
+     "þegar vindurinn blæs yfir hafið þá syng ég lagið okkar aftur og aftur", "isl", True),  # read as Hungarian
     ("Me a gano d'ar c'hoad hag d'ar mor bras, ar c'hleze a zo war an daol, kenavo d'an holl tud vat, ha bremañ e "
-     "kanomp asambles e-kreiz an noz, war an hent bras etrezek ar gêr", "Breton", True),  # read as Welsh
+     "kanomp asambles e-kreiz an noz, war an hent bras etrezek ar gêr", "bre", True),  # read as Welsh
     ("Mwen kay pati lè solèy kouché, nou ké chanté ansanm toujou, fo pa ou pléré chéri, sé lanmou ki la pou nou",
-     "Guadeloupean Creole", False),  # read as French
+     "gcf", False),  # read as French
 ])
 def test_languages_langdetect_lacks_come_from_their_letters_or_words(text, language, sure):
     from utils.common.language_names import language_of_text
@@ -268,17 +279,17 @@ def test_a_reading_langdetect_fills_with_unknown_languages_needs_its_words(monke
 
     altai = ("Öt tengeri kaira elikán hulgan märgän, kizirgán umai gúwará gúpái, goya zhasgáná ayyadá gynnáná "
              "yeláná yeládá börkit")
-    assert language_of_text(altai) == ("Hungarian", 0.5)  # no "és", "hogy", "nem"...: never sure
+    assert language_of_text(altai) == ("hun", 0.5)  # no "és", "hogy", "nem"...: never sure
     hungarian = ("Nem tudom, hogy mit akarsz, de én itt vagyok és várok rád, mert csak te vagy az egy nekem, "
                  "és ha eljön az éjszaka, már nem félek semmitől")
-    assert language_of_text(hungarian) == ("Hungarian", 1.0)
+    assert language_of_text(hungarian) == ("hun", 1.0)
     # Serbian read as Slovenian: without "in", "kaj", "sem"... it goes by the country and the year
-    monkeypatch.setattr(language_names, "language_of_text", lambda text: ("Slovenian", 1.0))
+    monkeypatch.setattr(language_names, "language_of_text", lambda text: ("slv", 1.0))
     assert song_language("Ej Ljubice, Beograd noću sija", "Ovo je Balkan", "Milan Stanković") == (
-        "Serbo-Croatian", 1.0, True)
-    assert song_language("Ej devojko, Beograd noću sija", "Ovo je Balkan", "Milan Stanković")[0] == "Serbian"
+        "hbs", 1.0, True)
+    assert song_language("Ej devojko, Beograd noću sija", "Ovo je Balkan", "Milan Stanković")[0] == "srp"
     assert song_language("S tabo vedno je poletje, ko pogledaš me vem, da uredu sem", "Stabo", "Skinshape")[0] \
-        == "Slovenian"
+        == "slv"
 
 
 def test_a_line_holding_its_translation_after_a_caret_is_read_without_it():
@@ -289,7 +300,7 @@ def test_a_line_holding_its_translation_after_a_caret_is_read_without_it():
              "Y nunca vamos a parar de cantar^And we are never going to stop singing",
              "Las estrellas brillan sobre el mar^The stars shine over the sea",
              "Mi corazón late por ti cada día^My heart beats for you every day"]
-    assert language_of_text("\n".join(lines)) == ("Spanish", 1.0)
+    assert language_of_text("\n".join(lines)) == ("spa", 1.0)
 
 
 def test_lines_count_once_and_the_stanzas_vote():
@@ -297,14 +308,14 @@ def test_lines_count_once_and_the_stanzas_vote():
 
     croatian = CROATIAN.replace(", ", "\n")
     intro = "Ha-ha, listen here, we are coming at you easy now, freedom for every child all around the world"
-    assert language_of_text(f"{intro}\n\n{croatian}\n\n{croatian.upper()}\n\n{EKAVIAN}")[0] == "Croatian"
+    assert language_of_text(f"{intro}\n\n{croatian}\n\n{croatian.upper()}\n\n{EKAVIAN}")[0] == "hrv"
     # a few lines sung over and over: read, never sure
     found = language_of_text("\n".join(["I'm just a kid", "It was just a little mistake"] * 12))
     assert found is None or found[1] <= 0.5
     # a second language most of a stanza is in
     german = ("Du bist so schmutzig, du bist so schön, ich kann dich riechen, ich kann dich sehen, und alles was "
               "ich will ist bei dir zu sein heute Nacht")
-    assert language_of_text(f"{german}\n\n{ENGLISH}\n\n{german.upper()}")[0] == "German / English"
+    assert language_of_text(f"{german}\n\n{ENGLISH}\n\n{german.upper()}")[0] == "deu / eng"
 
 
 def test_a_short_cyrillic_stanza_without_its_letters_has_no_vote():
@@ -312,9 +323,9 @@ def test_a_short_cyrillic_stanza_without_its_letters_has_no_vote():
 
     belarusian = BELARUSIAN.replace(", ", "\n")
     assert language_of_text(f"{belarusian}\n\nГэта мой колер, не выходзь з дому, гэта мой колер, я твой знаёмы, "
-                            f"не выходзь з дому")[0] == "Belarusian"
+                            f"не выходзь з дому")[0] == "bel"
     # Ukrainian typed with a Latin "i"
-    assert language_of_text(UKRAINIAN.replace("і", "i"))[0] == "Ukrainian"
+    assert language_of_text(UKRAINIAN.replace("і", "i"))[0] == "ukr"
 
 
 def test_romaji_alone_and_kajkavian():
@@ -323,12 +334,12 @@ def test_romaji_alone_and_kajkavian():
     romaji = ("Machi no zawameki ga mimi ni nokoru yoru no shiruetto kimi no koe ga kikoeru kimi to futari de "
               "aruita michi")
     language, probability, _ = song_language(romaji, "Night Silhouette", "Chill City Pop")
-    assert language in ("Japanese", "Finnish", "Estonian", "Italian", "Tagalog", "Indonesian", "Malay")
-    assert language != "Japanese" or probability <= 0.5
+    assert language in ("jpn", "fin", "est", "ita", "tgl", "ind", "msa")
+    assert language != "jpn" or probability <= 0.5
     slovenian = ("Ker tu je vse tako lepo, tu nič me ne boli, Jan je nehal piti kavo in zdaj samo še spi, vse je "
                  "tako lepo pri nas doma")
-    assert song_language(slovenian, "Raca", "Cinkuši", "Croatia")[:2] == ("Croatian (Kajkavian)", 0.5)
-    assert song_language(slovenian, "Vest", "Koala Voice", "Slovenia")[0] == "Slovenian"
+    assert song_language(slovenian, "Raca", "Cinkuši", "Croatia")[:2] == ("kjv", 0.5)
+    assert song_language(slovenian, "Vest", "Koala Voice", "Slovenia")[0] == "slv"
 
 
 def test_stored_lyrics_module_reads_the_songs_own_text(monkeypatch):
@@ -345,16 +356,16 @@ def test_stored_lyrics_module_reads_the_songs_own_text(monkeypatch):
     monkeypatch.setattr(module, "lyrics_db_session", contextmanager(lambda: (yield None)))
     monkeypatch.setattr(module, "stored_lyrics", lambda session, song_id: stored.get(song_id))
     artist = SimpleNamespace(name="Sassja", origin=None, songs=[])
-    artist.songs = [SimpleNamespace(language="Bosnian"), SimpleNamespace(language="Unknown")]
+    artist.songs = [SimpleNamespace(language="bos"), SimpleNamespace(language="und")]
     song = lambda song_id, year=None: [SimpleNamespace(id=song_id, title="T", artist=artist, year=year)]
 
     found = module.get_language("A", "T", songs=song(1))
-    assert (found.language, found.from_song, found.confidence > 0.9) == ("English", True, True)
-    assert module.get_language("A", "T", songs=song(2)).language == "English"  # LRC times left out
+    assert (found.language, found.from_song, found.confidence > 0.9) == ("eng", True, True)
+    assert module.get_language("A", "T", songs=song(2)).language == "eng"  # LRC times left out
     assert (module.get_language("A", "T", songs=song(3)).language, module.get_language("A", "T", songs=song(3))
-            .confidence) == ("Instrumental", None)
+            .confidence) == ("zxx", None)
     assert module.get_language("A", "T", songs=song(4)) is None
-    assert module.get_language("A", "T", songs=song(5, 2017)).language == "Bosnian"  # the artist's other songs
+    assert module.get_language("A", "T", songs=song(5, 2017)).language == "bos"  # the artist's other songs
 
 
 class _Page:
@@ -378,9 +389,9 @@ def test_musixmatch_names_the_language_of_its_lyrics(monkeypatch):
 
     found = musixmatch_fetcher.get_language("Kult", "Arahja")
     assert (found.language, found.matched_title, found.matched_artist, found.confidence) == (
-        "Polish", "Arahja", "Kult", None)
+        "pol", "Arahja", "Kult", None)
     page["text"] = _musixmatch_page("", instrumental=True)
-    assert musixmatch_fetcher.get_language("Kult", "Arahja").language == "Instrumental"
+    assert musixmatch_fetcher.get_language("Kult", "Arahja").language == "zxx"
     page["text"] = _musixmatch_page("")
     assert musixmatch_fetcher.get_language("Kult", "Arahja") is None
 
@@ -406,7 +417,7 @@ def test_musicbrainz_takes_the_language_of_the_first_recording_linked_to_its_wor
 
     monkeypatch.setattr(mb, "mb_get", mb_get)
     found = mb.get_language("Kult", "Arahja")
-    assert (found.language, found.matched_artist, found.source_ref) == ("Polish / English", "Kult & Kazik", "r2")
+    assert (found.language, found.matched_artist, found.source_ref) == ("pol / eng", "Kult & Kazik", "r2")
     assert found.never_sure  # the work's language: an instrumental cover of it has it too
     assert asked == ["recording/", "recording/r1", "recording/r2"]  # "Polska" is another song
 
@@ -435,9 +446,9 @@ def youtube(monkeypatch):
 
 
 @pytest.mark.parametrize("code, language", [
-    ("pl", "Polish"), ("en-US", "English"), ("pt-BR", "Portuguese"), ("EN-gb", "English"),
-    ("zxx", "Instrumental"),  # no linguistic content
-    ("el", "Greek"), ("nb", "Norwegian"), ("be", "Belarusian"),
+    ("pl", "pol"), ("en-US", "eng"), ("pt-BR", "por"), ("EN-gb", "eng"),
+    ("zxx", "zxx"),  # no linguistic content
+    ("el", "ell"), ("nb", "nor"), ("be", "bel"),
     ("und", None), ("", None), ("qq", None),
 ])
 def test_youtube_audio_language_codes(code, language):
@@ -454,7 +465,7 @@ def test_youtube_audio_language_of_the_songs_own_video_is_never_sure(youtube):
     assert youtube.asked == [["v1", "v2", "v3"]]  # one request for every video, none without a link
 
     found = youtube.module.get_language("A", "T", songs=songs[:1])
-    assert (found.language, found.from_song, found.never_sure, found.source_ref) == ("Polish", True, True, "v1")
+    assert (found.language, found.from_song, found.never_sure, found.source_ref) == ("pol", True, True, "v1")
     assert [youtube.module.get_language("A", "T", songs=[song]) for song in songs[3:]] == [None] * 4
     assert youtube.module.get_language("A", "T", songs=songs[1:2]) is None  # "und" = nothing
     assert len(youtube.asked) == 1  # all answered by that request
@@ -508,15 +519,15 @@ def test_a_sure_answer_after_an_unsure_one_wins(session):
     song = Song(title="Arahja", artist=Artist(name="Kult"))
     session.add(song)
     session.flush()
-    lyrics = _module(lambda a, t: _result("Russian", 0.7, from_song=True), local=True)
+    lyrics = _module(lambda a, t: _result("rus", 0.7, from_song=True), local=True)
     broken = _module(fails=True)
-    other_song = _module(lambda a, t: _result("English", title="Polska"))
-    site = _module(lambda a, t: _result("Polish"))
+    other_song = _module(lambda a, t: _result("eng", title="Polska"))
+    site = _module(lambda a, t: _result("pol"))
 
     search = discover_language(song, [("lyrics", "L", lyrics), ("broken", "B", broken),
                                       ("other", "O", other_song), ("site", "S", site)])
 
-    assert (search.match.module_id, search.match.result.language, search.match.sure) == ("site", "Polish", True)
+    assert (search.match.module_id, search.match.result.language, search.match.sure) == ("site", "pol", True)
     assert (search.failed, search.missed) == (["broken"], ["other"])
     assert len(lyrics.calls) == 1  # a local module reads the song itself, once
 
@@ -527,10 +538,10 @@ def test_an_unsure_reading_is_kept_when_nothing_is_sure(session):
     song = Song(title="Arahja", artist=Artist(name="Kult"))
     session.add(song)
     session.flush()
-    search = discover_language(song, [("lyrics", "L", _module(lambda a, t: _result("Polish", 0.8, from_song=True),
+    search = discover_language(song, [("lyrics", "L", _module(lambda a, t: _result("pol", 0.8, from_song=True),
                                                               local=True)),
                                       ("site", "S", _module())])
-    assert (search.match.result.language, search.match.sure, search.missed) == ("Polish", False, ["site"])
+    assert (search.match.result.language, search.match.sure, search.missed) == ("pol", False, ["site"])
 
 
 def test_a_never_sure_source_is_unsure_and_asked_once_a_song(session):
@@ -542,9 +553,9 @@ def test_a_never_sure_source_is_unsure_and_asked_once_a_song(session):
     session.flush()
     silent = _module()
     silent.BY_SONG = True
-    youtube = _module(lambda a, t: LanguageDiscoveryResult("Polish", from_song=True, never_sure=True))
+    youtube = _module(lambda a, t: LanguageDiscoveryResult("pol", from_song=True, never_sure=True))
     search = discover_language(song, [("silent", "S", silent), ("youtube", "Y", youtube)])
-    assert (search.match.result.language, search.match.sure, search.missed) == ("Polish", False, ["silent"])
+    assert (search.match.result.language, search.match.sure, search.missed) == ("pol", False, ["silent"])
     assert len(silent.calls) == 1  # its answer doesn't depend on the names asked
 
 
@@ -552,18 +563,18 @@ def test_a_never_sure_source_is_unsure_and_asked_once_a_song(session):
 
 def test_fill_missing_languages(session, monkeypatch):
     kult, solo = Artist(name="Kult"), Artist(name="Solo")
-    session.add_all([Song(title=f"Known {i}", artist=kult, language="Polish") for i in range(3)])
-    arahja = Song(title="Arahja", artist=kult, language="Unknown")
-    romaji = Song(title="Kimi", artist=kult, language="Unknown")
+    session.add_all([Song(title=f"Known {i}", artist=kult, language="pol") for i in range(3)])
+    arahja = Song(title="Arahja", artist=kult, language="und")
+    romaji = Song(title="Kimi", artist=kult, language="und")
     nothing = Song(title="Silence", artist=kult)
-    online = Song(title="Away", artist=solo, language="Unknown")
+    online = Song(title="Away", artist=solo, language="und")
     session.add_all([arahja, romaji, nothing, online])
     session.flush()
 
-    readings = {arahja.id: _result("Polish", 0.99, from_song=True), romaji.id: _result("Swahili", 0.99, from_song=True)}
+    readings = {arahja.id: _result("pol", 0.99, from_song=True), romaji.id: _result("swa", 0.99, from_song=True)}
     lyrics = _module(local=True)
     lyrics.get_language = lambda artist, title, songs=None: readings.get(songs[0].id)
-    site = _module(lambda a, t: _result("English", title="Away", artist="Solo") if t == "Away" else None)
+    site = _module(lambda a, t: _result("eng", title="Away", artist="Solo") if t == "Away" else None)
     monkeypatch.setattr(language_review, "load_discovery_modules",
                         lambda kind: [("stored_lyrics_fetcher", "L", lyrics), ("site", "S", site)])
     monkeypatch.setattr(language_review, "load_max_songs_per_fetch", lambda: 50)
@@ -578,11 +589,11 @@ def test_fill_missing_languages(session, monkeypatch):
     monkeypatch.setattr(questionary, "checkbox", checkbox)
 
     assert language_review.fill_missing_languages() == 3
-    assert (arahja.language, online.language) == ("Polish", "English")  # saved at once
+    assert (arahja.language, online.language) == ("pol", "eng")  # saved at once
     # a sure reading none of the artist's songs has is asked about, unticked
-    assert shown == {"Kult - Kimi  ->  Swahili  (lyrics, 0.99; the artist: 0/3 songs)": False,
-                     "Kult - Silence  ->  Polish  (the artist's other songs; the artist: 3/3 songs)": True}
-    assert (romaji.language, nothing.language) == ("Unknown", "Polish")
+    assert shown == {"Kult - Kimi  ->  swa (Swahili)  (lyrics, 0.99; the artist: 0/3 songs)": False,
+                     "Kult - Silence  ->  pol (Polish)  (the artist's other songs; the artist: 3/3 songs)": True}
+    assert (romaji.language, nothing.language) == ("und", "pol")
 
 
 def _fill_with(session, monkeypatch, readings, site=None):
@@ -600,39 +611,39 @@ def test_songs_needing_the_artists_origin_are_typed_or_left_for_later(session, m
     from utils.discoveries.discovery_result import LanguageDiscoveryResult
 
     nameless, croatian = Artist(name="Elemental"), Artist(name="Gibonni", origin="Croatia - Dalmatia - Split")
-    waits = Song(title="Usne", artist=nameless, year=2016, language="Unknown")
-    site_waits = Song(title="Srce", artist=nameless, year=2016, language="Unknown")
-    classic = Song(title="Zlatne godine", artist=croatian, year=1989, language="Unknown")
+    waits = Song(title="Usne", artist=nameless, year=2016, language="und")
+    site_waits = Song(title="Srce", artist=nameless, year=2016, language="und")
+    classic = Song(title="Zlatne godine", artist=croatian, year=1989, language="und")
     session.add_all([waits, site_waits, classic])
     session.flush()
-    reading = LanguageDiscoveryResult("Croatian", confidence=1.0, from_song=True, needs_origin=True)
-    site = _module(lambda a, t: _result("Croatian", title=t, artist=a))
+    reading = LanguageDiscoveryResult("hrv", confidence=1.0, from_song=True, needs_origin=True)
+    site = _module(lambda a, t: _result("hrv", title=t, artist=a))
     _fill_with(session, monkeypatch, {waits.id: reading}, site)
     asked = []
     monkeypatch.setattr(language_review, "ask_yes_no", lambda question: asked.append(question) or type_now)
-    typed = iter(["Serbian", ""])
+    typed = iter(["srp", ""])
     monkeypatch.setattr(questionary, "text", lambda *a, **k: type("Prompt", (), {"ask": lambda self: next(typed)})())
 
     language_review.fill_missing_languages()
 
-    assert classic.language == "Serbo-Croatian"  # the site's Croatian, under the country-and-year rule
+    assert classic.language == "hbs"  # the site's Croatian, under the country-and-year rule
     assert len(asked) == 1
     if type_now:
-        assert (waits.language, site_waits.language) == ("Serbian", "Unknown")  # empty = later
+        assert (waits.language, site_waits.language) == ("srp", "und")  # empty = later
     else:
-        assert (waits.language, site_waits.language) == ("Unknown", "Unknown")
+        assert (waits.language, site_waits.language) == ("und", "und")
 
 
 def test_youtubes_audio_language_goes_to_the_review_after_the_sites(session, monkeypatch, youtube):
     kult, gibonni = Artist(name="Kult"), Artist(name="Gibonni", origin="Croatia - Dalmatia - Split")
-    session.add_all([Song(title="Known", artist=kult, language="Polish")])
-    arahja = Song(title="Arahja", artist=kult, language="Unknown", youtube_video_id="v1")
+    session.add_all([Song(title="Known", artist=kult, language="pol")])
+    arahja = Song(title="Arahja", artist=kult, language="und", youtube_video_id="v1")
     site_knows = Song(title="Away", artist=kult, youtube_video_id="v2")
     croatian = Song(title="Zlatne godine", artist=gibonni, year=1989, youtube_video_id="v3")
     session.add_all([arahja, site_knows, croatian])
     session.flush()
     youtube.codes = {"v1": "pl", "v2": "en", "v3": "hr"}
-    site = _module(lambda a, t: _result("English", title="Away", artist="Kult") if t == "Away" else None)
+    site = _module(lambda a, t: _result("eng", title="Away", artist="Kult") if t == "Away" else None)
     _fill_with(session, monkeypatch, {}, site)
     modules = language_review.load_discovery_modules(None) + [("youtube_language_fetcher", "Y", youtube.module)]
     monkeypatch.setattr(language_review, "load_discovery_modules", lambda kind: modules)
@@ -646,18 +657,18 @@ def test_youtubes_audio_language_goes_to_the_review_after_the_sites(session, mon
     language_review.fill_missing_languages()
 
     assert youtube.asked == [["v3", "v1", "v2"]]  # one request before the songs are asked (by artist)
-    assert site_knows.language == "English"  # the site before YouTube, and sure
+    assert site_knows.language == "eng"  # the site before YouTube, and sure
     # never saved without the owner, the country-and-year rule applied to its "hr"
-    assert shown == {"Kult - Arahja  ->  Polish  (youtube_language_fetcher; the artist: 1/1 songs)": True,
-                     "Gibonni - Zlatne godine  ->  Serbo-Croatian  (youtube_language_fetcher)": False}
-    assert (arahja.language, croatian.language) == ("Unknown", None)
+    assert shown == {"Kult - Arahja  ->  pol (Polish)  (youtube_language_fetcher; the artist: 1/1 songs)": True,
+                     "Gibonni - Zlatne godine  ->  hbs (Serbo-Croatian)  (youtube_language_fetcher)": False}
+    assert (arahja.language, croatian.language) == ("und", None)
 
 
 # ==================== Covers (owner's rule, 2026-11-20) ====================
 
 def _cover(session, original, artist, title, **fields):
     from utils.database import covers
-    song = Song(title=title, artist=Artist(name=artist), language="Unknown", **fields)
+    song = Song(title=title, artist=Artist(name=artist), language="und", **fields)
     session.add(song)
     covers.set_covered_artist([song], original.artist)
     session.flush()
@@ -667,16 +678,16 @@ def _cover(session, original, artist, title, **fields):
 def test_a_cover_singing_the_originals_words_takes_its_language(session):
     from utils.database.languages import original_language
 
-    colic = Song(title="Juče još", artist=Artist(name="Zdravko Čolić"), year=1978, language="Serbo-Croatian")
-    toto = Song(title="Africa", artist=Artist(name="Toto"), language="English")
-    hero = Song(title="Holding Out For A Hero", artist=Artist(name="Bonnie Tyler"), language="English")
+    colic = Song(title="Juče još", artist=Artist(name="Zdravko Čolić"), year=1978, language="hbs")
+    toto = Song(title="Africa", artist=Artist(name="Toto"), language="eng")
+    hero = Song(title="Holding Out For A Hero", artist=Artist(name="Bonnie Tyler"), language="eng")
     session.add_all([colic, toto, hero])
     session.flush()
     ceka = _cover(session, colic, "Ceka", "Juce jos", year=2012)
     africa = _cover(session, toto, "UkrTrashDub", "Африка", covered_title="Africa")
     vitr = _cover(session, hero, "Lucie Vondráčková", "Vítr", covered_title="Holding Out for a Hero")
     marked = _cover(session, toto, "Someone", "Africa", cover_translated=1)
-    assert original_language(ceka) == "Serbo-Croatian"
+    assert original_language(ceka) == "hbs"
     # not marked yet, but its title is in another script / not the original's
     assert original_language(africa) is original_language(vitr) is None
     assert original_language(marked) is None
@@ -686,23 +697,23 @@ def test_the_yugoslav_rule_goes_by_the_originals_year_and_artist(session):
     from utils.database.languages import words_basis
 
     colic = Song(title="Juče još", artist=Artist(name="Zdravko Čolić", origin="Serbia"), year=1978)
-    other = Song(title="Druga", artist=colic.artist, language="Serbo-Croatian")
+    other = Song(title="Druga", artist=colic.artist, language="hbs")
     session.add_all([colic, other])
     session.flush()
     ceka = _cover(session, colic, "Ceka", "Juce jos", year=2012)
-    assert words_basis(ceka) == (1978, "Serbia", ["Serbo-Croatian"])
+    assert words_basis(ceka) == (1978, "Serbia", ["hbs"])
     ceka.cover_translated = 1
     assert words_basis(ceka) == (2012, None, [])
 
 
 def test_fill_missing_languages_saves_the_originals_language_first(session, monkeypatch):
-    colic = Song(title="Juče još", artist=Artist(name="Zdravko Čolić"), year=1978, language="Serbo-Croatian")
+    colic = Song(title="Juče još", artist=Artist(name="Zdravko Čolić"), year=1978, language="hbs")
     session.add(colic)
     session.flush()
     ceka = _cover(session, colic, "Ceka", "Juce jos", year=2012)
-    lyrics = _module(lambda a, t: _result("Croatian", 1.0, from_song=True), local=True)
+    lyrics = _module(lambda a, t: _result("hrv", 1.0, from_song=True), local=True)
     _fill_with(session, monkeypatch, {})
     monkeypatch.setattr(language_review, "load_discovery_modules", lambda kind: [("stored_lyrics_fetcher", "L", lyrics)])
 
     assert language_review.fill_missing_languages() == 1
-    assert ceka.language == "Serbo-Croatian" and not lyrics.calls  # no module asked
+    assert ceka.language == "hbs" and not lyrics.calls  # no module asked

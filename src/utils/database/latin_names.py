@@ -17,7 +17,7 @@ for separately.
 from collections import Counter
 from dataclasses import dataclass
 
-from config.constants import ALBUM_TYPE_SINGLE
+from config.constants import ALBUM_TYPE_SINGLE, LANGUAGE_UNKNOWN
 from utils.common.normalizer import normalize
 from utils.common.romanize import latin_basis, suggest_latin
 from utils.common.script_utils import has_non_latin
@@ -120,7 +120,7 @@ class LatinCandidate:
 
 
 def _common_language(songs) -> str | None:
-    languages = Counter(s.language for s in songs if s.language and s.language != "Unknown")
+    languages = Counter(s.language for s in songs if s.language and s.language != LANGUAGE_UNKNOWN)
     return languages.most_common(1)[0][0] if languages else None
 
 

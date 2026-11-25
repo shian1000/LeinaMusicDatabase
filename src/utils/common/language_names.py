@@ -1,13 +1,14 @@
 """
-A song's language as stored in songs.language: English names, several joined
-by " / " ("English / Japanese"), one spelling per language - Leina Radio counts
-its listening stats and searches by the value as it is.
+A song's language as stored in songs.language: ISO 639-3 codes, several joined
+by " / " ("eng / jpn"), one code per language (owner, 2026-11-25) - Leina Radio
+counts its listening stats and searches by the value as it is, and shows each
+code's name in its own language.
 
 clean_language() is what every write goes through (Song's validator in
-datatables.py): each part looked up by language_key() in LANGUAGE_SYNONYMS,
-a lowercase ISO 639 code ("eng", "pl" - mp3 TLAN tags) by its name, any other
-name kept as written (capitalised when typed all lowercase - the owner's own
-names, "Croatian (Kajkavian)", "Interslavic", stay). No database here.
+datatables.py): each part read by language_code() - an ISO 639-1 / -2 / -3
+code (mp3 TLAN tags "eng" / "pl", the lookups, langdetect) or an English name
+(pycountry's, LANGUAGE_NAMES', LANGUAGE_SYNONYMS') - and anything else kept as
+written. language_name() / language_label() are what the menus show.
 
 language_of_text() reads the language of a text (lyrics) with langdetect,
 narrowed by the alphabet and the letters (the owner's rules, 2026-11-19):
@@ -19,17 +20,17 @@ sung ten times doesn't outweigh the verses), the stanzas vote (an intro in anoth
 language doesn't decide), and a text holding a translation isn't read
 (looks_like_translation()). song_language() adds what the song's names, its
 artist's other songs and origin tell. Invented languages are never read: no rule
-tells them (owner, 2026-11-20).
+tells them (owner, 2026-11-20). Every language there is its code too.
 """
 
 import re
 import unicodedata
 from functools import lru_cache
 
-from config.constants import (KAJKAVIAN, LANGUAGE_CODE_NAMES, LANGUAGE_CREDIT_WORDS, LANGUAGE_DETECT_MIN_LETTERS,
+from config.constants import (KAJKAVIAN, LANGUAGE_CODE_ALIASES, LANGUAGE_CREDIT_WORDS, LANGUAGE_DETECT_MIN_LETTERS,
                               LANGUAGE_INLINE_TRANSLATION_MARK, LANGUAGE_INLINE_TRANSLATION_SHARE,
-                              LANGUAGE_INSTRUMENTAL, LANGUAGE_MARKS, LANGUAGE_NEIGHBOURS, LANGUAGE_PROOF_WORDS,
-                              LANGUAGE_RARELY_RIGHT,
+                              LANGUAGE_INSTRUMENTAL, LANGUAGE_MARKS, LANGUAGE_NAMES, LANGUAGE_NEIGHBOURS,
+                              LANGUAGE_PROOF_WORDS, LANGUAGE_RARELY_RIGHT,
                               LANGUAGE_ROMAJI_MISREADINGS, LANGUAGE_ROMAJI_ONLY_MISREADINGS, LANGUAGE_ROMAJI_SHARE,
                               LANGUAGE_SECOND_SCRIPT_SHARE, LANGUAGE_SEPARATOR, LANGUAGE_STANZA_LINES,
                               LANGUAGE_STANZA_MIN_LETTERS, LANGUAGE_STANZA_SURE, LANGUAGE_SYNONYMS,
@@ -42,9 +43,9 @@ from utils.common.origin_names import clean_origin
 from utils.common.romanize import cyrillic_language
 
 _SEPARATORS = re.compile(r"\s*[/,;]\s*")
-# Only lowercase, as tags and lookups write codes: the owner's "Ga" stays Ga, not Irish
+# Only lowercase, as tags and lookups write codes: the owner's "Ga" is Ga (gaa), not Irish (ga)
 _CODE = re.compile(r"[a-z]{2,3}")
-_PYCOUNTRY_SUFFIX = re.compile(r"\s*\((macrolanguage|\d{4}-)\)$")
+_PYCOUNTRY_SUFFIX = re.compile(r"\s*\((macrolanguage|\d{4}-|to \d{4}|\d{3}-ca\. \d{4})\)$")
 
 
 def language_key(name: str | None) -> str:
@@ -52,44 +53,68 @@ def language_key(name: str | None) -> str:
     return normalize(name or "").replace(" ", "")
 
 
-@lru_cache(maxsize=512)
-def code_name(code: str) -> str | None:
-    """The language an ISO 639-1 / -2 / -3 code names, None when it's none."""
-    if code in LANGUAGE_CODE_NAMES:
-        return LANGUAGE_CODE_NAMES[code]
-    import pycountry  # loads its tables on first use, only codes need them
+@lru_cache(maxsize=1)
+def _name_codes() -> dict:
+    """{language_key(name): code} of every English name a language is read by."""
+    import pycountry  # loads its tables on first use, only names need them
+    codes = {language_key(_PYCOUNTRY_SUFFIX.sub("", found.name)): found.alpha_3 for found in pycountry.languages}
+    codes.update((language_key(name), code) for code, name in LANGUAGE_NAMES.items())
+    codes.update(LANGUAGE_SYNONYMS)
+    return {key: LANGUAGE_CODE_ALIASES.get(code, code) for key, code in codes.items()}
+
+
+@lru_cache(maxsize=1024)
+def _iso_code(code: str) -> str | None:
+    """The code stored for an ISO 639-1 / -2 / -3 code, None when it's none."""
+    if code in LANGUAGE_CODE_ALIASES or code in LANGUAGE_NAMES:
+        return LANGUAGE_CODE_ALIASES.get(code, code)
+    import pycountry
     for field in ("alpha_2", "alpha_3", "bibliographic"):
         found = pycountry.languages.get(**{field: code})
         if found is not None:
-            return _PYCOUNTRY_SUFFIX.sub("", found.name)
+            return LANGUAGE_CODE_ALIASES.get(found.alpha_3, found.alpha_3)
     return None
 
 
-def canonical_language(name: str) -> str:
-    """The spelling one language is stored under."""
-    name = " ".join(composed(name).split())
-    if _CODE.fullmatch(name):
-        name = code_name(name) or name
-    key = language_key(name)
-    if key in LANGUAGE_SYNONYMS:
-        return LANGUAGE_SYNONYMS[key]
-    return name[:1].upper() + name[1:] if name.islower() else name
+def language_code(name: str | None) -> str | None:
+    """The ISO 639-3 code one language is stored under, from a code (lowercase:
+    "pl", "ger", "pol") or an English name ("Polish", "Farsi"); None when it's neither."""
+    name = " ".join(composed(name or "").split())
+    if _CODE.fullmatch(name) and _iso_code(name):
+        return _iso_code(name)
+    return _name_codes().get(language_key(name))
+
+
+@lru_cache(maxsize=512)
+def language_name(code: str) -> str:
+    """A code's English name ("pol" -> "Polish"); anything else as it is."""
+    if code in LANGUAGE_NAMES:
+        return LANGUAGE_NAMES[code]
+    import pycountry
+    found = pycountry.languages.get(alpha_3=code) if _CODE.fullmatch(code or "") else None
+    return _PYCOUNTRY_SUFFIX.sub("", found.name) if found else code
+
+
+def language_label(value: str | None) -> str:
+    """A stored value as the menus show it: "eng / jpn (English / Japanese)"."""
+    if not value:
+        return value or ""
+    names = LANGUAGE_SEPARATOR.join(language_name(code) for code in value.split(LANGUAGE_SEPARATOR))
+    return value if names == value else f"{value} ({names})"
 
 
 def clean_language(value) -> str | None:
-    """As stored: each language in its one spelling, the order kept,
-    repeats and an "Unknown" beside a known one dropped, joined by " / ";
-    nothing = None."""
+    """As stored: each language as its code (a part no code is found for kept
+    as written), the order kept, repeats and an "und" beside a known one
+    dropped, joined by " / "; nothing = None."""
     if value is None:
         return None
-    languages, seen = [], set()
+    languages = []
     for part in _SEPARATORS.split(str(value)):
-        if not part.strip():
-            continue
-        language = canonical_language(part)
-        if language_key(language) not in seen:
-            seen.add(language_key(language))
-            languages.append(language)
+        if part.strip():
+            language = language_code(part) or " ".join(part.split())
+            if language not in languages:
+                languages.append(language)
     if len(languages) > 1:
         languages = [language for language in languages if language != LANGUAGE_UNKNOWN] or languages
     return LANGUAGE_SEPARATOR.join(languages) or None
@@ -103,9 +128,9 @@ _SCRIPT_CODES = {
     "DEVANAGARI": ("hi", "mr", "ne"),
     "GREEK": ("el",),
 }
-_SCRIPT_LANGUAGES = {"HANGUL": "Korean", "KANA": "Japanese", "CJK": "Chinese", "GEORGIAN": "Georgian",
-                     "ARMENIAN": "Armenian", "THAI": "Thai"}
-_CYRILLIC_CODES = {"be": "Belarusian", "uk": "Ukrainian", "ru": "Russian", "sr": "Serbian"}
+_SCRIPT_LANGUAGES = {"HANGUL": "kor", "KANA": "jpn", "CJK": "zho", "GEORGIAN": "kat",
+                     "ARMENIAN": "hye", "THAI": "tha"}
+_CYRILLIC_CODES = {"be": "bel", "uk": "ukr", "ru": "rus", "sr": "srp"}
 # A syllable or an aksara counts as the two letters it is in Latin (Bloodywood's Hindi lyrics fell under the second
 # script's share otherwise)
 _SYLLABIC = ("HANGUL", "KANA", "CJK", "DEVANAGARI", "GURMUKHI", "BENGALI", "TAMIL", "TELUGU", "KANNADA", "MALAYALAM",
@@ -156,22 +181,22 @@ def _read_latin(text: str) -> tuple[str, float] | None:
     lower = text.lower()
     letters = set(lower)
     if "ŭ" in letters:
-        return "Belarusian", 1.0
+        return "bel", 1.0
     found = _detect(text)
-    marked = _marked_language(lower, code_name(found[0]) if found else None)
+    marked = _marked_language(lower, language_code(found[0]) if found else None)
     if marked:
         return marked
     slavic = sum(lower.count(ch) for ch in "čšž") >= _LACINKA_MIN_LETTERS and not letters & set("ąęż")
     if "ś" in letters and slavic:
         if "ł" in letters:
-            return "Belarusian", 1.0
+            return "bel", 1.0
         if "đ" in letters:
-            return "Montenegrin", 1.0
-        return (code_name(found[0]) or found[0], min(found[1], 0.5)) if found else None
+            return "cnr", 1.0
+        return (language_code(found[0]) or found[0], min(found[1], 0.5)) if found else None
     if found is None:
         return None
-    name = code_name(found[0])
-    if name == "Vietnamese" and not letters & _VIETNAMESE_LETTERS:
+    name = language_code(found[0])
+    if name == "vie" and not letters & _VIETNAMESE_LETTERS:
         return name, min(found[1], 0.5)
     return (name, found[1]) if name else None
 
@@ -209,22 +234,22 @@ def _read_script(script: str, text: str) -> tuple[str, float] | None:
     if script == "CYRILLIC":
         letters = set(text.lower())
         if letters & set("өү"):  # Kazakh has them too, with ә ғ қ ң
-            return ("Kazakh" if letters & set("әғқң") else "Mongolian"), 1.0
+            return ("kaz" if letters & set("әғқң") else "mon"), 1.0
         if letters & set("ѓќѕ"):
-            return "Macedonian", 1.0
+            return "mkd", 1.0
         found = _detect(text, _SCRIPT_CODES["CYRILLIC"])
         code = cyrillic_language(text, None, None)  # the letters only one alphabet has
         if code == "sr" and found is not None and found[0] == "mk" and not letters & set("ђћ"):
-            return "Macedonian", found[1]  # ј љ њ џ: Serbian and Macedonian alike
+            return "mkd", found[1]  # ј љ њ џ: Serbian and Macedonian alike
         if found is None or found[0] in ("ru", "uk") or code in ("be", "sr"):
             return _CYRILLIC_CODES[code], found[1] if found else 0.5
-        return code_name(found[0]), found[1]
+        return language_code(found[0]), found[1]
     if script == "HEBREW":
-        return ("Yiddish" if any(mark in text for mark in YIDDISH_MARKS) else "Hebrew"), 1.0
+        return ("yid" if any(mark in text for mark in YIDDISH_MARKS) else "heb"), 1.0
     if script in _SCRIPT_LANGUAGES:
         return _SCRIPT_LANGUAGES[script], 1.0
     found = _detect(text, _SCRIPT_CODES.get(script))
-    return (code_name(found[0]), found[1]) if found and code_name(found[0]) else None
+    return (language_code(found[0]), found[1]) if found and language_code(found[0]) else None
 
 
 def language_of_text(text: str | None) -> tuple[str, float] | None:
@@ -339,10 +364,10 @@ def _neighbours(language: str, other: str) -> bool:
 # The letter sets a Cyrillic stanza must show to vote for its language: a short Belarusian
 # stanza without і or ў ("Гэта мой колер, не выходзь з дому") reads as Russian
 _CYRILLIC_PROOF = {
-    "Belarusian": lambda letters: "ў" in letters or ("і" in letters and bool(letters & set("ыэ"))),
-    "Ukrainian": lambda letters: bool(letters & set("їєґ")) or ("і" in letters and "и" in letters
+    "bel": lambda letters: "ў" in letters or ("і" in letters and bool(letters & set("ыэ"))),
+    "ukr": lambda letters: bool(letters & set("їєґ")) or ("і" in letters and "и" in letters
                                                                  and not letters & set("ыэ")),
-    "Russian": lambda letters: bool(letters & set("ыэъё")) and bool(letters & set("иъщ"))
+    "rus": lambda letters: bool(letters & set("ыэъё")) and bool(letters & set("иъщ"))
     and not letters & set("іўїє"),
 }
 
@@ -402,17 +427,17 @@ def _romaji_share(text: str) -> float:
 # The languages each script writes - a title wholly in one, with lyrics read as another
 # language, may hold a translation (LRCLIB's and Genius's English of Ado's "ビバリウム")
 _SCRIPT_WRITES = {
-    "CYRILLIC": {"Russian", "Ukrainian", "Belarusian", "Bulgarian", "Macedonian", "Serbian", "Mongolian", "Kazakh",
-                 "Church Slavonic", "Ruthenian", "Montenegrin", SERBO_CROATIAN, "Tuvan", "Kyrgyz", "Tatar"},
-    "KANA": {"Japanese"}, "CJK": {"Japanese", "Chinese", "Cantonese"}, "HANGUL": {"Korean"},
-    "ARABIC": {"Arabic", "Persian", "Urdu", "Kashmiri", "Berber"}, "HEBREW": {"Hebrew", "Yiddish"},
-    "GREEK": {"Greek", "Attic Greek"}, "DEVANAGARI": {"Hindi", "Marathi", "Nepali", "Sanskrit"},
-    "GEORGIAN": {"Georgian"}, "ARMENIAN": {"Armenian"}, "THAI": {"Thai"},
+    "CYRILLIC": {"rus", "ukr", "bel", "bul", "mkd", "srp", "mon", "kaz",
+                 "chu", "rue", "cnr", SERBO_CROATIAN, "tyv", "kir", "tat"},
+    "KANA": {"jpn"}, "CJK": {"jpn", "zho", "yue"}, "HANGUL": {"kor"},
+    "ARABIC": {"ara", "fas", "urd", "kas", "shi"}, "HEBREW": {"heb", "yid"},
+    "GREEK": {"ell", "grc"}, "DEVANAGARI": {"hin", "mar", "nep", "san"},
+    "GEORGIAN": {"kat"}, "ARMENIAN": {"hye"}, "THAI": {"tha"},
 }
 
 
 # Cyrillic letters a title in that language can't have (Сергій Бабкін - "ДАЛІ МИ САМІ" isn't Russian)
-_CYRILLIC_FOREIGN = {"Russian": set("іїєґў"), "Ukrainian": set("ыэъёў"), "Belarusian": set("иїєґщъ")}
+_CYRILLIC_FOREIGN = {"rus": set("іїєґў"), "ukr": set("ыэъёў"), "bel": set("иїєґщъ")}
 
 
 def may_be_translation(title: str | None, language: str | None) -> bool:
@@ -449,8 +474,8 @@ def written_otherwise(text: str | None, language: str | None) -> bool:
     return not _SCRIPT_WRITES[script] & set(language.split(LANGUAGE_SEPARATOR))
 
 
-_YUGOSLAV_READINGS = {"Croatian", "Serbian", "Bosnian", "Montenegrin", SERBO_CROATIAN}
-_COUNTRY_OF_LANGUAGE = {"Croatian": "Croatia", "Bosnian": "Bosnia", "Serbian": "Serbia", "Montenegrin": "Montenegro"}
+_YUGOSLAV_READINGS = {"hrv", "srp", "bos", "cnr", SERBO_CROATIAN}
+_COUNTRY_OF_LANGUAGE = {"hrv": "Croatia", "bos": "Bosnia", "srp": "Serbia", "cnr": "Montenegro"}
 
 
 def is_yugoslav(language: str | None) -> bool:
@@ -463,7 +488,7 @@ def yugoslav_language(text: str, year: int | None, origin: str | None, artist_la
     until the artist's origin is known rather than guess (2026-11-19)."""
     lower = (text or "").lower()
     if set(lower) & set("śź") or "с\u0301" in lower or "з\u0301" in lower:
-        return "Montenegrin"
+        return "cnr"
     origin = clean_origin(origin) or ""
     country = next((key for key in YUGOSLAV_COUNTRIES if origin.startswith(key)), None)
     if country is None:
@@ -493,15 +518,15 @@ def song_language(text: str | None, title: str = "", artist: str = "", origin: s
         return None
     language, probability = reading
     names = f"{title} {artist}"
-    japanese = [value for value in artist_languages if "Japanese" in value.split(LANGUAGE_SEPARATOR)]
+    japanese = [value for value in artist_languages if "jpn" in value.split(LANGUAGE_SEPARATOR)]
     if language in LANGUAGE_ROMAJI_MISREADINGS and (any(_script(ch) in ("KANA", "CJK") for ch in names)
                                                     or len(japanese) * 2 > len(artist_languages) > 0):
-        return "Japanese", probability, False
+        return "jpn", probability, False
     if language in LANGUAGE_ROMAJI_ONLY_MISREADINGS and _romaji_share(text) >= LANGUAGE_ROMAJI_SHARE:
-        return "Japanese", min(probability, 0.5), False
-    if language == "Slovenian" and (clean_origin(origin) or "").startswith("Croatia"):
+        return "jpn", min(probability, 0.5), False
+    if language == "slv" and (clean_origin(origin) or "").startswith("Croatia"):
         language, probability = KAJKAVIAN, min(probability, 0.5)
-    elif language == "Slovenian" and not _proven_by_words(language, _lyrics_only(text)):
+    elif language == "slv" and not _proven_by_words(language, _lyrics_only(text)):
         language = SERBO_CROATIAN  # Serbian read as Slovenian (Milan Stanković - Ovo je Balkan)
     needs_origin = False
     if is_yugoslav(language):

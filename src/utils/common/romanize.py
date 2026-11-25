@@ -132,9 +132,17 @@ def _serbian(text: str) -> str:
 _BELARUSIAN_PAIRS = ("жы", "шы", "чы", "жэ", "шэ", "чэ", "цэ")
 
 
-_CYRILLIC_BY_NAME = (("belarus", "be"), ("ukrain", "uk"), ("russia", "ru"), ("bulgar", "bg"), ("mongol", "mn"),
-                     ("tuva", "mn"), ("serbia", "sr"),
-                     ("macedon", "sr"), ("bosnia", "sr"), ("montenegr", "sr"))
+# songs.language's codes, and the countries an origin starts with
+_CYRILLIC_BY_LANGUAGE = {"bel": "be", "ukr": "uk", "rus": "ru", "bul": "bg", "mon": "mn", "tyv": "mn", "srp": "sr",
+                         "mkd": "sr", "bos": "sr", "cnr": "sr"}
+_CYRILLIC_BY_ORIGIN = (("belarus", "be"), ("ukrain", "uk"), ("russia", "ru"), ("bulgar", "bg"), ("mongol", "mn"),
+                       ("tuva", "mn"), ("serbia", "sr"),
+                       ("macedon", "sr"), ("bosnia", "sr"), ("montenegr", "sr"))
+
+
+def _language_codes(language: str | None) -> set:
+    """songs.language's codes ("eng / jpn"); no language_names here, which imports this module."""
+    return {part.strip() for part in (language or "").split("/")}
 
 
 def _cyrillic_system(text: str, language: str | None, origin: str | None) -> tuple[str, str]:
@@ -143,9 +151,9 @@ def _cyrillic_system(text: str, language: str | None, origin: str | None) -> tup
     ("origin"), else a guess ("guess"). Belarusian has і with ы/э/ё,
     Ukrainian і with и/щ/apostrophe; Russian has neither і nor ў. Bulgarian
     has no letter of its own, so only its name tells it."""
-    language = (language or "").lower()
-    for key, code in _CYRILLIC_BY_NAME:
-        if key in language:
+    codes = _language_codes(language)
+    for key, code in _CYRILLIC_BY_LANGUAGE.items():
+        if key in codes:
             return code, "language"
     lower = text.lower()
     letters = set(lower)
@@ -160,7 +168,7 @@ def _cyrillic_system(text: str, language: str | None, origin: str | None) -> tup
     if "і" in letters and letters & set("ищ'ʼ’"):
         return "uk", "letters"
     origin = (origin or "").lower()
-    for key, code in _CYRILLIC_BY_NAME:
+    for key, code in _CYRILLIC_BY_ORIGIN:
         if origin.startswith(key):
             return code, "origin"
     # і alone: Belarusian or Ukrainian - the library has far more Ukrainian
@@ -349,12 +357,12 @@ def _han_system(text: str, language: str | None, origin: str | None) -> tuple[st
     (most of the library's)."""
     if _KANA_SCRIPT.search(text):
         return "ja", "letters" if re.search(r"[\u3400-\u9fff]", text) else "alphabet"
-    language = (language or "").lower()
-    if "cantonese" in language:
+    codes = _language_codes(language)
+    if "yue" in codes:
         return "yue", "language"
-    if "japan" in language:
+    if "jpn" in codes:
         return "ja", "language"
-    if "chinese" in language or "mandarin" in language:
+    if "zho" in codes:
         return "zh", "language"
     origin = (origin or "").lower()
     if origin.startswith("japan"):
@@ -460,7 +468,7 @@ def _arabic_word(word: str) -> str:
 def _persian(text: str, language: str | None) -> bool:
     """Persian / Urdu, which mishkal doesn't read: by the language, or a letter
     Arabic doesn't have (پ چ ژ گ ک ی)."""
-    return any(name in (language or "").lower() for name in ("persian", "farsi", "urdu", "pashto", "dari")) \
+    return bool(_language_codes(language) & {"fas", "urd", "pus", "prs"}) \
         or bool(set(text) & set("پچژگکیۀ"))
 
 
@@ -507,7 +515,7 @@ def _only_latin_letters(text: str) -> bool:
 def suggest_latin(text: str | None, language: str | None = None, origin: str | None = None) -> str | None:
     """A Latin form to offer for `text`, or None: already Latin, or a script
     (kanji, Arabic, Hebrew, ...) with no automatic reading here.
-    `language` (songs.language, e.g. "Ukrainian") and `origin`
+    `language` (songs.language, e.g. "ukr") and `origin`
     (artists.origin) pick the Cyrillic system when the letters don't."""
     if not text or _only_latin_letters(text):
         return None

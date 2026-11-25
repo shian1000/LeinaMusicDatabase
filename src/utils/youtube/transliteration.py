@@ -334,7 +334,7 @@ class TransliterableLanguage:
 
 
 TRANSLITERABLE_LANGUAGES: dict[str, TransliterableLanguage] = {
-    "belarusian": TransliterableLanguage(
+    "bel": TransliterableLanguage(  # songs.language's code
         native_script=_BE_CYRILLIC_RE,
         to_latin=belarusian_to_latin,
         to_native=latin_to_belarusian,

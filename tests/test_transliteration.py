@@ -199,20 +199,21 @@ def test_latin_to_belarusian_full_song_regression():
 
 def test_transliterate_picks_direction_from_script():
     # Cyrillic input -> Latin
-    assert transliterate("Адзіноцтва", "Belarusian") == "Adzinoctva"
+    assert transliterate("Адзіноцтва", "bel") == "Adzinoctva"
     # Latin input -> Cyrillic
-    assert transliterate("Ihołki", "Belarusian") == "Іголкі"
+    assert transliterate("Ihołki", "bel") == "Іголкі"
 
 
 def test_transliterate_unknown_language_returns_none():
-    assert transliterate("Adzinoctva", "English") is None
+    assert transliterate("Adzinoctva", "eng") is None
     assert transliterate("Adzinoctva", None) is None
 
 
 def test_is_transliterable_case_insensitive():
-    assert is_transliterable("Belarusian")
-    assert is_transliterable("belarusian")
-    assert not is_transliterable("Polish")
+    assert is_transliterable("bel")
+    assert is_transliterable("BEL")
+    assert not is_transliterable("Belarusian")  # songs.language holds codes
+    assert not is_transliterable("pol")
     assert not is_transliterable(None)
 
 

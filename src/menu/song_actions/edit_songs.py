@@ -300,7 +300,7 @@ def add_songs_menu():
         ("artist_name", "Artist:", True, False),
         ("album", "Album (optional):", False, False),
         ("year", "Year (optional):", False, True),
-        ("language", "Language (optional):", False, False),
+        ("language", "Language (optional, an ISO 639-3 code or its English name):", False, False),
         ("origin", "Artist's origin (optional):", False, False),
     ):
         answer = _ask_text(question, required, number)

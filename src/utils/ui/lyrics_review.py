@@ -10,6 +10,7 @@ import questionary
 
 from config.constants import LYRICS_MISS_REJECTED, LYRICS_SOURCE_MANUAL
 from utils.common.automation_settings import recent_misses, remember_misses
+from utils.common.language_names import language_label
 from utils.common.normalizer import normalize
 from utils.common.text_utils import similarity
 from utils.common.output import escape, ok, review_header, show
@@ -188,7 +189,7 @@ def _review_unsure(lyrics_session, unsure: list) -> int:
         song, match = pair
         found = f"{match.result.matched_artist} - {match.result.matched_title}"
         first = _as_lyrics(match).first_line or _kind(_as_lyrics(match))
-        note = f" · in a script {song.language} isn't written in" if match.other_script else ""
+        note = f" · in a script {language_label(song.language)} isn't written in" if match.other_script else ""
         return (f"{_label(song)}  <->  {found} ({_length(match.duration_s)} / "
                 f"{_length(match.found_duration_s)}) · {first[:60]}{note}")
 

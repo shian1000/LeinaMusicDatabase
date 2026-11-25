@@ -1,6 +1,6 @@
 from config.constants import LANGUAGE_UNKNOWN, NO_VIDEO_SENTINEL
 from settings import Settings
-from utils.common.language_names import clean_language, code_name
+from utils.common.language_names import language_code
 from utils.discoveries.discovery_result import LanguageDiscoveryResult
 from utils.youtube.manage_youtube_playlists import audio_languages_via_api
 
@@ -47,10 +47,10 @@ def prepare(songs) -> None:
 
 
 def language_of_code(code: str) -> str | None:
-    """The stored language a BCP-47 code names ("pt-BR" -> Portuguese), None
+    """The stored language a BCP-47 code names ("pt-BR" -> "por"), None
     for "und" and codes naming none."""
-    name = code_name(code.split("-")[0].lower()) if code else None
-    return None if name in (None, LANGUAGE_UNKNOWN) else clean_language(name)
+    found = language_code(code.split("-")[0].lower()) if code else None
+    return None if found in (None, LANGUAGE_UNKNOWN) else found
 
 
 def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult | None:

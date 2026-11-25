@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 
 from config.constants import LANGUAGE_ARTIST_MIN_SHARE, LANGUAGE_ARTIST_MIN_SONGS
 from utils.common.automation_settings import recent_misses, remember_misses
-from utils.common.language_names import is_yugoslav, may_be_translation, yugoslav_language
+from utils.common.language_names import is_yugoslav, language_label, may_be_translation, yugoslav_language
 from utils.common.output import escape, review_header, show
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.fetch_data_settings import load_max_songs_per_fetch
@@ -45,6 +45,7 @@ _ROWS = {"language": ("song", "songs"), "origin": ("artist", "artists")}
 def _describe(fix) -> str:
     field, old, new, count = fix
     one, many = _ROWS[field]
+    new = language_label(new) if field == "language" else new
     return f"{field}: {old!r}  ->  {new or '(not set)'}  ({count} {one if count == 1 else many})"
 
 
@@ -57,9 +58,9 @@ def unify_language_and_country_names() -> int:
         return 0
 
     review_header(f"REVIEW: {len(fixes)} spelling(s) of languages and countries to unify",
-                  "Typos, case, ISO codes from mp3 tags, other separators, countries in one English form "
-                  "('United Kingdom - England'), and origins that aren't a place cleared - Leina Radio "
-                  "counts and searches by the exact name.")
+                  "Languages as their ISO 639-3 codes ('Polish', 'pl' -> 'pol'), other separators, countries in "
+                  "one English form ('United Kingdom - England'), and origins that aren't a place cleared - "
+                  "Leina Radio counts and searches by the exact value.")
     picked = tick_items("Tick the spellings to change (space toggles, enter confirms):",
                         fixes, _describe, checked=True)
     if picked is None:
@@ -100,7 +101,7 @@ class LanguageProposal:
             if self.artist_songs else ""
         note = "; the lyrics may be a translation" if self.from_lyrics and may_be_translation(
             self.song.title, self.language) else ""
-        return f"{self.song.artist.name} - {self.song.title}  ->  {self.language}  ({source}{known}{note})"
+        return f"{self.song.artist.name} - {self.song.title}  ->  {language_label(self.language)}  ({source}{known}{note})"
 
 
 def _proposal(song, match, counts: dict) -> LanguageProposal:
@@ -137,7 +138,7 @@ def _from_originals(songs: list) -> list:
             left.append(song)
             continue
         song.language = language
-        show(f"{escape(song.artist.name)} - {escape(song.title)}: [green]{escape(language)}[/green] "
+        show(f"{escape(song.artist.name)} - {escape(song.title)}: [green]{escape(language_label(language))}[/green] "
              f"[dim](the original's)[/dim]")
     return left
 
@@ -167,7 +168,7 @@ def _look_up(songs: list, modules: list, counts: dict, guesses: dict, asked: lis
             song.language = match.result.language
             guesses.pop(song.id, None)
             show(f"[{position}/{len(songs)}] {escape(song.artist.name)} - {escape(song.title)}: "
-                 f"[green]{escape(song.language)}[/green] [dim]({escape(match.module_id)})[/dim]")
+                 f"[green]{escape(language_label(song.language))}[/green] [dim]({escape(match.module_id)})[/dim]")
             continue
         if match is not None and song.id not in guesses:
             guesses[song.id] = match
@@ -274,7 +275,7 @@ def _ask_undecided(undecided: list) -> int:
                   "Yugoslavia: Serbo-Croatian) - neither is known for these.")
     for song, match in undecided:
         show(f"  {escape(song.artist.name)} - {escape(song.title)} ({song.year or 'year ?'}): read as "
-             f"{escape(match.result.language)}")
+             f"{escape(language_label(match.result.language))}")
     if not ask_yes_no("Type their languages by hand now? (no = look them up again later, once the artists' "
                       "origins are known - Artist actions -> Edit -> origin)"):
         show("Left without a language - looked up again next time.")
@@ -285,4 +286,4 @@ def _ask_undecided(undecided: list) -> int:
 
     return type_each(undecided, lambda item: f"{escape(item[0].artist.name)} - {escape(item[0].title)} "
                                              f"({item[0].year or 'year ?'})",
-                     "Language (empty = later):", save, default=lambda item: item[1].result.language)
+                     "Language (an ISO 639-3 code or its English name; empty = later):", save, default=lambda item: item[1].result.language)

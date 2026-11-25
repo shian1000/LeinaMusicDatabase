@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 from utils.database.datatables import artist_categories, song_categories, search_only_categories, Song, Artist, AdditionalSongArtist, Album
 from utils.common.debug import slog
 from utils.common.text_utils import is_soundtrack_artist, normalize_text
+from utils.common.language_names import language_code, language_label
 from utils.common.normalizer import normalize
 from utils.common.soundtrack_names import soundtrack_work, work_key
 from collections import Counter
@@ -55,8 +56,11 @@ class SongSearchFilters:
 
     @staticmethod
     def language(query: str):
-        """Filter songs by language containing the query."""
-        return func.lower(Song.language).contains(query.lower())
+        """Filter songs by language containing the query, or the code it names ("Japanese" -> "jpn")."""
+        code = language_code(query)
+        if code is None:
+            return func.lower(Song.language).contains(query.lower())
+        return or_(func.lower(Song.language).contains(query.lower()), Song.language.contains(code))
 
     @staticmethod
     def origin(query: str):
@@ -144,8 +148,8 @@ class SongNormalizedFields:
 
     @staticmethod
     def language(song: Song) -> str:
-        """Extract and normalize language."""
-        return normalize_text(song.language or "")
+        """Extract and normalize language: its codes and their names."""
+        return normalize_text(language_label(song.language))
 
     @staticmethod
     def origin(song: Song) -> str:

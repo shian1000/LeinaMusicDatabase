@@ -5,7 +5,7 @@ from urllib.parse import quote
 from utils.common.debug import flog
 from utils.common.normalizer import fold_diacritics
 from utils.common.request_pacing import RequestPacer
-from utils.common.language_names import code_name
+from utils.common.language_names import language_code
 from utils.discoveries.discovery_result import LanguageDiscoveryResult, LyricsDiscoveryResult
 from utils.discoveries.lyrics_pages import fetch_page
 from config.constants import LANGUAGE_INSTRUMENTAL, MUSIXMATCH_LYRICS_URL, MUSIXMATCH_MIN_INTERVAL
@@ -74,14 +74,14 @@ def get_lyrics(artist: str, title: str, duration_s: float | None = None, songs=N
 
 def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult | None:
     """The language of the page's lyrics (what Shazam shows - its lyrics are
-    Musixmatch's), or "Instrumental"; None without lyrics or a language."""
+    Musixmatch's), or LANGUAGE_INSTRUMENTAL; None without lyrics or a language."""
     found = _track(artist, title)
     if found is None:
         return None
     url, data = found
     track = data.get("track") or {}
     code = ((data.get("lyrics") or {}).get("language") or "").lower()
-    language = LANGUAGE_INSTRUMENTAL if track.get("isInstrumental") is True else code_name(code) if code else None
+    language = LANGUAGE_INSTRUMENTAL if track.get("isInstrumental") is True else language_code(code) if code else None
     if language is None:
         flog(f"[Musixmatch] {url} names no language")
         return None

@@ -97,6 +97,7 @@ from config.constants import (
     ARTIST_JOINING_WORDS,
     DUPLICATE_TITLE_EXTRA_JUNK,
     GENERIC_TOPIC_CHANNELS,
+    LANGUAGE_UNKNOWN,
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
     SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS,
     SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
@@ -234,7 +235,7 @@ class SongRequestCase:
             "feat_artists": [],  # filled from the title by the "request" cleanup
             "album": self._first("album"),
             "year": self._first("year"),
-            "language": "Unknown",
+            "language": LANGUAGE_UNKNOWN,
             "origin": None,
             "youtube_video_id": self.youtube_video_ids[0] if self.youtube_video_ids else None,
             "spotify_url": spotify_track_url(self.spotify_track_ids[0]) if self.spotify_track_ids else None,

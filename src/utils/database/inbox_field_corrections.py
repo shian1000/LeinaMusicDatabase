@@ -84,6 +84,7 @@ from dataclasses import dataclass, field
 
 from config.constants import ALBUM_TYPE_SINGLE, ALBUM_TYPES, BAD_VIDEO_WRONG_FOR_SONG, SONG_KINDS
 from utils.common.debug import mlog
+from utils.common.language_names import clean_language
 from utils.common.normalizer import normalize
 from utils.common.text_utils import title_resembles
 from utils.database.albums import album_key, album_twin, rename_album
@@ -236,9 +237,12 @@ def coerce_field_value(table: str, column: str, value):
     return value, None
 
 
-def same_value(a, b) -> bool:
+def same_value(a, b, column: str | None = None) -> bool:
     """Equal as stored values: empty == empty, 1990 == "1990", text exact
-    (a case-only fix is a real correction)."""
+    (a case-only fix is a real correction); a language as its codes, so
+    Leina Radio's "Polish" is the stored "pol"."""
+    if column == "language":
+        a, b = clean_language(a), clean_language(b)
     a = a.strip() if isinstance(a, str) else a
     b = b.strip() if isinstance(b, str) else b
     a = None if a == "" else a
@@ -332,15 +336,15 @@ class FieldCorrectionCase:
     def changed_since(self) -> bool:
         """The database's value isn't the one the phone had any more (fixed
         here already, or another phone's correction)."""
-        return not same_value(self.current, self.latest.old_value)
+        return not same_value(self.current, self.latest.old_value, self.column_name)
 
     @property
     def earlier_values(self) -> list:
         """Other values older reports asked for (the newest wins)."""
         seen = []
         for report in self.reports[:-1]:
-            if not same_value(report.new_value, self.latest.new_value) and \
-                    not any(same_value(report.new_value, v) for v in seen):
+            if not same_value(report.new_value, self.latest.new_value, self.column_name) and \
+                    not any(same_value(report.new_value, v, self.column_name) for v in seen):
                 seen.append(report.new_value)
         return seen
 
@@ -433,7 +437,7 @@ def holds(case: FieldCorrectionCase, value) -> bool:
     if case.names_artist:
         artist = replaced_artist(case)
         return artist is None if value is None else _called(artist, value)
-    return same_value(case.current, value)
+    return same_value(case.current, value, case.column_name)
 
 
 def covered_artist_error(case: FieldCorrectionCase, name) -> str | None:

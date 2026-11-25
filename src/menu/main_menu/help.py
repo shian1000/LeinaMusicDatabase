@@ -298,10 +298,11 @@ All in Enter database -> Manage database:
     ('Nana - Kuroi Namida'): the song is then found by its title among every artist's songs
     whose album names the work.
   - Fill in Latin forms of names in other alphabets: 'Кино' -> 'Kino' for Leina Radio.
-  - Unify language and country names: one spelling per language ('Finish' -> 'Finnish', 'eng'
-    -> 'English') and per country in artists' origins, in English ('USA' -> 'United States',
-    'England - London' -> 'United Kingdom - England - London'), origins that aren't a place
-    cleared, since Leina Radio counts and searches them by the exact name. Every one saved since
+  - Unify language and country names: one ISO 639-3 code per language ('Finnish' -> 'fin',
+    'Farsi' -> 'fas', 'pl' -> 'pol') and one spelling per country in artists' origins, in
+    English ('USA' -> 'United States', 'England - London' -> 'United Kingdom - England -
+    London'), origins that aren't a place cleared, since Leina Radio counts and searches them by
+    the exact value. Every one saved since
     is spelt that way already.
   - Fix names and tags for mp3 files that are in the database: rename and re-tag the files
     after their song.

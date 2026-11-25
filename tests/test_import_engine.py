@@ -86,7 +86,7 @@ def test_a_new_artist_and_song_are_created(env):
 
     [song] = added
     assert (song.title, song.album, song.year, song.language, song.youtube_video_id) == (
-        "Sonne", "Mutter", 2001, "German", "StZcUAPRRac")
+        "Sonne", "Mutter", 2001, "deu", "StZcUAPRRac")
     assert (song.artist.name, song.artist.origin) == ("Rammstein", "Germany")
     assert song.kind is None
     assert env["split_offers"] == [[song.artist]]

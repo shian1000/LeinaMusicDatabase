@@ -105,8 +105,8 @@ class LyricsDiscoveryResult:
 @dataclass
 class LanguageDiscoveryResult:
     """What a module's get_language() found: the language as stored
-    (language_names.clean_language(), "English / Japanese", "Instrumental"
-    for a song without words). confidence: how sure a guess is (0-1, a
+    (language_names.clean_language(), "eng / jpn", LANGUAGE_INSTRUMENTAL
+    "zxx" for a song without words). confidence: how sure a guess is (0-1, a
     reading of the lyrics), None when the source says it outright. matched_*
     are what the source says the language belongs to - never an echo of the
     query; from_song: read from the song's own stored data, nothing to check.

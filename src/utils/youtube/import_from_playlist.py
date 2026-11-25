@@ -41,7 +41,7 @@ from utils.common.sanitize import (
     strip_hashtags,
 )
 from utils.common.song_entry import SongEntry, as_entry, describe_cuts
-from config.constants import GENERIC_TOPIC_CHANNELS, TITLE_FIRST_CHANNELS, YTDLP_PLAYLIST_LANG
+from config.constants import GENERIC_TOPIC_CHANNELS, LANGUAGE_UNKNOWN, TITLE_FIRST_CHANNELS, YTDLP_PLAYLIST_LANG
 from utils.common.debug import flog, mlog
 from utils.common import trace
 
@@ -721,7 +721,7 @@ def build_metadata_from_item(item: dict, artist_title_override: tuple | None = N
         "title": song_title,
         "album": album,
         "year": None,
-        "language": "Unknown",
+        "language": LANGUAGE_UNKNOWN,
         "origin": None,
         "youtube_video_id": item.get("video_id"),
         # Tells a full-album video from a track (song_kinds.songs_for_entry()); flat-playlist only

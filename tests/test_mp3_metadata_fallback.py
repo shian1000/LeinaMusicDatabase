@@ -18,7 +18,7 @@ def test_extract_metadata_with_fallback_uses_filename_when_title_artist_are_miss
         "artist_name": "Unknown Artist",
         "album": None,
         "year": "2008",
-        "language": "English",
+        "language": "eng",
         "origin": None,
     }):
         with patch("utils.discoveries.mp3_utils.extract_unknown_data", return_value=("Nneka", "Kangpe")):
@@ -72,22 +72,22 @@ def _fallback(tags: dict, from_name: tuple) -> dict:
 
 def test_the_file_name_replaces_only_the_names():
     metadata = _fallback({"title": "Unknown Title", "artist_name": "Unknown Artist", "album": "Mamut", "year": "2016",
-                          "language": "Polish", "origin": "Poland"}, ("Ørganek", "Wiosna"))
+                          "language": "pol", "origin": "Poland"}, ("Ørganek", "Wiosna"))
 
     assert metadata == {"title": "Wiosna", "artist_name": "Ørganek", "album": "Mamut", "year": "2016",
-                        "language": "Polish", "origin": "Poland"}
+                        "language": "pol", "origin": "Poland"}
 
 
 def test_a_real_artist_stays_when_the_file_name_has_none():
     metadata = _fallback({"title": "Unknown Title", "artist_name": "Ørganek", "album": None, "year": None,
-                          "language": "Unknown", "origin": None}, (None, None))
+                          "language": "und", "origin": None}, (None, None))
 
     assert (metadata["artist_name"], metadata["title"]) == ("Ørganek", None)
 
 
 def test_a_real_title_stays_when_the_file_name_has_no_artist():
     metadata = _fallback({"title": "Wiosna", "artist_name": "Unknown Artist", "album": None, "year": None,
-                          "language": "Unknown", "origin": None}, (None, None))
+                          "language": "und", "origin": None}, (None, None))
 
     assert (metadata["artist_name"], metadata["title"]) == (None, "Wiosna")
 
@@ -98,7 +98,7 @@ def test_no_readable_tags_give_the_defaults():
         metadata = extract_metadata_with_fallback(Path("any.mp3"))
 
     assert metadata == {"title": "Wiosna", "artist_name": "Ørganek", "album": None, "year": None,
-                        "language": "Unknown", "origin": None}
+                        "language": "und", "origin": None}
 
 
 def test_a_ripped_file_reads_as_its_name_with_its_year(tmp_path):
@@ -107,9 +107,9 @@ def test_a_ripped_file_reads_as_its_name_with_its_year(tmp_path):
     file = tmp_path / "Ørganek - Wiosna.mp3"
     with patch("utils.discoveries.mp3_utils.extract_mp3_metadata", side_effect=lambda f: _read_tags({
         "artist": ["Nieznany wykonawca"], "title": ["Ścieżka 15"], "album": ["Nieznany album (2018-09-10 12:31:53)"],
-        "date": ["2016"], "language": ["Polish"]})), \
+        "date": ["2016"], "language": ["pol"]})), \
             patch("utils.discoveries.import_data_from_mp3_tags.audio_duration", return_value=208):
         metadata = read_file_metadata(file)
 
     assert (metadata.artist, metadata.title, metadata.album, metadata.year, metadata.language) == \
-        ("Ørganek", "Wiosna", None, "2016", "Polish")
+        ("Ørganek", "Wiosna", None, "2016", "pol")

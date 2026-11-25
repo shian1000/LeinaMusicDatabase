@@ -761,32 +761,53 @@ PERMISSION_LABELS = {
 
 # ==================== Languages (utils/common/language_names.py, songs.language) ====================
 
-# songs.language: English names, several joined by LANGUAGE_SEPARATOR ("English / Japanese");
-# LANGUAGE_UNKNOWN is the imports' placeholder (Leina Radio ignores it), NULL = not set.
-LANGUAGE_UNKNOWN = "Unknown"
-LANGUAGE_INSTRUMENTAL = "Instrumental"  # a song without words
+# songs.language: ISO 639-3 codes (owner, 2026-11-25: one code per language), several joined by
+# LANGUAGE_SEPARATOR ("eng / jpn"); LANGUAGE_UNKNOWN is the imports' placeholder (Leina Radio ignores
+# it), NULL = not set. A name is only shown (language_names.language_name()) or read from what is
+# typed, tagged or sent (language_names.language_code()).
+LANGUAGE_UNKNOWN = "und"  # ISO: undetermined
+LANGUAGE_INSTRUMENTAL = "zxx"  # a song without words (ISO: no linguistic content)
 LANGUAGE_SEPARATOR = " / "
-# Other spellings -> the stored one, keyed by language_names.language_key() (lowercase,
-# no diacritics, spaces or punctuation). Spellings differing only in case need no entry.
-LANGUAGE_SYNONYMS = {
-    "finish": "Finnish",
-    "portugeese": "Portuguese",
-    "lithianian": "Lithuanian",
-    "islandic": "Icelandic",
-    "slovakian": "Slovak",
-    "slovene": "Slovenian",
-    "arabian": "Arabic",
-    "farsi": "Persian",
-    "panjabi": "Punjabi",
-    "nigerianpigdin": "Nigerian Pidgin",
-    "kajkavian": "Croatian (Kajkavian)",  # the owner's one name for it (2026-11-20)
-    "madeuplatin": "Pseudo-Latin",  # the owner's one name for it (2026-11-21: Era, Vangelis, Nox Arcana)
-    "unknown": LANGUAGE_UNKNOWN,
-    "instrumental": LANGUAGE_INSTRUMENTAL,
+# A code's English name where pycountry's isn't the one shown, or ISO has none: its local-use range
+# (qaa-qtz) holds the languages it has no code for (owner, 2026-11-25)
+LANGUAGE_NAMES = {
+    "und": "Unknown", "zxx": "Instrumental",
+    "qiv": "Invented", "qpl": "Pseudo-Latin", "qpd": "Podlachian",
+    "kjv": "Croatian (Kajkavian)", "ckm": "Croatian (Čakavian)",
+    "ell": "Greek", "grc": "Ancient Greek", "msa": "Malay", "nep": "Nepali", "swa": "Swahili", "pan": "Punjabi",
+    "rom": "Romani", "kir": "Kyrgyz", "tyv": "Tuvan", "sot": "Sotho", "pus": "Pashto", "hat": "Haitian Creole",
+    "jam": "Jamaican Patois", "kea": "Cape Verdean Creole", "gcf": "Guadeloupean Creole", "chu": "Church Slavonic",
+    "alt": "Altai", "yue": "Cantonese", "fro": "Old French",
 }
-# ISO 639 codes (mp3 TLAN tags "eng" / "pol", later the lookups) whose pycountry name isn't
-# the one stored. Codes saying "no known language" give LANGUAGE_UNKNOWN; "zxx" (no
-# linguistic content) LANGUAGE_INSTRUMENTAL.
+# Other ISO 639 codes of a language stored under another (macrolanguages' members, the old
+# "no known language" ones) - one code per language
+LANGUAGE_CODE_ALIASES = {
+    "nob": "nor", "nno": "nor", "cmn": "zho", "khk": "mon", "ekk": "est", "lvs": "lav", "pes": "fas", "arb": "ara",
+    "ydd": "yid", "kmr": "kur", "ckb": "kur", "zsm": "msa", "npi": "nep", "swh": "swa",
+    "mul": LANGUAGE_UNKNOWN, "mis": LANGUAGE_UNKNOWN, "xxx": LANGUAGE_UNKNOWN,
+}
+# Other names and spellings -> the code, keyed by language_names.language_key() (lowercase, no
+# diacritics, spaces or punctuation). pycountry's English names and LANGUAGE_NAMES' need no entry.
+LANGUAGE_SYNONYMS = {
+    "finish": "fin",
+    "portugeese": "por",
+    "lithianian": "lit",
+    "islandic": "isl",
+    "slovakian": "slk",
+    "slovene": "slv",
+    "arabian": "ara",
+    "farsi": "fas",
+    "nigerianpigdin": "pcm",
+    "kajkavian": "kjv",
+    "cakavian": "ckm",
+    "madeuplatin": "qpl",
+    "mandarin": "zho",
+    "nolanguage": LANGUAGE_INSTRUMENTAL,
+    "atticgreek": "grc",
+    "englishjamaican": "jam",
+    "ruthenian": "rue",  # Hrdza's Rusyn, not pycountry's Pannonian Ruthenian "rsk" (owner, 2026-11-25)
+    "berber": "shi",  # the one song stored so, Hindi Zahra's, is in Tachelhit (owner, 2026-11-25)
+}
 # Fill missing data -> Languages (utils/ui/language_review.py). A language read from the lyrics
 # (stored_lyrics_fetcher, langdetect) is saved at once from this probability on - measured on the
 # catalog's 2,551 songs with a language and lyrics: 96.8% right from 0.95, 94.5% over all; below it
@@ -822,13 +843,13 @@ LANGUAGE_STANZA_SURE = 0.9
 # Languages a stanza is easily misread as when the song is in another of the same group: such a
 # vote counts as the main language's (Bajaga's Serbo-Croatian stanzas read as Slovenian)
 LANGUAGE_NEIGHBOURS = (
-    frozenset({"Croatian", "Serbian", "Bosnian", "Montenegrin", "Serbo-Croatian", "Slovenian", "Macedonian",
-               "Croatian (Kajkavian)"}),
-    frozenset({"Norwegian", "Danish", "Swedish", "Icelandic", "Faroese"}),
-    frozenset({"Spanish", "Catalan", "Portuguese", "Galician", "Italian"}),
-    frozenset({"Dutch", "Afrikaans", "German"}),
-    frozenset({"Indonesian", "Malay", "Tagalog", "Filipino"}),
-    frozenset({"Czech", "Slovak"}),
+    frozenset({"hrv", "srp", "bos", "cnr", "hbs", "slv", "mkd",
+               "kjv"}),
+    frozenset({"nor", "dan", "swe", "isl", "fao"}),
+    frozenset({"spa", "cat", "por", "glg", "ita"}),
+    frozenset({"nld", "afr", "deu"}),
+    frozenset({"ind", "msa", "tgl", "fil"}),
+    frozenset({"ces", "slk"}),
 )
 # Languages langdetect doesn't know, told by their letters or words in a text it reads as a
 # neighbour (language_names._marked_language()): (the neighbour it's read as - None: any -, letters,
@@ -837,13 +858,13 @@ LANGUAGE_NEIGHBOURS = (
 # one; Icelandic's þ, read as anything (Norwegian, Hungarian: Björk, Sigur Rós, Daði Freyr);
 # Breton's c'h (Denez Prigent as Indonesian); Guadeloupean Creole's words in a French one (Delgres).
 LANGUAGE_MARKS = {
-    "Kashubian": ("Polish", "òùë", 3, 1.0),
-    "Crimean Tatar": ("Turkish", "q", 2, 0.5),
-    "Cape Verdean Creole": ("Portuguese", ("nha", "nhos", "dja", "sodade", "kuma", "tita", "tchora", "tchorá",
+    "csb": ("pol", "òùë", 3, 1.0),
+    "crh": ("tur", "q", 2, 0.5),
+    "kea": ("por", ("nha", "nhos", "dja", "sodade", "kuma", "tita", "tchora", "tchorá",
                                            "nôs", "bô"), 3, 0.5),
-    "Icelandic": (None, "þ", 2, 1.0),
-    "Breton": (None, re.compile(r"c['’]h"), 2, 1.0),
-    "Guadeloupean Creole": ("French", ("mwen", "nou", "kay", "ké", "sé", "fo", "pé", "lè"), 3, 0.5),
+    "isl": (None, "þ", 2, 1.0),
+    "bre": (None, re.compile(r"c['’]h"), 2, 1.0),
+    "gcf": ("fra", ("mwen", "nou", "kay", "ké", "sé", "fo", "pé", "lè"), 3, 0.5),
 }
 # The words a reading in one of these needs (at least the number given) to be sure: langdetect puts
 # languages it doesn't know there by their letters - Altai as Hungarian (Ummet Ozcan - Altay), Serbian
@@ -851,12 +872,12 @@ LANGUAGE_MARKS = {
 # Arcana). Slovenian without its own words is read as Serbo-Croatian (then the country-and-year rule),
 # unless the artist is Croatian (Kajkavian, KAJKAVIAN).
 LANGUAGE_PROOF_WORDS = {
-    "Hungarian": (("és", "hogy", "nem", "egy", "az", "van", "meg", "csak", "már", "mint", "vagy", "ez", "én"), 3),
-    "Slovenian": (("in", "kaj", "tudi", "ker", "lahko", "zelo", "sem", "ki", "bom", "še", "vem", "ko", "res",
+    "hun": (("és", "hogy", "nem", "egy", "az", "van", "meg", "csak", "már", "mint", "vagy", "ez", "én"), 3),
+    "slv": (("in", "kaj", "tudi", "ker", "lahko", "zelo", "sem", "ki", "bom", "še", "vem", "ko", "res",
                    "vedno", "zdaj", "kje", "kdo", "jaz"), 2),
-    "Indonesian": (("yang", "dan", "aku", "kau", "tidak", "ini", "itu", "dengan", "untuk", "akan", "kita", "di"), 3),
-    "Tagalog": (("ang", "ng", "sa", "ko", "mo", "ako", "ikaw", "hindi", "mga", "ka"), 3),
-    "Romanian": (("și", "şi", "nu", "să", "că", "în", "pe", "cu", "mai", "este", "ce", "mă"), 3),
+    "ind": (("yang", "dan", "aku", "kau", "tidak", "ini", "itu", "dengan", "untuk", "akan", "kita", "di"), 3),
+    "tgl": (("ang", "ng", "sa", "ko", "mo", "ako", "ikaw", "hindi", "mga", "ka"), 3),
+    "ron": (("și", "şi", "nu", "să", "că", "în", "pe", "cu", "mai", "este", "ce", "mă"), 3),
 }
 # A line holding its own translation after this mark ("Si te quieres divertir^If you want to have
 # fun", LRCLIB's Bad Bunny - NUEVAYoL, read as English): when this share of the lines has one, only
@@ -866,11 +887,11 @@ LANGUAGE_INLINE_TRANSLATION_SHARE = 0.5
 # Readings a Japanese text in romaji gets with no kana / kanji around it (Disgaea's "Etna Boogie"
 # as Swahili): Japanese when this share of its words are romaji syllables, never sure. Not Finnish,
 # Italian or Tagalog - real ones whose words look alike
-LANGUAGE_ROMAJI_ONLY_MISREADINGS = frozenset({"Swahili", "Somali", "Yoruba", "Shona", "Sotho", "Tswana", "Tsonga",
-                                              "Zulu", "Xhosa"})
+LANGUAGE_ROMAJI_ONLY_MISREADINGS = frozenset({"swa", "som", "yor", "sna", "sot", "tsn", "tso",
+                                              "zul", "xho"})
 LANGUAGE_ROMAJI_SHARE = 0.75
 # Slovenian lyrics by a Croatian artist are Kajkavian (Cinkuši, Dunja Knebl), never sure
-KAJKAVIAN = "Croatian (Kajkavian)"
+KAJKAVIAN = "kjv"
 # Ekavian forms: a Croatian reading with one of these is Serbian ("Koju pesmu hoćete?")
 # Not "vremena" nor "sveta": Croatian too (vrijeme's genitive, "holy")
 SERBIAN_EKAVIAN_WORDS = ("pesma", "pesmu", "pesme", "lepo", "lepa", "vreme", "dete", "deca", "reka", "mleko",
@@ -882,32 +903,25 @@ SERBIAN_EKAVIAN_WORDS = ("pesma", "pesmu", "pesme", "lepo", "lepa", "vreme", "de
 # the artist's origin, else the language of its other songs, else ekavian words (Serbia); a song
 # with no known country is Serbo-Croatian up to YUGOSLAVIA_LAST_YEAR. Montenegrin only by its
 # letters (ś, ź, Cyrillic с́ з́) or as the owner marks it.
-YUGOSLAV_COUNTRIES = {"Croatia": ("Croatian", 1991), "Bosnia": ("Bosnian", 1992), "Serbia": ("Serbian", 2006),
-                      "Montenegro": ("Serbian", 2006)}
+YUGOSLAV_COUNTRIES = {"Croatia": ("hrv", 1991), "Bosnia": ("bos", 1992), "Serbia": ("srp", 2006),
+                      "Montenegro": ("srp", 2006)}
 YUGOSLAVIA_LAST_YEAR = 1990
-SERBO_CROATIAN = "Serbo-Croatian"
+SERBO_CROATIAN = "hbs"
 # Hebrew letters with these are Yiddish: the vowel signs Yiddish writes under alef, its words
 YIDDISH_MARKS = ("אַ", "אָ", "דער", "דאָס", "און", "איך", "ניט", "נישט")
 # Readings of Japanese in romaji (title or artist in kana / kanji, or the artist's other songs
 # mostly Japanese): it's Japanese
-LANGUAGE_ROMAJI_MISREADINGS = frozenset({"Swahili", "Somali", "Yoruba", "Shona", "Tagalog", "Indonesian", "Malay",
-                                         "Sotho", "Tswana", "Tsonga", "Zulu", "Xhosa", "Maori", "Finnish",
-                                         "Estonian", "Italian"})
+LANGUAGE_ROMAJI_MISREADINGS = frozenset({"swa", "som", "yor", "sna", "tgl", "ind", "msa",
+                                         "sot", "tsn", "tso", "zul", "xho", "mri", "fin",
+                                         "est", "ita"})
 # Readings that are rarely right - never saved without the owner
-LANGUAGE_RARELY_RIGHT = frozenset({"Somali", "Swahili", "Yoruba", "Shona", "Sotho", "Tswana", "Tsonga", "Zulu",
-                                   "Xhosa", "Afrikaans", "Welsh"})
+LANGUAGE_RARELY_RIGHT = frozenset({"som", "swa", "yor", "sna", "sot", "tsn", "tso", "zul",
+                                   "xho", "afr", "cym"})
 LANGUAGE_ARTIST_MIN_SONGS = 3
 LANGUAGE_ARTIST_MIN_SHARE = 0.9
 # Questions a song's lookup asks a site at most (each module, its names first - see
 # discoveries_manager.discover_language())
 LANGUAGE_MAX_QUERIES = 3
-LANGUAGE_CODE_NAMES = {
-    "ell": "Greek", "gre": "Greek", "el": "Greek",
-    "nob": "Norwegian", "nno": "Norwegian", "nb": "Norwegian", "nn": "Norwegian",
-    "yue": "Cantonese",
-    "zxx": LANGUAGE_INSTRUMENTAL,
-    "und": LANGUAGE_UNKNOWN, "mul": LANGUAGE_UNKNOWN, "mis": LANGUAGE_UNKNOWN, "xxx": LANGUAGE_UNKNOWN,
-}
 
 # ==================== Countries (utils/common/origin_names.py, artists.origin) ====================
 

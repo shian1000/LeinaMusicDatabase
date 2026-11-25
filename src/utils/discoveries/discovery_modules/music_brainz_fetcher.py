@@ -21,7 +21,7 @@ from config.constants import (
     VERSION_LIVE,
     VERSION_REMIX,
 )
-from utils.common.language_names import clean_language, code_name
+from utils.common.language_names import clean_language, language_code
 from utils.common.musicbrainz_client import lucene_quote, mb_get
 from utils.common.version_names import read_version
 from utils.database.song_kinds import sure_version
@@ -593,7 +593,7 @@ def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult
         data = _mb_json(f"{MUSICBRAINZ_WS_ROOT}recording/{recording['id']}", {"inc": "work-rels"})
         codes = [code for relation in data.get("relations") or []
                  for code in (relation.get("work") or {}).get("languages") or []]
-        names = [name for name in (code_name(code) for code in dict.fromkeys(codes)) if name]
+        names = [found for found in (language_code(code) for code in dict.fromkeys(codes)) if found]
         if names:  # the work's language, also on an instrumental cover of it: never sure (18 of 22 right, 2026-11-21)
             return LanguageDiscoveryResult(clean_language(" / ".join(names)), matched_title=recording.get("title"),
                                            matched_artist=_credit(recording), source_ref=recording["id"],

@@ -83,7 +83,7 @@ def test_a_module_that_found_nothing_is_asked_again_after_a_while_a_rejected_one
 
 def test_only_the_modules_that_havent_answered_are_asked(music, lyrics_db):
     plain, done, album = _song("Plain"), _song("Done"), _song("Whole", kind=SONG_KIND_FULL_ALBUM)
-    asked, wordless, instrumental_take = _song("Asked"), _song("Mood", language="Instrumental"), \
+    asked, wordless, instrumental_take = _song("Asked"), _song("Mood", language="zxx"), \
         _song("Plain", version_kind=VERSION_INSTRUMENTAL)
     music.add_all([plain, done, album, asked, wordless, instrumental_take])
     music.commit()
@@ -119,7 +119,7 @@ def test_a_song_renamed_since_is_asked_again_and_forgetting_asks_every_module(mu
 def test_marking_songs_instrumental():
     song = _song()
     store.mark_instrumental([song])
-    assert song.language == "Instrumental" and store.is_instrumental(song)
+    assert song.language == "zxx" and store.is_instrumental(song)
 
 
 @pytest.mark.parametrize("kind", ["live", "karaoke"])
@@ -223,18 +223,18 @@ def test_a_text_in_a_script_the_songs_language_isnt_written_in_is_never_sure():
     russian = LyricsDiscoveryResult(plain="Время летит, мчаться года вдаль улетая", matched_title="Serce",
                                     matched_artist="Fisz")
     polish = LyricsDiscoveryResult(plain="Nerwy jak druty mam", matched_title="Serce", matched_artist="Fisz")
-    song = _song("Serce", "Fisz", language="Polish")
+    song = _song("Serce", "Fisz", language="pol")
     alone = dm.discover_lyrics(song, _module(russian), duration_s=None).match
     assert (alone.sure, alone.other_script) == (False, True)  # kept for the review at the end
     second = [("lrclib_fetcher", "LRCLIB", _module(russian)[0][2]), ("genius_lyrics_fetcher", "Genius",
                                                                        _module(polish)[0][2])]
     assert dm.discover_lyrics(song, second, duration_s=None).match.result is polish
-    assert written_otherwise("Время летит", "Polish") and not written_otherwise("Время летит", "Russian")
-    assert not written_otherwise("Время летит", "Unknown") and not written_otherwise("Время летит", None)
-    assert not written_otherwise("Kimi no na wa", "Japanese")  # romanized lyrics are common
-    assert not written_otherwise("君の名は、ずっと", "Japanese") and not written_otherwise("你好世界", "Cantonese")
-    assert written_otherwise("ロンドンモード王道も", "English")
-    assert not written_otherwise("Время летит", "English / Russian")
+    assert written_otherwise("Время летит", "pol") and not written_otherwise("Время летит", "rus")
+    assert not written_otherwise("Время летит", "und") and not written_otherwise("Время летит", None)
+    assert not written_otherwise("Kimi no na wa", "jpn")  # romanized lyrics are common
+    assert not written_otherwise("君の名は、ずっと", "jpn") and not written_otherwise("你好世界", "yue")
+    assert written_otherwise("ロンドンモード王道も", "eng")
+    assert not written_otherwise("Время летит", "eng / rus")
 
 
 def test_a_translated_cover_is_neither_asked_nor_matched_as_the_original():
@@ -719,7 +719,7 @@ def test_library_files_lyrics_tags(tmp_path, monkeypatch, text, plain, synced):
 # ---- the review list ----
 
 def test_the_review_saves_the_ticked_and_may_reject_the_rest(lyrics_db, monkeypatch):
-    first, second, third = _song("Kometa"), _song("Wojenka"), _song("Serce", "Fisz", language="Polish")
+    first, second, third = _song("Kometa"), _song("Wojenka"), _song("Serce", "Fisz", language="pol")
     first.id, second.id, third.id = 1, 2, 3
     unsure = [(first, dm.LyricsMatch(_found("Kometa"), "m", False, None, 200)),
               (second, dm.LyricsMatch(_found("Wojenka (Live)"), "m", False, 200, 205, False)),
@@ -766,7 +766,7 @@ def test_the_instrumental_list_marks_the_ticked_and_turns_down_an_unticked_claim
         assert seen["checked"] == [True, False, True]
         assert store.stored_lyrics(session, 1).instrumental
         assert store.answered_modules(session) == {3: {"lrclib_fetcher"}}
-    assert [s.language for s in (claimed, nothing, wrong)] == ["Instrumental", "Instrumental", None]
+    assert [s.language for s in (claimed, nothing, wrong)] == ["zxx", "zxx", None]
 
 
 # ---- merges and deletions ----

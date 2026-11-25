@@ -21,7 +21,7 @@ origin  "Country - Region - City" title_latin    (migration 0011)
                                  other_titles   (migration 0023) "Hymn of the Cherubim; Cherubic Hymn"
 synonyms                        album
 name_latin    (migration 0011)  year
-                                 language       "English / Japanese", "Unknown", "Instrumental"
+                                 language       ISO 639-3 codes: "eng / jpn", "und" (unknown), "zxx" (no words)
                                  artist_id      FK -> Artist.id, NOT NULL
                                  youtube_video_id
                                  spotify_url
@@ -464,7 +464,7 @@ public copy either (the lyrics' licence; `public_export` refuses its tables); Le
   0003) is the name it was asked by (`lyrics_key()`, artist|title normalized): a song renamed since
   is asked again; NULL (rows from before) counts for any name. Song actions → "Lyrics" → look it
   up again drops the song's text and every answer (`forget_lookups()`).
-- Songs without words are `songs.language` = "Instrumental" (`LANGUAGE_INSTRUMENTAL`) or an
+- Songs without words are `songs.language` = "zxx" (`LANGUAGE_INSTRUMENTAL`) or an
   instrumental version: never looked up. A source's `instrumental` answer is stored as a row with
   `instrumental` = 1 only when the owner confirms it (the end of "Lyrics").
 - `applied_song_changes`: the replay cursor, as in files.db.

@@ -106,7 +106,7 @@ non-trivial work in that area.
   rejected by the owner = never; a new module asks every song once; each miss holds the name it
   was asked by, `lyrics_key()`, so a renamed song is asked again). A module that *fails* (no
   network, LRCLIB's 429) must raise, never return [] - [] is remembered as "doesn't know the song"
-  (it was, 2026-11-12). Songs with `language` "Instrumental" or an instrumental version are never
+  (it was, 2026-11-12). Songs with `language` "zxx" (no words) or an instrumental version are never
   looked up; the run ends offering to mark the songs nothing had words for (ticked: those a source
   says are instrumental). Filled by
   Fetch database data → Fill missing data → "Lyrics" (`utils/ui/lyrics_review.py`, also the last
@@ -258,12 +258,22 @@ non-trivial work in that area.
   (MusicBrainz's genre list `src/config/musicbrainz_genres.txt`, `GENRE_SYNONYMS`, then the
   spelling music.db already uses); never assign `song.genre` raw text.
   `languages.py` — `songs.language` (Leina Radio's stats "Języki" and search use the exact value):
-  English names, several joined by " / ", `"Unknown"` the imports' placeholder, `"Instrumental"`
-  = no words. Unlike genres, cleaning needs no database: `Song`'s `@validates("language")` runs
-  `utils/common/language_names.clean_language()` on every ORM write (`LANGUAGE_SYNONYMS` for
-  typos, lowercase ISO codes "eng" / "de" from tags → the name, the owner's own names - "Croatian (Kajkavian)",
-  "Interslavic" - kept). Older rows: Manage database → "Unify language and country names"
-  (`utils/ui/language_review.py`, `languages.spelling_fixes()`); a new synonym needs it run once.
+  ISO 639-3 codes, one per language (owner, 2026-11-25; macrolanguages as such - `zho`, `nor`,
+  `hbs` beside `hrv` / `srp`), several joined by " / " (`eng / jpn`), `LANGUAGE_UNKNOWN` `"und"` the
+  imports' placeholder, `LANGUAGE_INSTRUMENTAL` `"zxx"` = no words, ISO's local-use range for what it
+  has no code for (`qiv` invented, `qpl` pseudo-Latin, `qpd` Podlachian, `constants.LANGUAGE_NAMES`).
+  Leina Radio shows each code's name in its own language
+  ([handoff](docs/handoffs/language-codes-for-musicdatabaseapp.md)). The detection rules work in
+  codes too; a name is only shown (`language_name()` / `language_label()`, "jpn (Japanese)") or read
+  (`language_code()`: ISO 639-1 / -2 / -3 codes, pycountry's English names, `LANGUAGE_NAMES`,
+  `LANGUAGE_SYNONYMS`, other ISO codes of one language through `LANGUAGE_CODE_ALIASES`).
+  Unlike genres, cleaning needs no database: `Song`'s `@validates("language")` runs
+  `utils/common/language_names.clean_language()` on every ORM write, so a typed or sent name is
+  stored as its code (a name with no code is kept as written). Older rows: Manage database →
+  "Unify language and country names" (`utils/ui/language_review.py`, `languages.spelling_fixes()`);
+  a new synonym needs it run once. Leina Radio's language corrections are compared as codes
+  (`inbox_field_corrections.same_value(..., column)`). `romanize.py` and `transliteration.py` key
+  on the codes as well.
   `artists.origin` the same way (`Artist`'s validator → `utils/common/origin_names.clean_origin()`):
   "Country - Region - City", the country in one English form (owner, 2026-11-19: translated for
   display later, one form stored; `ORIGIN_COUNTRY_SYNONYMS`, pycountry with `ORIGIN_COUNTRY_NAMES`),
