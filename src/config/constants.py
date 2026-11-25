@@ -80,9 +80,9 @@ RUN_ALL_STEP_LABELS = {
     "shared_albums": "Resolve albums with several artists",
     "years": "Fill missing years",
     "genres": "Fill missing genres",
-    "latin_forms": "Fill in Latin forms of names in other alphabets",
     "lyrics": "Fill missing lyrics",
     "languages": "Fill missing languages",
+    "latin_forms": "Fill in Latin forms of names in other alphabets",
 }
 
 # "Create playlist from folder": a file whose title matches a song exactly but
@@ -211,6 +211,9 @@ AUTOMATION_RULE_LABELS = {
     "lyrics_same_title": "Fill missing lyrics: save lyrics found for a song of the same title whose length "
                          "doesn't confirm it",
     "lyrics_instrumental": "Fill missing lyrics: mark a song instrumental when a source says it has no words",
+    "latin_forms": "Fill in Latin forms: save a suggestion whose transcription the name's alphabet, the "
+                   "song's language or letters only one language has settle (not one going by the artist's "
+                   "origin or guessed)",
     "languages_unsure": "Fill missing languages: save a language read from the lyrics without certainty, "
                         "YouTube's audio language of the song's video, or the one the artist's other songs "
                         "nearly all have",
@@ -353,6 +356,12 @@ AUTOMATION_QUESTIONS = {
         "length_difference_s": ("the recordings' lengths differ by (seconds)", FACT_NUMBER)}),
     "lyrics_instrumental": ("Fill missing lyrics: a song nothing had words for", {
         "source_says_instrumental": ("a source says it has no words", FACT_YES_NO)}),
+    "latin_forms": ("Fill in Latin forms: a suggested Latin form of a name in another alphabet", {
+        "kind": ("whose name (artist / album / song)", FACT_TEXT),
+        "system": ("the transcription (Russian, Ukrainian, Belarusian Lacinka, Bulgarian, Japanese (Hepburn), "
+                    "Chinese (pinyin), Greek, ...)", FACT_TEXT),
+        "settled_by": ("what chose it (alphabet, language = the song's, letters, origin = the artist's, guess)",
+                       FACT_TEXT)}),
     "languages_unsure": ("Fill missing languages: a language no source is sure of", {
         "language": ("the language", FACT_TEXT),
         "from_lyrics": ("read from the stored lyrics", FACT_YES_NO),
@@ -372,7 +381,8 @@ FACT_OPERATORS = {
 # On until the owner turns them off: what the request pass always did. Every
 # other rule starts off - turning one on is the owner's trust in it
 AUTOMATION_RULES_ON_BY_DEFAULT = frozenset({"dead_link_same_video", "found_link_same_video",
-                                            "field_correction_permitted"})
+                                            "field_correction_permitted",
+                                            "latin_forms"})  # owner, 2026-11-22
 # Songs a lookup run by the automation found nothing for are left out of its
 # later runs this long (data/automation_misses.json), so a lookup every few
 # minutes doesn't ask the same sites about them again and again; the menu's

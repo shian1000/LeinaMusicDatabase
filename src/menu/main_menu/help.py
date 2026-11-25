@@ -39,6 +39,11 @@ LIBRARIES = [
      "checking many videos at once with an API key (whether they play, their lengths, their audio "
      "language)."),
     ("langdetect, pycountry", "Guessing a song's language from its lyrics, and the language's name."),
+    ("cutlet, fugashi, unidic-lite, pypinyin, ToJyutping", "Suggesting Latin forms of Japanese names "
+                                                           "(Hepburn, from a Japanese dictionary), Mandarin "
+                                                           "ones (pinyin) and Cantonese ones (Jyutping)."),
+    ("mishkal", "Puts the unwritten short vowels into Arabic names, so their Latin form can be "
+                "suggested (with the PyArabic, qalsadi, ... packages it needs)."),
     ("RapidFuzz", "Fuzzy comparison of names when copying songs' files from the music library."),
     ("universal_pathlib, smbprotocol", "Paths that may be a local folder or an smb:// network share "
                                        "(the music library on a NAS)."),
@@ -262,7 +267,7 @@ All in Enter database -> Manage database:
   - Run all clean-ups and lookups in order: the steps below that need no folder or pick, one after
     another - requests, clean names, split and merge artists, swapped artist and title, spell
     check, songs' duplicates, full albums, projects, covers, artists without songs, albums, their
-    names, years, genres, Latin forms, lyrics, languages. A list first lets
+    names, years, genres, lyrics, languages, Latin forms. A list first lets
     you leave some out this time; which ones are ticked there is set in Settings -> "Run all:
     steps". Ctrl+C stops the step running and asks whether to go on.
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names

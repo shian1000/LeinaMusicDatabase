@@ -251,8 +251,11 @@ def _duplicates_after_spell_check():
 # - albums found, then their names settled (soundtracks, titles shared by
 #   several artists - which also gives those songs their album rows);
 # - years after albums (Years looks a song up by its album and shares a
-#   year across one), genres, and Latin forms for every name by then;
-# - lyrics last: the slowest lookup, and it compares the titles fixed above.
+#   year across one), genres;
+# - lyrics: the slowest lookup, and it compares the titles fixed above, then
+#   languages, which read the lyrics;
+# - Latin forms last, for every name by then: a song's language picks how a
+#   Cyrillic or Japanese name is transcribed.
 # Left out: imports and "Import a request package" (they need a source),
 # "Fix names and tags for mp3 files ..." (a folder; it rewrites files),
 # Manual management and Merge / Divide artists (the user picks the rows).
@@ -274,9 +277,9 @@ RUN_ALL_STEPS = {
     "shared_albums": review_multi_artist_albums,
     "years": fill_missing_years,
     "genres": fill_missing_genres,
-    "latin_forms": fill_latin_forms,
     "lyrics": fill_missing_lyrics,
     "languages": fill_missing_languages,  # after lyrics: it reads them
+    "latin_forms": fill_latin_forms,  # after languages: a song's language picks the transcription
 }
 
 
@@ -321,11 +324,12 @@ def run_all_steps():
 # those that ask only through prompts' checkbox lists and yes/no questions:
 # the clean-ups, which look nothing up on the internet, and the lookups, on an
 # interval of their own. Left out: the requests (the timer's own pass runs
-# right before), "Resolve albums with several artists" (a pick per album) and
-# the Latin forms (nothing ticked at first). Languages waits for the owner's review of its
-# rules first (2026-11-19).
+# right before) and "Resolve albums with several artists" (a pick per album).
+# Languages waits for the owner's review of its rules first (2026-11-19). The
+# Latin forms went in once the owner had looked at a sample (2026-11-25).
 CLEAN_UP_STEPS = ("clean_names", "split_artists", "duplicated_artists", "swapped_songs", "duplicated_songs",
-                  "full_albums", "projects", "covers", "versions", "songless_artists", "soundtracks")
+                  "full_albums", "projects", "covers", "versions", "songless_artists", "soundtracks",
+                  "latin_forms")
 LOOKUP_STEPS = ("spell_check", "albums", "years", "genres", "lyrics")
 
 

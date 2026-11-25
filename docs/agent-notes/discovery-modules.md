@@ -866,9 +866,10 @@ compilations, without the real album). Two known misses are by design, not bugs 
   the compilation filter drops every release it has.
 - **Japanese titles in romaji.** MusicBrainz stores Japanese recordings in the original script
   (`星のシルエット`). The artist has a Latin sort-name/alias, but the title doesn't, so a romaji
-  `recording:"..."` query returns nothing. Even a kanji romanizer (none yet — see `matching_key()`
-  in AGENTS.md) wouldn't save katakana loanwords: シルエット romanizes to "shiruetto", not
-  "silhouette". What works instead: store the title and artist in the original script and give
+  `recording:"..."` query returns nothing. The matching key has no kanji romanizer
+  (`matching_key()` in AGENTS.md; `romanize.py`'s cutlet reading is only for suggesting Latin
+  forms), and a strict one wouldn't save katakana loanwords: シルエット romanizes to "shiruetto",
+  not "silhouette". What works instead: store the title and artist in the original script and give
   the artist its Latin name as a synonym (岩崎良美 + "Yoshimi Iwasaki"). Western services credit the
   romaji name, which the manager can't match to kanji (Google's "Yoshimi Iwasaki" was discarded),
   but the synonym retry queries with it, and YouTube Music then finds `タッチ`.

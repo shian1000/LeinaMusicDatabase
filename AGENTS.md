@@ -239,10 +239,14 @@ non-trivial work in that area.
   Leina Radio reads them ([handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)).
   `latin_names.py` — Latin forms of names in other alphabets (`songs.title_latin`,
   `artists.name_latin`, `albums.title_latin`, migration 0011; "Кино" → "Kino"), which Leina Radio
-  shows as "Кино (Kino)" and sends as field corrections. Only the owner writes them (song/artist
+  shows as "Кино (Kino)" and sends as field corrections. The owner writes them (song/artist
   editor, Manage database → "Fill in Latin forms of names in other alphabets" =
-  `utils/ui/latin_forms_review.py`, or a reviewed correction); suggestions come from
-  `utils/common/romanize.py`. A name is stored in its own alphabet (owner, 2026-11-12); a Belarusian
+  `utils/ui/latin_forms_review.py`, a Run all step after Languages, or a reviewed correction);
+  suggestions come from `utils/common/romanize.py`, each with what chose its system
+  (`latin_basis()`: the alphabet, the song's language, letters only one language has, the artist's
+  origin, or a guess). The first three are ticked at first and taken by the
+  `latin_forms` automation rule, on by default (owner, 2026-11-22); the step is one of
+  `CLEAN_UP_STEPS` since the owner approved a sample (2026-11-25). A name is stored in its own alphabet (owner, 2026-11-12); a Belarusian
   one in Cyrillic, its Latin form in Belarusian Lacinka, even when the upload is in Lacinka; what a
   band itself writes in Latin stays, the Cyrillic as another title (data-model.md). Search treats them as names, matching as synonyms / second titles:
   code that hands an artist's synonyms to matching passes `artist_match_synonyms(artist)`, not
@@ -778,8 +782,13 @@ non-trivial work in that area.
   `docs/agent-notes/normalization-and-matching.md`.
 - `src/utils/common/romanize.py` — `suggest_latin()`: a readable Latin form to *offer* for a
   name (English-style Russian "Alyona"/"Zhuki", Ukrainian national system, Belarusian Lacinka
-  via `transliteration.py`, Serbian Latin, Greek, Georgian, Hangul, Hepburn kana; kanji/Arabic →
-  None). Never stored without the owner accepting it. Not a matching key — that's
+  via `transliteration.py`, Bulgarian streamlined and Mongolian (MNS, also for Tuvan) - only by
+  the song's language or the artist's origin, they have no letter of their own -, Serbian Latin, Greek, Georgian, Hangul, Japanese Hepburn by `cutlet` (MeCab + UniDic:
+  kanji, word breaks, loanwords as spelt; kana a dictionary splits into single letters read letter
+  by letter) and Mandarin pinyin by `pypinyin`, Cantonese Jyutping by `ToJyutping`, loaded on first use, told apart
+  by kana, the song's language, the origin, or a character Japanese doesn't write; a loanword cutlet
+  spells as the wrong word goes into `_JAPANESE_LOANWORDS`; Arabic by `mishkal`'s guessed vowels,
+  basis "vowels", never ticked nor taken by the rule; Persian / Urdu → None). Never stored without the owner accepting it. Not a matching key — that's
   `script_utils.matching_key()`.
 - `src/utils/common/selenium_sessions.py` — one process-wide headless Chrome shared by the
   fetchers that still need a browser (Spotify, Genius, Google), started by the first
@@ -855,7 +864,7 @@ non-trivial work in that area.
 - Manage database → "Run all clean-ups and lookups in order" (`run_all_steps()` in
   `manage_database/__init__.py`) runs `RUN_ALL_STEPS`, the whole-catalog steps of that menu, in an
   order explained in the comment above it (requests → names → duplicates → swapped songs → spell
-  check → what a song is → artists without songs → albums → years / genres / Latin forms → lyrics → languages). Their order and labels are
+  check → what a song is → artists without songs → albums → years / genres → lyrics → languages → Latin forms). Their order and labels are
   `constants.RUN_ALL_STEP_LABELS` (same keys); Settings → "Run all: steps"
   (`menu/main_menu/settings/run_all_steps.py`) turns them off, saved by key in `run_all_config.json`
   (`utils/common/run_all_settings.py`, only the ones off, so a new step starts on). A new

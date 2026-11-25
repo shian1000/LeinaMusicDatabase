@@ -139,9 +139,16 @@ aliases       other spellings, comma-separated
 - Latin forms (migration 0011): `songs.title_latin`, `artists.name_latin`, `albums.title_latin` —
   the owner's Latin spelling of a name in another alphabet ("Кино" → "Kino"), free text, NULL =
   none. Leina Radio shows them as "Кино (Kino)" (album via `songs.album_id`; `songs.album` has no
-  column) and sends them as field corrections. Written only by the owner: the song editor, Manage
+  column) and sends them as field corrections. Written by the owner - the song editor, Manage
   database → "Fill in Latin forms of names in other alphabets" (a checkbox list of suggestions
-  from `utils/common/romanize.py`, then the rest typed one by one), or a reviewed correction.
+  from `utils/common/romanize.py`, then the rest typed one by one), or a reviewed correction - and
+  by the automation's `latin_forms` rule, which takes only a suggestion whose system the alphabet,
+  the song's language or letters only one language has settle (`romanize.latin_basis()`; owner,
+  2026-11-22/25). Never taken unasked: a system guessed or read from the artist's origin, and
+  Arabic, whose vowels mishkal only guesses (Modern Standard Arabic - dialect titles like
+  "تملي معاك" come out wrong). Japanese loanwords keep cutlet's English spelling ("ファンタジー" →
+  "Fantasy", owner's choice over strict Hepburn); one it gets wrong ("トラック" → "truck") goes into
+  `romanize._JAPANESE_LOANWORDS`.
   Search counts them like a name (`database_getter`, `artist_name_or_synonym_contains()`),
   matching like a synonym (`latin_names.artist_match_synonyms()`) or a second title
   (`find_existing_song()`, the YouTube retry `title_latin`). Merges keep the kept row's form, else

@@ -1,12 +1,14 @@
 """Manage database -> "Fill in Latin forms": every artist / album / song
 whose name has non-Latin letters and no Latin form yet (utils/database/
 latin_names.py). First one checkbox list of the automatic suggestions to
-accept, then, if wanted, the rest one by one - kanji and the like have no
+accept - ticked at first those whose transcription the alphabet, the song's
+language or the letters settle, which the "latin_forms" automation rule
+takes - then, if wanted, the rest one by one - kanji and the like have no
 suggestion and need typing. Nothing is stored that the owner didn't tick
-or type."""
+or type, or a rule took."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no, tick_items, type_each
+from utils.ui.prompts import ask_yes_no, tick_items, type_each, unattended_now
 
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.latin_names import (
@@ -25,8 +27,26 @@ from utils.common.output import escape, review_header, show
 _KIND_LABELS = {ARTIST: "Artists", ALBUM: "Albums", SONG: "Songs"}
 
 
+# romanize.latin_basis()'s second part, as the list says it
+_SETTLED_BY = {"alphabet": "", "language": "the song's language", "letters": "its letters",
+               "origin": "the artist's origin", "guess": "guessed", "vowels": "vowels guessed"}
+_SURE = ("alphabet", "language", "letters")
+
+
+def _sure(candidate: LatinCandidate) -> bool:
+    """Ticked at first, and taken by the rule."""
+    return (candidate.basis or ("", ""))[1] in _SURE
+
+
 def _describe(candidate: LatinCandidate) -> str:
-    return f"{candidate.name}  ->  {candidate.suggestion}   ({candidate.kind}, {candidate.context})"
+    system, settled_by = candidate.basis or ("", "")
+    how = f"{system}, {_SETTLED_BY[settled_by]}" if _SETTLED_BY.get(settled_by) else system
+    return f"{candidate.name}  ->  {candidate.suggestion}   [{how}]   ({candidate.kind}, {candidate.context})"
+
+
+def _facts(candidate: LatinCandidate) -> dict:
+    system, settled_by = candidate.basis or (None, None)
+    return {"kind": candidate.kind, "system": system, "settled_by": settled_by}
 
 
 def _pick_kinds(session) -> tuple | None:
@@ -35,6 +55,8 @@ def _pick_kinds(session) -> tuple | None:
     counts = {kind: len(missing_latin_forms(session, (kind,))) for kind in _KIND_LABELS}
     if not any(counts.values()):
         return ()
+    if unattended_now():
+        return tuple(_KIND_LABELS)
     choices = [questionary.Choice(f"{label} ({counts[kind]} without one)", value=kind, checked=bool(counts[kind]))
                for kind, label in _KIND_LABELS.items()]
     picked = questionary.checkbox("Which names do you want to go through?", choices=choices).ask()
@@ -46,8 +68,12 @@ def _accept_suggestions(candidates: list[LatinCandidate]) -> set:
     offered = [i for i, c in enumerate(candidates) if c.suggestion]
     if not offered:
         return set()
-    review_header(f"{len(offered)} name(s) have a suggested Latin form. Tick the ones to save", "(space toggles, a toggles all, i inverts, enter confirms). The rest can be typed next.")
-    selected = tick_items("Save these Latin forms:", offered, lambda i: _describe(candidates[i]))
+    review_header(f"{len(offered)} name(s) have a suggested Latin form. Tick the ones to save",
+                  "(space toggles, a toggles all, i inverts, enter confirms). Ticked: those the alphabet, the "
+                  "song's language or the letters settle. The rest can be typed next.")
+    selected = tick_items("Save these Latin forms:", offered, lambda i: _describe(candidates[i]),
+                          checked=lambda i: _sure(candidates[i]),
+                          rule="latin_forms", facts=lambda i: _facts(candidates[i]))
     if not selected:
         return set()
     for i in selected:

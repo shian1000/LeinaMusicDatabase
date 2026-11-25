@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from config.constants import ALBUM_TYPE_SINGLE
 from utils.common.normalizer import normalize
-from utils.common.romanize import suggest_latin
+from utils.common.romanize import latin_basis, suggest_latin
 from utils.common.script_utils import has_non_latin
 from utils.common.version_names import title_with_version
 from utils.database.datatables import Album, Artist, Song
@@ -112,6 +112,7 @@ class LatinCandidate:
     row: object
     context: str  # who it's by, for the list
     suggestion: str | None  # suggest_latin()'s offer; None = the owner types it
+    basis: tuple[str, str] | None = None  # romanize.latin_basis(): (system, what settled it)
 
     @property
     def name(self) -> str:
@@ -123,14 +124,25 @@ def _common_language(songs) -> str | None:
     return languages.most_common(1)[0][0] if languages else None
 
 
-def suggest_latin_for(obj) -> str | None:
-    """suggest_latin() for a Song / Artist / Album's name, with the language
-    of its songs and its artist's origin to pick the Cyrillic system."""
+def _latin_args(obj) -> tuple:
+    """(name, language, origin) for suggest_latin() / latin_basis(): a song's
+    own language, an artist's or album's most common one, and the artist's
+    origin to pick the Cyrillic system."""
     if isinstance(obj, Song):
-        return suggest_latin(obj.title, obj.language, obj.artist.origin if obj.artist else None)
+        return obj.title, obj.language, obj.artist.origin if obj.artist else None
     if isinstance(obj, Artist):
-        return suggest_latin(obj.name, _common_language(obj.songs), obj.origin)
-    return suggest_latin(obj.title, _common_language(obj.songs), obj.artist.origin if obj.artist else None)
+        return obj.name, _common_language(obj.songs), obj.origin
+    return obj.title, _common_language(obj.songs), obj.artist.origin if obj.artist else None
+
+
+def suggest_latin_for(obj) -> str | None:
+    """suggest_latin() for a Song / Artist / Album's name."""
+    return suggest_latin(*_latin_args(obj))
+
+
+def _candidate(kind: str, row, context: str) -> LatinCandidate:
+    args = _latin_args(row)
+    return LatinCandidate(kind, row, context, suggest_latin(*args), latin_basis(*args))
 
 
 def missing_latin_forms(session, kinds=(ARTIST, ALBUM, SONG)) -> list[LatinCandidate]:
@@ -141,8 +153,7 @@ def missing_latin_forms(session, kinds=(ARTIST, ALBUM, SONG)) -> list[LatinCandi
     if ARTIST in kinds:
         for artist in session.query(Artist).filter(Artist.name_latin.is_(None)).order_by(Artist.name):
             if needs_latin_form(artist.name):
-                found.append(LatinCandidate(ARTIST, artist, f"{len(artist.songs)} song(s)",
-                                            suggest_latin_for(artist)))
+                found.append(_candidate(ARTIST, artist, f"{len(artist.songs)} song(s)"))
     if ALBUM in kinds:
         albums = (session.query(Album)
                   .filter(Album.title_latin.is_(None))
@@ -151,10 +162,10 @@ def missing_latin_forms(session, kinds=(ARTIST, ALBUM, SONG)) -> list[LatinCandi
         for album in sorted(albums, key=lambda a: ((a.artist.name if a.artist else "").lower(), a.title.lower())):
             if needs_latin_form(album.title) and album.songs:
                 by = album.artist.name if album.artist else "various artists"
-                found.append(LatinCandidate(ALBUM, album, by, suggest_latin_for(album)))
+                found.append(_candidate(ALBUM, album, by))
     if SONG in kinds:
         songs = session.query(Song).join(Artist).filter(Song.title_latin.is_(None)).order_by(Artist.name, Song.title)
         for song in songs:
             if needs_latin_form(song.title):
-                found.append(LatinCandidate(SONG, song, song.artist.name, suggest_latin_for(song)))
+                found.append(_candidate(SONG, song, song.artist.name))
     return found

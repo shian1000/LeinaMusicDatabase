@@ -1,7 +1,8 @@
 """Latin forms of names in other alphabets (songs.title_latin,
 artists.name_latin, albums.title_latin; utils/database/latin_names.py):
 suggestions (utils/common/romanize.py), migration 0011, what's still
-missing (and the Fill in menu when nothing is ticked), search and matching
+missing (and the Fill in menu when nothing is ticked, what chose each
+suggestion's system, what the automation rule takes), search and matching
 using them, merges keeping them, a "Singles"
 album copying its song's form, and the YouTube retry with the Latin title.
 In-memory SQLite with the album listener on, no mocking of SQL."""
@@ -95,15 +96,28 @@ def _song(session, title, artist, **kw):
     ("방탄소년단", None, None, "Bangtansonyeondan"),
     ("きゃりーぱみゅぱみゅ", None, None, "Kyaripamyupamyu"),
     ("ちょっと", None, None, "Chotto"),
-    ("ファンタジー", None, None, "Fantaji"),
+    ("ファンタジー", None, None, "Fantasy"),  # cutlet spells a loanword as English does
+    ("君の名は", None, None, "Kimi no na wa"),
+    ("TK from 凛として時雨", None, None, "TK from rinto shite shigure"),
+    ("費玉清", "Chinese", None, "Fei Yu Qing"),
+    ("河图", None, None, "He Tu"),  # a simplified character Japanese doesn't write
+    ("海闊天空", "Cantonese", None, "Hoi Fut Tin Hung"),
+    ("ペルソナ4 オリジナル・サウンドトラック", None, None, "Persona 4 original soundtrack"),
+    ("Щурците", "Bulgarian", None, "Shturtsite"),
+    # Arabic: mishkal's vowels, pausal forms, the article's sun letters
+    ("حبيبي", "Arabic", None, "Habibi"),
+    ("الشاب خالد", None, None, "Ash-shabb khalid"),
+    ("Мен - тыва мен", "Tuvan", None, "Men - tyva men"),
+    ("John Park(존박)", None, None, "John Park(Jonbak)"),
 ])
 def test_suggests_a_readable_latin_form(text, language, origin, expected):
     assert suggest_latin(text, language, origin) == expected
 
 
-@pytest.mark.parametrize("text", ["君の名は", "حبيبي", "Rock", "Bôa", "", None])
-def test_no_suggestion_for_kanji_arabic_or_latin_names(text):
-    assert suggest_latin(text) is None
+@pytest.mark.parametrize("text, language", [("کوک", "Persian"), ("Rock", None),
+                                            ("Bôa", None), ("", None), (None, None)])
+def test_no_suggestion_for_persian_or_latin_names(text, language):
+    assert suggest_latin(text, language) is None
 
 
 # ---- migration ----------------------------------------------------------------
@@ -155,7 +169,7 @@ def test_missing_latin_forms_lists_non_latin_names_without_a_form(session):
     _song(session, "Группа крови", kino, album="Группа крови", language="Russian")
     _song(session, "Хочу перемен", kino, album=SINGLES_ALBUM)  # its single album copies the song's form
     _song(session, "Искала", done, title_latin="Iskala", album="14 недель тишины")
-    _song(session, "君の名は", done)
+    _song(session, "کوک", done)
     session.flush()
 
     found = ln.missing_latin_forms(session)
@@ -164,7 +178,7 @@ def test_missing_latin_forms_lists_non_latin_names_without_a_form(session):
         (ln.ARTIST, "Кино", "Kino"),
         (ln.ALBUM, "14 недель тишины", "14 nedel tishiny"),  # by artist: Земфира before Кино
         (ln.ALBUM, "Группа крови", "Gruppa krovi"),
-        (ln.SONG, "君の名は", None),
+        (ln.SONG, "کوک", None),
         (ln.SONG, "Группа крови", "Gruppa krovi"),
         (ln.SONG, "Хочу перемен", "Khochu peremen"),
     ]
@@ -327,3 +341,54 @@ def test_fill_latin_forms_with_nothing_missing_says_so(session, monkeypatch, cap
     review.fill_latin_forms()
 
     assert "Every name in another alphabet already has a Latin form." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("text, language, origin, expected", [
+    ("Кино", "Russian", None, ("Russian", "language")),
+    ("Шэры камень", None, None, ("Belarusian Lacinka", "letters")),
+    ("Ціха", None, "Belarus - White Ruthenia - Minsk", ("Belarusian Lacinka", "origin")),
+    ("Кино", None, None, ("Russian", "guess")),
+    ("Μπουζούκι", None, None, ("Greek", "alphabet")),
+    ("ファンタジー", None, None, ("Japanese (Hepburn)", "alphabet")),
+    ("君の名は", None, None, ("Japanese (Hepburn)", "letters")),
+    ("星野源", "Japanese", None, ("Japanese (Hepburn)", "language")),
+    ("椎名林檎", None, None, ("Japanese (Hepburn)", "guess")),
+    ("河图", None, None, ("Chinese (pinyin)", "letters")),
+    ("海闊天空", None, "Hong Kong", ("Cantonese (Jyutping)", "origin")),
+    ("حبيبي", "Arabic", None, ("Arabic", "vowels")),  # mishkal's vowels are only guessed
+    ("کوک", "Persian", None, None),
+    ("Rock", None, None, None),
+])
+def test_latin_basis_says_what_chose_the_transcription(text, language, origin, expected):
+    from utils.common.romanize import latin_basis
+    assert latin_basis(text, language, origin) == expected
+
+
+def test_the_list_shows_the_transcription_and_what_chose_it(session):
+    from utils.ui import latin_forms_review as review
+    _song(session, "Группа крови", _artist(session, "Latin Band"), language="Russian")
+    [candidate] = ln.missing_latin_forms(session, (ln.SONG,))
+
+    assert "Gruppa krovi   [Russian, the song's language]" in review._describe(candidate)
+
+
+def test_unattended_fill_latin_forms_saves_only_what_its_rule_is_sure_of(session, monkeypatch):
+    # The "latin_forms" rule is on by default (owner, 2026-11-22): it takes a
+    # suggestion the alphabet, the song's language or the letters settle -
+    # never a guessed system nor Arabic's guessed vowels
+    from utils.ui import latin_forms_review as review
+    from utils.ui.prompts import unattended
+    band = _artist(session, "Latin Band")
+    sure = _song(session, "Группа крови", band, language="Russian")
+    kana = _song(session, "ちょっと", band)
+    guessed = _song(session, "Кукушка", band)
+    arabic = _song(session, "حبيبي", band, language="Arabic")
+    monkeypatch.setattr(review, "open_and_set_global_database_sessions", lambda: (session, None))
+    monkeypatch.setattr(review, "submit_global_database_session", session.flush)
+
+    with unattended() as taken:
+        review.fill_latin_forms()
+
+    assert (sure.title_latin, kana.title_latin) == ("Gruppa krovi", "Chotto")
+    assert guessed.title_latin is None and arabic.title_latin is None
+    assert len(taken) == 2
