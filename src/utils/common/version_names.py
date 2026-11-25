@@ -24,8 +24,9 @@ from utils.common.normalizer import normalize
 from utils.common.title_patterns import YOUTUBE_BRACKETED
 
 _BRACKET_RE = re.compile(r"\s*" + YOUTUBE_BRACKETED)
-# A spaced dash; what follows the last ones may be a marker (" - Live at Wembley")
-_SPACED_DASH_RE = re.compile(r"\s+[-–—]\s+")
+# A spaced dash; what follows the last ones may be a marker (" - Live at Wembley"). Uploaders
+# also set one off with halfwidth "ﾉ": "the less i know the better ﾉ slowed + reverb ﾉ"
+_SPACED_DASH_RE = re.compile(r"\s+[-–—ﾉ]\s+")
 _NO_BRACKETS_RE = re.compile(r"^[^()\[\]【】（）［］]+$")
 
 # First match wins: "na żywo, akustycznie" is live, "Extended Orchestral Version" extended
@@ -38,7 +39,8 @@ _KIND_WORDS = (
     (VERSION_KARAOKE, r"karaoke"),
     (VERSION_INSTRUMENTAL, r"instrumental|instrumentalna"),
     (VERSION_DEMO, r"demo"),
-    (VERSION_REMIX, r"remix|rmx|rework|bootleg|mashup|mix|dub"),
+    # "slowed + reverb", "sped up", "nightcore": the recording itself changed, like a remix
+    (VERSION_REMIX, r"remix|rmx|rework|bootleg|mashup|mix|dub|slowed|sped up|nightcore"),
     (VERSION_EXTENDED, r"extended|long version|long mix"),
     (VERSION_EDIT, r"edit"),
     (VERSION_OTHER, r"version|wersja"),
@@ -72,7 +74,7 @@ def version_kind_of(marker: str) -> str | None:
 
 def _reading(title: str, start: int, end: int, marker: str) -> VersionReading | None:
     kind = version_kind_of(marker)
-    rest = re.sub(r"\s{2,}", " ", f"{title[:start]} {title[end:]}").strip(" -–—.,")
+    rest = re.sub(r"\s{2,}", " ", f"{title[:start]} {title[end:]}").strip(" -–—.,ﾉ")
     if kind is None or not rest:
         return None
     label = marker.strip()
@@ -91,7 +93,7 @@ def read_version(title: str | None) -> VersionReading | None:
         if reading := _reading(title, bracket.start(), bracket.end(), bracket[1]):
             return reading
     for dash in reversed(list(_SPACED_DASH_RE.finditer(title))):
-        marker = title[dash.end():].strip()
+        marker = title[dash.end():].strip(" ﾉ")
         if not _NO_BRACKETS_RE.match(marker):
             break
         if reading := _reading(title, dash.start(), len(title), marker):

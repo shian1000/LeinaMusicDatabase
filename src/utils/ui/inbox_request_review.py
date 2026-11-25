@@ -806,7 +806,11 @@ def resolve_new_requests(after_import=None) -> None:
     if answer == history_label:
         show_auto_changes(history)
         mark_auto_report_shown()
-        return
+        # Back to the question: the report alone ended Run all's requests step unreviewed
+        choices.remove(history_label)
+        if not choices:
+            return
+        answer = questionary.select("What now?", choices=choices + ["Back"]).ask()
     if answer != review_label:
         return
 

@@ -634,8 +634,9 @@ VERSION_KINDS = tuple(VERSION_KIND_LABELS)
 # one is saved without asking only when the release itself is that kind of version - its title
 # reads so ("... (Live at ...)", "Live in ...") or the source says (MusicBrainz's "Live" release
 # group) -, else the owner reviews it, and nothing of it is saved unattended (owner, 2026-11-24;
-# version_names.lookup_fits_version()). Only live so far: another kind joins here.
-VERSIONS_NEEDING_OWN_RELEASE = frozenset({VERSION_LIVE})
+# version_names.lookup_fits_version()). Remixes and edits too: "Another Love (Zwette Edit)" got
+# Tom Odell's studio album, "Jesteś lekiem na całe zło (Old Spice Edit)" the 1983 original's year.
+VERSIONS_NEEDING_OWN_RELEASE = frozenset({VERSION_LIVE, VERSION_REMIX, VERSION_EDIT})
 # A recording at least this long (a library file, a YouTube video) may be a
 # whole album: a candidate in the review, and a full album's YouTube search
 # takes only videos this long. A file or video this long may match a song too

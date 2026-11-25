@@ -19,6 +19,7 @@ from config.constants import (
     MUSICBRAINZ_VARIOUS_ARTISTS_ID,
     MUSICBRAINZ_WS_ROOT,
     VERSION_LIVE,
+    VERSION_REMIX,
 )
 from utils.common.language_names import clean_language, code_name
 from utils.common.musicbrainz_client import lucene_quote, mb_get
@@ -200,8 +201,8 @@ def _album_type(release) -> str | None:
 
 
 # Release group secondary types saying which kind of version the release is
-# (DiscoveryResult.release_kind): a live version takes a live album's album and year
-_SECONDARY_TYPE_VERSION_KINDS = {"Live": VERSION_LIVE}
+# (DiscoveryResult.release_kind): a live version takes a live album's album and year, a remix a remix release's
+_SECONDARY_TYPE_VERSION_KINDS = {"Live": VERSION_LIVE, "Remix": VERSION_REMIX}
 
 
 def _release_kind(release_group) -> str | None:

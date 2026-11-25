@@ -272,21 +272,21 @@ other tracks are B-sides, not the album). Rules that keep the cache from giving 
 - **It lives for one run only and stores nothing.** Spotify / iTunes could fill `load_tracks` the
   same way from their album pages; they don't yet. Tests: `tests/test_album_track_cache.py`.
 
-### A live version takes only a live release's album and year
+### A live version takes only a live release's album and year (a remix / edit its own)
 
 Albums and Years look a song up by artist and title - a version's title is stored without its
 marker - and the sources pick the original's release: MusicBrainz's pickers skip "Live" release
 groups on purpose (`_SKIPPED_SECONDARY_TYPES`), and the tracklist cache keys on the bare title.
 "The Rolling Stones - The Last Time" (live, a later performance) got the 1965 studio single's
 album and year that way on 2026-11-22. Owner's rule (2026-11-24): for a song whose `version_kind`
-is in `constants.VERSIONS_NEEDING_OWN_RELEASE` (only `live` so far - another kind joins that set,
-nothing else changes) a found value is saved unasked only when
+is in `constants.VERSIONS_NEEDING_OWN_RELEASE` (`live`, and since 2026-11-24 `remix` / `edit`:
+"Another Love (Zwette Edit)" got the studio album - another kind joins that set, nothing else changes) a found value is saved unasked only when
 `version_names.lookup_fits_version(song, titles, release_kind)` holds - the release's or the
 matched recording's title reads as that version (`reads_as_version()`: `read_version()`'s marker,
 "... (Live at ...)", "Hits - Live", or a release titled as one, "Live at Leeds", "Live in
 Gdańsk", "Koncert w Jarocinie", not "Live Through This") or the source says the release is one
 (`DiscoveryResult` / `YearDiscoveryResult.release_kind`, `AlbumMatch` carries it with
-`matched_title`; MusicBrainz sets `live` from the release group's secondary types,
+`matched_title`; MusicBrainz sets `live` / `remix` from the release group's secondary types,
 `_SECONDARY_TYPE_VERSION_KINDS`). One check, applied in:
 - **Albums** (`fill_missing_albums()`, the menu, Run all, the import's fill-in, the timer): a sure
   match that doesn't fit goes to `review_version_albums()` (`utils/ui/album_guess_review.py`, at

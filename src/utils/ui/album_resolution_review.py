@@ -195,6 +195,9 @@ def review_multi_artist_albums(songs: list | None = None) -> int:
             "What is this album?",
             choices=([_MERGE] if pairs else []) + ([_SWAP] if swaps else [])
                     + [_COMPILATION, _SOUNDTRACK, _PER_ARTIST, _BY_HAND, _DELETE, _SKIP, _STOP],
+            # The cursor on a suggestion, else on Skip: it started on "a compilation", wrong for
+            # "IV" of Black Mountain (2016) and Sülfür Ensemble (2026) - an Enter merged such titles
+            default=_MERGE if pairs else _SWAP if swaps else _SKIP,
         ).ask()
         if choice is None or choice == _STOP:
             break

@@ -331,7 +331,8 @@ non-trivial work in that area.
   its own, titled without the marker, shown "Title (Marker)" (`version_names.title_with_version()`, also
   inside `title_with_cover()`, so in files too); `version_of` is the original when music.db has it, never
   another version. A marker is read by `utils/common/version_names.py` (`read_version()`; "Radio Edit",
-  "Remastered", "Bonus track" name a release, not a version): a new song gets it in `create_song_entry()`,
+  "Remastered", "Bonus track" name a release, not a version; "slowed + reverb", "sped up",
+  "nightcore" are remixes, and a halfwidth "ﾉ" sets a marker off like a dash): a new song gets it in `create_song_entry()`,
   stored ones through Manage database → "Find versions" (`utils/ui/version_review.py`, `version_checked`
   marker), Song actions → "Set version" by hand. A contest's or a radio's take ("Eurovision Song
   Contest 2011", "BBC Session") is live; of several dashed suffixes the shortest naming a version is
@@ -345,10 +346,10 @@ non-trivial work in that area.
   song request "Heart Of Glass (Disco Version)" was settled as the plain song, 2026-11-13);
   `song_titles()` and `find_existing_song()` compare the marked title too; duplicates are keyed by it.
   Albums and Years look a song up by artist and title, so a version gets its original's release:
-  for a kind in `constants.VERSIONS_NEEDING_OWN_RELEASE` (only live so far, owner 2026-11-24) a
+  for a kind in `constants.VERSIONS_NEEDING_OWN_RELEASE` (live, remix, edit; owner 2026-11-24) a
   found album / year is saved unasked only when `version_names.lookup_fits_version()` holds (the
   release's or matched recording's title reads as live, or the source's `release_kind` says so -
-  MusicBrainz's "Live" release group); else it goes to that step's review unticked and the timer
+  MusicBrainz's "Live" / "Remix" release group); else it goes to that step's review unticked and the timer
   never saves it. Every lookup writing `songs.album` / `songs.year` for a song (`fill_missing_albums()`
   incl. `_save_album_details()`, `fill_missing_years._collect()`) goes through that one check -
   a new one must too ([discovery-modules note](docs/agent-notes/discovery-modules.md) → "A live

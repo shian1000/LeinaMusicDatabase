@@ -187,13 +187,14 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
             album = ask_typed(f"{song.artist.name} - {song.title}", "New album name (Put nothing to cancel): ")
             if album:
                 edit_db_entry(song, "album", album)
+                saved.append((song, None))
 
     if unattended_now():
         remember_misses("albums", [song.id for song, album, _ in found.values() if album is None])
-    songs_objects = [song for song, _, _ in found.values()]
-    confirmation = ask_yes_no(f"Do you want to edit some of the changes manually?")
-    if confirmation:
-        edit_songs_menu(songs_objects)
+    # Only the songs that got an album: a run that saved nothing asked about "the changes" too
+    changed = list({id(song): song for song, _ in saved}.values())
+    if changed and ask_yes_no("Do you want to edit some of the changes manually?"):
+        edit_songs_menu(changed)
 
     submit_global_database_session()
 

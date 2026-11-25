@@ -20,7 +20,7 @@ sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root / "src"))
 
 import menu.main_menu  # noqa: F401,E402  (import order, see AGENTS.md)
-from config.constants import VERSION_LIVE, VERSION_REMIX  # noqa: E402
+from config.constants import VERSION_ACOUSTIC, VERSION_LIVE, VERSION_REMIX  # noqa: E402
 from utils.common.version_names import lookup_fits_version, reads_as_version  # noqa: E402
 from utils.discoveries.discoveries_manager import AlbumMatch  # noqa: E402
 from utils.discoveries.discovery_result import YearDiscoveryResult  # noqa: E402
@@ -59,7 +59,8 @@ def test_a_live_version_takes_only_a_live_release(titles, release_kind, fits):
 
 def test_other_songs_take_any_release():
     assert lookup_fits_version(_song(STUDIO_SINGLE), [STUDIO_SINGLE])
-    assert lookup_fits_version(_song(STUDIO_SINGLE, VERSION_REMIX), [STUDIO_SINGLE])  # not in the set (yet)
+    assert lookup_fits_version(_song(STUDIO_SINGLE, VERSION_ACOUSTIC), [STUDIO_SINGLE])  # not in the set
+    assert not lookup_fits_version(_song(STUDIO_SINGLE, VERSION_REMIX), [STUDIO_SINGLE])  # remixes need their own
 
 
 def test_reads_as_version_needs_the_kind_asked():
