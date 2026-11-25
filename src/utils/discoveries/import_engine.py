@@ -28,7 +28,7 @@ from utils.database.song_kinds import (
 from config.constants import SINGLES_ALBUM, SONG_KIND_FULL_ALBUM
 from config.constants import NAMELESS_AUTO_ACCEPT_MIN_CHARS, NAMELESS_AUTO_ACCEPT_MIN_WORDS, FILE_MATCH_SCORE_TITLE_WEIGHT, FILE_TITLE_PREFIX_MIN_LENGTH, FILE_TITLE_SIMILARITY_THRESHOLD, SPELLING_CHECK_THRESHOLD, TITLE_AMPERSAND_WORDS
 from utils.common import spellcheck_cache
-from utils.common.normalizer import name_key
+from utils.common.normalizer import and_word_key, has_and_word, name_key, with_diacritics_of
 from utils.common.musicbrainz_client import MBStats
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.album_resolution_review import offer_album_resolution
@@ -49,6 +49,31 @@ _SPELL_CHECK_CACHE = {}
 # same artist name reuse the pending state instead of re-querying MusicBrainz
 # and queueing a duplicate question.
 _PENDING_ARTIST = object()
+
+
+def _spell_check(artist: str, title: str) -> dict:
+    """check_spelling() of the pair through this batch's cache, under the
+    key find_similar_artist() / find_similar_song() use - one lookup for
+    the three of them."""
+    key = (artist, title or "")
+    if key not in _SPELL_CHECK_CACHE:
+        _SPELL_CHECK_CACHE[key] = check_spelling(artist, title or "")
+    return _SPELL_CHECK_CACHE[key]
+
+
+def musicbrainz_accents(metadata: dict, field: str) -> str | None:
+    """The entry's title (`field` "corrected_title") or artist name
+    ("corrected_artist") with the accents MusicBrainz spells it with, when
+    that is all MusicBrainz changes ("Plesem sama" -> "Plešem sama"); None
+    otherwise - a case change alone ("Kese etikete" / "Kese Etikete") or
+    other letters keep the name as it came. For a new song or artist only;
+    the lookup is the one the import makes anyway (_spell_check())."""
+    metadata = as_entry(metadata)
+    name = metadata.title if field == "corrected_title" else metadata.artist
+    if not name or not metadata.artist:
+        return None
+    spelling = _spell_check(metadata.artist, metadata.title)
+    return with_diacritics_of(name, spelling.get(field) or "") if spelling.get("found") else None
 
 def find_similar_artist(metadata: dict) -> list:
     """
@@ -228,6 +253,10 @@ def _match_artist_locally(name: str, session=None, artist_pool=None) -> tuple:
     ).order_by(Artist.id).all()
     if candidates:
         return candidates[0], True
+    # "The Ball And Chain" is "The Ball & Chain" (normalize() drops the "&")
+    twins = and_word_twins(music_session, name)
+    if twins:
+        return twins[0], True
 
     # The search finds artists by their synonyms too ("I nad kropką" is
     # Konkret's), so they're compared like the name.
@@ -344,7 +373,9 @@ def resolve_artist(metadata: dict, artist_cache: dict = None, pending_conflicts:
     new_artist_obj = None
     if not existing_artist:
         new_artist_obj = Artist()
-        new_artist_obj.name = new_artist_name
+        new_artist_obj.name = musicbrainz_accents(metadata, "corrected_artist") or new_artist_name
+        if new_artist_obj.name != new_artist_name:
+            mlog(f"[Artist] \"{new_artist_name}\" added as MusicBrainz spells it, {new_artist_obj.name!r}", trace.DETAIL)
         if new_artist_origin:
             new_artist_obj.origin = new_artist_origin
         add_db_entry(new_artist_obj)
@@ -375,13 +406,14 @@ def importable_album(album: str | None, artist_name: str) -> str | None:
     return None
 
 
-def create_song_entry(metadata: dict, artist_obj: Artist, session=None) -> Song:
+def create_song_entry(metadata: dict, artist_obj: Artist, session=None, title: str | None = None) -> Song:
     """Add the song `metadata` describes, by `artist_obj` (one with an id),
-    to `session` (default: the global music session). The caller commits."""
+    to `session` (default: the global music session), titled `title` when
+    given, else as the entry is. The caller commits."""
     metadata = as_entry(metadata)
     new_song_obj = Song()
     new_song_obj.artist_id = artist_obj.id
-    new_song_obj.title = metadata.title
+    new_song_obj.title = title or metadata.title
     new_song_obj.album = importable_album(metadata.album, artist_obj.name)
     # A tag's date with an album not accepted is that compilation's, not the
     # song's: "Električni orgazam - Igra rok en rol cela Jugoslavija" (1988)
@@ -594,6 +626,23 @@ def title_after_artists(title: str, artist: str) -> str | None:
     return parts[1].strip() if f" {wanted} " in f" {normalize(parts[0])} " else None
 
 
+def and_word_twins(session, name: str) -> list:
+    """Artists whose name is `name` with another word for "and" ("&", "+",
+    "and", "i", ... - normalizer.SAME_AS_AND) in the same place: "The Ball
+    & Chain" for "The Ball And Chain", "Florence + the Machine" for
+    "Florence and the Machine"; oldest first, none named `name` itself. A
+    joined credit stays two artists: "A & B" finds "A and B", never "A"."""
+    if not has_and_word(name):
+        return []
+    key = and_word_key(name)
+    words = [w for w in key.split() if w != "and"]
+    if not words:
+        return []
+    word = max(words, key=len)
+    found = session.query(Artist).filter(func.lower(Artist.name).like(f"%{word}%")).order_by(Artist.id).all()
+    return [a for a in found if a.name and a.name.lower() != name.lower() and and_word_key(a.name) == key]
+
+
 class LocalSongMatcher:
     """mp3/import metadata -> the Song already in the database, looked up
     locally only (no MusicBrainz, nothing created). Caches each artist's
@@ -620,6 +669,7 @@ class LocalSongMatcher:
         self.session = session
         self._artist_pool = ArtistPool(session) if load_artists_once else None
         self._artists = {}
+        self._twins = {}  # name -> and_word_twins()
         self._songs = {}
         self._by_title = None
         self._scoring = None       # [(song, title forms)] for best_guesses()
@@ -662,12 +712,21 @@ class LocalSongMatcher:
             return None
         artist = self._artist(name)
         song = None
-        if artist is not None:
-            songs, duration, feats = self._artist_songs(artist), metadata.duration_s, metadata.feat_artists
+        # The artist found, then its twins spelling "&" otherwise: "The Ball
+        # And Chain"'s song may be under a duplicate "The Ball & Chain" (2026-11-25)
+        for each in ([artist, *self._and_word_twins(name, artist)] if artist is not None else []):
+            songs, duration, feats = self._artist_songs(each), metadata.duration_s, metadata.feat_artists
             song = find_song_loosely(title, songs, duration, feats, metadata.project, metadata.is_cover)
             if song is None and (rest := title_after_artists(title, name)):
                 song = find_song_loosely(rest, songs, duration, feats, metadata.project, metadata.is_cover)
+            if song is not None:
+                break
         return song or self.match_work(metadata)
+
+    def _and_word_twins(self, name: str, artist: Artist) -> list:
+        if name not in self._twins:
+            self._twins[name] = and_word_twins(self.session, name)
+        return [a for a in self._twins[name] if a.id != artist.id]
 
     def match_work(self, metadata: dict) -> Song | None:
         """For an entry credited to a film, game or anime instead of who sings
@@ -1101,9 +1160,19 @@ def resolve_song(metadata: dict, artist_obj: Artist, pending_conflicts: list, en
         })
         return None, True
 
-    new_song_obj = create_song_entry(metadata, artist_obj)
+    new_song_obj = _create_new_song(metadata, artist_obj)
     _remember(entries, new_song_obj, metadata)
     return new_song_obj, False
+
+
+def _create_new_song(metadata, artist_obj: Artist) -> Song:
+    """create_song_entry() for an entry that is a new song, its title with
+    MusicBrainz's accents when only they differ (musicbrainz_accents())."""
+    title = musicbrainz_accents(metadata, "corrected_title")
+    if not title:
+        return create_song_entry(metadata, artist_obj)
+    mlog(f"[Song] \"{metadata.title}\" added as MusicBrainz spells it, {title!r}", trace.DETAIL)
+    return create_song_entry(metadata, artist_obj, title=title)
 
 
 def _found_existing_song(metadata, song: Song, entries: dict | None) -> None:
@@ -1223,7 +1292,7 @@ def _settle_song_conflicts(pending_conflicts: list, session, entries: dict | Non
             _credit_found_song(existing_song, metadata)  # the owner said it's this song
             _remember(entries, existing_song, metadata)
         else:
-            added.append(create_song_entry(metadata, artist_obj))
+            added.append(_create_new_song(metadata, artist_obj))
             _remember(entries, added[-1], metadata)
         session.commit()
         print()

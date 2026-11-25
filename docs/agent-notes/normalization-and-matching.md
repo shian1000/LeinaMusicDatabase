@@ -550,6 +550,20 @@ groups, 8 real. A title naming a version word the others don't
 ft. Joanna Jones (Cover)" - but unticked. Only spelling-identical titles
 (`spelling_key()`) are folded without asking, by "Resolve duplicated artists".
 
+## "&", "+" and "and" in one artist name
+
+`normalize()` drops "&" and "+" but keeps "and", so "The Ball & Chain" ("the
+ball chain") and "The Ball And Chain" never met, and the duplicate rows lived
+side by side (2026-11-25). `normalizer.and_word_key()` reads every whole word
+of `SAME_AS_AND` ("&", "+", "and" and the other languages' "and" from
+`artist_identity._JOINING_WORDS`; not "feat", "x", "vs" or "with", which credit
+someone else) as "and". It is used where two spellings of *one* name are
+compared: `artist_identity._names_match()`, `remove_duplicate_artists()`'s key,
+`import_engine._match_artist_locally()` and `LocalSongMatcher.match_exact()`
+(via `and_word_twins()`). It never splits a name, so a joined credit "A & B"
+stays apart from "A" - splitting is "Split joined artist names"' job. "C+C"
+and "R&B" keep their sign (not a word).
+
 Every fold goes through `merge_songs()`: before it, the silent pass kept the
 lowest id and lost the dropped row's link, album, year and extra artists.
 It also runs on the global music session - it used to open its own, leaving

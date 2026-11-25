@@ -399,7 +399,10 @@ non-trivial work in that area.
   their own) and `merge_songs()`, the one way to fold a duplicate: the kept row (most data) gets
   the other's missing fields and extra artists, references follow via `record_song_merge()`.
   "Resolve duplicated artists" folds spelling-only ones silently (`remove_duplicate_songs()`,
-  with `remove_duplicate_artists()`, the pair repeated only while a round still merged something);
+  with `remove_duplicate_artists()`, the pair repeated only while a round still merged something;
+  artists whose names differ only in case, apostrophe, a look-alike letter or a word for "and" -
+  "&" / "+" / "and" / "i" / "y" / "et" / "und" / "oraz", `normalizer.SAME_AS_AND`, a whole word
+  only - are one: "The Ball & Chain" / "The Ball And Chain", 2026-11-25);
   Manage database → Resolve duplicates → "Resolve duplicated songs"
   (`utils/ui/song_duplicate_review.py`) asks in one checkbox list, version-looking pairs unticked,
   then in a second one whether to credit the featured artists only a folded title named

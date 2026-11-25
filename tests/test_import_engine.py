@@ -500,3 +500,60 @@ def test_a_request_by_an_artist_named_like_a_domain_is_its_song(env):
                                          "feat_artists": []}, source=SOURCE_REQUEST), SOURCE_REQUEST)
 
     assert ie.run_import_batch([entry]) == [] and entry.song_id == 6971
+
+
+# ==================== Leina Radio's requests, 2026-11-25 ====================
+
+@pytest.mark.parametrize("unattended", [False, True])
+def test_a_new_song_takes_musicbrainz_accents_but_not_its_case(env, unattended):
+    # "Detour - Plesem sama" was added so although MusicBrainz spells it
+    # "Plešem sama"; "Kese etikete" vs "Kese Etikete" is only a case change
+    from utils.ui.prompts import unattended as nobody_asked
+
+    session = env["session"]
+    _artist(session, "Detour", "Ljubav")
+    env["spelling"][("Detour", "Plesem sama")] = {"found": True, "corrected_artist": "Detour",
+                                                   "corrected_title": "Plešem sama"}
+    env["spelling"][("Bojana Vunturišević", "Kese etikete")] = {
+        "found": True, "corrected_artist": "Bojana Vunturišević", "corrected_title": "Kese Etikete"}
+    env["spelling"][("Ukanose", "Gintariniai Kariai")] = {"found": True, "corrected_artist": "Ūkanose",
+                                                          "corrected_title": "Gintariniai kariai"}
+    entries = [_entry("Detour", "Plesem sama"), _entry("Bojana Vunturišević", "Kese etikete"),
+               _entry("Ukanose", "Gintariniai Kariai")]
+
+    if unattended:
+        with nobody_asked():
+            ie.run_import_batch(entries)
+    else:
+        ie.run_import_batch(entries)
+
+    assert _songs(session) == [("Bojana Vunturišević", "Kese etikete"), ("Detour", "Ljubav"),
+                               ("Detour", "Plešem sama"), ("Ūkanose", "Gintariniai Kariai")]
+    assert env["questions"] == []
+
+
+def test_an_artist_written_with_and_is_the_one_written_with_a_plus(env):
+    # "Florence and the Machine" is "Florence + the Machine"
+    session = env["session"]
+    florence = _artist(session, "Florence + the Machine", "Dog Days Are Over")
+
+    [song] = ie.run_import_batch([_entry("Florence and the Machine", "Drumming Song")])
+
+    assert song.artist_id == florence.id
+    assert session.query(Artist).count() == 1
+
+
+def test_the_matcher_finds_the_song_of_the_artist_spelling_and_otherwise(env):
+    # "The Ball And Chain - Don't Tell Me Everything" was song #241 of a duplicate
+    # "The Ball & Chain" (closest_song_of_artist_score 0.229)
+    session = env["session"]
+    ball = _artist(session, "The Ball & Chain")
+    session.add(Song(id=241, title="Don't Tell Me Everything", artist=ball))
+    _artist(session, "The Ball And Chain", "Gera (LIVE cover)")
+    _artist(session, "The Ball", "Don't Tell Me Everything")
+    matcher = ie.LocalSongMatcher(session)
+
+    assert matcher.match(_entry("The Ball And Chain", "Don't Tell Me Everything")).id == 241
+    assert matcher.match(_entry("The Ball & Chain", "Gera (LIVE cover)")).artist.name == "The Ball And Chain"
+    # A joined credit is still two artists: "The Ball" isn't "The Ball & Chain"
+    assert matcher.match(_entry("The Ball", "Gera (LIVE cover)")) is None

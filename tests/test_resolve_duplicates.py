@@ -189,3 +189,20 @@ def test_resolve_duplicated_artists_catches_song_duplicates_an_artist_merge_crea
     session.close()
     assert rounds == ["songs", "artists", "songs", "artists", "songs", "artists"]
     assert len(loaded) == 2
+
+
+def test_remove_duplicate_artists_reads_and_and_the_ampersand_as_one(session_factory):
+    # "The Ball & Chain" (#177) and "The Ball And Chain" (#1248), 2026-11-25
+    session = session_factory()
+    session.add_all([Artist(id=177, name="The Ball & Chain"), Artist(id=1248, name="The Ball And Chain"),
+                     Artist(id=5, name="The Ball")])
+    session.add_all([Song(title="Don't Tell Me Everything", artist_id=177), Song(title="Gera", artist_id=1248)])
+    session.commit()
+    session.close()
+
+    rd.remove_duplicate_artists()
+
+    session = session_factory()
+    assert sorted(a.id for a in session.query(Artist)) == [5, 177]
+    assert {s.artist_id for s in session.query(Song)} == {177}
+    session.close()

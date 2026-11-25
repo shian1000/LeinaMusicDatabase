@@ -1,3 +1,5 @@
+import re
+
 from utils.database.music_db_manager import Song, Artist
 from sqlalchemy import text
 from utils.database.song_artists import merge_artist_synonyms, reassign_additional_artist_links
@@ -5,7 +7,7 @@ from utils.database.albums import reassign_artist_albums
 from utils.database.latin_names import artist_synonyms
 from utils.database.song_duplicates import find_duplicate_groups, merge_songs, spelling_key
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
-from utils.common.normalizer import normalize, normalize_apostrophes
+from utils.common.normalizer import SAME_AS_AND, normalize, normalize_apostrophes
 from utils.common.script_utils import fix_mixed_script_words
 
 def remove_duplicate_songs(report_none: bool = True) -> int:
@@ -35,12 +37,16 @@ def remove_duplicate_songs(report_none: bool = True) -> int:
 
 
 def _artist_key(name: str) -> str:
-    return normalize_apostrophes(fix_mixed_script_words(name)).lower()
+    # "&", "+" and "and" (normalizer.SAME_AS_AND) as one word: "The Ball &
+    # Chain" is "The Ball And Chain" (2026-11-25)
+    key = re.sub(r"\s+[&+]\s+", " & ", normalize_apostrophes(fix_mixed_script_words(name)).lower())
+    return " ".join("&" if word in SAME_AS_AND else word for word in key.split())
 
 
 def remove_duplicate_artists(report_none: bool = True) -> int:
-    """Merge artists whose names differ only in case, apostrophe or a
-    look-alike letter, or match another artist's synonym, without asking.
+    """Merge artists whose names differ only in case, apostrophe, a
+    look-alike letter or a word for "and" ("&" / "+" / "and"), or match
+    another artist's synonym, without asking.
     Returns how many artists were removed."""
     session, _ = open_and_set_global_database_sessions()
 
@@ -50,8 +56,9 @@ def remove_duplicate_artists(report_none: bool = True) -> int:
     duplicates = []
 
     for artist in all_artists:
-        # Only case, the apostrophe variant ("Carla's" / "Carla’s") and a
-        # look-alike letter from the other alphabet ("Вjörk" / "björk") are
+        # Only case, the apostrophe variant ("Carla's" / "Carla’s"), a
+        # look-alike letter from the other alphabet ("Вjörk" / "björk") and
+        # "&" / "and" are
         # ignored - this merges without asking, and a full normalize() would
         # also fold real pairs together ("Bôa" / "BoA", "!!!" / "(((())))").
         key = _artist_key(artist.name)

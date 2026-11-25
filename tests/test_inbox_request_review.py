@@ -660,3 +660,28 @@ def test_requests_of_songs_deleted_since_are_listed_and_can_be_rejected(env, cap
 
     review.resolve_new_requests()
     assert "No new requests in the inbox." in capsys.readouterr().out
+
+
+
+def test_a_skipped_song_keeps_its_file_in_review_while_the_others_are_added(env, capsys):
+    # shianman_2026-11-25_13-00-00_014.db: 7 of its songs added, one skipped -
+    # the file must stay for the skipped one. And "The Ball And Chain" asked
+    # for the song of a duplicate artist "The Ball & Chain": found, not asked
+    session = env["session"]
+    ball = Artist(id=177, name="The Ball & Chain")
+    session.add_all([ball, Artist(id=1248, name="The Ball And Chain"),
+                     Song(id=241, title="Don't Tell Me Everything", artist=ball)])
+    session.commit()
+    _request(env["inbox"], "shianman_2026-11-25_13-00-00_014.db",
+             songs=[("Sassja", "Clash"), ("The Ball And Chain", "Don't Tell Me Everything"),
+                    ("Mandalay", "Opposites"), ("Metronomy", "The Bay")])
+    env["answers"].add(REVIEW_LABEL, "Add it to the database (", review._SKIP, "Add it to the database (")
+
+    review.resolve_new_requests()
+
+    out = capsys.readouterr().out
+    assert "#241 The Ball & Chain - Don't Tell Me Everything" in out
+    assert [(e["artist_name"], e["title"]) for e in env["imported"]] == [("Sassja", "Clash"), ("Metronomy", "The Bay")]
+    assert _folder(env, pr.REVIEW) == ["shianman_2026-11-25_13-00-00_014.db"]
+    assert _folder(env, pr.PROCESSED) == []
+    assert "song:" + sr.song_key("Mandalay", "Opposites") not in _decisions(env)

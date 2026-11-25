@@ -41,6 +41,50 @@ def fold_diacritics(text: str) -> str:
     return "".join(map(fold, text)).translate(NON_DECOMPOSING_LETTER_FOLDS)
 
 
+def with_diacritics_of(text: str, spelled: str) -> str | None:
+    """`text` with the accents `spelled` has where `text` has the plain
+    letter ("Plesem sama" + MusicBrainz's "Plešem sama" -> "Plešem sama"),
+    `text`'s own case kept ("Plešem Sama" adds only the "š"). None when they
+    aren't the same letters once accents are dropped, or when `spelled` adds
+    no accent (a case change alone: "Kese Etikete")."""
+    text, spelled = unicodedata.normalize("NFC", text or ""), unicodedata.normalize("NFC", spelled or "")
+    if len(text) != len(spelled) or fold_diacritics(text).casefold() != fold_diacritics(spelled).casefold():
+        return None
+    out = []
+    for mine, theirs in zip(text, spelled):
+        if fold_diacritics(mine) != mine and mine.casefold() != theirs.casefold():
+            return None  # another accent than ours: a different spelling, not ours completed
+        if mine.casefold() == theirs.casefold() or fold_diacritics(theirs) == theirs:
+            out.append(mine)
+        else:
+            out.append(theirs.upper() if mine.isupper() else theirs.lower())
+    result = "".join(out)
+    return result if result != text else None
+
+
+# Words joining the parts of one name the same way, "&" written out: "The
+# Ball & Chain" is "The Ball And Chain", "Florence + the Machine" "Florence
+# and the Machine" (artist_identity._JOINING_WORDS minus "feat" / "x" / "vs"
+# / "with", which credit someone else rather than spell "and")
+SAME_AS_AND = {"&", "+", "and", "i", "oraz", "y", "et", "und"}
+_AND_SIGN_RE = re.compile(r"\s+[&+]\s+")
+
+
+def and_word_key(name: str | None) -> str:
+    """normalize()d `name` with every word of SAME_AS_AND read as "and", so
+    two spellings of one name compare equal; "" for nothing. Only a whole
+    word counts ("C+C Music Factory" keeps its "+", "R&B" its "&")."""
+    if not name:
+        return ""
+    words = _AND_SIGN_RE.sub(" & ", name).split()
+    return normalize(" ".join("and" if w.casefold() in SAME_AS_AND else w for w in words))
+
+
+def has_and_word(name: str | None) -> bool:
+    """Does `name` hold a word and_word_key() reads as "and"?"""
+    return bool(name) and any(w.casefold() in SAME_AS_AND for w in _AND_SIGN_RE.sub(" & ", name).split())
+
+
 # Every apostrophe-like character, for normalize() (dropped, or a space) and
 # normalize_apostrophes() (one canonical "'") alike
 APOSTROPHES = "'’‘‚‛`´ʻʼʹʽ′‵＇"

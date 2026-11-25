@@ -18,7 +18,7 @@ from itertools import combinations
 from config.constants import (
     SAME_ARTIST_SIMILARITY_THRESHOLD, SONGLESS_ARTIST_IGNORE_FILE, SPELLING_CHECK_THRESHOLD, SWAPPED_SONG_IGNORE_FILE)
 from utils.common.json_file import read_json, write_json
-from utils.common.normalizer import name_key, normalize
+from utils.common.normalizer import and_word_key, name_key, normalize
 from utils.common.script_utils import matching_key, scripts_in
 from utils.common.text_utils import resembles_across_scripts, similarity
 from utils.database.albums import delete_empty_album
@@ -48,11 +48,16 @@ def _fix_lookalikes(name: str) -> str:
 def _names_match(a: str, b: str) -> bool:
     """One name, spelled differently: case/punctuation ("P.O.D." / "POD"),
     another script ("Aimyon" / "あいみょん"), a look-alike letter ("björk" /
-    "Вjörk") or a typo ("Man I Trust" / "Men I Trust")."""
+    "Вjörk"), "&" written out ("The Ball & Chain" / "The Ball And Chain") or a
+    typo ("Man I Trust" / "Men I Trust")."""
     if not a or not b:
         return False
     a, b = _fix_lookalikes(a), _fix_lookalikes(b)
     if normalize(a) == normalize(b) or (name_key(a) and name_key(a) == name_key(b)):
+        return True
+    # "&" / "+" / "and" (and the other languages' "and") are one word in a name:
+    # "The Ball & Chain" / "The Ball And Chain". "A & B" stays apart from "A"
+    if and_word_key(a) and and_word_key(a) == and_word_key(b):
         return True
     if resembles_across_scripts(a, b):
         return True

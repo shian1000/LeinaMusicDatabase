@@ -1025,3 +1025,35 @@ def test_a_title_musicbrainz_has_without_its_symbols_waits_for_the_owner(env, mo
     facts = sr.song_request_facts(case, "alt-J", "(∆) Breezeblocks", {}, env["matcher"], False)
     assert facts["musicbrainz_title_similarity"] < 0.9
     automation_settings.CONFIG_PATH.unlink()
+
+
+def test_the_automatic_pass_keeps_a_file_whose_other_songs_it_added_for_the_one_left(env, monkeypatch):
+    # The pass added 4 of shianman_2026-11-25_13-00-00_014.db's songs; the
+    # file went on to review/ for the rest, as it must
+    from utils.common import automation_settings
+    from utils.discoveries import import_engine
+
+    automation_settings.save_user_rules([{
+        "name": "MusicBrainz agrees", "question": "song_request", "on": True,
+        "conditions": [{"fact": "musicbrainz_title_similarity", "op": ">=", "value": 0.99}]}])
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": True, "title_similarity": 0.5 if title == "Opposites" else 1.0, "artist_similarity": 1.0,
+        "mb_score": 100})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+
+    def fake_import(entries):
+        for i, entry in enumerate(entries):
+            entry.song_id = 4700 + i
+    monkeypatch.setattr(import_engine, "run_import_batch", fake_import)
+    _request(env["inbox"], "shianman_2026-11-25_13-00-00_014.db",
+             [{"title": "Plesem sama", "artist": "Detour"}, {"title": "Opposites", "artist": "Mandalay"},
+              {"title": "Ništa", "artist": "Sassja"}])
+
+    result = ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    assert len([c for c in result.changes if c["kind"] == "song_request"]) == 2
+    assert result.to_review == 1
+    assert _names(env["inbox"], "review") == ["shianman_2026-11-25_13-00-00_014.db"]
+    assert _names(env["inbox"], "processed") == []
+    automation_settings.CONFIG_PATH.unlink()

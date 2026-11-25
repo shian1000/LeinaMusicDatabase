@@ -39,6 +39,8 @@ def _artist(name, synonyms=None, artist_id=None):
     ("Molchat Doma", "Молчат Дома (Molchat Doma)"),
     ("Chylińska", "Agnieszka Chylińska"),
     ("Mariya Takeuchi", "Mariya Takeuchi 竹内 まりや"),
+    ("The Ball & Chain", "The Ball And Chain"),          # "&" written out (2026-11-25)
+    ("Florence + the Machine", "Florence and the Machine"),
 ])
 def test_same_artist_under_two_spellings(a, b):
     assert artists_look_same(_artist(a), _artist(b))
@@ -51,6 +53,8 @@ def test_same_artist_under_two_spellings(a, b):
     ("Purple Disco Machine", "Purple Disco Machine, Sophie and the Giants"),
     ("Persona 5 OST", "Persona 5 Strikers OST"),         # 0.74 similar, two games
     ("Genesis", "Kygo"),
+    ("The Ball", "The Ball & Chain"),                     # "&" read as "and" joins no more than it did
+    ("Kult", "Kult and Kazik"),
 ])
 def test_different_artists_are_not_offered_for_merging(a, b):
     assert not artists_look_same(_artist(a), _artist(b))

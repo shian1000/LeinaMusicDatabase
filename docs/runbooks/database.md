@@ -505,6 +505,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   rule requires it `<= 0.84`, so "czas pomyka" next to Voo Voo's "Czas pomyka II" (0.88) waits
   for review. A title the pass adds written all in lower / upper case takes MusicBrainz's
   spelling of the same words (`title_as_musicbrainz_spells()`).
+  Checked on 2026-11-25 (`shianman_2026-11-25_13-00-00_014.db`): a new song or artist the import
+  adds - asked for or by a rule, in the menu or unattended - takes MusicBrainz's accents when they
+  are all its spelling adds (`import_engine.musicbrainz_accents()` → `normalizer.with_diacritics_of()`:
+  "Plesem sama" → "Plešem sama", the request's own case kept; "Kese etikete" stays, MusicBrainz's
+  "Kese Etikete" being a case change only). An artist whose name says "and" another way is the same
+  artist (`normalizer.and_word_key()`, `import_engine.and_word_twins()`): "Florence and the Machine"
+  is "Florence + the Machine", and a request by "The Ball And Chain" finds the song of a duplicate
+  "The Ball & Chain" (the matcher tries the twin after the artist of that very name); "A & B"
+  still never finds "A". A file stays in `review/` while any of its cases is open, whatever was
+  added from it in the same run (`finish_request_files()`; tests in
+  `test_inbox_request_review.py` / `test_inbox_song_requests.py`).
   Checked on "Preuzeti (2018.05)" (2026-11-22, 61 requests): the artist it adds is spelt as
   music.db spells it, else as MusicBrainz does when they differ only in case
   (`artist_as_musicbrainz_spells()`: "nina simone" -> "Nina Simone"; "alt-J" kept, not
