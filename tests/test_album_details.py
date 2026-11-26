@@ -230,3 +230,32 @@ def test_the_manager_tries_the_next_module_after_a_reissues_year(monkeypatch):
     # A project's recording (held=False) is years after its studio song by nature
     assert dm.discover_release_year_result("Andrzej Zaucha", "Męskie Granie", False, modules, album_songs=[song],
                                            held=False).year == 2014
+
+
+@pytest.mark.parametrize("requested, title, expected", [
+    (True, "Another [Empathy]", "Another"),
+    (True, "Opposites (empathy)", "Opposites"),  # case aside
+    (True, "Another [Empathy Live]", "Another [Empathy Live]"),  # not just the album
+    (False, "Another [Empathy]", "Another [Empathy]"),  # not a requested song
+])
+def test_a_requested_songs_bracket_naming_the_album_found_leaves_its_title(session, monkeypatch,
+                                                                            requested, title, expected):
+    # 2026-11-25: Leina Radio asked for "Mandalay - Another [Empathy]"; the
+    # album found was "Empathy", the title should have been "Another"
+    from utils.database.datatables import SettledSongRequest
+    song = Song(title=title, artist=Artist(name="Mandalay"))
+    session.add(song)
+    session.flush()
+    if requested:
+        session.add(SettledSongRequest(artist="Mandalay", title=title, song_id=song.id))
+        session.flush()
+    for name, value in (("close_global_driver", lambda: None), ("load_max_songs_per_fetch", lambda: 100),
+                        ("load_discovery_modules", lambda: []), ("submit_global_database_session", lambda: None),
+                        ("discover_album", lambda *a: dm.AlbumMatch("Empathy")),
+                        ("ask_yes_no", lambda question: False),
+                        ("edit_db_entry", lambda song, category, value: setattr(song, category, value))):
+        monkeypatch.setattr(fill_albums, name, value)
+
+    fill_albums.fill_missing_albums([song])
+
+    assert (song.title, song.album) == (expected, "Empathy")

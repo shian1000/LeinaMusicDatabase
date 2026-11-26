@@ -309,9 +309,11 @@ def youtube(monkeypatch):
     state = {"found": {}, "api": {}, "ytdlp": {}, "ytdlp_calls": [], "api_calls": []}
     monkeypatch.setattr(m, "search_video_ytdlp", lambda artist, title, **k: state["found"].get(title))
 
-    def api(ids):
+    def api(ids, streams=None):
         ids = list(ids)
         state["api_calls"].append(ids)
+        if streams is not None:
+            streams.update(v for v in ids if v in state.get("streams", ()))
         return None if state["api"] is None else {v: state["api"].get(v, True) for v in ids}
 
     def ytdlp(video_id, timeout=20):
@@ -363,6 +365,27 @@ def test_without_the_api_a_blocked_check_stays_unknown(env, youtube):
 
     assert pr.check_link_cases([case]) == {"api": False, "blocked": 1, "marked": 0}
     assert case.plays == {"sugg0": None} and case.dead_still_plays is None
+
+
+def test_a_stream_the_api_lists_never_counts_as_playing(env, youtube):
+    # 2026-11-25: LRT OPUS - Ore's 02eMuzRAapY, an ended live stream; YouTube
+    # blocked yt-dlp and the API's listing made it "plays here"
+    _request(env["inbox"], "2026-10-12_23-44-05_001.db", [_row(replacement="02eMuzRAapY")])
+    youtube["found"] = {"Chromatic": "ours0"}
+    youtube["streams"] = {"02eMuzRAapY"}
+    youtube["ytdlp"] = {"02eMuzRAapY": None, "ours0": None}
+    _, [case] = _cases(env)
+
+    stats = pr.check_link_cases([case])
+
+    assert case.plays == {"02eMuzRAapY": None, "ours0": True}
+    assert case.streams == ["02eMuzRAapY"]
+    assert youtube["ytdlp_calls"] == ["ours0"]  # a stream isn't asked
+    assert stats["blocked"] == 1
+    pr.save_case_checks([case])
+    case.streams, case.checked_at = [], None
+    pr.load_case_checks([case], 24)
+    assert case.streams == ["02eMuzRAapY"]
 
 
 def test_ytdlp_saying_gone_beats_the_api_listing(env, youtube):

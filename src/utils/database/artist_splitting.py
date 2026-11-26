@@ -59,11 +59,71 @@ class SplitCandidate:
     proposal: SplitProposal
     existing: dict[str, Artist]  # proposal name -> artist already in the DB
     song_count: int
+    on_musicbrainz: bool = False  # every part an artist MusicBrainz knows, the whole name not
 
     @property
     def preselected(self) -> bool:
         # Every part already being its own artist is as strong as "feat."/" x "
-        return self.proposal.confident or len(self.existing) == len(self.proposal.names)
+        return self.proposal.confident or self.on_musicbrainz or len(self.existing) == len(self.proposal.names)
+
+
+def _joined_parts(name: str) -> list[str] | None:
+    """The parts of a name joined by "and" / "i" / ... (JOINING_WORD_SEPARATOR),
+    None when there's no such word or a part looks like a band's own name
+    ("Tom Petty and the Heartbreakers") or is too short."""
+    if not JOINING_WORD_SEPARATOR.search(name or ""):
+        return None
+    parts = [p.strip() for p in JOINING_WORD_SEPARATOR.split(name) if p.strip()]
+    if len(parts) < 2 or any(p.lower().startswith(("the ", "his ", "her ")) or len(p) <= 2 for p in parts):
+        return None
+    return parts
+
+
+def _whole_name_on_musicbrainz(name: str) -> bool | None:
+    """artist_on_musicbrainz() of the name and of it with "&" for its joining
+    word ("Simon and Garfunkel" is "Simon & Garfunkel" there): True when
+    either is known."""
+    from utils.common.musicbrainz_artists import artist_on_musicbrainz
+
+    answers = [artist_on_musicbrainz(name), artist_on_musicbrainz(JOINING_WORD_SEPARATOR.sub(" & ", name))]
+    return True if True in answers else None if None in answers else False
+
+
+def _parts_on_musicbrainz(name: str) -> list[str] | None:
+    """The parts of a name joined by "and" (_joined_parts()) when MusicBrainz
+    knows each as an artist and not the whole name; None otherwise or when it
+    can't be asked."""
+    from utils.common.musicbrainz_artists import artist_on_musicbrainz
+
+    parts = _joined_parts(name)
+    if parts is None or _whole_name_on_musicbrainz(name) is not False:
+        return None
+    return parts if all(artist_on_musicbrainz(p) for p in parts) else None
+
+
+def split_joined_feat_names(session, names: list[str]) -> list[str]:
+    """A "ft." list's names (sanitize's feat_to_credits, which splits only
+    at "&" and ",") with each name of two artists joined by "and" / "i" / ...
+    as those artists: "VILLAIN ft. Madison Beer and Kim Petras" credits
+    Madison Beer and Kim Petras (2026-11-26, it credited one artist "Madison
+    Beer and Kim Petras"). Only when every part is an artist music.db has (by
+    name or synonym) or, else, MusicBrainz knows (cached), and the whole name
+    is neither - "Simon and Garfunkel", "Bajaga i Instruktori" stay whole. The
+    rest as they are; the split review still sees the names kept whole."""
+    by_name = None
+    result = []
+    for name in names:
+        parts = _joined_parts(name)
+        if parts is not None:
+            by_name = _artists_by_name(session) if by_name is None else by_name
+            if normalize(name) in by_name or normalize(JOINING_WORD_SEPARATOR.sub(" & ", name)) in by_name:
+                parts = None
+            elif all(normalize(p) in by_name for p in parts):
+                parts = None if _whole_name_on_musicbrainz(name) else parts
+            else:
+                parts = _parts_on_musicbrainz(name)
+        result += [p for p in parts or [name] if p not in result]
+    return result
 
 
 def _propose_split_on_existing_parts(
@@ -93,7 +153,11 @@ def _propose_split_on_existing_parts(
 
 def find_split_candidates(session, artists: list[Artist] | None = None) -> list[SplitCandidate]:
     """Joined-looking artists (all of them, or just `artists`), minus the
-    ignore list and anything without songs to move."""
+    ignore list and anything without songs to move. For `artists` (an
+    import's new ones) a name joined by "and" whose parts aren't in music.db
+    is asked of MusicBrainz too (cached): every part an artist there, the
+    whole name not, is proposed pre-ticked - never for the whole database,
+    one lookup per name."""
     ignored = load_split_ignore_list()
     by_name = _artists_by_name(session)
     pool = artists if artists is not None else session.query(Artist).order_by(Artist.name).all()
@@ -107,6 +171,9 @@ def find_split_candidates(session, artists: list[Artist] | None = None) -> list[
             or _propose_split_on_existing_parts(artist, by_name, UPPERCASE_X_SEPARATOR, require_all=True)
             or _propose_split_on_existing_parts(artist, by_name, JOINING_WORD_SEPARATOR, require_all=False)
         )
+        on_musicbrainz = False
+        if proposal is None and artists is not None and (parts := _parts_on_musicbrainz(artist.name)):
+            proposal, on_musicbrainz = SplitProposal(artist.name, parts, [], False), True
         if proposal is None:
             continue
         song_count = len(artist.songs) + len(artist.additional_song_links)
@@ -117,7 +184,7 @@ def find_split_candidates(session, artists: list[Artist] | None = None) -> list[
             for n in proposal.names
             if normalize(n) in by_name and by_name[normalize(n)].id != artist.id
         }
-        candidates.append(SplitCandidate(artist, proposal, existing, song_count))
+        candidates.append(SplitCandidate(artist, proposal, existing, song_count, on_musicbrainz))
     return candidates
 
 

@@ -477,7 +477,8 @@ class _FakeVideos:
     def list(self, part, id, maxResults):
         self.calls.append(id.split(","))
         items = [{"id": v, "status": self.items[v].get("status", self.items[v]),
-                  "contentDetails": self.items[v].get("contentDetails", {})}
+                  "contentDetails": self.items[v].get("contentDetails", {}),
+                  **({"snippet": self.items[v]["snippet"]} if "snippet" in part and "snippet" in self.items[v] else {})}
                  for v in id.split(",") if v in self.items]
         return types.SimpleNamespace(execute=lambda: {"items": items})
 
@@ -520,6 +521,30 @@ def test_videos_exist_via_api_region_blocks(monkeypatch):
     assert m.videos_exist_via_api(["49JVQEOkNmY", "bqM-TDv73Bg", "notforpl000", "blockedelse"]) == {
         "49JVQEOkNmY": False, "bqM-TDv73Bg": True, "notforpl000": False, "blockedelse": True,
     }
+
+
+def test_videos_exist_via_api_tells_streams_apart(monkeypatch):
+    # 2026-11-25: LRT OPUS's 02eMuzRAapY, an ended live stream ("Offline" in
+    # yt-dlp), was listed fine and counted as playing
+    public = {"privacyStatus": "public", "uploadStatus": "processed"}
+    _fake_service(monkeypatch, {
+        "02eMuzRAapY": {"status": public, "contentDetails": {"duration": "P0D"},
+                        "snippet": {"liveBroadcastContent": "none"}},
+        "upcoming000": {"status": public, "contentDetails": {"duration": "PT0S"},
+                        "snippet": {"liveBroadcastContent": "upcoming"}},
+        "onair000000": {"status": public, "contentDetails": {"duration": "PT1H"},
+                        "snippet": {"liveBroadcastContent": "live"}},
+        "song0000000": {"status": public, "contentDetails": {"duration": "PT3M30S"},
+                        "snippet": {"liveBroadcastContent": "none"}},
+        "gone0000000": {"status": {**public, "privacyStatus": "private"}, "contentDetails": {"duration": "P0D"}},
+    })
+    streams = set()
+
+    result = m.videos_exist_via_api(["02eMuzRAapY", "upcoming000", "onair000000", "song0000000", "gone0000000"],
+                                    streams=streams)
+
+    assert all(result[v] for v in ("02eMuzRAapY", "upcoming000", "onair000000", "song0000000"))
+    assert streams == {"02eMuzRAapY", "upcoming000", "onair000000"}  # a gone one is just gone
 
 
 def test_videos_exist_via_api_batches_by_fifty(monkeypatch):

@@ -94,6 +94,7 @@ from utils.database.inbox_song_requests import (
     mark_song_added,
     song_request_facts,
     title_as_musicbrainz_spells,
+    twin_of_added_song,
     videos_saved_text,
 )
 from utils.database.song_artists import additional_artist_role, song_artist_label
@@ -487,10 +488,19 @@ def _add_requested_songs(session, cases: list, senders: dict, may, result: AutoR
         rule = user_rule_taking("song_request", case.auto_facts)
         if rule is None:
             case.auto_note = "no rule of yours (Settings -> Automation -> My rules) takes it"
+            if case.auto_facts["musicbrainz_found"] is None:
+                case.auto_note += " - MusicBrainz couldn't be reached, so its facts are unknown"
             continue
         # The artist spelt as the database or MusicBrainz spells it, as the title
         taken.append((case, artist_as_musicbrainz_spells(artist, title, matcher),
                       title_as_musicbrainz_spells(artist, title), rule))
+    # Two requests of one run for the same song under a band's two names
+    # ("Bajaga i Instruktori" / "Bajaga - Moji drugovi", 2026-11-26), or one
+    # an artist of a related name has already: not added unasked
+    twins = twin_of_added_song(session, [(case, artist, title) for case, artist, title, _ in taken], matcher)
+    for i, note in twins.items():
+        taken[i][0].auto_note = note
+    taken = [item for i, item in enumerate(taken) if i not in twins]
     if not taken:
         return
     # The import works in the menu's sessions: this one must hold no

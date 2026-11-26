@@ -138,6 +138,9 @@ def env(tmp_path, monkeypatch):
         return []
     monkeypatch.setattr(ie, "run_import_batch", fake_import)
 
+    # The review asks MusicBrainz for a suggestion (musicbrainz_suggestion()): never the real one
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": False, "corrected_artist": artist, "corrected_title": title, "corrected": False})
     answers = Answers()
     monkeypatch.setattr(review.questionary, "select", answers.select)
     monkeypatch.setattr(review.questionary, "text", answers.text)
@@ -150,7 +153,7 @@ def env(tmp_path, monkeypatch):
 
 def _request(inbox: Path, name: str, dead=(), found=(), fields=(), songs=()) -> Path:
     """dead: (song_id, title, dead id, replacement); found: (song_id, title,
-    video id); fields: (row_id, column, old, new) on songs; songs: (artist, title[, duration_s])."""
+    video id[, video title]); fields: (row_id, column, old, new) on songs; songs: (artist, title[, duration_s])."""
     path = inbox / pr.REVIEW / name
     conn = sqlite3.connect(str(path))
     with conn:
@@ -159,9 +162,9 @@ def _request(inbox: Path, name: str, dead=(), found=(), fields=(), songs=()) -> 
         for song_id, title, dead_id, replacement in dead:
             conn.execute("INSERT INTO dead_youtube_links VALUES (?, ?, 'Elise Trouw', ?, ?, ?, NULL, NULL, NULL)",
                          (song_id, title, dead_id, WHEN, replacement))
-        for song_id, title, video_id in found:
-            conn.execute("INSERT INTO found_youtube_links VALUES (?, ?, 'Elise Trouw', ?, 'vt', 'vc', ?)",
-                         (song_id, title, video_id, WHEN))
+        for song_id, title, video_id, *video_title in found:
+            conn.execute("INSERT INTO found_youtube_links VALUES (?, ?, 'Elise Trouw', ?, ?, 'vc', ?)",
+                         (song_id, title, video_id, (video_title or ["vt"])[0], WHEN))
         for row_id, column, old, new in fields:
             conn.execute("INSERT INTO field_corrections VALUES ('songs', ?, ?, ?, ?, ?, 'Chromatic', "
                          "'Elise Trouw', ?)", (row_id, column, old, new, row_id, WHEN))
@@ -339,15 +342,59 @@ def test_after_the_dead_links_the_found_links_are_asked(env):
 
 # ==================== several links correct ====================
 
-def _checked_as(monkeypatch, our_video, plays=None, dead_gone=True):
+def _checked_as(monkeypatch, our_video, plays=None, dead_gone=True, streams=()):
     def check(cases, on_case=None):
         for case in cases:
             case.our_video_id = our_video
             case.dead_still_plays = False if dead_gone else None
             case.plays = plays or {}
+            case.streams = list(streams)
             case.checked_at = WHEN
         return {"api": True, "blocked": 0}
     monkeypatch.setattr(review, "check_link_cases", check)
+
+
+def test_a_remix_leina_radio_found_for_a_song_that_isnt_one_comes_after_our_link(env, monkeypatch, capsys):
+    # 2026-11-25: Renman - "Nemreš Bolivit": Leina Radio's "(Space Cat Remix)"
+    # was pre-selected over our search's original
+    _checked_as(monkeypatch, "ours1", plays={"remix1": True, "ours1": True})
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db",
+             found=[(4602, "Losing Sleep", "remix1", "Losing Sleep (Space Cat Remix)")])
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+
+    review.resolve_new_requests()
+
+    titles = env["answers"].selects[-1][1]
+    assert titles[0] == "Use the link our search found (ours1)"  # questionary's default
+    assert "Use Leina Radio's link (remix1) - its title names a remix (Space Cat Remix), the song isn't one" in titles
+    assert "names a remix (Space Cat Remix), the song isn't one" in capsys.readouterr().out
+
+
+def test_a_remix_stays_first_for_a_song_that_is_one(env, monkeypatch):
+    env["songs"][4602].version_kind = "remix"
+    env["session"].commit()
+    _checked_as(monkeypatch, "ours1", plays={"remix1": True, "ours1": True})
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db",
+             found=[(4602, "Losing Sleep", "remix1", "Losing Sleep (Space Cat Remix)")])
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+
+    review.resolve_new_requests()
+
+    assert env["answers"].selects[-1][1][0] == "Use Leina Radio's link (remix1)"
+
+
+def test_a_live_stream_isnt_shown_playing_nor_offered_first(env, monkeypatch, capsys):
+    # 2026-11-25: LRT OPUS - Ore's 02eMuzRAapY, an ended live stream, "plays here" and pre-selected
+    _checked_as(monkeypatch, "ours1", plays={"02eMuzRAapY": None, "ours1": True}, streams=["02eMuzRAapY"])
+    _request(env["inbox"], "2026-10-14_09-00-00_001.db", found=[(4602, "Losing Sleep", "02eMuzRAapY")])
+    env["answers"].add(REVIEW_LABEL, review._SKIP)
+
+    review.resolve_new_requests()
+
+    assert env["answers"].selects[-1][1][0] == "Use the link our search found (ours1)"
+    out = capsys.readouterr().out
+    assert "a live stream, or one that ended" in out and "plays here" in out.split("Our search:")[1]
+    assert "plays here" not in out.split("Leina Radio:")[1].split("\n")[0]
 
 
 def test_both_links_correct_asks_the_main_one_and_saves_the_other_as_additional(env, monkeypatch):
@@ -658,8 +705,10 @@ def test_requests_of_songs_deleted_since_are_listed_and_can_be_rejected(env, cap
     assert {d["decision"] for d in _decisions(env).values()} == {sr.REJECT}
     assert _folder(env, pr.PROCESSED) == [real_file]
 
+    # Nothing left to review; the rejections can only be reopened
+    env["answers"].add("Back")
     review.resolve_new_requests()
-    assert "No new requests in the inbox." in capsys.readouterr().out
+    assert env["answers"].selects[-1][1] == ["Reopen rejected requests (asked again in the next review)", "Back"]
 
 
 
@@ -685,3 +734,88 @@ def test_a_skipped_song_keeps_its_file_in_review_while_the_others_are_added(env,
     assert _folder(env, pr.REVIEW) == ["shianman_2026-11-25_13-00-00_014.db"]
     assert _folder(env, pr.PROCESSED) == []
     assert "song:" + sr.song_key("Mandalay", "Opposites") not in _decisions(env)
+
+
+# ==================== 2026-11-26 review round ====================
+
+def test_a_request_as_long_as_a_mix_is_offered_as_a_full_album_first(env):
+    # Mixes are added, not rejected (owner, 2026-11-26): the Mik4000 mix
+    _request(env["inbox"], "shianman_2026-11-25_19-40-20_016.db",
+             songs=[("Mik4000", "WINDOWS XP DnB mix", 3600), ("babotokki", "Masayoshi Takanaka mix")])
+    env["answers"].add(REVIEW_LABEL, "Add it as a full album / mix", "Add it as a full album / mix")
+
+    review.resolve_new_requests()
+
+    first, second = env["answers"].selects[1][1], env["answers"].selects[2][1]
+    assert first[0] == "Add it as a full album / mix (Mik4000 - WINDOWS XP DnB mix)"
+    # No length known: offered after adding it as asked
+    assert second[0] == "Add it to the database (babotokki - Masayoshi Takanaka mix)"
+    assert "Add it as a full album / mix (babotokki - Masayoshi Takanaka mix)" in second
+    assert [(e.artist, e.title, e.get("full_album")) for e in env["imported"]] == [
+        ("Mik4000", "WINDOWS XP DnB mix", True), ("babotokki", "Masayoshi Takanaka mix", True)]
+
+
+def test_no_musicbrainz_lookup_before_the_first_case_is_asked(env, monkeypatch):
+    # 2026-11-26: 24 requests took ~12 minutes before the first question
+    events = []
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: events.append(
+        ("musicbrainz", f"{artist} {title}")) or {"found": False, "corrected_artist": artist, "corrected_title": title})
+    _request(env["inbox"], "2026-11-26_09-00-00_001.db",
+             songs=[("SomeChannel1", "First Song"), ("SomeChannel2", "Second Song"), ("SomeChannel3", "Third")])
+    select = env["answers"].select
+
+    def asked(question, choices, **kwargs):
+        events.append(("asked", question))
+        return select(question, choices, **kwargs)
+    monkeypatch.setattr(review.questionary, "select", asked)
+    env["answers"].add(REVIEW_LABEL, "Skip for now", _STOP_LABEL)
+
+    review.resolve_new_requests()
+
+    song_questions = [i for i, e in enumerate(events) if e == ("asked", "What should the database do?")]
+    looked_up = [i for i, e in enumerate(events) if e[0] == "musicbrainz"]
+    # Each case's lookups right before its question; the third, never shown, none
+    assert looked_up and not any("SomeChannel3" in events[i][1] for i in looked_up)
+    second = [i for i in looked_up if "SomeChannel2" in events[i][1]]
+    assert second and min(second) > song_questions[0]
+    assert max(i for i in looked_up if "SomeChannel1" in events[i][1]) < song_questions[0]
+
+
+_STOP_LABEL = "Stop here"
+
+
+def test_rejected_requests_are_reopened_from_the_menu(env, monkeypatch, capsys):
+    session = env["session"]
+    name = "shianman_2026-11-23_17-16-56_213.db"
+    (env["inbox"] / pr.PROCESSED).mkdir()
+    path = _request(env["inbox"], name, songs=[("babotokki", "Masayoshi Takanaka mix")])
+    path.rename(env["inbox"] / pr.PROCESSED / name)
+    session.add(RejectedSongRequest(artist="babotokki", title="Masayoshi Takanaka mix",
+                                    youtube_video_id="ldzbvjLbz3Y", rejected_at="2026-11-25T18:41:04+01:00"))
+    session.commit()
+    (env["inbox"] / pr.DECISIONS_FILE).write_text(json.dumps({"song:babotokki|masayoshi takanaka mix": {
+        "decision": "rejected", "artist": "babotokki", "title": "Masayoshi Takanaka mix",
+        "decided_at": "2026-11-25T18:41:04+01:00", "files": [name]}}))
+    shown = []
+    monkeypatch.setattr(review, "tick_items", lambda question, items, label, **kw: shown.extend(
+        label(i) for i in items) or items)
+    env["answers"].add("Reopen rejected requests", REVIEW_LABEL, "Skip for now")
+
+    review.resolve_new_requests()
+
+    assert shown == ["babotokki - Masayoshi Takanaka mix  (https://youtu.be/ldzbvjLbz3Y; rejected 2026-11-25 18:41)"]
+    assert session.query(RejectedSongRequest).count() == 0
+    assert _decisions(env) == {}
+    # Asked about again right away
+    assert env["answers"].selects[-1][0] == "What should the database do?"
+    assert _folder(env, pr.REVIEW) == [name]
+
+
+def test_a_corrected_mix_is_asked_whether_its_a_full_album(env):
+    _request(env["inbox"], "2026-11-26_09-30-00_001.db", songs=[("Mik4000", "WINDOWS XP", 3600)])
+    env["answers"].add(REVIEW_LABEL, "Correct the artist", "Mik4000", "WINDOWS XP DnB Mix")
+    env["yes_no"].append(True)
+
+    review.resolve_new_requests()
+
+    assert [(e.title, e.get("full_album")) for e in env["imported"]] == [("WINDOWS XP DnB Mix", True)]

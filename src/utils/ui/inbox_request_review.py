@@ -17,10 +17,10 @@ Anything skipped stays in review/ for next time. The screen also lists what
 the automatic pass changed."""
 
 import questionary
-from utils.ui.prompts import ask_yes_no, choose
+from utils.ui.prompts import ask_yes_no, choose, tick_items
 from utils.ui.song_colors import as_rich_markup, song_tokens
 
-from config.constants import INBOX_CHECK_MAX_AGE_HOURS, SONG_KIND_FULL_ALBUM
+from config.constants import INBOX_CHECK_MAX_AGE_HOURS, SONG_KIND_FULL_ALBUM, VERSION_KIND_LABELS
 from utils.database.database_sessions import open_and_set_global_database_sessions, submit_global_database_session
 from utils.database.inbox_auto import auto_resolve
 from utils.database.inbox_field_corrections import (
@@ -48,23 +48,29 @@ from utils.database.inbox_field_corrections import (
 )
 from utils.database.inbox_found_links import REJECTED, apply_found_link_decision, collect_found_link_cases
 from utils.database.inbox_song_requests import (
+    MusicBrainzLookups,
     collect_song_request_cases,
     deleted_song_requests,
+    full_album_offer,
     is_generic_channel_artist,
     mark_song_added,
+    rejected_requests,
     reject_deleted_song_request,
+    reopen_rejected_requests,
     reject_song_request,
+    suggest_from_musicbrainz,
     videos_saved_text,
 )
 from utils.database.inbox_field_corrections import OPEN as FIELD_OPEN
 from utils.database.inbox_field_corrections import UNSUPPORTED as FIELD_UNSUPPORTED
 from utils.database.latin_names import LATIN_COLUMNS, name_of
 from utils.database.artist_reassignment import is_unused
-from utils.database.datatables import Artist
+from utils.database.datatables import Artist, RejectedSongRequest
 from utils.database.song_artists import additional_artist_role, count_artist_songs, song_artist_label
 from utils.database.song_kinds import looks_like_full_album
 from utils.ui.artist_change import ask_old_artist_role, offer_removing_emptied
 from utils.common.cover_names import title_with_cover
+from utils.common.version_names import read_version
 from utils.common.romanize import suggest_latin
 from utils.database.inbox_requests import (
     INBOX_DIR,
@@ -114,8 +120,39 @@ def _plays(value: bool | None) -> str:
     return "[green]plays here[/green]" if value else "[red]doesn't play here[/red]"
 
 
+def _plays_of(case, video_id: str) -> str:
+    """_plays() of one of the case's videos; a stream says so."""
+    if video_id in case.streams:
+        return "[yellow]a live stream, or one that ended (YouTube API) - not counted as playing[/yellow]"
+    return _plays(case.plays.get(video_id))
+
+
 def _not_playing_note(value: bool | None) -> str:
     return " - didn't play here" if value is False else ""
+
+
+def _unasked_version(case, video_id: str) -> str | None:
+    """"a remix (Space Cat Remix)" when the video's title (as Leina Radio
+    sent it) names a version the song isn't - 2026-11-25: "Nemreš Bolivit
+    (Space Cat Remix)" was offered first for Renman's original; None
+    otherwise, also for our search's video (its title isn't kept; its
+    matcher keeps a version's marker apart already)."""
+    title = next((r.title for r in case.all_replacements() if r.video_id == video_id and r.title), None)
+    reading = read_version(title)
+    if reading is None or reading.kind == case.song.version_kind:
+        return None
+    return f"a {VERSION_KIND_LABELS[reading.kind].lower()}" + (f" ({reading.label})" if reading.label else "")
+
+
+def _version_note(case, video_id: str) -> str:
+    version = _unasked_version(case, video_id)
+    return f" - its title names {version}, the song isn't one" if version else ""
+
+
+def _offered_later(case, video_id: str) -> bool:
+    """A video not to offer first: a stream, or one naming a version the
+    song isn't - the other video comes first then (questionary's default)."""
+    return video_id in case.streams or _unasked_version(case, video_id) is not None
 
 
 def _show_bad(case) -> None:
@@ -127,7 +164,7 @@ def _show_ours(case) -> None:
     if case.our_video_id:
         same = " [green](same as Leina Radio's)[/green]" if any(
             r.video_id == case.our_video_id for r in case.replacements) else ""
-        show(f"    Our search:   {_url(case.our_video_id)}  {_plays(case.plays.get(case.our_video_id))}{same}")
+        show(f"    Our search:   {_url(case.our_video_id)}  {_plays_of(case, case.our_video_id)}{same}")
     else:
         show("    Our search:   [dim]found nothing[/dim]")
 
@@ -150,8 +187,10 @@ def _show_case(case, position: str) -> None:
         about = " - ".join(escape(x) for x in (r.title, r.channel) if x)
         latest = ("  [dim](its latest pick)[/dim]" if not case.dead_video_id and i == 0
                   and len(case.replacements) > 1 else "")
+        version = _unasked_version(case, r.video_id)
+        warning = f"  [yellow]names {escape(version)}, the song isn't one[/yellow]" if version else ""
         show(f"    {'Suggested:  ' if case.dead_video_id else 'Leina Radio:'}  {_url(r.video_id)}  "
-             f"{_plays(case.plays.get(r.video_id))}" + (f"  {about}" if about else "") + latest)
+             f"{_plays_of(case, r.video_id)}" + (f"  {about}" if about else "") + warning + latest)
     _show_bad(case)
     _show_ours(case)
     files = escape(describe_files({r.file_name for r in case.reports}))
@@ -168,15 +207,18 @@ def _video_choices(case, label: str) -> list:
     """The phone's videos, ours, those found bad before, paste, "N/A".
     "Use ..." takes a new video; "Keep ..." (_KEEP) only ever means leaving
     what the database has.
-    Offered even when the check said it doesn't play - the user may know better."""
+    Offered even when the check said it doesn't play - the user may know better.
+    A stream or a version the song isn't comes after the other video
+    (_offered_later()), so it isn't the one pre-selected."""
     choices = []
     for r in case.replacements:
         also = " - our search found it too" if r.video_id == case.our_video_id else ""
-        note = _not_playing_note(case.plays.get(r.video_id))
+        note = _not_playing_note(case.plays.get(r.video_id)) + _version_note(case, r.video_id)
         choices.append(questionary.Choice(f"Use {label} ({r.video_id}){also}{note}", (USE_VIDEO, r.video_id)))
     if case.our_video_id and not any(r.video_id == case.our_video_id for r in case.replacements):
         note = _not_playing_note(case.plays.get(case.our_video_id))
         choices.append(questionary.Choice(f"Use the link our search found ({case.our_video_id}){note}", (USE_VIDEO, case.our_video_id)))
+    choices.sort(key=lambda choice: _offered_later(case, choice.value[1]))  # stable: the order otherwise
     for r in case.bad_replacements:
         choices.append(questionary.Choice(f"Use {label} ({r.video_id}) - found bad before: {case.bad[r.video_id]}",
                                           (USE_VIDEO, r.video_id)))
@@ -583,6 +625,7 @@ def _review_field_corrections(session, requests) -> tuple[list, bool]:
 
 _ADD = "add"
 _ADD_SUGGESTED = "add suggested"
+_ADD_FULL_ALBUM = "add full album"
 _CORRECT = "correct"
 _REJECT_SONG = "reject"
 
@@ -627,16 +670,24 @@ def _show_song_request(case, position: str) -> None:
 
 
 def _ask_song_request(case):
-    """(_ADD, artist, title), _REJECT_SONG, _SKIP or _STOP."""
+    """(_ADD, artist, title, full_album), _REJECT_SONG, _SKIP or _STOP. A
+    request as long as a full album or a mix (full_album_offer()) is offered
+    as one first: mixes are added, not rejected (owner, 2026-11-26)."""
     report = case.latest
     suggested = case.suggested
+    offer = full_album_offer(case)
+    as_full_album = ([questionary.Choice([("", "Add it as a full album / mix ("),
+                                          *song_tokens(report.artist, report.title), ("", ")")], _ADD_FULL_ALBUM)]
+                     if offer is not False and report.artist and not is_generic_channel_artist(report.artist) else [])
     choices = [
+        *(as_full_album if offer else []),
         *[questionary.Choice([("", "Add it as "), *song_tokens(*suggestion)], (_ADD_SUGGESTED, suggestion))
           for suggestion in case.suggestions],
         # A generic Topic channel ("Release") is never the artist
         *([questionary.Choice([("", "Add it as asked (" if suggested else "Add it to the database ("),
                                *song_tokens(report.artist, report.title), ("", ")")], _ADD)]
           if report.artist and not is_generic_channel_artist(report.artist) else []),
+        *(as_full_album if offer is None else []),
         questionary.Choice("Correct the artist / title, then add it", _CORRECT),
         questionary.Choice("Reject - Leina Radio won't ask for it again", _REJECT_SONG),
         questionary.Choice(_SKIP, _SKIP),
@@ -647,33 +698,37 @@ def _ask_song_request(case):
         if answer is None:
             return _STOP
         if isinstance(answer, tuple) and answer[0] == _ADD_SUGGESTED:
-            return _ADD, *answer[1]
-        if answer == _ADD:
-            return _ADD, report.artist, report.title
+            return _ADD, *answer[1], False
+        if answer in (_ADD, _ADD_FULL_ALBUM):
+            return _ADD, report.artist, report.title, answer == _ADD_FULL_ALBUM
         if answer != _CORRECT:
             return answer
         default_artist, default_title = suggested or (report.artist, report.title)
         artist = (questionary.text("Artist:", default=default_artist or "").ask() or "").strip()
         title = (questionary.text("Title:", default=default_title or "").ask() or "").strip()
-        if artist and title:
-            return _ADD, artist, title
-        show("[red]Both the artist and the title are needed.[/red]")
+        if not (artist and title):
+            show("[red]Both the artist and the title are needed.[/red]")
+            continue
+        full_album = offer is not False and bool(ask_yes_no("Add it as a full album / mix (no = a song)?"))
+        return _ADD, artist, title, full_album
 
 
 def _add_requested_songs(session, approved: list, after_import=None) -> None:
-    """The approved songs through the import, in one batch (its questions
-    about similar artists / songs come at the end, as for any import), then
-    `after_import(result)` - the menu's offer to fill in their missing data."""
+    """The approved songs ((case, artist, title, full_album) each) through
+    the import, in one batch (its questions about similar artists / songs
+    come at the end, as for any import), then `after_import(result)` - the
+    menu's offer to fill in their missing data."""
     if not approved:
         return
     from utils.discoveries.import_engine import run_import_batch
 
     show(f"\nAdding {len(approved)} song(s) Leina Radio asked for...")
-    entries = [case.metadata(artist, title) for case, artist, title in approved]
+    entries = [case.metadata(artist, title, full_album=True) if full_album else case.metadata(artist, title)
+               for case, artist, title, full_album in approved]
     result = run_import_batch(entries)
     submit_global_database_session()
     left_out = []
-    for (case, artist, title), entry in zip(approved, entries):
+    for (case, artist, title, _), entry in zip(approved, entries):
         if entry.song_id is None:
             left_out.append(f"{artist} - {title}")
         else:
@@ -687,7 +742,10 @@ def _add_requested_songs(session, approved: list, after_import=None) -> None:
 
 def _review_song_requests(session, requests, after_import=None) -> tuple[list, bool]:
     """Returns (cases, stopped)."""
-    cases = collect_song_request_cases(session, requests)
+    from utils.discoveries.import_engine import LocalSongMatcher
+
+    matcher = LocalSongMatcher(session)
+    cases = collect_song_request_cases(session, requests, matcher)
     settled = [c for c in cases if not c.pending]
     open_cases = [c for c in cases if c.pending]
     if settled:
@@ -703,7 +761,11 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
         show(f"\n{len(open_cases)} song(s) Leina Radio played that aren't in the database:")
     approved = []
     stopped = False
+    # MusicBrainz's suggestion for one case at a time, right before it's
+    # shown - never all of them before the first question
+    lookups = MusicBrainzLookups()
     for i, case in enumerate(open_cases, 1):
+        suggest_from_musicbrainz(case, matcher, lookups)
         _show_song_request(case, f"[{i}/{len(open_cases)}]")
         answer = _ask_song_request(case)
         if answer == _STOP:
@@ -715,8 +777,8 @@ def _review_song_requests(session, requests, after_import=None) -> tuple[list, b
             reject_song_request(session, case)
             submit_global_database_session()
             continue
-        _, artist, title = answer
-        approved.append((case, artist, title))
+        _, artist, title, full_album = answer
+        approved.append((case, artist, title, full_album))
     # What was approved before a stop is still added
     _add_requested_songs(session, approved, after_import)
     return cases, stopped
@@ -757,6 +819,37 @@ def _review_deleted_requests(session) -> bool:
     return False
 
 
+def _rejected_label(item) -> str:
+    when = (item.rejected_at or "?")[:16].replace("T", " ")
+    videos = ", ".join(_url(v) for v in item.youtube_video_ids) or "no video"
+    return f"{_song_label(item.artist, item.title)}  ({videos}; rejected {when})"
+
+
+def _reopen_rejected(session) -> bool:
+    """Manage database -> "Resolve new requests" -> "Reopen rejected
+    requests": tick rejections to undo (inbox_song_requests.reopen_rejected_requests());
+    whether any were. Nothing is ticked at first."""
+    items = rejected_requests(session)
+    if not items:
+        show("No rejected song requests.")
+        return False
+    show(f"\n{len(items)} rejected song request(s), newest first. A reopened one is no longer rejected "
+         "(Leina Radio stops showing it so) and the next review asks about it again.")
+    picked = tick_items("Which ones to reopen (space toggles, enter confirms)?", items, _rejected_label)
+    if not picked:
+        show("Nothing reopened.")
+        return False
+    moved = reopen_rejected_requests(session, picked)
+    show(f"[green]Reopened {len(picked)} request(s)[/green]; {len(moved)} file(s) moved back to "
+         f"{INBOX_DIR / 'review'}.")
+    without_file = [item for item in picked if not item.files or not set(item.files) & set(moved)]
+    if without_file:
+        warn(f"{len(without_file)} of them had no file left in processed/ - the next review can't ask about "
+             "them; add those songs by hand if they're wanted: "
+             + "; ".join(_song_label(item.artist, item.title) for item in without_file))
+    return True
+
+
 def show_auto_changes(entries: list[dict]) -> None:
     for entry in entries:
         when = (entry.get("at") or "?")[:16].replace("T", " ")
@@ -795,19 +888,26 @@ def resolve_new_requests(after_import=None) -> None:
     show(f"Waiting for your review (checked automatically): {review_count}")
     if deleted_count:
         show(f"Songs Leina Radio asked for, deleted since: {deleted_count}")
+    rejected_count = session.query(RejectedSongRequest).count()
     review_label = "Review the requests"
     history_label = f"Show what the automatic check changed ({len(history)})"
+    reopen_label = "Reopen rejected requests (asked again in the next review)"
     choices = (([review_label] if new_count or review_count or deleted_count else [])
-               + ([history_label] if history else []))
+               + ([history_label] if history else []) + ([reopen_label] if rejected_count else []))
     if not choices:
         show("No new requests in the inbox.")
         return
     answer = questionary.select("What now?", choices=choices + ["Back"]).ask()
-    if answer == history_label:
-        show_auto_changes(history)
-        mark_auto_report_shown()
-        # Back to the question: the report alone ended Run all's requests step unreviewed
-        choices.remove(history_label)
+    # Back to the question after these: the report alone ended Run all's
+    # requests step unreviewed
+    while answer in (history_label, reopen_label):
+        if answer == history_label:
+            show_auto_changes(history)
+            mark_auto_report_shown()
+        elif _reopen_rejected(session):
+            if review_label not in choices:
+                choices.insert(0, review_label)
+        choices.remove(answer)
         if not choices:
             return
         answer = questionary.select("What now?", choices=choices + ["Back"]).ask()

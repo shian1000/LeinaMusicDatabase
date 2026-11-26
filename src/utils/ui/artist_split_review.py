@@ -38,7 +38,7 @@ def review_artist_splits(artists: list[Artist] | None = None) -> int:
             show("No joined artist names to split.")
         return 0
 
-    review_header(f"REVIEW: {len(candidates)} artist name(s) look like several artists", "Pre-selected: a feat./x credit, or every part already exists as an artist.")
+    review_header(f"REVIEW: {len(candidates)} artist name(s) look like several artists", "Pre-selected: a feat./x credit, or every part already exists as an artist (here, or on MusicBrainz for a new name joined by 'and').")
     selected = tick_items("Select the names to split (space toggles, enter confirms):", candidates, _describe,
                           checked=lambda c: c.preselected, rule="split_artists",
                           facts=lambda c: {"confident": c.proposal.confident, "parts": len(c.proposal.names),

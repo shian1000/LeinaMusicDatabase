@@ -330,7 +330,14 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   questions are `import_existing_song` / `import_existing_artist`, answered by the owner's rules
   for them, else no (a new song or artist - require `closest_song_of_artist_score` (not
   `closest_song_score`, mostly the title across all artists) / `artist_known` in the
-  `song_request` rule to keep that from happening). The `add_songs` permission is only a fact. The owner's answers (no `by` in `decisions.json`) go into the decision log with the
+  `song_request` rule to keep that from happening). When MusicBrainz couldn't be reached (503s,
+  timeouts) the `musicbrainz_*` facts are unknown, so no rule holds on them, and the note says
+  MusicBrainz couldn't be reached; such an answer isn't cached (`check_spelling()` gives `found`
+  None, `spelling_lookup_failed()`), the next pass asks again. Until 2026-11-25 it was cached as
+  "not on MusicBrainz" (AURORA's "Forgotten Love"; 130 such entries): to ask again about every
+  cached "no match" answer once, with the app and the automation closed, run
+  `cd src && ../venv/bin/python -m utils.common.spellcheck_cache --forget-not-found`
+  (it refuses while the app lock is held). The `add_songs` permission is only a fact. The owner's answers (no `by` in `decisions.json`) go into the decision log with the
   pass's note, `data/decision_log.jsonl` (`utils/common/decision_log.py`), as do every
   `tick_items()` / `ask_yes_no()` answer, under the menu entry or "Run all" step they were asked
   in - the material for new rules; only appended, the app never reads it.
@@ -373,7 +380,13 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   `videos_correct_together()`) asks which is the main link and saves the rest in
   `additional_youtube_videos`; a reported link YouTube didn't confirm gone may stay the main one. The check is `video_playability()`: True / False / None, where
   None means YouTube blocked it (HTTP 429, "confirm you're not a bot") and is shown as "couldn't
-  check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way. Answers go to `Inbox/decisions.json`; only "kept" is read
+  check", never as dead — on 2026-10-13 a video that played fine on the phone looked dead this way.
+  A video the Data API lists as a live or upcoming stream or 0 seconds long (`case.streams`; an
+  ended stream without a recording is listed fine - LRT OPUS's 02eMuzRAapY, 2026-11-25) is never
+  counted as playing: not asked of yt-dlp, `None`, shown as a stream. Such a video, and one whose
+  title as Leina Radio sent it names a version the song isn't (`read_version()`: "Nemreš Bolivit
+  (Space Cat Remix)" for Renman's original, 2026-11-25, with a warning on its line and choice),
+  comes after the other candidate in the list, so it isn't the one pre-selected. Answers go to `Inbox/decisions.json`; only "kept" is read
   back (it changes nothing in the database, so a pending or repeated report would otherwise be asked
   again, unless it was detected after the answer).
 - For `field_corrections` (`utils/database/inbox_field_corrections.py`, app handoff
@@ -465,10 +478,17 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   title (normalized), YouTube video or Spotify track is settled without asking. Deleting a row (app
   closed) only stops the phone showing the track as rejected - it asks for a song once ever (its
   outbox remembers what it sent; seen 2026-11-24: "already requested: 2"), so it won't ask again by
-  itself; add a wanted song by hand instead. To review a rejection made by mistake, also
-  move its entry out of `Inbox/decisions.json` (into `decisions_reopened_<date>.json`, as on
-  2026-11-18 and 2026-11-21) and its file from `processed/` back to `review/` - the menu has no
-  undo. The other way round, a song found in the
+  itself; add a wanted song by hand instead. A rejection made by mistake is undone from
+  "Resolve new requests" → "Reopen rejected requests" (2026-11-26; `rejected_requests()` /
+  `reopen_rejected_requests()`): it lists the rejections newest first (artist, title, video,
+  date; a `decisions.json` "rejected" answer with the rows its reports' names, videos or Spotify
+  tracks match, then rows no answer names), and for each ticked one deletes those rows through
+  the session (committed first), moves the answer into `decisions_reopened_<date>.json` (what
+  was done by hand on 2026-11-18 and 2026-11-21, `inbox_requests.move_decisions()`, with
+  `reopened_at`) and its file(s) from `processed/` back to `review/`; the review is offered
+  right after. With no rows left, nothing settles it as "rejected before", and Leina Radio stops
+  showing the track as rejected from the next copy. A file no longer in `processed/` is left
+  where it is (the screen says which can't be asked again). The other way round, a song found in the
   database or added is a row of `settled_song_requests` (migration 0024) with its `songs.id`:
   Leina Radio then shows its track as that song, and a later request matching one the same way
   is settled as that song. The rows for requests settled before the table were written once
@@ -503,7 +523,23 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   `closest_song_of_artist_score` compares only the artist's own songs (`closest_song_score`
   is mostly the title: another artist's "Wena" scored 1.0) - the owner's "MusicBrainz agrees"
   rule requires it `<= 0.84`, so "czas pomyka" next to Voo Voo's "Czas pomyka II" (0.88) waits
-  for review. A title the pass adds written all in lower / upper case takes MusicBrainz's
+  for review. Nor does it see a band under its two names: on 2026-11-26 one run added both
+  #7018 "Bajaga i Instruktori - Moji drugovi" and #7019 "Bajaga - Moji drugovi" (two files, two
+  artists in music.db). So, whatever the rules say, the pass leaves for review a request that
+  would add a title (normalized, as stored) another request of the same run adds first for an
+  artist of a related name - equal, one name starting the other by whole words
+  (`related_artist_names()`), or the same database artist - or that an artist of a related
+  name other than its own already has (`twin_of_added_song()`, the note says which).
+  **Mixes and compilations are added, not rejected** (owner, 2026-11-26): a request as long as a
+  full album or a mix (`full_album_offer()`: `FULL_ALBUM_MIN_DURATION_S`, or a full-album marker
+  in its title) is offered "Add it as a full album / mix (artist - title)" first, with the names
+  as asked; one with no length whose title names a mix / mixtape / playlist / compilation (a word
+  of its own, not "remix") gets it offered after "as asked"; "Correct ..." then asks whether it
+  is one. It is imported with the entry's `full_album` set: `create_song_entry()` marks the new
+  song `full_album` (`set_song_kind()`, filed under its own title - as "Andrea Ferro - Italian
+  Disco/Funk Mixtape") and never reads its "... Mix" as a remix (`mark_new_song_version()` isn't
+  run for it). A song the import finds instead keeps its kind. The automatic pass doesn't mark
+  anything so - a long video may be a long song. A title the pass adds written all in lower / upper case takes MusicBrainz's
   spelling of the same words (`title_as_musicbrainz_spells()`).
   Checked on 2026-11-25 (`shianman_2026-11-25_13-00-00_014.db`): a new song or artist the import
   adds - asked for or by a rule, in the menu or unattended - takes MusicBrainz's accents when they
@@ -564,9 +600,44 @@ with `--inbox` = `Settings.phone_inbox_dir` (`.../Database/Inbox`):
   tag, named "Title Artist") is also split when its title *ends* with one artist music.db knows by
   exactly that name, same length rules ("Arriving somewhere but not here Porcupine Tree" ->
   Porcupine Tree / "Arriving somewhere but not here", then settled as already in the database);
-  with a channel as the artist it isn't, the channel being the likelier artist. MusicBrainz isn't asked (yet), so a title whose artists are all new gets none.
+  with a channel as the artist it isn't, the channel being the likelier artist. When music.db
+  knows neither side, the owner's review (never the automatic pass, which never uses it) asks
+  MusicBrainz (`musicbrainz_suggestion()`, through the cached `check_spelling()`): a recording
+  titled like the request's artist by an artist named like its title suggests the swap ("Moya" /
+  "Godspeed You! Black Emperor" -> Godspeed You! Black Emperor / "Moya", 2026-11-25), and a
+  recording by an artist the title starts with suggests the split ("Behnam37" / "Sylvie Vartan
+  L'amour c'est comme une cigarette" -> Sylvie Vartan / "L'amour c'est comme une cigarette"), each
+  only when the recording is at least `SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY` alike on both
+  names, and not when MusicBrainz has the request as asked. The split reads the recording
+  `check_spelling()` keeps (`mb_artist` / `mb_title`); an answer cached before 2026-11-26 has none,
+  so each cut of the title's first `SONG_REQUEST_TITLE_ARTIST_MAX_WORDS` words is looked up once.
+  A MusicBrainz suggestion settles nothing (no "already in the database" check by it). It is
+  asked for one case at a time, right before that case is shown (`suggest_from_musicbrainz()`,
+  `MusicBrainzLookups`): asked for every case first, 24 requests kept the owner ~12 minutes
+  before the first question (2026-11-26, rate limit and 503 retries). Each case may make at
+  most `SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS` lookups MusicBrainz must answer (cached ones are
+  free), and once one goes unanswered the rest of the review asks it nothing.
+  The title is read without the punctuation at its ends and without a first / last " - " part
+  naming only a record label and a year (`without_label_parts()`: "Ella Baila Sola" / "-
+  Eslabon Armado y Peso Pluma - DEL Records 2023" had been suggested as artist "- Eslabon
+  Armado y Peso Pluma", title "DEL Records 2023"); a whole title of known artists joined by
+  "y" / "&" / ... is the swap too ("Eslabon Armado & Peso Pluma" / "Ella Baila Sola"), and a
+  label's part is never a split's title. A title is split at ": " only when the request's artist
+  isn't a credit of several artists (`credits_several_artists()`): "Sandfall Interactive and
+  Lorien Testard" / "Clair Obscur: Expedition 33" is a work's title, not the band Clair Obscur's
+  "Expedition 33" - such a split needs MusicBrainz's recording of it (the split above). A
+  channel named as an artist plus a channel affix (`channel_base_name()`: "Official" before or
+  after, "Music" or "VEVO" after, spaced or CamelCase - "PomplamooseMusic", "OfficialClutch";
+  not "Records", "TV", "Band", which end real names) is that artist when music.db knows it by
+  exactly that name (the automatic pass too), else - the review only - when MusicBrainz has an
+  artist of that name (`utils/common/musicbrainz_artists.py`, one cached artist search per name,
+  `data/musicbrainz_artists.json`).
   The review offers it first, and the "already
-  in the database" / "rejected before" checks use it too.
+  in the database" / "rejected before" checks use the others too.
+  A song added from a request whose title ends with a bracket that only names the album Fill
+  missing data → Albums then finds for it ("Mandalay - Another [Empathy]", album "Empathy",
+  2026-11-25) loses that bracket (`requested_title_without_album()`: a `settled_song_requests`
+  row for the song, case and accents aside).
   A request from Spotify gets none of these: its artist is Spotify's credit, never a channel
   ("Petite Meller" / "High Forever" was suggested "The High - Forever", 2026-11-21). It is only
   suggested without the artists Spotify also lists that its title already credits, a guest or the

@@ -271,9 +271,11 @@ def youtube(monkeypatch):
     state = {"found": {}, "api": {}, "ytdlp": {}, "api_calls": []}
     monkeypatch.setattr(m, "search_video_ytdlp", lambda artist, title, **k: state["found"].get(title))
 
-    def api(ids):
+    def api(ids, streams=None):
         ids = list(ids)
         state["api_calls"].append(ids)
+        if streams is not None:
+            streams.update(v for v in ids if v in state.get("streams", ()))
         return {v: state["api"].get(v, True) for v in ids}
 
     monkeypatch.setattr(m, "videos_exist_via_api", api)

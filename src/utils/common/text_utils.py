@@ -139,10 +139,25 @@ def _cached_for_input(cached: dict, artist: str, title: str, threshold: float) -
     return result
 
 
+MUSICBRAINZ_UNREACHABLE = "MusicBrainz couldn't be reached"
+
+
+def spelling_lookup_failed(result: dict | None) -> bool:
+    """Did this check_spelling() answer come from MusicBrainz not answering
+    (found None), rather than from a search that found nothing? Such an
+    answer corrects nothing and is cached nowhere."""
+    return bool(result) and result.get("found") is None
+
+
 def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
     """
     Queries MusicBrainz to verify/correct spelling.
     Includes fallback logic, normalization, and extensive logging.
+
+    "found" is True (a recording), False (MusicBrainz answered, nothing -
+    cached like a hit) or None when MusicBrainz couldn't be reached
+    (spelling_lookup_failed(); "error" says so, the input comes back
+    uncorrected and nothing is cached, so the next call asks again).
     """
     from utils.common.normalizer import normalize as central_normalize
 
@@ -176,29 +191,49 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
     def perform_search(q, retries=2):
         """Run a single MusicBrainz recording search. Rate limiting, timeout and
-        429/503 retry/backoff are handled centrally by mb_get()."""
+        429/503 retry/backoff are handled centrally by mb_get(). None when
+        MusicBrainz didn't answer (every attempt failed, or not JSON)."""
         params = {"query": q, "limit": MUSICBRAINZ_API_LIMIT, "fmt": "json"}
         slog(f"Attempting MB Query: {q}")
         resp = mb_get(MUSICBRAINZ_API_BASE_URL, params, retries=retries)
         if resp is None:
-            return []
+            return None
         try:
             return resp.json().get("recordings", [])
         except ValueError:
             slog("MB response was not valid JSON")
-            return []
+            return None
 
     # The precise fielded query is the expensive one and, when MusicBrainz is
     # under load, the first to be dropped. Give it a single attempt and fall
     # straight through to the cheaper keyword query rather than burning two
     # timeouts on it.
     recordings = perform_search(primary_query, retries=1)
-    slog(f"Primary results count: {len(recordings)}")
+    failed = recordings is None
+    slog(f"Primary results count: {len(recordings or [])}")
 
     if not recordings and MUSICBRAINZ_SPELLCHECK_USE_FALLBACK:
         slog("No results for primary query. Trying fallback keyword search...")
         recordings = perform_search(fallback_query)
-        slog(f"Fallback results count: {len(recordings)}")
+        failed = failed or recordings is None
+        slog(f"Fallback results count: {len(recordings or [])}")
+
+    # Nothing found while a query went unanswered (503s, a timeout) isn't
+    # "no such recording": not cached, or a busy evening's 503s would stay
+    # "not on MusicBrainz" for good (2026-11-25: AURORA's "Forgotten Love",
+    # 130 such entries)
+    if not recordings and failed:
+        unknown = {
+            "input_artist": artist,
+            "input_title": title,
+            "corrected_artist": artist,
+            "corrected_title": title,
+            "corrected": False,
+            "found": None,
+            "error": MUSICBRAINZ_UNREACHABLE,
+        }
+        mlog(f"[Spell check] '{artist}' - '{title}' -> {_spellcheck_outcome(unknown)}", 1)
+        return unknown
 
     if not recordings:
         slog("No recordings found.")
@@ -247,6 +282,11 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
         "corrected_title_norm": central_normalize(final_title),
         "corrected": is_corrected,
         "mb_score": mb_score,
+        # The best recording as MusicBrainz names it, even when too unlike
+        # the input to correct it (the song request review reads a swap or
+        # a split off it); missing in answers cached before 2026-11-26
+        "mb_artist": mb_artist,
+        "mb_title": mb_title,
         "title_similarity": round(title_sim, 2),
         "artist_similarity": round(artist_sim, 2),
         "found": True,
@@ -260,6 +300,8 @@ def check_spelling(artist: str, title: str, threshold: float = 0.8) -> dict:
 
 def _spellcheck_outcome(result: dict) -> str:
     """check_spelling()'s answer in a few words, for the debug log."""
+    if spelling_lookup_failed(result):
+        return "MusicBrainz couldn't be reached (not cached)"
     if not result.get("found"):
         return "not on MusicBrainz"
     return (f"'{result.get('corrected_artist')}' - '{result.get('corrected_title')}' "

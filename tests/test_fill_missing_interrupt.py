@@ -207,6 +207,6 @@ def test_the_songs_added_from_requests_are_offered_their_data(monkeypatch):
     monkeypatch.setattr(review, "mark_song_added", lambda *args: None)
     case = SimpleNamespace(metadata=lambda artist, title: SongEntry({"artist_name": artist, "title": title}))
     got = []
-    review._add_requested_songs(None, [(case, "A", "T")], got.append)
+    review._add_requested_songs(None, [(case, "A", "T", False)], got.append)
     assert got == [("result", 1)]
-    review._add_requested_songs(None, [(case, "A", "T")])  # without the menu's offer: as before
+    review._add_requested_songs(None, [(case, "A", "T", False)])  # without the menu's offer: as before

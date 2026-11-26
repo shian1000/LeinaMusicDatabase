@@ -59,7 +59,9 @@ named "Title Artist") whose title ends with an artist the database knows by
 exactly that name ("Arriving somewhere but not here Porcupine Tree") suggests
 that split as well - only then, since a channel's own name is the likelier
 artist. A whole title that is an artist the database knows by exactly that
-name (brackets aside), with an artist it doesn't know, suggests the two swapped. A request from
+name (brackets aside), with an artist it doesn't know, suggests the two swapped. When the
+database knows neither, the owner's review (never the automatic pass) asks MusicBrainz for those
+two readings, a swap or an artist the title starts with (musicbrainz_suggestion()). A request from
 Spotify gets none of those - its artist is a real credit, not a channel - only
 the same names without the artists Spotify also lists that the title already
 credits, a guest or the remixer (spotify_credits()); its track page goes on
@@ -92,6 +94,8 @@ import re
 from dataclasses import dataclass, field
 from functools import cache
 
+from sqlalchemy import inspect as sa_inspect
+
 from config.constants import (
     ADDITIONAL_VIDEO_IMPORT,
     ARTIST_JOINING_WORDS,
@@ -101,6 +105,8 @@ from config.constants import (
     SONG_REQUEST_COLON_ARTIST_MAX_WORDS,
     SONG_REQUEST_CREDIT_SPLIT_MAX_WORDS,
     SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS,
+    SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS,
+    SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY,
     SONG_REQUEST_TITLE_ARTIST_MAX_WORDS,
 )
 from utils.common.debug import flog, mlog
@@ -135,6 +141,9 @@ SUGGESTED_FROM_SWAP = "the title is a known artist's name"
 SUGGESTED_FROM_DESCRIPTION = "credited in the YouTube video's description"
 SUGGESTED_FROM_CHANNEL = "the YouTube video's title and channel"
 SUGGESTED_FROM_SPOTIFY = "Spotify's other artists are the title's guests"
+SUGGESTED_FROM_MUSICBRAINZ_SWAP = "MusicBrainz has it with the artist and title swapped"
+SUGGESTED_FROM_MUSICBRAINZ_TITLE = "MusicBrainz: the title starts with the artist"
+SUGGESTED_FROM_MUSICBRAINZ_CHANNEL = "MusicBrainz knows the artist the channel is named after"
 
 # Answers
 ADD = "added"
@@ -173,7 +182,7 @@ class SongRequestCase:
     auto_note: str | None = None  # why the automatic pass left it to the owner
     suggested: tuple | None = None  # (artist, title) read out of the title or the description, see the module docstring
     also_suggested: list = field(default_factory=list)  # the description's other readings, (artist, title) each
-    suggested_from: str | None = None  # SUGGESTED_FROM_TITLE / _DESCRIPTION / _CHANNEL
+    suggested_from: str | None = None  # SUGGESTED_FROM_TITLE / _DESCRIPTION / _CHANNEL / _MUSICBRAINZ_*
 
     @property
     def suggestions(self) -> list[tuple]:
@@ -221,14 +230,21 @@ class SongRequestCase:
     def sources(self) -> list[str]:
         return list(dict.fromkeys(SOURCE_LABELS.get(r.source, r.source) for r in self.reports))
 
-    def metadata(self, artist: str | None = None, title: str | None = None) -> SongEntry:
+    def metadata(self, artist: str | None = None, title: str | None = None, full_album: bool = False) -> SongEntry:
         """An import_engine metadata dict (run_import_batch()); `artist` /
         `title` as the owner corrected them, else the request's. A
         featured-artist credit leaves the title for `feat_artists`, which the
         import credits on the new song ("Billionaire ft. Bruno Mars" ->
         "Billionaire", Bruno Mars as feat) - sanitize's "request" steps
-        (its feat_to_credits)."""
+        (its feat_to_credits). `full_album`: added as a full album / mix
+        (songs.kind, set by create_song_entry(); "... Mix" stays its title)."""
         latest = self.latest
+        entry = self._metadata(latest, artist, title)
+        if full_album:
+            entry["full_album"] = True
+        return entry
+
+    def _metadata(self, latest, artist, title) -> SongEntry:
         return sanitize_metadata(SongEntry({
             "artist_name": artist if artist is not None else latest.artist,
             "title": title if title is not None else latest.title or "",
@@ -243,6 +259,28 @@ class SongRequestCase:
         }, source=SOURCE_REQUEST, raw_text=latest.title, originals={
             field: value for field, value in (("artist", latest.artist), ("title", latest.title),
                                               ("album", latest.album)) if value is not None}), SOURCE_REQUEST)
+
+
+# A mix's or a compilation's name in a request's title ("Masayoshi Takanaka
+# mix", "sad indie kid (...) // playlist pt. 1") - a word of its own, not "remix"
+_MIX_TITLE_RE = re.compile(r"(?:^| )(?:mix|megamix|mixtape|minimix|playlist|compilation)(?: |$)")
+
+
+def full_album_offer(case: SongRequestCase) -> bool | None:
+    """Whether the review offers adding the request as a full album / mix
+    (songs.kind; mixes and compilations are added, not rejected - owner,
+    2026-11-26): True = offered first, the recording being as long as a full
+    album or a mix, or its title saying it's a whole album
+    (looks_like_full_album()); None = offered, not first, when no length is
+    known and its title names a mix, a playlist or a compilation (a song may
+    be called "... Mix"); False = not offered."""
+    from utils.database.song_kinds import looks_like_full_album
+
+    if looks_like_full_album(case.latest.title, case.duration_s):
+        return True
+    if case.duration_s is None and _MIX_TITLE_RE.search(normalize(case.latest.title or "")):
+        return None
+    return False
 
 
 def _request_rows(session, model) -> dict:
@@ -276,21 +314,29 @@ def suggested_artist_title(artist: str | None, title: str | None, matcher) -> tu
     with known artists (_artists_at_start()), or - asked with no artist at
     all, a file on the phone named "Title Artist" - ends with one
     (_artist_at_end()), or is swapped with an unknown artist
-    (_swapped_artist_title()). None otherwise - a
-    known artist's channel uploading another artist's song is left as
-    asked."""
-    parts = _split_title(title or "")
+    (_swapped_artist_title()). A channel named a known artist's name and a
+    channel affix ("PomplamooseMusic", "OfficialClutch":
+    channel_base_name()) is that artist too. A title is read without its
+    edge punctuation and a record label's part ("- Eslabon Armado y Peso
+    Pluma - DEL Records 2023": without_label_parts()), and split at a colon
+    only when `artist` doesn't credit several artists ("Sandfall Interactive
+    and Lorien Testard" / "Clair Obscur: Expedition 33" is a work's title -
+    the review asks MusicBrainz instead, musicbrainz_suggestion()). None
+    otherwise - a known artist's channel uploading another artist's song is
+    left as asked."""
+    title = without_label_parts(title or "")
+    parts = _split_title(title, colon=not credits_several_artists(artist))
     if parts is None:
-        at_start = _artists_at_start(artist, title or "", matcher)
+        at_start = _artists_at_start(artist, title, matcher)
         if at_start is not None:
             return at_start
-        at_end = None if artist else _artist_at_end(title or "", matcher)
+        at_end = None if artist else _artist_at_end(title, matcher)
         if at_end is not None:
             return at_end
-        swapped = _swapped_artist_title(artist, title or "", matcher)
+        swapped = _swapped_artist_title(artist, title, matcher)
         if swapped is not None:
             return swapped
-        known = _known_by_other_name(artist, matcher)
+        known = _known_by_other_name(artist, matcher) or _known_by_channel_name(artist, matcher)
         return (known.name, title) if known is not None and title else None
     in_title = matcher.artist(parts[0])
     asked = matcher.artist(artist) if artist else None
@@ -323,6 +369,73 @@ def _known_by_other_name(artist: str | None, matcher):
     if known is None or name_key(artist) == name_key(known.name):
         return None
     return known if name_key(artist) in {name_key(n) for n in artist_synonyms(known)} else None
+
+
+# A channel's name around an artist's (owner's cases 2026-11-26:
+# "PomplamooseMusic", "OfficialClutch") - only these affixes: "Records",
+# "TV", "Band" also end real names. Spaced any case, or run on CamelCase
+_CHANNEL_AFFIX_RES = (
+    re.compile(r"^official[\s_.-]+(?P<name>\S.*)$", re.IGNORECASE),
+    re.compile(r"^(?:Official|OFFICIAL)(?P<name>[A-Z0-9].*)$"),
+    re.compile(r"^(?P<name>.*\S)[\s_.-]+(?:official|music|vevo)$", re.IGNORECASE),
+    re.compile(r"^(?P<name>.*[a-z0-9])(?:Official|Music)$"),
+    re.compile(r"^(?P<name>.*\S)(?:VEVO|Vevo)$"),
+)
+
+
+def channel_base_name(artist: str | None) -> str | None:
+    """The name a channel's name is made of with a channel affix -
+    "Official" before or after it, "Music" or "VEVO" after it, spaced or
+    CamelCase ("PomplamooseMusic" -> "Pomplamoose", "OfficialClutch" ->
+    "Clutch", "AdeleVEVO" -> "Adele"); None for any other name or too short
+    a rest."""
+    for pattern in _CHANNEL_AFFIX_RES:
+        match = pattern.match((artist or "").strip())
+        if match and len(name_key(match["name"])) >= SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
+            return match["name"].strip(" _.-")
+    return None
+
+
+def _known_by_channel_name(artist: str | None, matcher):
+    """The database artist named exactly as the channel `artist` without its
+    affix (channel_base_name()), when `artist` itself isn't a known artist."""
+    base = channel_base_name(artist)
+    if base is None or _known_exactly(artist, matcher) is not None:
+        return None
+    return _known_exactly(base, matcher)
+
+
+def credits_several_artists(artist: str | None) -> bool:
+    """Whether a request's artist reads as a credit of several artists
+    ("Sandfall Interactive and Lorien Testard", "A & B") - real artists,
+    not a channel's name."""
+    if not artist:
+        return False
+    from utils.common.artist_credits import JOINING_WORD_SEPARATOR, propose_artist_split
+    proposal = propose_artist_split(JOINING_WORD_SEPARATOR.sub(" & ", artist))
+    return proposal is not None and len(proposal.names) >= 2
+
+
+# What a cut video title may still have at its ends: Leina Radio cut "Ella
+# Baila Sola - Eslabon Armado y Peso Pluma - DEL Records 2023" at its first
+# dash. No dots: "APT." ends in one
+_EDGE_PUNCTUATION_RE = re.compile(r"^[\s\-–—|:•·]+|[\s\-–—|:•·]+$")
+# A part naming only a record label and a year, never a song: "DEL Records
+# 2023" (without the year it may be one: "Broken Records")
+_LABEL = r"[^\s\-–—|][^\-–—|]{0,40}?\s(?:records|recordings)\s*[(\[]?(?:19|20)\d\d[)\]]?"
+_TRAILING_LABEL_RE = re.compile(r"\s+[-–—|]\s+" + _LABEL + r"$", re.IGNORECASE)
+_LEADING_LABEL_RE = re.compile(r"^" + _LABEL + r"\s+[-–—|]\s+", re.IGNORECASE)
+
+
+def without_label_parts(title: str) -> str:
+    """`title` without the punctuation at its ends and a first or last
+    " - " part that only names a record label and a year: "- Eslabon Armado y Peso
+    Pluma - DEL Records 2023" -> "Eslabon Armado y Peso Pluma". `title`
+    itself when nothing would be left."""
+    cut = _EDGE_PUNCTUATION_RE.sub("", title or "")
+    cut = _LEADING_LABEL_RE.sub("", _TRAILING_LABEL_RE.sub("", cut))
+    cut = _EDGE_PUNCTUATION_RE.sub("", cut)
+    return cut or title
 
 
 def _artists_at_start(artist: str | None, title: str, matcher) -> tuple | None:
@@ -382,7 +495,9 @@ def _artist_at_end(title: str, matcher) -> tuple | None:
 
 def _swapped_artist_title(artist: str | None, title: str, matcher) -> tuple | None:
     """(title as the database's artist, artist) when the whole title is an
-    artist the database knows by exactly that name and `artist` is one it
+    artist the database knows by exactly that name (or known artists joined
+    by "&", "y", ...: "Ella Baila Sola" / "Eslabon Armado y Peso Pluma" ->
+    "Eslabon Armado & Peso Pluma") and `artist` is one it
     doesn't: "Chciałem być" / "Krzysztof Krawczyk" -> ("Krzysztof Krawczyk",
     "Chciałem być"). Brackets don't count ("Summer Vibe" / "Walk off the
     Earth (Original)"); one naming a version goes to the title. None for a
@@ -394,10 +509,28 @@ def _swapped_artist_title(artist: str | None, title: str, matcher) -> tuple | No
     if len(name_key(name)) < SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS:
         return None
     db_artist = _known_exactly(name, matcher)
-    if db_artist is None:
+    joined = [db_artist.name] if db_artist is not None else _joined_known_artists(name, matcher)
+    if not joined:
         return None
     versions = [b for b in _BRACKETED.findall(title) if read_version(f"{artist} {b}")]
-    return db_artist.name, " ".join([artist, *versions])
+    return " & ".join(joined), " ".join([artist, *versions])
+
+
+def _joined_known_artists(name: str, matcher) -> list[str] | None:
+    """The database's names of the artists `name` is, joined by
+    _TITLE_ARTIST_JOINERS, each known by exactly its words ("Eslabon Armado y
+    Peso Pluma" -> ["Eslabon Armado", "Peso Pluma"]); None when one isn't."""
+    names, part = [], []
+    for word in [*_TITLE_WORD.findall(name), None]:
+        if word is not None and word.lower() not in _TITLE_ARTIST_JOINERS:
+            part.append(word)
+            continue
+        known = _known_exactly(" ".join(part), matcher) if part else None
+        if known is None:
+            return None
+        names.append(known.name)
+        part = []
+    return names if len(names) >= 2 else None
 
 
 def _artist_words(words: list, i: int, title: str, channel: str | None, matcher) -> tuple | None:
@@ -430,11 +563,13 @@ def _known_exactly(name: str, matcher):
     return known if name_key(name) in {name_key(n) for n in names if n} else None
 
 
-def _split_title(title: str) -> tuple[str, str] | None:
-    """(artist part, title part) of a video title, by " - " first, else by
-    ": " after at most SONG_REQUEST_COLON_ARTIST_MAX_WORDS words."""
+def _split_title(title: str, colon: bool = True) -> tuple[str, str] | None:
+    """(artist part, title part) of a video title, by " - " first, else
+    (`colon`) by ": " after at most SONG_REQUEST_COLON_ARTIST_MAX_WORDS words."""
     parts = _TITLE_ARTIST_SEPARATOR.split(title, maxsplit=1)
     if len(parts) < 2:
+        if not colon:
+            return None
         parts = _TITLE_ARTIST_COLON.split(title, maxsplit=1)
         if len(parts) < 2 or len(parts[0].split()) > SONG_REQUEST_COLON_ARTIST_MAX_WORDS:
             return None
@@ -661,7 +796,10 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
     needs no answer (the videos of songs found in the database saved on
     them, see _settle(); the caller commits). Order: first report first. `matcher`: a
     LocalSongMatcher to use (tests); made here otherwise. `fetch` = False
-    asks YouTube nothing (a video's description or title and channel)."""
+    asks YouTube nothing (a video's description or title and channel).
+    MusicBrainz isn't asked here: the review asks it for one case at a time,
+    right before showing it (suggest_from_musicbrainz()) - asked for every
+    case first, 24 requests kept the owner waiting ~12 minutes (2026-11-26)."""
     cases: dict[str, SongRequestCase] = {}
     for request in requests:
         if not request.supported:
@@ -704,6 +842,140 @@ def collect_song_request_cases(session, requests: list[RequestFile], matcher=Non
             case.suggested_from = SUGGESTED_FROM_CHANNEL
             _settle(session, case, known, matcher)
     return list(cases.values())
+
+
+class MusicBrainzLookups:
+    """How many MusicBrainz lookups a case's suggestion may still make
+    (SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS, cached answers free), and whether
+    MusicBrainz stopped answering - then the review asks it nothing more."""
+
+    def __init__(self, per_case: int = SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS):
+        self.per_case = per_case
+        self.left = per_case
+        self.unreachable = False
+
+    def next_case(self) -> None:
+        self.left = self.per_case
+
+    def spelling(self, artist: str, title: str) -> dict | None:
+        """check_spelling(artist, title), None when the case's lookups are
+        used up or MusicBrainz didn't answer (that one or an earlier one)."""
+        from utils.common import spellcheck_cache
+        from utils.common.text_utils import check_spelling, spelling_lookup_failed
+
+        if self.unreachable:
+            return None
+        if spellcheck_cache.get(artist, title) is None:
+            if self.left <= 0:
+                return None
+            self.left -= 1
+        answer = check_spelling(artist, title)
+        if spelling_lookup_failed(answer):
+            self.unreachable = True
+            return None
+        return answer
+
+    def artist_known(self, name: str) -> bool | None:
+        """artist_on_musicbrainz(name), as spelling() counts."""
+        from utils.common import musicbrainz_artists
+
+        if self.unreachable:
+            return None
+        if musicbrainz_artists.cached_answer(name) is None:
+            if self.left <= 0:
+                return None
+            self.left -= 1
+        known = musicbrainz_artists.artist_on_musicbrainz(name)
+        if known is None:
+            self.unreachable = True
+        return known
+
+
+def suggest_from_musicbrainz(case: SongRequestCase, matcher, lookups: MusicBrainzLookups | None = None) -> bool:
+    """For the owner's review, right before the case is shown: an open case
+    with nothing suggested (not from Spotify) gets musicbrainz_suggestion()'s
+    reading - shown, never used to settle it. Whether it got one."""
+    if not case.pending or case.suggested or case.latest.source == SOURCE_SPOTIFY:
+        return False
+    lookups = lookups or MusicBrainzLookups()
+    lookups.next_case()
+    reading = musicbrainz_suggestion(case.latest.artist, case.latest.title, matcher, lookups)
+    if reading:
+        case.suggested, case.suggested_from = reading
+    return bool(reading)
+
+
+def musicbrainz_suggestion(artist: str | None, title: str | None, matcher,
+                           lookups: MusicBrainzLookups | None = None) -> tuple | None:
+    """((artist, title), SUGGESTED_FROM_MUSICBRAINZ_*) for a request whose
+    artist the database doesn't know, when MusicBrainz (check_spelling(),
+    artist_on_musicbrainz(), both cached) knows the artist a channel is named
+    after ("PomplamooseMusic" -> "Pomplamoose", channel_base_name()), has
+    the song with the two swapped ("Moya" / "Godspeed You! Black Emperor" ->
+    "Godspeed You! Black Emperor" / "Moya") or by an artist the title starts
+    with ("Behnam37" / "Sylvie Vartan L'amour c'est comme une cigarette" ->
+    "Sylvie Vartan" / "L'amour c'est comme une cigarette"; "Sandfall
+    Interactive and Lorien Testard" / "Clair Obscur: Expedition 33" only if
+    MusicBrainz's Clair Obscur had a recording "Expedition 33"), each at
+    least SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY alike on both names. The
+    title is read without_label_parts(). Names as the request writes them.
+    None when MusicBrainz has the request as asked, couldn't be reached, or
+    the case's `lookups` (SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS uncached ones)
+    ran out. For the owner's review only."""
+    lookups = lookups or MusicBrainzLookups()
+    if not (artist and title) or is_generic_channel_artist(artist) or matcher.artist(artist) is not None:
+        return None
+    title = without_label_parts(title)
+    base = channel_base_name(artist)
+    if base is not None and lookups.artist_known(base):
+        return (base, title), SUGGESTED_FROM_MUSICBRAINZ_CHANNEL
+    asked = lookups.spelling(artist, title)
+    if asked is None or _musicbrainz_agrees(asked):
+        return None
+    name = _BRACKETED.sub("", title).strip()
+    if (len(name.split()) <= SONG_REQUEST_TITLE_ARTIST_MAX_WORDS
+            and len(name_key(name)) >= SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS
+            and _musicbrainz_agrees(lookups.spelling(name, artist) or {})):
+        versions = [b for b in _BRACKETED.findall(title) if read_version(f"{artist} {b}")]
+        return (name, " ".join([artist, *versions])), SUGGESTED_FROM_MUSICBRAINZ_SWAP
+    split = _musicbrainz_split(asked, title, lookups)
+    return (split, SUGGESTED_FROM_MUSICBRAINZ_TITLE) if split else None
+
+
+def _musicbrainz_agrees(spelling: dict) -> bool:
+    """Whether check_spelling()'s recording is the asked song, artist and title."""
+    return bool(spelling.get("found")) and all(
+        spelling.get(f"{field}_similarity", 0) >= SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY
+        for field in ("artist", "title"))
+
+
+def _musicbrainz_split(asked: dict, title: str, lookups: MusicBrainzLookups) -> tuple | None:
+    """(artist, title) of a title that starts with the artist of the
+    recording check_spelling() found for the request (`asked`); an answer
+    that doesn't say which recording (cached before 2026-11-26, or nothing
+    found for the joined names) asks MusicBrainz about each cut instead. A
+    cut's parts lose the punctuation at their ends ("Clair Obscur:"); a
+    record label's part is never the title."""
+    from utils.common.text_utils import similarity
+
+    words = list(_TITLE_WORD.finditer(title))
+    cuts = [(_EDGE_PUNCTUATION_RE.sub("", title[:words[i].start()]), _EDGE_PUNCTUATION_RE.sub("", title[words[i].start():]))
+            for i in range(1, min(len(words), SONG_REQUEST_TITLE_ARTIST_MAX_WORDS + 1))]
+    cuts = [(head, rest) for head, rest in cuts
+            if len(name_key(head)) >= SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS and _BRACKETED.sub("", rest).strip()
+            and not re.fullmatch(_LABEL, rest, re.IGNORECASE)]
+    if asked.get("found") and asked.get("mb_artist"):
+        mb_artist, mb_title = normalize(asked["mb_artist"]), normalize(asked.get("mb_title") or "")
+        return next(((head, rest) for head, rest in cuts
+                     if similarity(normalize(head), mb_artist) >= SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY
+                     and similarity(normalize(rest), mb_title) >= SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY), None)
+    for head, rest in cuts:
+        spelling = lookups.spelling(head, rest)
+        if spelling is None:
+            return None
+        if _musicbrainz_agrees(spelling):
+            return head, rest
+    return None
 
 
 def _settle(session, case: SongRequestCase, known: tuple, matcher) -> bool:
@@ -823,6 +1095,57 @@ def _closest_title_of(artist, title: str) -> float:
     return round(max(scores, default=0.0), 3)
 
 
+def related_artist_names(a: str | None, b: str | None) -> bool:
+    """Whether two artist names may be one artist: equal (normalized), or one
+    starting the other by whole words - "Bajaga" / "Bajaga i Instruktori"
+    (2026-11-26: the automatic pass added "Moji drugovi" for both in one
+    run). The shorter at least SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS long."""
+    return _related_keys(normalize(a or ""), normalize(b or ""))
+
+
+def _related_keys(ka: str, kb: str) -> bool:
+    """related_artist_names() of two normalize()d names."""
+    if not ka or not kb:
+        return False
+    short, long = sorted((ka, kb), key=len)
+    return short == long or (len(name_key(short)) >= SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS
+                             and long.startswith(short + " "))
+
+
+def twin_of_added_song(session, taken: list, matcher) -> dict[int, str]:
+    """The requests of one automatic run not to add with the rest, by index
+    of `taken` ((case, artist, title) each, in order), with why: one that
+    would add the title (normalized, as the import would store it) another
+    one of the run adds first for an artist of a related name
+    (related_artist_names(), or the same database artist), or that an
+    artist of a related name other than its own has in the database already
+    - the same song, most likely, under the band's two names. They wait for
+    the owner's review."""
+    if not taken:
+        return {}
+    from utils.database.datatables import Artist
+
+    artists = [(artist, [normalize(n) for n in (artist.name, *artist_synonyms(artist))])
+               for artist in session.query(Artist)]
+    twins, kept = {}, []
+    for i, (case, artist, title) in enumerate(taken):
+        key, wanted = normalize(case.metadata(artist, title).title), normalize(artist)
+        own = matcher.artist(artist)
+        earlier = next(((a, t) for a, t, k, o in kept if k == key and (
+            related_artist_names(artist, a) or (own is not None and o is not None and own.id == o.id))), None)
+        if earlier is not None:
+            twins[i] = f'another request of this run adds "{earlier[0]} - {earlier[1]}" - the same song?'
+            continue
+        other = next((db_artist for db_artist, names in artists
+                      if (own is None or db_artist.id != own.id) and any(_related_keys(wanted, n) for n in names)
+                      and any(normalize(song.title or "") == key for song in db_artist.songs)), None)
+        if other is not None:
+            twins[i] = f'the database\'s "{other.name}" (#{other.id}) has "{title}" already - the same song?'
+            continue
+        kept.append((artist, title, key, own))
+    return twins
+
+
 def title_as_musicbrainz_spells(artist: str, title: str) -> str:
     """`title` written all in lower or upper case ("czas pomyka") as
     MusicBrainz spells the same words ("Czas pomyka"), for a requested song
@@ -851,6 +1174,28 @@ def artist_as_musicbrainz_spells(artist: str, title: str, matcher) -> str:
         return known.name
     spelled = check_spelling(artist, title).get("corrected_artist") or artist
     return spelled if spelled.casefold() == artist.casefold() else artist
+
+
+_TRAILING_BRACKET_RE = re.compile(r"\s*[\[(]([^\[\]()]+)[\])]\s*$")
+
+
+def requested_title_without_album(song: Song, album: str | None) -> str | None:
+    """`song`'s title without a last bracket that only names `album` (case and
+    accents aside), for a song a Leina Radio request settled
+    (settled_song_requests) - its title was a video's: "Mandalay - Another
+    [Empathy]" with album "Empathy" found -> "Another" (2026-11-25). None
+    for any other song or title."""
+    match = _TRAILING_BRACKET_RE.search(song.title or "") if album else None
+    if match is None or not getattr(song, "id", None):
+        return None
+    def key(text):
+        return " ".join(fold_diacritics(text).casefold().split())
+    rest = song.title[:match.start()].strip()
+    state = sa_inspect(song, raiseerr=False)
+    if not rest or key(match[1]) != key(album) or state is None or state.session is None:
+        return None
+    requested = state.session.query(SettledSongRequest.id).filter(SettledSongRequest.song_id == song.id).first()
+    return rest if requested is not None else None
 
 
 def reject_song_request(session, case: SongRequestCase, **extra) -> None:
@@ -994,6 +1339,109 @@ def reject_deleted_song_request(session, item: DeletedSongRequest) -> None:
     reject_song_request(session, item.case, deleted_song_id=item.song_id, was_added_as=item.added_as)
 
 
+# --------------------
+# Reopening a rejection
+# --------------------
+# A rejection made by mistake is undone from the review's menu ("Reopen
+# rejected requests"): its rejected_song_requests rows go (so neither the
+# automatic pass nor the review settles it as "rejected before", and the
+# phone stops showing the track as rejected), its decisions.json entry moves
+# into decisions_reopened_<date>.json - as was done by hand on 2026-11-18 and
+# 2026-11-21 - and its file(s) from processed/ back to review/, so the next
+# review asks about it again. Leina Radio won't ask for the song again by
+# itself; the review does.
+
+REOPENED_DECISIONS_FILE = "decisions_reopened_{date}.json"
+
+
+@dataclass
+class RejectedRequest:
+    """One rejected song request as the menu lists it: its decision (None
+    for rows no decision of decisions.json names) and the rows of
+    rejected_song_requests answering it."""
+    key: str  # the case's "song:<song_key()>", the decision's key
+    entry: dict | None
+    rows: list
+    reports: list
+
+    @property
+    def artist(self) -> str | None:
+        return (self.entry or {}).get("artist", self.rows[0].artist if self.rows else None)
+
+    @property
+    def title(self) -> str:
+        return (self.entry or {}).get("title") or (self.rows[0].title if self.rows else "")
+
+    @property
+    def rejected_at(self) -> str:
+        return ((self.entry or {}).get("decided_at")
+                or max((row.rejected_at or "" for row in self.rows), default=""))
+
+    @property
+    def youtube_video_ids(self) -> list[str]:
+        return list(dict.fromkeys([*(r.youtube_video_id for r in self.reports if r.youtube_video_id),
+                                   *(row.youtube_video_id for row in self.rows if row.youtube_video_id)]))
+
+    @property
+    def files(self) -> list[str]:
+        return [name for name in (self.entry or {}).get("files") or [] if isinstance(name, str)]
+
+
+def rejected_requests(session, decisions: dict | None = None) -> list[RejectedRequest]:
+    """Every rejected song request, newest first: each "rejected" answer of
+    decisions.json (or `decisions`) with the rows answering it (by the names,
+    videos or Spotify tracks of its reports, read from its files when they're
+    there), then the rows no answer names, one item per artist + title."""
+    decisions = load_decisions() if decisions is None else decisions
+    rows = session.query(RejectedSongRequest).order_by(RejectedSongRequest.id).all()
+    keys_of = {row.id: set(_request_keys(row.artist, row.title, row.youtube_video_id, row.spotify_track_id))
+               for row in rows}
+    claimed, items = set(), []
+    for key, entry in decisions.items():
+        if not (key.startswith("song:") and isinstance(entry, dict) and entry.get("decision") == REJECT):
+            continue
+        reports = _reports_of_decision(key, entry)
+        keys = {f"name:{key.removeprefix('song:')}",
+                *(k for r in reports for k in _request_keys(r.artist, r.title, r.youtube_video_id,
+                                                            r.spotify_track_id))}
+        mine = [row for row in rows if row.id not in claimed and keys_of[row.id] & keys]
+        claimed |= {row.id for row in mine}
+        items.append(RejectedRequest(key, entry, mine, reports))
+    unclaimed: dict[str, list] = {}
+    for row in rows:
+        if row.id not in claimed:
+            unclaimed.setdefault(f"song:{song_key(row.artist, row.title)}", []).append(row)
+    items += [RejectedRequest(key, None, group, []) for key, group in unclaimed.items()]
+    return sorted(items, key=lambda item: item.rejected_at, reverse=True)
+
+
+def reopen_rejected_requests(session, items: list[RejectedRequest], today: str | None = None) -> list[str]:
+    """Undo the rejections `items`: their rows deleted (committed here), then
+    each decision moved into decisions_reopened_<today>.json and its files
+    moved from processed/ back to review/. The names of the files moved. A
+    file not in processed/ (still waiting, gone) is left where it is."""
+    from datetime import date
+    from utils.database.inbox_requests import PROCESSED, REVIEW, _move, move_decisions
+
+    for item in items:
+        for row in item.rows:
+            session.delete(row)
+    session.commit()
+    move_decisions([item.key for item in items if item.entry is not None],
+                   REOPENED_DECISIONS_FILE.format(date=today or date.today().isoformat()),
+                   reopened_at=now_iso())
+    moved = []
+    for item in items:
+        for name in item.files:
+            path = find_request_file(name)
+            if path is not None and path.parent.name == PROCESSED:
+                _move(path, REVIEW)
+                moved.append(name)
+        mlog(f"Inbox request: song {item.artist} - {item.title} reopened ({len(item.rows)} rejected row(s) "
+             f"removed, files back in review: {', '.join(item.files) or 'none'})")
+    return moved
+
+
 _DASHES_RE = re.compile(r"[\u2010-\u2015\u2212]")
 _QUOTES_RE = re.compile(r"[“”„«»]")
 
@@ -1023,11 +1471,12 @@ def song_request_facts(case: SongRequestCase, artist: str, title: str, senders: 
     """What the owner's rules for adding a requested song compare
     (constants.AUTOMATION_QUESTIONS["song_request"]), for the song as it
     would be added (`artist` - `title`). Asks MusicBrainz (check_spelling(),
-    cached on disk)."""
-    from utils.common.text_utils import check_spelling
+    cached on disk). When MusicBrainz couldn't be reached, its facts are
+    unknown (None) - musicbrainz_found too, so no rule holds on them."""
+    from utils.common.text_utils import check_spelling, spelling_lookup_failed
 
     spelling = check_spelling(artist, title)
-    found = bool(spelling.get("found"))
+    found = None if spelling_lookup_failed(spelling) else bool(spelling.get("found"))
     title_similarity = spelling.get("title_similarity") if found else None
     if title_similarity is not None and spelling.get("corrected_title"):
         title_similarity = min(title_similarity, _stored_title_similarity(

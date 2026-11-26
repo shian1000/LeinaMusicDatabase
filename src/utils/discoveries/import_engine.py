@@ -11,7 +11,7 @@ from utils.common import trace
 from utils.database.database_getter import ArtistPool, get_artists_from_db_session, get_songs_from_db_session
 from utils.database.datatables import artist_categories
 from utils.database.database_management import add_db_entry
-from utils.common.text_utils import normalize, check_spelling, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
+from utils.common.text_utils import normalize, check_spelling, spelling_lookup_failed, similarity, are_artists_entries_similar, scaled_similarity_threshold, remove_brackets, strip_track_number_prefix, similarity_at_least, strip_trailing_feat, is_blacklisted_album
 from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.version_names import title_with_version
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
@@ -56,9 +56,13 @@ def _spell_check(artist: str, title: str) -> dict:
     key find_similar_artist() / find_similar_song() use - one lookup for
     the three of them."""
     key = (artist, title or "")
-    if key not in _SPELL_CHECK_CACHE:
-        _SPELL_CHECK_CACHE[key] = check_spelling(artist, title or "")
-    return _SPELL_CHECK_CACHE[key]
+    if key in _SPELL_CHECK_CACHE:
+        return _SPELL_CHECK_CACHE[key]
+    result = check_spelling(artist, title or "")
+    # MusicBrainz not answering is asked again next time, not kept
+    if not spelling_lookup_failed(result):
+        _SPELL_CHECK_CACHE[key] = result
+    return result
 
 
 def musicbrainz_accents(metadata: dict, field: str) -> str | None:
@@ -92,15 +96,7 @@ def find_similar_artist(metadata: dict) -> list:
     slog(f"Couldn't find artist {new_artist_name}, trying spellcheck")
 
     # OPTIMIZATION: Use title for spell check context
-    spell_check_cache_key = (new_artist_name, metadata.get("title", ""))
-
-    if spell_check_cache_key in _SPELL_CHECK_CACHE:
-        spell_check_result = _SPELL_CHECK_CACHE[spell_check_cache_key]
-        slog(f"[CACHE HIT] Artist spell check cached", priority=1)
-    else:
-        spell_check_result = check_spelling(new_artist_name, metadata.title)
-        _SPELL_CHECK_CACHE[spell_check_cache_key] = spell_check_result
-        slog(f"[API CALL] Artist spell check performed and cached", priority=1)
+    spell_check_result = _spell_check(new_artist_name, metadata.title)
 
     slog(new_artist_name)
     slog(metadata.title)
@@ -178,14 +174,7 @@ def find_similar_song(metadata: dict, artist_obj: Artist) -> Song | None:
          f"{len(existing_artists_songs)} song(s), spell check on MusicBrainz", trace.DETAIL)
 
     # OPTIMIZATION STEP 2: Only call expensive API if no local match found
-    cache_key = (new_artist_name, new_title)
-    if cache_key in _SPELL_CHECK_CACHE:
-        spell_check_result = _SPELL_CHECK_CACHE[cache_key]
-        slog(f"      [CACHE HIT] Spell check result retrieved from cache", priority=1)
-    else:
-        spell_check_result = check_spelling(new_artist_name, new_title)
-        _SPELL_CHECK_CACHE[cache_key] = spell_check_result
-        slog(f"      [API CALL] Spell check performed and cached", priority=1)
+    spell_check_result = _spell_check(new_artist_name, new_title)
 
     slog(spell_check_result)
 
@@ -433,12 +422,18 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None, title: s
         set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM)
     if metadata.project_whole:
         set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM, file_under_album=False)
+    # A song request the owner added as a full album / mix ("Masayoshi
+    # Takanaka mix", owner 2026-11-26), filed under its own title
+    if metadata.full_album:
+        set_song_kind([new_song_obj], SONG_KIND_FULL_ALBUM)
     add_db_entry(new_song_obj, session)
     # "Boję się (Live)": a version, titled without the marker, of the artist's
-    # "Boję się" when there is one - kept apart from it when matching
+    # "Boję się" when there is one - kept apart from it when matching. Not a
+    # mix's name: "... Mix" on a whole mix is its title, no remix
     from sqlalchemy.orm import object_session
     from utils.database.versions import mark_new_song_version
-    mark_new_song_version(object_session(new_song_obj), new_song_obj, metadata.duration_s)
+    if not metadata.full_album:
+        mark_new_song_version(object_session(new_song_obj), new_song_obj, metadata.duration_s)
     if metadata.project:
         from sqlalchemy.orm import object_session
         from utils.database.projects import project_named, set_song_project
@@ -451,8 +446,11 @@ def create_song_entry(metadata: dict, artist_obj: Artist, session=None, title: s
     # A caller that split "Title ft. X" off its title (song requests) names X here
     if metadata.feat_artists:
         from sqlalchemy.orm import object_session
+        from utils.database.artist_splitting import split_joined_feat_names
         from utils.database.song_duplicates import credit_feat_artists
-        credit_feat_artists(object_session(new_song_obj), new_song_obj, metadata.feat_artists)
+        # "ft. Madison Beer and Kim Petras": two guests, when they're known artists
+        feats = split_joined_feat_names(object_session(new_song_obj), metadata.feat_artists)
+        credit_feat_artists(object_session(new_song_obj), new_song_obj, feats)
     return new_song_obj
 
 # Songs whose missing YouTube link the running import filled in - the

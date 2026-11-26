@@ -851,8 +851,24 @@ reissue. Further rules, each from a real miss (2026-11-19, second round):
   reports, the lone compilation counts after all (`lone_compilations=True`): Czesław Niemen's
   "Dziwny jest ten świat" (1967) shows up only as its 1991 CD after a 1979 best-of, so it's the
   album with no year, and Years asks the release-group search, which has the group's first date.
-- **`_search_album()` asks for 25 hits** whenever the first 5 gave no non-reissue Album (it
-  stops when fewer hits came back than asked for: that was all).
+- **`_search_album()` asks for 25 hits** whenever the first 5 gave no non-reissue Album of the
+  artist's own (it stops when fewer hits came back than asked for: that was all). A "Various
+  Artists" album from the first 5 doesn't stop it (2026-11-26: The Immortals' "Techno Syndrome"
+  got the games compilation "A Gamer's Day", 2005, typed Soundtrack, over their own "Mortal
+  Kombat: The Album", 1994, among the 25). When all 25 came back and none gave such an album, it
+  searches once more with ` AND NOT comment:live` (the recording's disambiguation, "live,
+  2004-04-25: ..."): Pixies' "Where Is My Mind?" had 25 concert / compilation hits, the studio
+  recording on "Surfer Rosa" further down. Not `NOT secondarytype:live`, which drops a recording
+  any of whose releases is live - the studio one too, tried on the real data.
+- **The album's year** is its release group's earliest among the hits, but when the hits date it
+  only after the song first appeared (or not at all), the group's own `first-release-date` is
+  asked (`_release_group_first_year()`, one `mb_get()` request, only then) and the earlier one
+  taken: a 2003 edition of Robbie Williams' "Sing When You're Winning" (2000) after a 2001
+  compilation. `conftest.py` stubs the fetcher's `mb_get` for every test.
+- **"remixes"** is in `blacklist.txt` beside "remix" (a whole word): "Space Cat, The Remixes"
+  became Renman's original "Nemreš Bolivit"'s album from some other module (MusicBrainz has no
+  recording of it). Which module gave "Death to the Pixies" and Robbie Williams' 2003 isn't in
+  `debug.log` (MusicBrainz found no album for the Pixies song then).
 - **`first_appearance_year()`**: the same earliest year as one request, for the manager's
   `year_after_the_song()` (below). A re-check of the 68 songs with a
 MusicBrainz album on 2026-11-19 changed only reissues and compilations ("CDN", 2017, for Hey's

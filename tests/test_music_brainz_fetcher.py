@@ -583,3 +583,108 @@ def test_a_versions_recording_and_a_bootleg_are_not_the_songs_album():
         _yu_recording("Losing Grip", [bootleg, _yu_release("Let Go", "2002-06-04", "rg-l")]),
     ]
     assert _pick_release(recordings, title="Losing Grip")[0] == "Let Go"
+
+
+# ==================== 2026-11-26: compilations and reissues over the album ====================
+
+def _pixies(title, releases, disambiguation=None):
+    recording = {"title": title, "artist-credit": [{"artist": {"id": "pixies", "name": "Pixies"}}],
+                 "release-list": [{**r, "status": "Official", "artist-credit": [{"artist": {"id": "pixies"}}]}
+                                  for r in releases]}
+    if disambiguation:
+        recording["disambiguation"] = disambiguation
+    return recording
+
+
+def test_a_song_flooded_with_live_recordings_is_searched_again_without_them(monkeypatch):
+    # Pixies' "Where Is My Mind?": the 25 hits were concerts and compilations
+    # ("Death to the Pixies", 1997, came from another module); the studio
+    # recording on "Surfer Rosa" (1988) only came without the live ones
+    live = [_pixies("Where Is My Mind?", [_release(f"2004-04-{d:02}: Concert", "Album", f"2004-04-{d:02}", ["Live"])],
+                    disambiguation="live, 2004") for d in range(1, 24)]
+    live += [_pixies("Where Is My Mind?", [_release("Death to the Pixies", "Album", "1997-10-06", ["Compilation"])])] * 2
+    studio = _pixies("Where Is My Mind?", [_release("Death to the Pixies", "Album", "1997-10-06", ["Compilation"]),
+                                           {**_release("Surfer Rosa", "Album", "1988-03-21"),
+                                            "release-group": {"id": "surfer", "primary-type": "Album",
+                                                              "secondary-type-list": []}}])
+    searches = []
+
+    def search(query, limit):
+        searches.append(query)
+        if "NOT comment:live" in query:
+            return {"recording-list": [live[-1], studio]}
+        return {"recording-list": live[:limit]}
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", search)
+    monkeypatch.setattr(music_brainz_fetcher.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(music_brainz_fetcher, "check_spelling", lambda artist, song: {"found": False})
+
+    result = get_album_name("Pixies", "Where Is My Mind?")
+
+    assert (result.album, result.year) == ("Surfer Rosa", 1988)
+    assert len(searches) == 3 and searches[-1].endswith(" AND NOT comment:live")
+
+
+def test_a_short_answer_isnt_searched_again():
+    # Fewer than 25 hits were every hit: no third search
+    searches = []
+
+    def search(query, limit):
+        searches.append(query)
+        return {"recording-list": [_recording("Song", [_release("Hits", "Album", "2020", ["Compilation"])])]}
+    original = music_brainz_fetcher.musicbrainzngs.search_recordings
+    music_brainz_fetcher.musicbrainzngs.search_recordings = search
+    try:
+        assert music_brainz_fetcher._search_album("A", "Song") is None
+    finally:
+        music_brainz_fetcher.musicbrainzngs.search_recordings = original
+    assert len(searches) == 1
+
+
+def test_the_artists_own_soundtrack_album_beats_a_various_artists_one_found_first(monkeypatch):
+    # The Immortals' "Techno Syndrome" got "A Gamer's Day" (2005, a games
+    # compilation by Various Artists) from the first 5 hits; their own
+    # "Mortal Kombat: The Album" (1994) was among the 25
+    various = {"artist-credit": [{"artist": {"id": music_brainz_fetcher.MUSICBRAINZ_VARIOUS_ARTISTS_ID}}]}
+    gamers_day = {"title": "Techno Syndrome (Mortal Kombat)", "artist-credit": [{"artist": {"id": "imm"}}],
+                  "release-list": [{**_release("A Gamer's Day", "Album", "2005-01-11", ["Soundtrack"]), **various}]}
+    own = {"title": "Techno Syndrome", "artist-credit": [{"artist": {"id": "imm"}}],
+           "release-list": [{**_release("Mortal Kombat: The Album", "Album", "1994-05-31", ["Soundtrack"]),
+                             "artist-credit": [{"artist": {"id": "imm"}}]}]}
+    filler = [_recording("Other", [])] * 3
+    monkeypatch.setattr(music_brainz_fetcher.musicbrainzngs, "search_recordings", lambda query, limit: {
+        "recording-list": [gamers_day, *filler, own][:limit] if limit > 5 else [gamers_day, *filler, filler[0]]})
+
+    result = music_brainz_fetcher._search_album("The Immortals", "Techno Syndrome")
+
+    assert (result.album, result.year, result.album_type) == ("Mortal Kombat: The Album", 1994, "soundtrack")
+
+
+def test_an_album_dated_only_by_later_editions_takes_its_release_groups_first_date(monkeypatch):
+    # Robbie Williams' "The Road To Mandalay" got 2003: "Sing When You're
+    # Winning" (2000) was among the hits only as a 2003 edition, after a 2001 compilation
+    recordings = [{"title": "The Road to Mandalay", "artist-credit": [{"artist": {"id": "rw"}}], "release-list": [
+        _release("Hit Club 2001.3", "Album", "2001", ["Compilation"]),
+        {**_release("Sing When You're Winning", "Album", "2003-01-01"),
+         "release-group": {"id": "swyw", "primary-type": "Album", "secondary-type-list": []}}]}]
+    asked = []
+    monkeypatch.setattr(music_brainz_fetcher, "_release_group_first_year", lambda group_id: asked.append(group_id) or 2000)
+
+    title, recording, release = music_brainz_fetcher._pick_release_with_entry(recordings, "Robbie Williams",
+                                                                              "The Road To Mandalay")
+    result = music_brainz_fetcher._album_result(title, recording, release, "Robbie Williams", recordings)
+
+    assert (result.album, result.year, asked) == ("Sing When You're Winning", 2000, ["swyw"])
+    # Dated as early as the song in the hits: nothing asked
+    asked.clear()
+    recordings[0]["release-list"][1]["date"] = "2000-10-30"
+    assert music_brainz_fetcher._album_result(title, recording, release, "Robbie Williams", recordings).year == 2000
+    assert asked == []
+
+
+def test_a_remix_album_is_no_songs_album():
+    # Renman's original "Nemreš Bolivit" got "Space Cat, The Remixes" (from
+    # another module: MusicBrainz has no such recording); "remix" is
+    # blacklisted, "remixes" was not
+    from utils.common.text_utils import is_blacklisted_album
+    assert is_blacklisted_album("Space Cat, The Remixes")
+    assert is_blacklisted_album("The Remixes")

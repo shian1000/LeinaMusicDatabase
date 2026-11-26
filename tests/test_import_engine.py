@@ -557,3 +557,80 @@ def test_the_matcher_finds_the_song_of_the_artist_spelling_and_otherwise(env):
     assert matcher.match(_entry("The Ball & Chain", "Gera (LIVE cover)")).artist.name == "The Ball And Chain"
     # A joined credit is still two artists: "The Ball" isn't "The Ball & Chain"
     assert matcher.match(_entry("The Ball", "Gera (LIVE cover)")) is None
+
+
+# ==================== Leina Radio's requests, 2026-11-26 ====================
+
+def test_a_request_added_as_a_full_album_is_one_and_its_mix_title_stays_whole(env):
+    # Mixes are added, not rejected (owner, 2026-11-26): "babotokki - Masayoshi
+    # Takanaka mix" (ldzbvjLbz3Y) is a whole mix, filed under its own title -
+    # no remix of a "Masayoshi Takanaka", also with no length known
+    entry = ie.as_entry(_entry("babotokki", "Masayoshi Takanaka mix", youtube_video_id="ldzbvjLbz3Y"))
+    entry["full_album"] = True
+
+    [song] = ie.run_import_batch([entry])
+
+    assert (song.title, song.kind, song.album, song.version_kind) == (
+        "Masayoshi Takanaka mix", "full_album", "Masayoshi Takanaka mix", None)
+    # Without it, the same title is a remix's name (as before)
+    [plain] = ie.run_import_batch([_entry("babotokki", "Lofi Beat (Night Mix)")])
+    assert (plain.kind, plain.version_kind) == (None, "remix")
+
+
+def _feat_entry(title, feats):
+    entry = ie.as_entry(_entry("K/DA", title))
+    entry["feat_artists"] = feats
+    return entry
+
+
+def test_a_feat_list_joined_by_and_credits_each_known_artist(env):
+    # "K/DA - VILLAIN ft. Madison Beer and Kim Petras" credited one artist
+    # "Madison Beer and Kim Petras" (2026-11-26)
+    session = env["session"]
+    _artist(session, "Madison Beer", "Selfish")
+    _artist(session, "Kim Petras", "Heart to Break")
+
+    [song] = ie.run_import_batch([_feat_entry("VILLAIN", ["Madison Beer and Kim Petras"])])
+
+    assert sorted((link.artist.name, link.role) for link in song.additional_artist_links) == [
+        ("Kim Petras", "feat"), ("Madison Beer", "feat")]
+    assert session.query(Artist).filter(Artist.name.like("%and%")).count() == 0
+
+
+def test_a_feat_list_of_artists_only_musicbrainz_knows_is_split_too(env, monkeypatch):
+    from utils.common import musicbrainz_artists
+    asked = []
+    monkeypatch.setattr(musicbrainz_artists, "artist_on_musicbrainz",
+                        lambda name: asked.append(name) or name in {"Madison Beer", "Kim Petras"})
+
+    [song] = ie.run_import_batch([_feat_entry("VILLAIN", ["Madison Beer and Kim Petras"])])
+
+    assert sorted(link.artist.name for link in song.additional_artist_links) == ["Kim Petras", "Madison Beer"]
+    assert "Madison Beer and Kim Petras" in asked  # the whole name first: not an artist there
+
+
+@pytest.mark.parametrize("known", ["Simon and Garfunkel", "Simon & Garfunkel"])
+def test_a_known_band_with_and_in_its_name_stays_whole(env, monkeypatch, known):
+    from utils.common import musicbrainz_artists
+    session = env["session"]
+    _artist(session, known, "The Boxer")
+    _artist(session, "Simon", "Song A")
+    _artist(session, "Garfunkel", "Song B")
+    monkeypatch.setattr(musicbrainz_artists, "artist_on_musicbrainz", lambda name: True)
+
+    [song] = ie.run_import_batch([_feat_entry("Mrs. Robinson Cover", ["Simon and Garfunkel"])])
+
+    assert [link.artist.name for link in song.additional_artist_links] == [known]
+
+
+def test_a_band_musicbrainz_knows_whole_isnt_split_by_its_parts(env, monkeypatch):
+    # Both parts are artists of music.db, but MusicBrainz has the band itself
+    from utils.common import musicbrainz_artists
+    session = env["session"]
+    _artist(session, "Simon", "Song A")
+    _artist(session, "Garfunkel", "Song B")
+    monkeypatch.setattr(musicbrainz_artists, "artist_on_musicbrainz", lambda name: name == "Simon & Garfunkel")
+
+    [song] = ie.run_import_batch([_feat_entry("Bridge", ["Simon and Garfunkel"])])
+
+    assert [link.artist.name for link in song.additional_artist_links] == ["Simon and Garfunkel"]

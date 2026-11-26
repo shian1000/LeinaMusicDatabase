@@ -210,6 +210,32 @@ def _release_kind(release_group) -> str | None:
     return next((kind for name, kind in _SECONDARY_TYPE_VERSION_KINDS.items() if name in types), None)
 
 
+def _release_group_first_year(group_id: str | None) -> int | None:
+    """The year of the release group's own first-release-date (one request,
+    through mb_get()), None when it can't be had."""
+    if not group_id:
+        return None
+    response = mb_get(f"{MUSICBRAINZ_WS_ROOT}release-group/{group_id}", {"fmt": "json"})
+    try:
+        return _extract_year(response.json().get("first-release-date")) if response is not None else None
+    except ValueError:
+        return None
+
+
+def _album_year(recordings, recording, release, first_appearances) -> int | None:
+    """The picked album's year: its release group's earliest among the hits,
+    or - when the hits date it only after the song first appeared, or not at
+    all - the group's own first-release-date, if earlier: the hits may hold
+    just a later edition of the album (Robbie Williams' "Sing When You're
+    Winning", 2000, came dated 2003). Asked only then, one request."""
+    year = _release_group_year(recordings, release)
+    first = first_appearances.get(normalize(recording.get("title", "")))
+    if year is None or (first and year > first):
+        own = _release_group_first_year(release.get("release-group", {}).get("id"))
+        year = min(y for y in (year, own) if y) if (year or own) else None
+    return year
+
+
 def _album_result(title: str, recording, release, artist: str, recordings) -> DiscoveryResult:
     matched_title, matched_artist = _recording_title_artist(recording, artist)
     track_number, disc_number = _track_position(release)
@@ -217,11 +243,12 @@ def _album_result(title: str, recording, release, artist: str, recordings) -> Di
     # A reissue's year isn't the song's; Years then asks for the album's own.
     # Unsure is enough here: Czesław Niemen's "Dziwny jest ten świat" (1967)
     # is among the hits only as its 1991 edition, after a lone 1979 best-of
-    reissue = _is_reissue(release, recording, recordings, _first_appearances(recordings, lone_compilations=True))
+    first_appearances = _first_appearances(recordings, lone_compilations=True)
+    reissue = _is_reissue(release, recording, recordings, first_appearances)
     return DiscoveryResult(album=title, matched_title=matched_title, matched_artist=matched_artist,
                            track_number=track_number, disc_number=disc_number,
                            load_tracks=_tracks_loader(release),
-                           year=None if reissue else _release_group_year(recordings, release),
+                           year=None if reissue else _album_year(recordings, recording, release, first_appearances),
                            album_type=_album_type(release),
                            album_ids={"musicbrainz_release_group_id": group_id} if group_id else {},
                            release_kind=_release_kind(release.get("release-group")))
@@ -364,15 +391,28 @@ def _spell_checked(artist: str, song: str) -> tuple[str, str]:
     return artist, song
 
 
+# A song with many live recordings (Pixies' "Where Is My Mind?": 25 hits,
+# every one a concert or a compilation) is searched once more without them,
+# by the recording's disambiguation ("live, 2004-04-25: ..."): the studio
+# recording was further down. Not "NOT secondarytype:live" - that drops a
+# recording any of whose releases is live, the studio one too
+_WITHOUT_LIVE_RECORDINGS = " AND NOT comment:live"
+
+
 def _search_album(artist: str, song: str) -> DiscoveryResult | None:
     """The album of the first 5 recording hits, then of the first 25 unless
-    the 5 gave a studio album that isn't a reissue: a later hit's album can
-    still beat an early hit's single or reissue (Maryla Rodowicz's "Sing-Sing",
-    1976, is the 22nd hit; the first 5 had only the undated "Wola 2")."""
+    the 5 gave the artist's own studio album that isn't a reissue: a later
+    hit's album can still beat an early hit's single, reissue or "Various
+    Artists" album (Maryla Rodowicz's "Sing-Sing", 1976, is the 22nd hit;
+    the first 5 had only the undated "Wola 2"; The Immortals' "Techno
+    Syndrome" got the game compilation "A Gamer's Day" over their own
+    "Mortal Kombat: The Album"). When all 25 were hits and none gave such an
+    album, the hits that aren't live recordings once more
+    (_WITHOUT_LIVE_RECORDINGS)."""
     query = f'recording:{lucene_quote(song)} AND artist:{lucene_quote(artist)}'
     slog(query, priority=1)
     found = None
-    for limit in (5, 25):
+    for query, limit in ((query, 5), (query, 25), (query + _WITHOUT_LIVE_RECORDINGS, 25)):
         with _bounded_socket_timeout(MUSICBRAINZ_SEARCH_TIMEOUT):
             response = musicbrainzngs.search_recordings(query=query, limit=limit)
         recordings = response.get("recording-list", [])
@@ -380,8 +420,9 @@ def _search_album(artist: str, song: str) -> DiscoveryResult | None:
         slog(result)
         if result:
             found = _album_result(result, result_recording, result_release, artist, recordings)
-            if result_release.get("release-group", {}).get("primary-type") == "Album" and not _is_reissue(
-                    result_release, result_recording, recordings, _first_appearances(recordings)):
+            if (result_release.get("release-group", {}).get("primary-type") == "Album"
+                    and not _is_various_artists_release(result_release)
+                    and not _is_reissue(result_release, result_recording, recordings, _first_appearances(recordings))):
                 return found
         if len(recordings) < limit:  # that was every hit
             break

@@ -11,7 +11,7 @@ from menu.main_menu.enter_database.manage_database.resolve_duplicates import (
     remove_duplicate_artists, remove_duplicate_songs, resolve_duplicated_artists)
 from menu.main_menu.enter_database.manage_database.merge_divide_menu import merge_artists_menu, divide_artists_menu
 from menu.main_menu.enter_database.manage_database.clean_names import clean_names
-from utils.common.text_utils import check_spelling, similarity
+from utils.common.text_utils import check_spelling, similarity, spelling_lookup_failed
 from utils.database.database_getter import get_songs_from_db_session
 from utils.ui.artist_split_review import review_artist_splits
 from utils.ui.swapped_song_review import review_swapped_songs
@@ -141,8 +141,10 @@ def check_spelling_menu():
         else:
             print(f"Checking {song.artist.name} - {song.title}")
             spell_check_results = check_spelling(song.artist.name, song.title)
-            spell_check_cache[cache_key] = spell_check_results
-            _MENU_SPELLCHECK_CACHE[cache_key] = spell_check_results
+            # MusicBrainz not answering corrects nothing and is asked again next run
+            if not spelling_lookup_failed(spell_check_results):
+                spell_check_cache[cache_key] = spell_check_results
+                _MENU_SPELLCHECK_CACHE[cache_key] = spell_check_results
 
         new_artist = spell_check_results["corrected_artist"]
         new_title = spell_check_results["corrected_title"]

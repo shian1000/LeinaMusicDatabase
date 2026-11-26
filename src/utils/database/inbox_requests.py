@@ -253,6 +253,8 @@ class LinkCase:
     dead_still_plays: bool | None = None
     # Suggested and newfound videos: True plays / False gone / None unknown
     plays: dict = field(default_factory=dict)
+    # Those the Data API lists as a live / upcoming stream or 0 s long: never "plays"
+    streams: list = field(default_factory=list)
     our_video_id: str | None = None
     checked_at: str | None = None  # when the above was filled; None = not checked
     auto_note: str | None = None  # why the automatic pass left it to the owner
@@ -618,6 +620,22 @@ def _write_decisions(entries: dict) -> None:
                                 **({"facts": check["facts"]} if check.get("facts") else {}), **entry)
 
 
+def move_decisions(keys: list[str], file_name: str, **extra) -> int:
+    """Take the answers for `keys` out of decisions.json into `file_name`
+    (next to it, merged with what it holds, each entry with `extra` added) -
+    a reopened case is then asked again. How many moved. An unreadable file
+    stops it before anything is written (InboxFileError)."""
+    decisions = _load_json(DECISIONS_FILE, {}, for_update=True)
+    moved = {key: {**decisions[key], **extra} for key in keys if key in decisions}
+    if not moved:
+        return 0
+    kept = _load_json(file_name, {}, for_update=True)
+    kept.update(moved)
+    _save_json(file_name, kept)
+    _save_json(DECISIONS_FILE, {key: entry for key, entry in decisions.items() if key not in moved})
+    return len(moved)
+
+
 def _write_pending_decisions(session) -> None:
     pending = session.info.get(_PENDING_DECISIONS)
     if not pending:
@@ -651,7 +669,8 @@ def save_case_checks(cases: list) -> None:
         if getattr(case, "checked_at", None):
             entry.update(checked_at=case.checked_at, plays=case.plays)
         if isinstance(case, LinkCase) and case.checked_at:
-            entry.update(our_video_id=case.our_video_id, dead_still_plays=case.dead_still_plays)
+            entry.update(our_video_id=case.our_video_id, dead_still_plays=case.dead_still_plays,
+                         streams=case.streams)
         checks[case.key] = entry
     _save_json(CHECKS_FILE, checks)
 
@@ -675,6 +694,7 @@ def load_case_checks(cases: list, max_age_hours: float) -> None:
         if isinstance(case, LinkCase):
             case.our_video_id = entry.get("our_video_id")
             case.dead_still_plays = entry.get("dead_still_plays")
+            case.streams = entry.get("streams") or []
 
 
 def add_auto_report(entries: list[dict], shown: bool = False) -> None:
@@ -890,7 +910,9 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
     2. one Data API call for every id at once (videos_exist_via_api(), no
        bot wall): a "gone" there is final;
     3. yt-dlp only for suggested/newfound ids the API didn't rule out, once
-       per id - the API lists some videos YouTube won't play.
+       per id - the API lists some videos YouTube won't play. A live,
+       upcoming or 0-second stream (case.streams) isn't asked: it counts as
+       unknown (None), never as playing - an ended stream is listed fine.
     The dead link itself isn't played again; only the API's answer is kept.
     A video found bad before is never our candidate, and what this finds gone
     or not playing goes to bad_youtube_videos - committed here, so the
@@ -927,17 +949,22 @@ def check_link_cases(cases: list[LinkCase], on_case=None) -> dict:
 
     candidates = [[r.video_id for r in case.replacements] + ([case.our_video_id] if case.our_video_id else [])
                   for case in cases]
+    streams = set()
     api = videos_exist_via_api(
-        [case.dead_video_id for case in cases if case.dead_video_id] + [v for ids in candidates for v in ids])
+        [case.dead_video_id for case in cases if case.dead_video_id] + [v for ids in candidates for v in ids],
+        streams=streams)
     known = {}
     blocked = 0
     for case, ids in zip(cases, candidates):
         if api is not None and api.get(case.dead_video_id) is False:
             case.dead_still_plays = False
+        case.streams = [v for v in ids if v in streams]
         for video_id in ids:
             if video_id not in known:
                 if api is not None and api.get(video_id) is False:
                     known[video_id] = False
+                elif video_id in streams:
+                    known[video_id] = None
                 else:
                     answer = video_playability(video_id)
                     if answer is None:

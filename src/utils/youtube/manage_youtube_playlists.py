@@ -1556,7 +1556,7 @@ def _videos_list(video_ids, part: str, what: str):
     return batches()
 
 
-def videos_exist_via_api(video_ids) -> dict | None:
+def videos_exist_via_api(video_ids, streams: set | None = None) -> dict | None:
     """{video id: False if YouTube's Data API says the video is gone (not
     listed at all = deleted, private or channel terminated; private; upload
     deleted/failed/rejected) or region-blocked in YOUTUBE_REGION, True if
@@ -1566,8 +1566,13 @@ def videos_exist_via_api(video_ids) -> dict | None:
     None when the API can't be used. Not affected by yt-dlp's rate limiting
     or bot wall, but it can't see everything: a video YouTube refuses to
     play ("UNPLAYABLE" Topic uploads, 2026-10-12) may still be listed as
-    fine, so True isn't proof that it plays - only False is final."""
-    batches = _videos_list(video_ids, "status,contentDetails", "status")
+    fine, so True isn't proof that it plays - only False is final.
+    `streams`, when given, gets the listed videos that are a live stream, an
+    upcoming one or 0 seconds long - an ended stream with no recording
+    (2026-11-25: 02eMuzRAapY, "Offline" in yt-dlp) is listed as fine too.
+    The snippet costs no more quota (a call is 1 unit whatever its parts)."""
+    batches = _videos_list(video_ids, "status,contentDetails" + (",snippet" if streams is not None else ""),
+                           "status")
     if batches is None:
         return None
     result = {}
@@ -1584,6 +1589,8 @@ def videos_exist_via_api(video_ids) -> dict | None:
                     and status.get("uploadStatus") not in _GONE_UPLOAD_STATUSES
                     and not _region_blocked(regions)
                 )
+                if streams is not None and result[video_id] and _is_stream(item):
+                    streams.add(video_id)
     except Exception as exc:
         flog(f"[YouTube API] videos.list failed: {exc}")
         return None
@@ -1591,6 +1598,15 @@ def videos_exist_via_api(video_ids) -> dict | None:
 
 
 _ISO_DURATION = re.compile(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$")
+
+
+def _is_stream(item: dict) -> bool:
+    """Is a videos.list item a live or upcoming stream, or 0 seconds long
+    (a stream that ended without a recording: "P0D")?"""
+    if item.get("snippet", {}).get("liveBroadcastContent") in ("live", "upcoming"):
+        return True
+    match = _ISO_DURATION.match(item.get("contentDetails", {}).get("duration") or "")
+    return bool(match) and not any(int(g or 0) for g in match.groups())
 
 
 def video_durations_via_api(video_ids, on_found=None) -> dict | None:

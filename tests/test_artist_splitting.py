@@ -121,6 +121,28 @@ def test_joining_words_split_only_when_a_part_already_exists(session):
     assert candidates[all_known.name].preselected
 
 
+def test_a_new_name_joined_by_and_of_musicbrainz_artists_is_proposed_preselected(session, monkeypatch):
+    # "Madison Beer and Kim Petras", made by an import (2026-11-26): neither
+    # part is in music.db, MusicBrainz knows both and not the whole name
+    from utils.common import musicbrainz_artists
+    asked = []
+    known = {"Madison Beer", "Kim Petras", "Simon & Garfunkel", "Simon", "Garfunkel"}
+    monkeypatch.setattr(musicbrainz_artists, "artist_on_musicbrainz", lambda name: asked.append(name) or name in known)
+    joined = _artist_with_song(session, "Madison Beer and Kim Petras", "VILLAIN")
+    band = _artist_with_song(session, "Simon and Garfunkel", "The Boxer")
+    unknown = _artist_with_song(session, "Tymon i Trupy", "Song")
+
+    candidates = {c.artist.name: c for c in split.find_split_candidates(session, [joined, band, unknown])}
+
+    assert set(candidates) == {joined.name}
+    assert candidates[joined.name].proposal.main == ["Madison Beer", "Kim Petras"]
+    assert candidates[joined.name].preselected
+    # The whole database's names are never asked about
+    asked.clear()
+    assert joined.name not in {c.artist.name for c in split.find_split_candidates(session)}
+    assert asked == []
+
+
 def test_ignore_list_hides_names_case_insensitively(session, ignore_file):
     _artist_with_song(session, "Simon & Garfunkel")
     split.add_to_split_ignore_list(["simon & GARFUNKEL"])

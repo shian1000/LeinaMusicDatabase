@@ -182,10 +182,15 @@ non-trivial work in that area.
   `set_link_decision()` / `record_link_decision()` - a new kind of link report reuses them), and `inbox_song_requests.py` for songs the phone played that music.db doesn't
   have (`song_requests`): added automatically only by a rule of the owner's for
   `song_request` (owner's choice 2026-11-13, ending "never automatically";
-  `song_request_facts()`, the import run unattended) - else the owner adds them (through
+  `song_request_facts()`, the import run unattended; MusicBrainz unreachable = its facts None) - else the owner adds them (the review
+  may suggest a swap or split MusicBrainz knows, `musicbrainz_suggestion()`, asked per case right
+  before it's shown, never the pass; a rejection is undone by its menu's "Reopen rejected
+  requests", `reopen_rejected_requests()`; through
   `run_import_batch()`; a "ft. X" / "(feat. X)" in the title becomes the metadata's `feat_artists`, which
   `create_song_entry()` credits as feat - as for the mp3 / YouTube imports, see `sanitize`'s
-  `feat_to_credits`; an artist "A feat. B" is looked up as A's song crediting B before any artist
+  `feat_to_credits`, "ft. A and B" as two guests when they're known artists, `split_joined_feat_names()`;
+  a request as long as a mix is offered "as a full album / mix", `full_album_offer()` → the entry's
+  `full_album` → `songs.kind`; an artist "A feat. B" is looked up as A's song crediting B before any artist
   is made, `import_engine.find_song_of_main_artist()` - sanitize never splits an artist field,
   the split review does), skips or rejects them; a rejected one goes to music.db's
   `rejected_song_requests` (migration 0015), which the phone reads so it doesn't ask again; one
@@ -812,9 +817,15 @@ non-trivial work in that area.
   `requests.get` against `musicbrainz.org` from anywhere else. Known unmigrated exception:
   `music_brainz_fetcher.py` still goes through the raw `musicbrainzngs` library instead — see
   `docs/agent-notes/import-pipeline.md`.
+- `src/utils/common/musicbrainz_artists.py` — `artist_on_musicbrainz(name)`: whether MusicBrainz
+  has an artist called exactly that (one artist search, cached in `data/musicbrainz_artists.json`,
+  an unanswered one None and not cached); for channel names and "A and B" credits. `conftest.py`
+  points its cache away and stubs its `mb_get` for every test.
 - `src/utils/common/spellcheck_cache.py` — disk cache for `check_spelling()` results at
   `data/spellcheck_cache.json`, saved every 20 answers and when the process exits (`atexit`), so a
-  test that fills it must leave `_CACHE_PATH` where `conftest.py` put it. `docs/agent-notes/import-pipeline.md`.
+  test that fills it must leave `_CACHE_PATH` where `conftest.py` put it. A lookup MusicBrainz
+  didn't answer is never put there (Performance notes); `forget_not_found()` (also its `__main__`,
+  `--forget-not-found`, refused while the app lock is held) drops the "no match" answers. `docs/agent-notes/import-pipeline.md`.
 - `src/utils/common/debug.py` — diagnostics, never messages for the user (those go through
   `utils/common/output.py`, see Coding conventions → "Output"). `slog(var)` / `mlog(message)` are
   for debugging: both reach `debug.log` (gitignored, timestamped) when `priority >= 3 - verbosity`,
@@ -1237,7 +1248,12 @@ non-trivial work in that area.
   MusicBrainz when there's no good local match.
 - `check_spelling()` results — including "no match" answers — are cached on disk
   (`spellcheck_cache.py` → `data/spellcheck_cache.json`), so a re-import only pays network cost
-  for genuinely new `(artist, title)` pairs. Delete the file to force fresh lookups.
+  for genuinely new `(artist, title)` pairs. Delete the file to force fresh lookups. A lookup
+  MusicBrainz didn't answer (503/429 after the retries, a timeout) is never cached: it comes back
+  with `found` None (`text_utils.spelling_lookup_failed()`), which callers treat as "nothing to
+  correct" and keep out of their own per-run caches too - never as "not on MusicBrainz".
+  `python -m utils.common.spellcheck_cache --forget-not-found` (from `src/`, app closed) drops the
+  cached "no match" answers once (runbook → "Requests from the phone").
 - MusicBrainz tunables (`MUSICBRAINZ_API_TIMEOUT`, `MUSICBRAINZ_API_MIN_INTERVAL`,
   `MUSICBRAINZ_SPELLCHECK_USE_FALLBACK`, `SPELLCHECK_CACHE_FILE`) live in `constants.py`. An
   import prints an `MBStats` summary (requests, cache hits/misses, 429/503 counts, time throttling

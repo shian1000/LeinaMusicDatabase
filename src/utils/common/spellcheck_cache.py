@@ -8,7 +8,12 @@ seen before (including "no match found" answers, which are the slowest because
 they trigger the fallback query and any backoff) is served from disk.
 
 Delete the cache file (``data/spellcheck_cache.json`` by default) to force fresh
-lookups of everything.
+lookups of everything. A lookup MusicBrainz didn't answer (503, timeout) is
+never stored; until 2026-11-25 it was, as "no match found" for good. To ask
+again about every "no match" answer once (they're only a cache), with the app
+and the automation not running::
+
+    cd src && ../venv/bin/python -m utils.common.spellcheck_cache --forget-not-found
 """
 
 import atexit
@@ -93,3 +98,35 @@ def save() -> None:
 # Only the import pipeline saves on its own; Check spelling and the fetchers
 # would otherwise lose up to _AUTOSAVE_EVERY - 1 answers when the app exits
 atexit.register(save)
+
+
+def forget_not_found() -> int:
+    """Drop every "no match found" answer (found False), so the next
+    check_spelling() of those pairs asks MusicBrainz again. The number
+    dropped; saved at once."""
+    global _dirty
+    with _lock:
+        cache = _load_locked()
+        stale = [key for key, value in cache.items() if isinstance(value, dict) and value.get("found") is False]
+        for key in stale:
+            del cache[key]
+        _dirty = _dirty or bool(stale)
+    save()
+    return len(stale)
+
+
+if __name__ == "__main__":
+    import sys
+
+    from utils.database.app_lock import try_exclusive_lock
+
+    if sys.argv[1:] != ["--forget-not-found"]:
+        sys.exit("Usage: python -m utils.common.spellcheck_cache --forget-not-found")
+    # An open app keeps its own copy of the cache and writes it back on exit
+    lock = try_exclusive_lock()
+    if lock is None:
+        sys.exit("The app or the automatic pass is running - close it first.")
+    try:
+        print(f"Dropped {forget_not_found()} \"not on MusicBrainz\" answers from {_CACHE_PATH}")
+    finally:
+        lock.close()

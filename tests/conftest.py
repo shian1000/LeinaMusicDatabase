@@ -44,6 +44,11 @@ from utils.common import spellcheck_cache  # noqa: E402
 
 spellcheck_cache._CACHE_PATH = _ISOLATED_DIR / "spellcheck_cache.json"
 
+# Whether MusicBrainz knows an artist: the same, never the owner's cache
+from utils.common import musicbrainz_artists  # noqa: E402
+
+musicbrainz_artists.CACHE_PATH = _ISOLATED_DIR / "musicbrainz_artists.json"
+
 # Settings -> "Name cleanup": the steps' defaults, never the owner's choice
 from utils.common.sanitize import settings as sanitize_settings  # noqa: E402
 
@@ -91,3 +96,20 @@ def no_real_db_album_lookup(monkeypatch):
     # want the exception patch it themselves; none may read the user's DB.
     from utils.database import albums
     monkeypatch.setattr(albums, "artist_has_album", lambda artist_name, title: False)
+
+
+@pytest.fixture(autouse=True)
+def no_musicbrainz_artist_search(monkeypatch):
+    # artist_on_musicbrainz() asks MusicBrainz for a name it hasn't cached:
+    # unreachable in tests (None, nothing cached) unless a test answers it
+    from utils.common import musicbrainz_artists
+    monkeypatch.setattr(musicbrainz_artists, "mb_get", lambda url, params, **kwargs: None)
+    musicbrainz_artists.forget_cache()
+
+
+@pytest.fixture(autouse=True)
+def no_musicbrainz_release_group_lookup(monkeypatch):
+    # An album's year may ask MusicBrainz for its release group's own date
+    # (_release_group_first_year()): never the real one in tests
+    from utils.discoveries.discovery_modules import music_brainz_fetcher
+    monkeypatch.setattr(music_brainz_fetcher, "mb_get", lambda url, params, **kwargs: None)

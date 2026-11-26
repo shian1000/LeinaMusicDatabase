@@ -1130,6 +1130,11 @@ DEBUG_SLOW_SQL_SECONDS = 0.05
 # Disk-backed cache of check_spelling() results, path relative to the project
 # root. Delete this file to force fresh lookups of everything.
 SPELLCHECK_CACHE_FILE = PROJECT_ROOT / "data/spellcheck_cache.json"
+# Whether MusicBrainz knows an artist of a name (musicbrainz_artists.py),
+# normalized name -> true / false; only a cache, delete it to ask again
+MUSICBRAINZ_ARTIST_CACHE_FILE = PROJECT_ROOT / "data/musicbrainz_artists.json"
+# A MusicBrainz artist search hit counts as that name from this score (0-100)
+MUSICBRAINZ_ARTIST_MIN_SCORE = 90
 # Joined artist names ("Simon & Garfunkel") the user said are one artist, so
 # "Split joined artist names" stops proposing them. Relative to the project
 # root; delete it (or a line in it) to be asked again.
@@ -1193,6 +1198,18 @@ SONG_REQUEST_COLON_ARTIST_MAX_WORDS = 4
 # (name_key()), since a short name ("Yes", "Air") starts many titles.
 SONG_REQUEST_TITLE_ARTIST_MAX_WORDS = 5
 SONG_REQUEST_LONE_TITLE_ARTIST_MIN_CHARS = 4
+
+# When the database knows neither the request's artist nor its title as an
+# artist, the review asks MusicBrainz (check_spelling(), cached) whether the
+# two are swapped ("Moya" / "Godspeed You! Black Emperor") or the title
+# starts with the artist ("Behnam37" / "Sylvie Vartan L'amour c'est comme
+# une cigarette"): a suggestion only when its recording is this alike (0-1)
+# on both the artist and the title. Never applied unattended.
+SONG_REQUEST_MUSICBRAINZ_MIN_SIMILARITY = 0.9
+# ... asked for one case at a time, right before it's shown, with at most
+# this many lookups MusicBrainz must answer (cached ones free): rate-limited
+# and retried on 503s, 24 requests asked up front took ~12 minutes (2026-11-26)
+SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS = 4
 
 # An artist a YouTube description credits that the database doesn't know is
 # tried as several known artists side by side ("Fisz Emade Tworzywo" ->

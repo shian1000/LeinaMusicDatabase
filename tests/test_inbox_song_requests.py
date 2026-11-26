@@ -861,6 +861,130 @@ def test_closest_song_of_artist_score_compares_only_the_artists_own_songs(env, m
     assert scores[("Nobody Known", "Chromatic")] == 0.0
 
 
+def _musicbrainz_knows(monkeypatch, answers: dict) -> list:
+    """check_spelling() answering `answers` ((artist, title) -> result,
+    found True added), "found": False for any other pair; the pairs asked."""
+    asked = []
+
+    def check_spelling(artist, title):
+        asked.append((artist, title))
+        answer = answers.get((artist, title))
+        return {"found": True, "mb_score": 100, **answer} if answer else {
+            "found": False, "corrected_artist": artist, "corrected_title": title}
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", check_spelling)
+    return asked
+
+
+def _review_cases(env, rows):
+    """The cases as the review shows them: each given MusicBrainz's suggestion
+    right before it's shown (suggest_from_musicbrainz())."""
+    _request(env["inbox"], "2026-11-25_10-00-00_001.db", rows)
+    cases = sr.collect_song_request_cases(env["session"], pr.read_new_requests(), matcher=env["matcher"],
+                                          fetch=False)
+    lookups = sr.MusicBrainzLookups()
+    for case in cases:
+        sr.suggest_from_musicbrainz(case, env["matcher"], lookups)
+    return cases
+
+
+def test_musicbrainz_suggests_a_swap_of_artists_the_database_doesnt_know(env, monkeypatch):
+    # 2026-11-25: "Moya - Godspeed You! Black Emperor" on cosmicguitars came swapped
+    _musicbrainz_knows(monkeypatch, {("Godspeed You! Black Emperor", "Moya"): {
+        "artist_similarity": 1.0, "title_similarity": 1.0,
+        "mb_artist": "Godspeed You! Black Emperor", "mb_title": "Moya"}})
+
+    [case] = _review_cases(env, [{"title": "Godspeed You! Black Emperor", "artist": "Moya",
+                                  "youtube_video_id": "gybeMoya001"}])
+
+    assert case.suggested == ("Godspeed You! Black Emperor", "Moya")
+    assert case.suggested_from == sr.SUGGESTED_FROM_MUSICBRAINZ_SWAP
+    assert case.pending  # a suggestion only, nothing settled by it
+
+
+@pytest.mark.parametrize("cached_recording", [True, False])
+def test_musicbrainz_suggests_the_artist_a_title_starts_with(env, monkeypatch, cached_recording):
+    # 2026-11-25: "Behnam37" (a channel) / "Sylvie Vartan L'amour c'est comme
+    # une cigarette"; check_spelling() found the title, nothing used its artist.
+    # cached_recording False: an answer cached before it kept mb_artist
+    title = "Sylvie Vartan L'amour c'est comme une cigarette"
+    joined = {"artist_similarity": 0.2, "title_similarity": 0.82,
+              "corrected_artist": "Behnam37", "corrected_title": "L’amour c’est comme une cigarette"}
+    if cached_recording:
+        joined |= {"mb_artist": "Sylvie Vartan", "mb_title": "L’amour c’est comme une cigarette"}
+    asked = _musicbrainz_knows(monkeypatch, {
+        ("Behnam37", title): joined,
+        ("Sylvie Vartan", "L'amour c'est comme une cigarette"): {"artist_similarity": 1.0, "title_similarity": 1.0}})
+
+    [case] = _review_cases(env, [{"title": title, "artist": "Behnam37"}])
+
+    assert case.suggested == ("Sylvie Vartan", "L'amour c'est comme une cigarette")
+    assert case.suggested_from == sr.SUGGESTED_FROM_MUSICBRAINZ_TITLE
+    if cached_recording:  # no lookup but the request's own (and the swap's)
+        assert ("Sylvie Vartan", "L'amour c'est comme une cigarette") not in asked
+
+
+def test_musicbrainz_suggests_nothing_when_it_has_the_request_as_asked_or_only_unlike(env, monkeypatch):
+    asked = _musicbrainz_knows(monkeypatch, {
+        ("Still Corners", "The Trip"): {"artist_similarity": 1.0, "title_similarity": 1.0,
+                                        "mb_artist": "Still Corners", "mb_title": "The Trip"},
+        # Swapped, but only a similar name: no suggestion
+        ("Some Long Title", "Nobody"): {"artist_similarity": 0.7, "title_similarity": 1.0}})
+
+    cases = _review_cases(env, [{"title": "The Trip", "artist": "Still Corners"},
+                                {"title": "Some Long Title", "artist": "Nobody"}])
+
+    assert [c.suggested for c in cases] == [None, None]
+    assert ("The Trip", "Still Corners") not in asked  # as asked: no swap asked about
+
+
+def test_only_the_review_asks_musicbrainz_for_a_suggestion(env, monkeypatch):
+    asked = _musicbrainz_knows(monkeypatch, {})
+    _request(env["inbox"], "2026-11-25_10-00-00_001.db", [{"title": "Godspeed You! Black Emperor", "artist": "Moya"}])
+
+    [case] = sr.collect_song_request_cases(env["session"], pr.read_new_requests(), matcher=env["matcher"], fetch=False)
+
+    assert case.suggested is None and asked == []
+
+
+def test_a_known_artist_gets_no_musicbrainz_suggestion(env, monkeypatch):
+    asked = _musicbrainz_knows(monkeypatch, {})
+
+    [case] = _review_cases(env, [{"title": "Okean Elzy Something", "artist": "Elise Trouw"}])
+
+    assert case.suggested is None and asked == []
+
+
+def test_musicbrainz_not_answering_leaves_its_facts_unknown(env, monkeypatch):
+    # 2026-11-25: AURORA's "Forgotten Love" got musicbrainz_found False from
+    # a 503, so "MusicBrainz agrees" couldn't hold; unknown says so instead
+    from utils.common import automation_settings
+    from utils.discoveries import import_engine
+    from utils.common.text_utils import MUSICBRAINZ_UNREACHABLE
+
+    automation_settings.save_user_rules([{
+        "name": "Not on MusicBrainz", "question": "song_request", "on": True,
+        "conditions": [{"fact": "musicbrainz_found", "op": "is", "value": False}]}])
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": None, "error": MUSICBRAINZ_UNREACHABLE, "corrected_artist": artist,
+        "corrected_title": title, "corrected": False})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    monkeypatch.setattr(import_engine, "run_import_batch", lambda entries: pytest.fail("imported"))
+    _request(env["inbox"], "2026-11-25_10-00-00_001.db", [
+        {"title": "Forgotten Love", "artist": "AURORA", "youtube_video_id": "TPUFd7cv9q8"}])
+
+    result = ia.auto_resolve(env["session"], pr.read_new_requests())
+
+    assert result.to_review == 1
+    [case] = sr.collect_song_request_cases(env["session"], pr.read_review_requests(), matcher=env["matcher"])
+    facts = sr.song_request_facts(case, "AURORA", "Forgotten Love", {}, env["matcher"], False)
+    assert [facts[f] for f in ("musicbrainz_found", "musicbrainz_title_similarity",
+                               "musicbrainz_artist_similarity", "musicbrainz_score")] == [None] * 4
+    pr.load_case_checks([case], 24)
+    assert "MusicBrainz couldn't be reached" in case.auto_note
+    automation_settings.CONFIG_PATH.unlink()
+
+
 def test_a_title_all_in_lower_case_is_added_as_musicbrainz_spells_it(env, monkeypatch):
     from utils.common import automation_settings
     from utils.discoveries import import_engine
@@ -1057,3 +1181,275 @@ def test_the_automatic_pass_keeps_a_file_whose_other_songs_it_added_for_the_one_
     assert _names(env["inbox"], "review") == ["shianman_2026-11-25_13-00-00_014.db"]
     assert _names(env["inbox"], "processed") == []
     automation_settings.CONFIG_PATH.unlink()
+
+
+# ==================== 2026-11-26 review round ====================
+
+def _reject(env, name, rows, when="2026-11-25T18:41:04+01:00"):
+    requests = [pr.read_request_file(_request(env["inbox"], name, rows, folder="valid"))]
+    cases = sr.collect_song_request_cases(env["session"], requests, matcher=env["matcher"], fetch=False)
+    for case in cases:
+        sr.reject_song_request(env["session"], case)
+    env["session"].commit()
+    pr.finish_request_files(requests, cases)
+    decisions = json.loads((env["inbox"] / pr.DECISIONS_FILE).read_text())
+    for case in cases:
+        decisions[case.key]["decided_at"] = when
+    (env["inbox"] / pr.DECISIONS_FILE).write_text(json.dumps(decisions))
+    return cases
+
+
+def test_a_rejection_reopened_is_asked_about_again(env):
+    # The owner's ids 10-12 and the Mik4000 mix, rejected on 2026-11-25/26 by
+    # mistake (mixes are added since): undone from the menu
+    _reject(env, "shianman_2026-11-23_17-16-56_213.db",
+            [{"title": "Masayoshi Takanaka mix", "artist": "babotokki", "youtube_video_id": "ldzbvjLbz3Y"}])
+    _reject(env, "shianman_2026-11-23_18-19-37_214.db",
+            [{"title": "Cigarettes & Materia", "artist": "RRR", "youtube_video_id": "rIm8UvzdDHk"}],
+            when="2026-11-25T18:41:10+01:00")
+    session = env["session"]
+    # A row no decision names (written by hand, say) is listed on its own
+    session.add(RejectedSongRequest(artist="Nobody", title="Lone Row", youtube_video_id="lone0000001",
+                                    rejected_at="2026-11-01T10:00:00+01:00"))
+    session.commit()
+
+    items = sr.rejected_requests(session)
+
+    assert [(i.artist, i.title, i.youtube_video_ids) for i in items] == [
+        ("RRR", "Cigarettes & Materia", ["rIm8UvzdDHk"]),
+        ("babotokki", "Masayoshi Takanaka mix", ["ldzbvjLbz3Y"]),
+        ("Nobody", "Lone Row", ["lone0000001"])]
+    assert items[0].rejected_at.startswith("2026-11-25T18:41:10")
+
+    moved = sr.reopen_rejected_requests(session, [items[1], items[2]], today="2026-11-26")
+
+    assert moved == ["shianman_2026-11-23_17-16-56_213.db"]
+    assert [(r.artist, r.title) for r in session.query(RejectedSongRequest)] == [("RRR", "Cigarettes & Materia")]
+    decisions = pr.load_decisions()
+    assert "song:babotokki|masayoshi takanaka mix" not in decisions
+    assert decisions["song:rrr|cigarettes materia"]["decision"] == sr.REJECT
+    reopened = json.loads((env["inbox"] / "decisions_reopened_2026-11-26.json").read_text())
+    assert reopened["song:babotokki|masayoshi takanaka mix"]["decision"] == sr.REJECT
+    assert reopened["song:babotokki|masayoshi takanaka mix"]["reopened_at"]
+    assert _names(env["inbox"], "review") == ["shianman_2026-11-23_17-16-56_213.db"]
+    assert _names(env["inbox"], "processed") == ["shianman_2026-11-23_18-19-37_214.db"]
+
+    # The next review asks about it; nothing settles it as rejected before -
+    # nor a later request of its video the automatic pass reads
+    [case] = sr.collect_song_request_cases(session, pr.read_review_requests(), matcher=env["matcher"], fetch=False)
+    assert case.pending
+    _request(env["inbox"], "2026-11-26_12-00-00_300.db",
+             [{"title": "takanaka mix", "artist": "babotokki", "youtube_video_id": "ldzbvjLbz3Y"}])
+    result = ia.auto_resolve(session, pr.read_new_requests())
+    assert result.to_review == 1 and _names(env["inbox"], "review") == [
+        "2026-11-26_12-00-00_300.db", "shianman_2026-11-23_17-16-56_213.db"]
+
+
+def test_full_album_offer_for_a_request_as_long_as_a_mix(env):
+    _request(env["inbox"], "2026-11-26_10-00-00_001.db", [
+        {"title": "WINDOWS XP", "artist": "Mik4000", "duration_s": 3600},
+        {"title": "Masayoshi Takanaka mix", "artist": "babotokki"},  # no length: offered, not first
+        {"title": "Lofi Remix", "artist": "babotokki"},
+        {"title": "Short Mix", "artist": "babotokki", "duration_s": 240},
+        {"title": "Unseen", "artist": "Elise Trouw"},
+    ])
+    _, cases = _cases(env)
+
+    assert [sr.full_album_offer(c) for c in cases] == [True, None, False, False, False]
+    metadata = cases[1].metadata(full_album=True)
+    assert metadata["full_album"] is True and metadata.title == "Masayoshi Takanaka mix"
+    assert "full_album" not in cases[1].metadata()
+
+
+def _mb_artists(monkeypatch, known: set) -> list:
+    from utils.common import musicbrainz_artists
+    asked = []
+    monkeypatch.setattr(musicbrainz_artists, "artist_on_musicbrainz", lambda name: asked.append(name) or name in known)
+    monkeypatch.setattr(musicbrainz_artists, "cached_answer", lambda name: None)
+    return asked
+
+
+def test_a_work_title_with_a_colon_under_real_artists_is_not_split(env, monkeypatch):
+    # 2026-11-26: "Sandfall Interactive and Lorien Testard" / "Clair Obscur:
+    # Expedition 33" was suggested as "Clair Obscur - Expedition 33" ("the
+    # title starts with the artist"); MusicBrainz's Clair Obscur is another band
+    asked = _musicbrainz_knows(monkeypatch, {("Clair Obscur", "Expedition 33"): {
+        "artist_similarity": 1.0, "title_similarity": 0.3, "mb_artist": "Clair Obscur", "mb_title": "Lumière"}})
+    _mb_artists(monkeypatch, set())
+
+    [case] = _review_cases(env, [{"title": "Clair Obscur: Expedition 33",
+                                  "artist": "Sandfall Interactive and Lorien Testard"}])
+
+    assert case.suggested is None
+    assert ("Sandfall Interactive and Lorien Testard", "Clair Obscur: Expedition 33") in asked
+    # A label's or a channel's name still has the colon read: "Travie McCoy: Billionaire"
+    assert sr.suggested_artist_title("Fueled By Ramen", "Travie McCoy: Billionaire", env["matcher"]) == (
+        "Travie McCoy", "Billionaire")
+
+
+def test_a_colon_split_under_real_artists_needs_musicbrainz_to_have_the_recording(env, monkeypatch):
+    _musicbrainz_knows(monkeypatch, {("Lorien Testardo", "Lumière"): {
+        "artist_similarity": 1.0, "title_similarity": 1.0}})
+    _mb_artists(monkeypatch, set())
+
+    [case] = _review_cases(env, [{"title": "Lorien Testardo: Lumière", "artist": "Sandfall Interactive and Friends"}])
+
+    assert case.suggested == ("Lorien Testardo", "Lumière")
+    assert case.suggested_from == sr.SUGGESTED_FROM_MUSICBRAINZ_TITLE
+
+
+def test_a_dash_prefix_and_a_label_suffix_dont_make_a_suggestion(env, monkeypatch):
+    # 2026-11-26: "Ella Baila Sola" / "- Eslabon Armado y Peso Pluma - DEL
+    # Records 2023" was suggested as artist "- Eslabon Armado y Peso Pluma",
+    # title "DEL Records 2023"; it is the two artists' "Ella Baila Sola"
+    session = env["session"]
+    request = {"title": "- Eslabon Armado y Peso Pluma - DEL Records 2023", "artist": "Ella Baila Sola"}
+    assert sr.without_label_parts(request["title"]) == "Eslabon Armado y Peso Pluma"
+    assert sr.without_label_parts("APT.") == "APT."
+
+    # music.db knowing neither: MusicBrainz has the swap
+    _musicbrainz_knows(monkeypatch, {("Eslabon Armado y Peso Pluma", "Ella Baila Sola"): {
+        "artist_similarity": 0.93, "title_similarity": 1.0}})
+    _mb_artists(monkeypatch, set())
+    [case] = _review_cases(env, [request])
+    assert case.suggested == ("Eslabon Armado y Peso Pluma", "Ella Baila Sola")
+    assert case.suggested_from == sr.SUGGESTED_FROM_MUSICBRAINZ_SWAP
+
+    # Knowing both artists, the swap comes from music.db, joined by "&"
+    for artist_id, name in ((5080, "Eslabon Armado"), (5081, "Peso Pluma")):
+        artist = Artist(id=artist_id, name=name)
+        session.add(artist)
+        env["matcher"].artists.append(artist)
+    session.commit()
+    assert sr.suggested_artist_title(request["artist"], request["title"], env["matcher"]) == (
+        "Eslabon Armado & Peso Pluma", "Ella Baila Sola")
+
+
+@pytest.mark.parametrize("channel, base", [
+    ("PomplamooseMusic", "Pomplamoose"), ("OfficialClutch", "Clutch"), ("Clutch Official", "Clutch"),
+    ("Official Clutch", "Clutch"), ("AdeleVEVO", "Adele"), ("Pomplamoose Music", "Pomplamoose"),
+    ("Clutch", None), ("Musician", None), ("Officially", None), ("Music", None), ("TV", None)])
+def test_channel_base_name(channel, base):
+    assert sr.channel_base_name(channel) == base
+
+
+def test_a_known_artists_channel_with_an_affix_suggests_the_artist(env, monkeypatch):
+    # 2026-11-26: "PomplamooseMusic" and "OfficialClutch" weren't recognised
+    session = env["session"]
+    for artist_id, name in ((2963, "Pomplamoose"), (5075, "Clutch")):
+        artist = Artist(id=artist_id, name=name)
+        session.add(artist)
+        env["matcher"].artists.append(artist)
+    session.commit()
+
+    assert sr.suggested_artist_title("PomplamooseMusic", "Mister Sandman", env["matcher"]) == (
+        "Pomplamoose", "Mister Sandman")
+    assert sr.suggested_artist_title("OfficialClutch", "Electric Worry", env["matcher"]) == ("Clutch", "Electric Worry")
+    # A channel of no known artist: only MusicBrainz (the review) may tell
+    asked = _mb_artists(monkeypatch, {"Vulfpeck"})
+    _musicbrainz_knows(monkeypatch, {})
+    [case] = _review_cases(env, [{"title": "Dean Town", "artist": "VulfpeckMusic"}])
+    assert case.suggested == ("Vulfpeck", "Dean Town")
+    assert case.suggested_from == sr.SUGGESTED_FROM_MUSICBRAINZ_CHANNEL
+    assert asked == ["Vulfpeck"]
+
+
+def test_musicbrainz_lookups_are_capped_per_case_and_stop_when_it_doesnt_answer(env, monkeypatch):
+    from utils.common.text_utils import MUSICBRAINZ_UNREACHABLE
+    asked = []
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: asked.append(
+        (artist, title)) or {"found": False, "corrected_artist": artist, "corrected_title": title})
+    _mb_artists(monkeypatch, set())
+    title = "One Two Three Four Five Six Seven Eight"
+
+    cases = _review_cases(env, [{"title": title, "artist": "SomeChannel1"}])
+
+    assert cases[0].suggested is None and len(asked) == sr.SONG_REQUEST_MUSICBRAINZ_MAX_LOOKUPS
+
+    asked.clear()
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: asked.append(
+        (artist, title)) or {"found": None, "error": MUSICBRAINZ_UNREACHABLE})
+    lookups = sr.MusicBrainzLookups()
+    for case in cases * 3:
+        case.suggested = None
+        sr.suggest_from_musicbrainz(case, env["matcher"], lookups)
+    assert len(asked) == 1 and lookups.unreachable
+
+
+def _rule_adds_everything(monkeypatch, env):
+    from utils.common import automation_settings
+    automation_settings.save_user_rules([{
+        "name": "Everything", "question": "song_request", "on": True,
+        "conditions": [{"fact": "requests", "op": ">=", "value": 1}]}])
+    monkeypatch.setattr("utils.common.text_utils.check_spelling", lambda artist, title: {
+        "found": True, "artist_similarity": 1.0, "title_similarity": 1.0, "mb_score": 100,
+        "corrected_artist": artist, "corrected_title": title})
+    monkeypatch.setattr(type(env["matcher"]), "best_guesses", lambda self, entry, limit, min_score: [],
+                        raising=False)
+    imported = []
+    from utils.discoveries import import_engine
+
+    def run_import_batch(entries):
+        for entry in entries:
+            entry.song_id = 7018 + len(imported)
+            imported.append(entry)
+    monkeypatch.setattr(import_engine, "run_import_batch", run_import_batch)
+    return imported
+
+
+def test_one_pass_doesnt_add_a_song_twice_under_a_bands_two_names(env, monkeypatch):
+    # 2026-11-26 10:19: #7018 "Bajaga i Instruktori - Moji drugovi" and #7019
+    # "Bajaga - Moji drugovi", both added by "MusicBrainz agrees" in one run
+    from utils.common import automation_settings
+    session = env["session"]
+    for artist_id, name in ((4201, "Bajaga i Instruktori"), (4872, "Bajaga")):
+        artist = Artist(id=artist_id, name=name)
+        session.add(artist)
+        env["matcher"].artists.append(artist)
+    session.commit()
+    imported = _rule_adds_everything(monkeypatch, env)
+    _request(env["inbox"], "shianman_2026-11-25_23-02-17_249.db", [
+        {"title": "Moji drugovi -", "artist": "Bajaga i Instruktori", "youtube_video_id": "lQTd3-YvBaY"}])
+    _request(env["inbox"], "shianman_2026-11-25_23-02-17_250.db", [
+        {"title": "Moji drugovi", "artist": "Bajaga", "youtube_video_id": "B9y7UX3wUow"}])
+
+    result = ia.auto_resolve(session, pr.read_new_requests())
+
+    assert [(e.artist, e.title) for e in imported] == [("Bajaga i Instruktori", "Moji drugovi")]
+    assert result.to_review == 1 and _names(env["inbox"], "review") == ["shianman_2026-11-25_23-02-17_250.db"]
+    [case] = sr.collect_song_request_cases(session, pr.read_review_requests(), matcher=env["matcher"], fetch=False)
+    pr.load_case_checks([case], 24)
+    assert "another request of this run" in case.auto_note
+    automation_settings.CONFIG_PATH.unlink()
+
+
+def test_the_pass_doesnt_add_a_title_an_artist_of_a_related_name_has(env, monkeypatch):
+    from utils.common import automation_settings
+    session = env["session"]
+    band = Artist(id=4201, name="Bajaga i Instruktori")
+    session.add_all([band, Song(id=7018, title="Moji drugovi", artist=band)])
+    session.commit()
+    env["matcher"].artists.append(band)
+    imported = _rule_adds_everything(monkeypatch, env)
+    _request(env["inbox"], "2026-11-26_11-00-00_001.db", [
+        {"title": "Moji drugovi", "artist": "Bajaga", "youtube_video_id": "B9y7UX3wUow"},
+        {"title": "Ruski voz", "artist": "Bajaga"}])
+
+    result = ia.auto_resolve(session, pr.read_new_requests())
+
+    assert [(e.artist, e.title) for e in imported] == [("Bajaga", "Ruski voz")]
+    assert result.to_review == 1
+    automation_settings.CONFIG_PATH.unlink()
+
+
+def test_related_artist_names():
+    assert sr.related_artist_names("Bajaga", "Bajaga i Instruktori")
+    assert sr.related_artist_names("BAJAGA I INSTRUKTORI", "bajaga")
+    assert not sr.related_artist_names("Bajaga", "Bajagan")
+    assert not sr.related_artist_names("Air", "Air Supply")  # too short to tell
+    assert not sr.related_artist_names("Bajaga", "Ruski voz")
+
+
+def test_a_label_part_needs_its_year():
+    assert sr.without_label_parts("Jimmy Eat World - Broken Records") == "Jimmy Eat World - Broken Records"
+    assert sr.without_label_parts("Song - Fueled By Ramen Records (2008)") == "Song"

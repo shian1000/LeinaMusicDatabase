@@ -77,7 +77,9 @@ def _save_album_details(saved, modules=()):
 def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     """Albums for the songs without one - every such song, or only those of
     `songs` (an import's, filled in right after it). `entries` (song id ->
-    SongEntry) is taken for the import's sake and not used yet."""
+    SongEntry) is taken for the import's sake and not used yet. A song Leina
+    Radio requested loses a last bracket that only names the album found
+    (requested_title_without_album())."""
     if songs is None:
         songs_objects = get_songs_with_empty_category("album")
     else:
@@ -165,6 +167,13 @@ def fill_missing_albums(songs: list | None = None, entries: dict | None = None):
     saved = []
 
     def save(song, album, match=None):
+        from utils.database.inbox_song_requests import requested_title_without_album
+
+        # A requested song titled as its video, "Another [Empathy]": the bracket was the album
+        title = requested_title_without_album(song, album)
+        if title is not None:
+            print(f"Title {YELLOW}{song.title}{RESET} -> {YELLOW}{title}{RESET} (the bracket is its album)")
+            edit_db_entry(song, "title", title)
         edit_db_entry(song, "album", album)
         _set_track_position(song, match)
         found[id(song)] = (song, album, match)
