@@ -128,7 +128,10 @@ non-trivial work in that area.
   the length - ±3 s of ours - only decides whether the synced lines are kept).
   Not a music.db table on purpose: ~25 MB that Leina Radio would download whole; the server
   answers one song at `GET /lyrics/<songs.id>` and the phone falls back to its own LRCLIB lookup
-  ([handoff](docs/handoffs/lyrics-for-musicdatabaseapp.md)). **Never public** (the lyrics'
+  ([handoff](docs/handoffs/lyrics-for-musicdatabaseapp.md)). Its `lyrics_latin` holds the lyrics in Latin
+  letters (`utils/common/lyrics_latin.py`: romanize's rules per line, Ukrainian also in the
+  owner's Slavic alphabet, `romanize.ukrainian_slavic()`), refreshed by `share_databases()` before
+  the copy and sent with the lyrics ([handoff](docs/handoffs/lyrics-latin-for-musicdatabaseapp.md)). **Never public** (the lyrics'
   licence): `public_export` refuses its tables. Details: `docs/data-model.md`,
   `docs/agent-notes/discovery-modules.md`.
 - `src/config/constants.py` — every magic number / threshold / menu label. Add new ones here;

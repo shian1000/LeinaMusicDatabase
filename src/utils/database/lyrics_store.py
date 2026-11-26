@@ -19,11 +19,14 @@ answered for it, and a new module asks every song once. A miss holds the name
 the song was asked by (lyrics_key()): a song renamed since is asked again. A module that failed
 (no network, LRCLIB's 429) records nothing. Songs without words
 (songs.language LANGUAGE_INSTRUMENTAL, an instrumental version) are never
-looked up. song_id is a plain integer
+looked up. `lyrics_latin` holds the lyrics in Latin letters (the usual
+rules and per-language alternatives, utils/common/lyrics_latin.py), worked
+out by refresh_lyrics_latin() before each copy for the phone. song_id is a plain integer
 pointing into music.db, so merges and deletions reach it through
 song_references.apply_song_id_changes(), like files.db.
 """
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +36,9 @@ from sqlalchemy.orm import declarative_base
 
 from config.constants import (
     LANGUAGE_INSTRUMENTAL,
+    LYRICS_LATIN_DEFAULT,
+    LYRICS_LATIN_ROMANIZE,
+    LYRICS_LATIN_RULES_VERSION,
     LYRICS_MISS_NOT_FOUND,
     LYRICS_MISS_REJECTED,
     LYRICS_RETRY_DAYS,
@@ -76,6 +82,18 @@ class ModuleMiss(LyricsBase):
     reason = Column(String, nullable=False)
     checked_at = Column(String, nullable=False)
     asked_as = Column(String)  # lyrics_key() of the song when asked; NULL = any
+
+
+class LyricsLatin(LyricsBase):
+    __tablename__ = "lyrics_latin"
+
+    song_id = Column(Integer, primary_key=True, autoincrement=False)
+    method = Column(String, primary_key=True)
+    plain = Column(String)
+    synced = Column(String)
+    source = Column(String, nullable=False)
+    made_from = Column(String)
+    made_at = Column(String, nullable=False)
 
 
 @dataclass(frozen=True)
@@ -149,6 +167,7 @@ def reject_lyrics(session, song) -> None:
     if stored is None:
         return
     session.query(SongLyrics).filter(SongLyrics.song_id == song.id).delete()
+    session.query(LyricsLatin).filter(LyricsLatin.song_id == song.id).delete()
     record_miss(session, song, stored.source, LYRICS_MISS_REJECTED)
 
 
@@ -156,6 +175,7 @@ def forget_lookups(session, song_id: int) -> None:
     """Song actions -> "Lyrics" -> look up again: the stored text and every
     module's answer go, so each module is asked once more. Caller commits."""
     session.query(SongLyrics).filter(SongLyrics.song_id == song_id).delete()
+    session.query(LyricsLatin).filter(LyricsLatin.song_id == song_id).delete()
     session.query(ModuleMiss).filter(ModuleMiss.song_id == song_id).delete()
 
 
@@ -227,3 +247,41 @@ def original_lyrics(session, song) -> Lyrics | None:
     if stored is None or stored.instrumental or not stored.plain:
         return None
     return Lyrics(plain=stored.plain, source=LYRICS_SOURCE_ORIGINAL, source_ref=str(original_id))
+
+
+def _latin_made_from(row: SongLyrics, language: str | None, origin: str | None) -> str:
+    key = "\0".join(str(part or "") for part in (LYRICS_LATIN_RULES_VERSION, row.plain, row.synced, language, origin))
+    return hashlib.sha1(key.encode()).hexdigest()
+
+
+def refresh_lyrics_latin(music_session, lyrics_session, batch: int = 200) -> int:
+    """Work the Latin texts out again for the songs whose lyrics, language or
+    artist's origin changed since (or that have none yet), and drop those of
+    songs without lyrics. Commits lyrics_session every `batch` songs, so a
+    long first run keeps what it did. Returns how many songs were worked out."""
+    from utils.common.lyrics_latin import transliterate_lyrics
+
+    facts = {song_id: (language, origin) for song_id, language, origin in
+             music_session.query(Song.id, Song.language, Artist.origin).join(Song.artist)}
+    made = dict(lyrics_session.query(LyricsLatin.song_id, LyricsLatin.made_from)
+                .filter(LyricsLatin.method == LYRICS_LATIN_DEFAULT))
+    with_text = set()
+    done = 0
+    for row in lyrics_session.query(SongLyrics).filter(SongLyrics.instrumental == 0).all():
+        with_text.add(row.song_id)
+        language, origin = facts.get(row.song_id, (None, None))
+        made_from = _latin_made_from(row, language, origin)
+        if made.get(row.song_id) == made_from:
+            continue
+        lyrics_session.query(LyricsLatin).filter(LyricsLatin.song_id == row.song_id).delete()
+        for method, (plain, synced) in transliterate_lyrics(row.plain, row.synced, language, origin).items():
+            lyrics_session.add(LyricsLatin(song_id=row.song_id, method=method, plain=plain, synced=synced,
+                                           source=LYRICS_LATIN_ROMANIZE, made_from=made_from, made_at=_now()))
+        done += 1
+        if done % batch == 0:
+            lyrics_session.commit()
+    lyrics_session.query(LyricsLatin).filter(LyricsLatin.song_id.notin_(with_text)).delete(synchronize_session=False)
+    lyrics_session.commit()
+    if done:
+        mlog(f"Lyrics in Latin letters worked out for {done} song(s)")
+    return done

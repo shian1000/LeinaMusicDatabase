@@ -67,6 +67,8 @@ def replay(conn, changes: list, has_playlists: bool = False, has_tags: bool = Tr
             # Whatever wasn't moved above: a deleted song's, or one the kept song didn't need
             touched += conn.execute("DELETE FROM lyrics WHERE song_id = :old", params).rowcount
             conn.execute("DELETE FROM lyrics_module_misses WHERE song_id = :old", params)
+            # Worked out again for the kept song by lyrics_store.refresh_lyrics_latin()
+            conn.execute("DELETE FROM lyrics_latin WHERE song_id = :old", params)
         last = change_id
     set_cursor(conn, last)
     return touched

@@ -1026,6 +1026,18 @@ LYRICS_RETRY_DAYS = 180
 # lyrics.source of text not from a discovery module (those store their module id)
 LYRICS_SOURCE_ORIGINAL = "original"  # a version's lyrics, the plain text of its original
 LYRICS_SOURCE_MANUAL = "manual"  # pasted by the owner (Song actions -> "Lyrics")
+# lyrics_latin.method: the lyrics in Latin letters by MusicDatabase's usual
+# rules (utils/common/romanize.py), and the alternatives a language may have -
+# Ukrainian's Slavic alphabet (romanize.ukrainian_slavic()). The phone gets the
+# default as plain_latin / synced_latin, the others under latin_alternatives.
+LYRICS_LATIN_DEFAULT = "default"
+LYRICS_LATIN_UK_SLAVIC = "uk-slavic"
+# lyrics_latin.source: worked out by romanize (the only one so far; the phone
+# is told it as latin_source, so an owner-written form could come later)
+LYRICS_LATIN_ROMANIZE = "romanize"
+# Part of every lyrics_latin.made_from: raise it when romanize's rules change,
+# so the next refresh works every song's Latin text out again
+LYRICS_LATIN_RULES_VERSION = 2
 # songs.language LANGUAGE_INSTRUMENTAL (Languages, above): never looked up, offered after a lookup
 # A found song whose length differs from ours by at most this is the same
 # recording, so its synced lines fit; otherwise only its plain text is kept

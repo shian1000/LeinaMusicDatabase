@@ -99,6 +99,56 @@ def _ukrainian(text: str) -> str:
     return _by_word(text, convert)
 
 
+# Ukrainian "Slavic" Latin (the owner's scheme, 2026-11-26), offered for lyrics
+# next to the national system: Belarusian Lacinka's letters (č š ž, ch, c,
+# j-vowels, ń ś ź ć) with Slovak's soft ď ť ľ, и -> y, і -> i, and no ł - a
+# hard л is l, a soft one ľ before a consonant or the end ("більшість" ->
+# "biľšisť", "Львів" -> "Ľviv"). Before a vowel softness is an i- instead, for
+# every consonant: "люди" -> "liudy", "пісня" -> "pisnia", "сьогодні" ->
+# "siohodni", "льон" -> "lion" (owner's rules, 2026-11-26).
+_UK_SLAVIC = {
+    "а": "a", "б": "b", "в": "v", "г": "h", "ґ": "g", "д": "d", "е": "e", "ж": "ž",
+    "з": "z", "и": "y", "і": "i", "й": "j", "к": "k", "л": "l", "м": "m", "н": "n",
+    "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u", "ф": "f", "х": "ch",
+    "ц": "c", "ч": "č", "ш": "š", "щ": "šč",
+    # Russian letters, should a Russian word turn up in Ukrainian lyrics
+    "ы": "y", "э": "e",
+}
+# The vowel after j- (word start, a vowel, an apostrophe, ь) or i- (a
+# consonant; ї then is a bare i: "сї" -> "si")
+_UK_SLAVIC_IOTATED = {"я": "a", "ю": "u", "є": "e", "ї": "i", "ё": "o"}
+# A consonant before ь (not before ьо): Slovak's ď ť ľ, Lacinka's acutes for the rest
+_UK_SLAVIC_SOFT = {"д": "ď", "т": "ť", "н": "ń", "л": "ľ", "с": "ś", "з": "ź", "ц": "ć"}
+_UK_APOSTROPHES = "'ʼ’ъ"
+_UK_SLAVIC_CONSONANTS = set(_UK_SLAVIC) - set("аеиіоуыэ")
+
+
+def ukrainian_slavic(text: str) -> str:
+    """Ukrainian Cyrillic in the Slavic Latin alphabet above; other letters as they are."""
+    def convert(word: str) -> str:
+        out, lower = [], word.lower()
+        for i, ch in enumerate(word):
+            low, prev = lower[i], lower[i - 1] if i else ""
+            if low in _UK_SLAVIC_IOTATED:
+                if prev not in _UK_SLAVIC_CONSONANTS:
+                    latin = "j" + _UK_SLAVIC_IOTATED[low]
+                else:
+                    latin = "i" if low == "ї" else "i" + _UK_SLAVIC_IOTATED[low]
+                out.append(_cased(ch, latin, word))
+            elif low == "ь":
+                if lower[i + 1:i + 2] == "о":
+                    out.append("i")  # "сьогодні" -> "siohodni", "трьох" -> "trioch"
+                elif prev in _UK_SLAVIC_SOFT:
+                    out[-1] = _cased(word[i - 1], _UK_SLAVIC_SOFT[prev], word)
+            elif low in _UK_APOSTROPHES:
+                continue  # the j- of the vowel after it says it: "п'ять" -> "pjať"
+            else:
+                latin = _UK_SLAVIC.get(low)
+                out.append(_cased(ch, latin, word) if latin is not None else ch)
+        return "".join(out)
+    return _by_word(text, convert)
+
+
 def _bulgarian(text: str) -> str:
     def convert(word: str) -> str:
         lower = word.lower()

@@ -159,6 +159,9 @@ with every path passed on the command line.
   a client hanging up mid-body is normal and not logged.
 - Lyrics: GET / HEAD /lyrics/<songs.id> -> 200 JSON {"song_id", "plain",
   "synced" (LRC or null), "instrumental", "source"} from <dir>/lyrics.db,
+  with the Latin text when lyrics_latin has one: "plain_latin" /
+  "synced_latin" (line for line, the same time stamps), "latin_source", and
+  "latin_alternatives" {method ("uk-slavic"): {"plain", "synced", "source"}},
   which is never served whole (not in SHARED_FILES). An id merged since the
   phone's music.db is answered for the kept song ("song_id" says which).
   No token, like the databases. 404: no lyrics, no lyrics.db or not an id -
@@ -344,13 +347,34 @@ def song_lyrics(lyrics_db: str, music_db: str, song_id: int) -> dict | None:
     try:
         row = conn.execute("SELECT plain, synced, instrumental, source FROM lyrics WHERE song_id = ?",
                            (song_id,)).fetchone()
+        latin = []
+        if row is not None:
+            try:
+                latin = conn.execute("SELECT method, plain, synced, source FROM lyrics_latin WHERE song_id = ?",
+                                     (song_id,)).fetchall()
+            except sqlite3.OperationalError:
+                latin = []  # a lyrics.db from before migration 0004
     finally:
         conn.close()
     if row is None:
         return None
     plain, synced, instrumental, source = row
-    return {"song_id": song_id, "plain": plain or None, "synced": synced or None,
-            "instrumental": bool(instrumental), "source": source}
+    answer = {"song_id": song_id, "plain": plain or None, "synced": synced or None,
+              "instrumental": bool(instrumental), "source": source}
+    alternatives = {}
+    for method, latin_plain, latin_synced, latin_source in latin:
+        # never a Latin text without the one it stands for
+        latin_plain = latin_plain if answer["plain"] else None
+        latin_synced = latin_synced if answer["synced"] else None
+        if not (latin_plain or latin_synced):
+            continue
+        if method == "default":  # constants.LYRICS_LATIN_DEFAULT (src/ isn't imported here)
+            answer.update(plain_latin=latin_plain, synced_latin=latin_synced, latin_source=latin_source)
+        else:
+            alternatives[method] = {"plain": latin_plain, "synced": latin_synced, "source": latin_source}
+    if alternatives:
+        answer["latin_alternatives"] = alternatives
+    return answer
 
 
 def make_handler(share_dir: str, mount: str | None, inbox_dir: str | None = None,

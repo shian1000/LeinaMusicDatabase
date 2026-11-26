@@ -470,6 +470,15 @@ public copy either (the lyrics' licence; `public_export` refuses its tables); Le
   0003) is the name it was asked by (`lyrics_key()`, artist|title normalized): a song renamed since
   is asked again; NULL (rows from before) counts for any name. Song actions → "Lyrics" → look it
   up again drops the song's text and every answer (`forget_lookups()`).
+- `lyrics_latin` (migration 0004): the lyrics in Latin letters, per song and `method` -
+  `default` (romanize.py's usual rules, settled once for the whole text, line by line,
+  `utils/common/lyrics_latin.py`; `plain` / `synced` NULL when the text is Latin already or any
+  line can't be read) and `uk-slavic` (Ukrainian lyrics only, `romanize.ukrainian_slavic()`).
+  Worked out by `refresh_lyrics_latin()` right before each copy for the phone (~45 s the first
+  time for ~5,600 songs, then only songs whose `made_from` - a hash of `LYRICS_LATIN_RULES_VERSION`,
+  the text, `songs.language` and the artist's origin - no longer matches; raise the version when
+  the rules change). Leina Radio gets them with the song's lyrics
+  ([handoff](handoffs/lyrics-latin-for-musicdatabaseapp.md)). A merged song's rows go.
 - Songs without words are `songs.language` = "zxx" (`LANGUAGE_INSTRUMENTAL`) or an
   instrumental version: never looked up. A source's `instrumental` answer is stored as a row with
   `instrumental` = 1 only when the owner confirms it (the end of "Lyrics").

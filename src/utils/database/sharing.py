@@ -89,6 +89,22 @@ def _copy_to_tmp(src_path: Path, tmp_path: Path) -> None:
         dest_conn.close()
 
 
+def _refresh_lyrics_latin() -> None:
+    """The lyrics' Latin texts brought up to date before lyrics.db is copied;
+    a failure only leaves them as they were (never blocks the copy)."""
+    from utils.database.lyrics_store import lyrics_db_session, refresh_lyrics_latin
+    from utils.database.user_datatables import sqlite_session
+
+    lyrics_db, music_db = DB_FILES.get("lyrics"), DB_FILES.get("music")
+    if not (lyrics_db and lyrics_db.exists() and music_db and music_db.exists()):
+        return
+    try:
+        with sqlite_session(music_db) as music_session, lyrics_db_session(lyrics_db) as lyrics_session:
+            refresh_lyrics_latin(music_session, lyrics_session)
+    except Exception as exc:
+        flog(f"Lyrics in Latin letters not refreshed (non-fatal): {exc}")
+
+
 def share_databases() -> list[Path]:
     """
     Copy every existing DB file into SHARING_DIR and return the published
@@ -99,6 +115,7 @@ def share_databases() -> list[Path]:
     errors (disk full, ...) propagate too, after cleaning up temp files.
     """
     _ensure_sharing_dir()
+    _refresh_lyrics_latin()
     pending = []
     try:
         for name, src_path in DB_FILES.items():
