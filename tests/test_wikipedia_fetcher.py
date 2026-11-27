@@ -29,7 +29,7 @@ def load_wikipedia_fetcher_module():
 def test_get_album_name_returns_none_when_wikipedia_page_json_decode_fails(monkeypatch):
     module = load_wikipedia_fetcher_module()
 
-    monkeypatch.setattr(module, "_search_with_retry", lambda query: ["Some page"])
+    monkeypatch.setattr(module, "_search_with_retry", lambda query, strict=False: ["Some page"])
 
     def raise_json_error(*args, **kwargs):
         raise requests.exceptions.JSONDecodeError("Expecting value", "", 0)

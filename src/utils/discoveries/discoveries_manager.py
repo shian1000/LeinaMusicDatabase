@@ -10,13 +10,17 @@ from utils.common.text_utils import (
     resembles_across_scripts,
     remove_brackets,
 )
-from utils.discoveries.discovery_result import (AlbumTrack, DiscoveryResult, LanguageDiscoveryResult, LyricsDiscoveryResult,
-                                                YearDiscoveryResult)
-from utils.discoveries.discovery_settings import ALBUMS, KINDS, LANGUAGES, LYRICS, YEARS, reconcile_discovery_config
+from utils.discoveries.discovery_result import (AlbumTrack, DiscoveryResult, GenreDiscoveryResult,
+                                                LanguageDiscoveryResult, LyricsDiscoveryResult, YearDiscoveryResult)
+from utils.discoveries.discovery_settings import (ALBUMS, GENRES, KINDS, LANGUAGES, LYRICS, YEARS,
+                                                  reconcile_discovery_config)
 from utils.discoveries.discovery_stats import record_invocation, record_success
 from config.constants import (
     ALBUM_EXTERNAL_ID_COLUMNS,
     DISCOVERY_ALBUM_TYPES,
+    GENRE_LEVEL_ARTIST,
+    GENRE_MAX_PER_SONG,
+    GENRE_MAX_QUERIES,
     LANGUAGE_DETECT_SURE,
     LANGUAGE_MAX_QUERIES,
     LYRICS_DURATION_TOLERANCE_S,
@@ -37,6 +41,7 @@ from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.latin_names import artist_match_synonyms, artist_synonyms, song_titles
 from utils.database.other_titles import other_titles
 from utils.database.covers import is_translated
+from utils.database.genres import canonical_genre, clean_genres, is_known_genre
 from utils.common.artist_credits import propose_artist_split, split_synonyms
 from utils.common.script_utils import cyrillic_search_variant, has_non_latin
 from utils.common.romanize import suggest_latin
@@ -1046,4 +1051,92 @@ def discover_language(song, modules) -> LanguageSearch:
             search.match = found
         if search.match.sure:
             return search
+    return search
+
+
+@dataclass
+class GenreMatch:
+    """Genres a module found for a song: `genres` as stored (at most
+    GENRE_MAX_PER_SONG, MusicBrainz's genre list only). sure: a song's or
+    album's genres from a source that may be - never an artist's, never a
+    never_sure source's."""
+    result: GenreDiscoveryResult
+    genres: str
+    module_id: str
+    sure: bool
+
+
+@dataclass
+class GenreSearch:
+    """What discover_genre() found: the best match (None = nothing), the
+    modules that answered without one and those that couldn't be asked."""
+    match: GenreMatch | None = None
+    missed: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+
+
+def _genre_match(result, song, queried_artist: str, module_id: str, module_name: str,
+                 credited: list[str] | None) -> GenreMatch | None:
+    """The answer checked against the song, or None when it's another song's
+    or names no genre MusicBrainz knows ("Soundtrack", "Worldwide")."""
+    if not isinstance(result, GenreDiscoveryResult) or not result.genres:
+        return None
+    genres = clean_genres(", ".join(canonical_genre(name) for name in result.genres if is_known_genre(name)))
+    if not genres:
+        flog(f"[{module_name}] none of {result.genres} is a genre MusicBrainz knows, discarding")
+        return None
+    genres = ", ".join(genres.split(", ")[:GENRE_MAX_PER_SONG])
+    sure = result.level != GENRE_LEVEL_ARTIST and not result.never_sure
+    if result.checked:
+        return GenreMatch(result, genres, module_id, sure)
+    if not result.matched_artist:
+        flog(f"[{module_name}] genres without the artist they belong to, discarding")
+        return None
+    if result.matched_title and not any(title_resembles(title, result.matched_title) for title in song_titles(song)):
+        slog(f"[{module_name}] the genres of '{result.matched_title}' aren't '{song.title}'s")
+        return None
+    if not _matched_artist_resembles(queried_artist, result.matched_artist, credited):
+        slog(f"[{module_name}] the genres of a song by '{result.matched_artist}' aren't '{queried_artist}'s")
+        return None
+    return GenreMatch(result, genres, module_id, sure)
+
+
+def discover_genre(song, modules) -> GenreSearch:
+    """The genres the given get_genre() modules find for `song`, in their
+    order: the first sure match wins; an unsure one is kept, and after it
+    only the modules that may be sure (no GENRE_NEVER_SURE) are asked. Each
+    module is asked the song's first GENRE_MAX_QUERIES (artist, title) of
+    _lyrics_queries() - not a cover's original's: a cover's genre is its own
+    - until it answers; one asking about the song itself (GENRE_BY_SONG) once. A
+    module raising (no network) is asked again next time."""
+    credited, _ = _multi_artist_query(song)
+    covered = getattr(song, "covered_artist", None)
+    queries = [(artist, title) for artist, title in _lyrics_queries(song)
+               if covered is None or artist != covered.name][:GENRE_MAX_QUERIES]
+    search = GenreSearch()
+    for module_id, module_name, module in modules:
+        if search.match is not None and getattr(module, "GENRE_NEVER_SURE", False):
+            continue
+        found, failed = None, False
+        for artist, title in queries:
+            record_invocation(module_id, GENRES)
+            try:
+                result = module.get_genre(composed(artist), composed(title), songs=[song])
+            except Exception as e:
+                flog(f"[{module_name}] failed while looking up the genre of '{artist} - {title}': {e}")
+                failed = True
+                break
+            found = _genre_match(result, song, artist, module_id, module_name, credited)
+            if found is not None or getattr(module, "GENRE_BY_SONG", False):
+                break
+        if found is None:
+            (search.failed if failed else search.missed).append(module_id)
+            continue
+        record_success(module_id, GENRES)
+        if search.match is None or (found.sure and not search.match.sure):
+            search.match = found
+        if search.match.sure:
+            return search
+    if search.match is None:
+        flog(f"No module found a genre for '{song.artist.name} - {song.title}'")
     return search

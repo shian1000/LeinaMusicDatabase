@@ -725,8 +725,11 @@ Settings and Statistics list it), `get_genre(artist, title, songs=None) -> Genre
   are the matched ones), else of the artist (level artist), those weighing at least
   `LASTFM_GENRE_MIN_COUNT` (the top tag = 100; below are "seen live" and one-off tags). Not
   found (error 6) is a miss; any other error, no key or no network raises. `never_sure`. Added
-  for the ~1,100 songs the other modules had nothing for (2026-11-27, small Eastern European,
-  Japanese and YouTube-only artists); not yet run on the catalog - no key on this machine.
+  for the ~1,100 songs the other modules had nothing for (small Eastern European, Japanese and
+  YouTube-only artists). Its first run (2026-11-27): 535 answers, nearly all at the artist level
+  (such songs have no tags of their own), 359 kept, 176 unticked - mostly another artist of the
+  same name ("Bully" the game soundtrack got the grunge band's genres, likewise "Gothic", "The
+  Bad", "Brazil"), so an artist-level Last.fm answer is never worth ticking unseen.
 
 `discover_genre()` keeps only names `genres.is_known_genre()` accepts (MusicBrainz's list +
 synonyms) in their stored spelling, at most `GENRE_MAX_PER_SONG`; a result naming none
@@ -751,6 +754,14 @@ evening) is dropped for the rest of the run; Wikipedia's search / page requests 
 missed is offered its artist's genres from music.db (`genres.artist_genre_proposal()`: those half
 the artist's songs with a genre have; rule `genres_artist_songs`, off by default) - 323 songs got
 theirs that way on 2026-11-27, Fisz, Ørganek, Nosowska and Waglewski among them.
+
+Tried and dropped for the ~580 songs left after that (2026-11-27): reading a genre out of the
+title or album name ("80's City Pop Mix", "【Eurobeat】") found one right genre and four wrong
+ones - "Nocturne", "Cyberpunk", "Mad" are genres on MusicBrainz's list too - so it isn't code;
+another AI model filling a CSV of them shifted its rows (each answer about a different song); audio
+analysis (Essentia-style models) the owner turned down. Those songs are game / anime soundtracks
+(MusicBrainz's list has no "soundtrack" or "video game music"), covers (the original's genre isn't
+taken, owner: no certainty), YouTube mixes and artists nothing knows - left without a genre.
 
 ## Multi-artist songs (`additional_song_artists`)
 

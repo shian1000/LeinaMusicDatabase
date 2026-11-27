@@ -87,8 +87,8 @@ def test_a_module_needing_a_key_switched_on_stays_on(config):
 
 
 def test_every_module_needing_a_key_exists_in_the_default_orders():
-    from config.constants import DEFAULT_DISCOVERY_MODULE_ORDER, DISCOVERY_MODULES_NEEDING_API_KEY
-    assert DISCOVERY_MODULES_NEEDING_API_KEY <= set(DEFAULT_DISCOVERY_MODULE_ORDER)
+    from config.constants import DISCOVERY_MODULES_NEEDING_API_KEY
+    assert DISCOVERY_MODULES_NEEDING_API_KEY <= {module for kind in ds.KINDS.values() for module in kind.default_order}
 
 
 @pytest.mark.parametrize("text", ["{not json", "[1, 2]", '"x"'])

@@ -7,7 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from config.constants import PROJECT_ROOT
 from utils.common.selenium_sessions import get_global_driver
 from utils.common.debug import flog, slog
-from utils.discoveries.discovery_result import DiscoveryResult, YearDiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, GenreDiscoveryResult, YearDiscoveryResult
 import re
 import time
 
@@ -20,6 +20,9 @@ import time
 #   data-attrid="kc:/music/recording_cluster:release date"
 #   data-attrid="kc:/music/recording_cluster:skos_genre"
 MODULE_NAME = "Google search fetcher (Selenium)"
+# The panel's genres say neither which recording they belong to nor where they
+# come from: the owner reviews them (discoveries_manager.discover_genre())
+GENRE_NEVER_SURE = True
 
 ATTRID_MAP = {
     "artist":       "artists",
@@ -52,6 +55,11 @@ def _extract_value(el) -> str:
     return ""
 
 
+# Set by _fetch_knowledge_panel_info(): Google couldn't be asked (no browser,
+# CAPTCHA), which get_genre() raises for, so the song is asked again next time
+blocked = False
+
+
 # -- Public API ----------------------------------------------------------------
 
 def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
@@ -65,9 +73,12 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
     based on Google's recording_cluster attrid naming convention - not yet
     confirmed against a live album panel, so get_release_year() may need
     its attrid handling revisited if this doesn't pan out)."""
+    global blocked
+    blocked = False
     driver = get_global_driver()
     if driver is None:
         flog("[Google] No browser available.")
+        blocked = True
         return None
 
     url = f"https://www.google.com/search?q={quote_plus(f'{artist} - {query}')}&hl=en"
@@ -78,6 +89,7 @@ def _fetch_knowledge_panel_info(artist: str, query: str) -> dict | None:
 
     if "/sorry/" in driver.current_url:
         flog("[Google] Google flagged this request as automated traffic (CAPTCHA block) - skipping.")
+        blocked = True
         return None
 
     try:
@@ -141,3 +153,14 @@ def get_release_year(artist: str, query: str, is_single: bool) -> YearDiscoveryR
     if not match:
         return None
     return YearDiscoveryResult(year=int(match.group(1)), matched_artist=info.get("artists"))
+
+
+def get_genre(artist: str, title: str, songs=None) -> GenreDiscoveryResult | None:
+    info = _fetch_knowledge_panel_info(artist, title)
+    if blocked:
+        raise ConnectionError("Google couldn't be asked (no browser, or a CAPTCHA)")
+    if not info or not info.get("genre"):
+        return None
+    # Linked values come joined by ", "; one link may hold two ("Alternative/Indie")
+    names = [name.strip() for name in re.split(r"[,/]", info["genre"]) if name.strip()]
+    return GenreDiscoveryResult(names, matched_artist=info.get("artists"), never_sure=True)

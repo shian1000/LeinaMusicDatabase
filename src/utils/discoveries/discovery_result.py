@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from config.constants import GENRE_LEVEL_SONG
+
 
 @dataclass
 class AlbumTrack:
@@ -122,4 +124,23 @@ class LanguageDiscoveryResult:
     from_song: bool = False
     source_ref: Optional[str] = None
     needs_origin: bool = False
+    never_sure: bool = False
+
+
+@dataclass
+class GenreDiscoveryResult:
+    """What a module's get_genre() found: the genres as the source names them,
+    the main one first (discover_genre() keeps those MusicBrainz's genre list
+    knows, in the database's spelling). level: what they're the genres of
+    (GENRE_LEVEL_SONG / _ALBUM / _ARTIST - an artist's are never sure).
+    matched_* are what the source says the genres belong to - never an echo
+    of the query; checked: the module matched the song itself (MusicBrainz's
+    own title / artist checks), nothing to check again. never_sure: a source
+    the owner reviews before anything is saved."""
+    genres: list[str]
+    level: str = GENRE_LEVEL_SONG
+    matched_title: Optional[str] = None
+    matched_artist: Optional[str] = None
+    source_ref: Optional[str] = None
+    checked: bool = False
     never_sure: bool = False

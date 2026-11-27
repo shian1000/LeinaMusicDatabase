@@ -1,7 +1,7 @@
 """Review screens no test reached (UI-12), prompts answered by the test:
-Fill missing data -> Genres (utils/ui/genre_review.py: the lookup's three
-outcomes, songs that had nothing before skipped, the artist-level list, typing
-the rest, Set genre), Find full albums (utils/ui/full_album_review.py) and
+Fill missing data -> Genres (utils/ui/genre_review.py: the lookup's
+outcomes, each module skipping the songs it had nothing for, the list of
+unsure genres, typing the rest, Set genre), Find full albums (utils/ui/full_album_review.py) and
 Import a request package (utils/ui/request_package_import.py). In-memory
 music.db; MusicBrainz, YouTube and the inbox faked."""
 from types import SimpleNamespace
@@ -45,21 +45,26 @@ def _songs(session, *titles, genre=None):
 
 @pytest.fixture
 def genres(session, monkeypatch):
-    state = SimpleNamespace(misses=set(), saved_misses=None, results={}, max_songs=100)
+    state = SimpleNamespace(misses={}, saved_misses=None, results={}, max_songs=100, asked=[])
     monkeypatch.setattr(gr, "open_and_set_global_database_sessions", lambda: (session, None))
     monkeypatch.setattr(gr, "submit_global_database_session", session.commit)
-    monkeypatch.setattr(gr, "load_misses", lambda: set(state.misses))
-    monkeypatch.setattr(gr, "save_misses", lambda ids: setattr(state, "saved_misses", set(ids)))
+    monkeypatch.setattr(gr, "load_misses", lambda: {m: set(ids) for m, ids in state.misses.items()})
+    monkeypatch.setattr(gr, "save_misses", lambda misses: setattr(state, "saved_misses", misses))
     monkeypatch.setattr(gr, "load_max_songs_per_fetch", lambda: state.max_songs)
+    monkeypatch.setattr(gr, "load_discovery_modules",
+                        lambda kind: [("mb", "MusicBrainz", None), ("wiki", "Wikipedia", None)])
 
-    class FakeLookup:
-        def __init__(self, known):
-            pass
-
-        def lookup(self, song):
-            found = state.results.get(song.title)
-            return None if found is None else SimpleNamespace(genres=found[0], level=found[1])
-    monkeypatch.setattr(gr, "GenreLookup", FakeLookup)
+    def discover(song, modules):
+        state.asked.append((song.title, [m[0] for m in modules]))
+        found = state.results.get(song.title)
+        if found is None:
+            return SimpleNamespace(match=None, missed=[m[0] for m in modules], failed=[])
+        genres, level, module, sure = (*found, "mb", True)[:4] if len(found) == 2 else found
+        sure = sure and level != GENRE_LEVEL_ARTIST
+        result = SimpleNamespace(level=level, never_sure=module != "mb")
+        return SimpleNamespace(match=SimpleNamespace(genres=genres, sure=sure, module_id=module, result=result),
+                               missed=[], failed=[])
+    monkeypatch.setattr(gr, "discover_genre", discover)
     return state
 
 
@@ -68,46 +73,117 @@ def test_genres_found_for_the_song_or_album_are_saved_at_once(session, genres, m
     genres.results = {"Teksański": ("rock, Alternative Rock", GENRE_LEVEL_SONG),
                       "Cisza": ("rock", GENRE_LEVEL_ALBUM)}
     monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)  # don't type the rest
+    monkeypatch.setattr(questionary, "checkbox", lambda message, choices: _answer(None))  # the artist's genres
 
     gr.fill_missing_genres()
     assert (a.genre, b.genre, c.genre) == ("rock, alternative rock", "rock", None)
-    assert genres.saved_misses == {c.id}  # nothing on MusicBrainz: skipped next time
+    # nothing in either module: neither asks about it next time
+    assert genres.saved_misses == {"mb": {c.id}, "wiki": {c.id}}
 
 
-def test_songs_that_had_nothing_before_are_skipped(session, genres, monkeypatch, capsys):
-    a, b = _songs(session, "Teksański", "Cisza")
-    genres.misses = {b.id}
-    asked = []
-    monkeypatch.setattr(gr.GenreLookup, "lookup", lambda self, song: asked.append(song.title) or None)
+def test_each_module_skips_the_songs_it_had_nothing_for(session, genres, monkeypatch, capsys):
+    a, b, c = _songs(session, "Teksański", "Cisza", "Nowy")
+    genres.misses = {"mb": {b.id, c.id}, "wiki": {c.id}}
     monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
 
     gr.fill_missing_genres()
-    assert asked == ["Teksański"]
-    assert "1 of them had nothing on MusicBrainz before" in capsys.readouterr().out
+    # Nowy: every module had nothing; Cisza: only Wikipedia is asked
+    assert genres.asked == [("Cisza", ["wiki"]), ("Teksański", ["mb", "wiki"])]
+    assert "1 of them had nothing in any genre module before" in capsys.readouterr().out
+
+
+def test_a_module_failing_three_times_in_a_row_is_dropped_for_the_run(session, genres, monkeypatch):
+    _songs(session, "A", "B", "C", "D", "E")
+    asked = []
+
+    def discover(song, modules):
+        asked.append([m[0] for m in modules])
+        return SimpleNamespace(match=None, missed=["mb"], failed=["wiki"])
+    monkeypatch.setattr(gr, "discover_genre", discover)
+    monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
+
+    gr.fill_missing_genres()
+    assert asked == [["mb", "wiki"]] * 3 + [["mb"]] * 2
+    assert "wiki" not in genres.saved_misses  # a failure is no miss: asked again next run
+
+
+def test_the_old_misses_file_was_musicbrainzs(tmp_path, monkeypatch):
+    path = tmp_path / "misses.json"
+    monkeypatch.setattr(gr, "GENRE_LOOKUP_MISSES_FILE", path)
+    assert gr.load_misses() == {}
+    path.write_text("[3, 1]")
+    assert gr.load_misses() == {"music_brainz_fetcher": {1, 3}}
+    gr.save_misses({"wiki": {2}, "mb": set()})
+    assert gr.load_misses() == {"wiki": {2}}
+
+
+def test_no_genre_modules_on(session, genres, monkeypatch, capsys):
+    monkeypatch.setattr(gr, "load_discovery_modules", lambda kind: [])
+    gr.fill_missing_genres()
+    assert "No genre modules are on" in capsys.readouterr().out
 
 
 def test_only_max_songs_per_fetch_are_looked_up(session, genres, monkeypatch):
     _songs(session, "A", "B", "C")
     genres.max_songs = 2
-    asked = []
-    monkeypatch.setattr(gr.GenreLookup, "lookup", lambda self, song: asked.append(song.title) or None)
     monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
 
     gr.fill_missing_genres()
-    assert asked == ["A", "B"]
+    assert [title for title, _ in genres.asked] == ["A", "B"]
 
 
-def test_artist_level_genres_are_saved_only_for_the_ticked_songs(session, genres, monkeypatch):
-    a, b = _songs(session, "Teksański", "Cisza")
-    genres.results = {"Teksański": ("rock", GENRE_LEVEL_ARTIST), "Cisza": ("rock", GENRE_LEVEL_ARTIST)}
+def test_unsure_genres_ticked_only_for_musicbrainzs_artist_level(session, genres, monkeypatch):
+    a, b, c = _songs(session, "Teksański", "Cisza", "Nowy")
+    genres.results = {"Teksański": ("rock", GENRE_LEVEL_ARTIST), "Cisza": ("rock", GENRE_LEVEL_ARTIST),
+                      "Nowy": ("pop", GENRE_LEVEL_SONG, "wiki", False)}
     lists = []
     monkeypatch.setattr(questionary, "checkbox",
-                        lambda message, choices: lists.append([c.checked for c in choices]) or _answer([1]))
+                        lambda message, choices: lists.append([c.checked for c in choices]) or _answer([1, 2]))
+    monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
 
     gr.fill_missing_genres()
-    assert lists == [[True, True]]          # all ticked to start with
-    # listed by artist, then title: "Cisza" (b) is first, the ticked index 1 is "Teksański" (a)
-    assert (a.genre, b.genre) == ("rock", None)
+    # by artist, then title: Cisza, Nowy, Teksański; Wikipedia's not ticked
+    assert lists == [[True, False, True]]
+    assert (a.genre, b.genre, c.genre) == ("rock", None, "pop")
+    assert genres.saved_misses["mb"] == {b.id}  # unticked: MusicBrainz's answer turned down
+
+
+def test_songs_no_module_knows_get_their_artists_genres_from_the_database(session, genres, monkeypatch):
+    a, b, c, d = _songs(session, "A", "B", "C", "Nowy")
+    for song in (a, b, c):
+        song.genre = "rock"
+    session.commit()
+    genres.misses = {"mb": {d.id}, "wiki": {d.id}}  # every module had nothing
+    lists = []
+    monkeypatch.setattr(questionary, "checkbox",
+                        lambda message, choices: lists.append([(c.title, c.checked) for c in choices]) or _answer([]))
+    monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
+
+    gr.fill_missing_genres()
+    assert len(lists) == 1 and lists[0][0][1] is True  # 3/3 songs: ticked
+    assert "the artist: 3/3 songs" in str(lists[0][0][0])
+    assert d.genre is None and genres.saved_misses["artist_songs"] == {d.id}  # unticked: not offered again
+
+
+def test_the_artists_genres_saved_when_ticked(session, genres, monkeypatch):
+    a, b, d = _songs(session, "A", "B", "Nowy")
+    a.genre, b.genre = "rock, punk", "rock"
+    session.commit()
+    genres.misses = {"mb": {d.id}, "wiki": {d.id}}
+    monkeypatch.setattr(questionary, "checkbox", lambda message, choices: _answer([0]))
+    monkeypatch.setattr(gr, "ask_yes_no", lambda q: False)
+
+    gr.fill_missing_genres()
+    assert d.genre == "rock, punk"
+
+
+def test_a_cancelled_list_remembers_nothing(session, genres, monkeypatch):
+    a, = _songs(session, "Teksański")
+    genres.results = {"Teksański": ("pop", GENRE_LEVEL_SONG, "wiki", False)}
+    monkeypatch.setattr(questionary, "checkbox", lambda message, choices: _answer(None))
+
+    gr.fill_missing_genres()
+    assert a.genre is None and "wiki" not in genres.saved_misses
 
 
 def test_genres_typed_by_hand_for_what_musicbrainz_didnt_know(session, genres, monkeypatch):

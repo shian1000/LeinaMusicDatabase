@@ -18,10 +18,11 @@ GENRE_SYNONYMS, the spellings music.db already uses, MusicBrainz's genre list
 typed.
 """
 
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 
-from config.constants import GENRE_SYNONYMS, GENRE_VOCABULARY_FILE
+from config.constants import GENRE_ARTIST_MIN_SHARE, GENRE_MAX_PER_SONG, GENRE_SYNONYMS, GENRE_VOCABULARY_FILE
 from utils.common.normalizer import normalize
 from utils.database.datatables import Artist, Song
 
@@ -129,3 +130,28 @@ def songs_missing_genre(session) -> list[Song]:
     return (session.query(Song).join(Song.artist)
             .filter((Song.genre.is_(None)) | (Song.genre == ""))
             .order_by(Artist.name, Song.title).all())
+
+
+def artist_genres(session) -> dict[int, Counter]:
+    """{artist id: Counter(genre: songs, "": songs with a genre)} of the songs
+    with a genre, by their main artist."""
+    counts: dict[int, Counter] = {}
+    rows = session.query(Song.artist_id, Song.genre).filter(Song.genre.isnot(None), Song.genre != "")
+    for artist_id, value in rows:
+        artist = counts.setdefault(artist_id, Counter())
+        artist[""] += 1
+        artist.update(set(split_genres(value)))
+    return counts
+
+
+def artist_genre_proposal(counts: Counter | None) -> tuple[str, float, int] | None:
+    """(the genres at least GENRE_ARTIST_MIN_SHARE of the artist's songs with
+    a genre have, the main one first; the share of the main one; how many
+    songs with a genre the artist has), or None."""
+    songs = (counts or {}).get("", 0)
+    if not songs:
+        return None
+    ranked = [(genre, count) for genre, count in counts.most_common() if genre and count / songs >= GENRE_ARTIST_MIN_SHARE]
+    if not ranked:
+        return None
+    return ", ".join(genre for genre, _ in ranked[:GENRE_MAX_PER_SONG]), ranked[0][1] / songs, songs

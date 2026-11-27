@@ -1,14 +1,16 @@
 import requests
 
 from utils.common.debug import flog, slog
+from utils.common.normalizer import normalize
 from utils.common.request_pacing import RequestPacer
 from utils.common.text_utils import is_blacklisted_album, is_various_artists_compilation, similarity
 from utils.common.version_names import read_version
 from utils.database.song_kinds import sure_version
-from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, GenreDiscoveryResult
 from config.constants import (
     ALBUM_TYPE_EP,
     HTTP_LOOKUP_TIMEOUT,
+    ITUNES_GENRE_NAMES,
     ITUNES_SEARCH_COUNTRY,
     ITUNES_SEARCH_LIMIT,
     ITUNES_SEARCH_MIN_INTERVAL,
@@ -28,6 +30,15 @@ EP_TITLE_SUFFIX = " - ep"
 
 _pacer = RequestPacer(ITUNES_SEARCH_MIN_INTERVAL)
 
+# One store genre per track, broad ("Alternative", "Pop"): the owner reviews it
+GENRE_NEVER_SURE = True
+
+
+def _credits(track_artist: str | None, artist: str) -> bool:
+    """Whether iTunes' artist field names ours, letters folded: Apple spells
+    "Ørganek" "Organek"."""
+    return normalize(artist) in normalize(track_artist or "")
+
 
 def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult | None:
     """The result that fits best, or None. An equally good title on a real
@@ -45,7 +56,7 @@ def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult 
         track_artist = result.get("artistName")
         if result.get("kind") != "song" or not (album and track_title and track_artist):
             continue
-        if artist.lower() not in track_artist.lower():
+        if not _credits(track_artist, artist):
             slog(f"Artist mismatch: expected '{artist}', found '{track_artist}'")
             continue
 
@@ -89,21 +100,26 @@ def _find_track(results: list[dict], artist: str, song: str) -> DiscoveryResult 
     return best
 
 
-def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
+def _search(artist: str, song: str) -> list[dict]:
+    """The songs iTunes finds for "artist song"; raises when it can't be asked."""
     _pacer.wait()
+    response = requests.get(
+        ITUNES_SEARCH_URL,
+        params={
+            "term": f"{artist} {song}",
+            "entity": "song",
+            "country": ITUNES_SEARCH_COUNTRY,
+            "limit": ITUNES_SEARCH_LIMIT,
+        },
+        timeout=HTTP_LOOKUP_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json().get("results", [])
+
+
+def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
     try:
-        response = requests.get(
-            ITUNES_SEARCH_URL,
-            params={
-                "term": f"{artist} {song}",
-                "entity": "song",
-                "country": ITUNES_SEARCH_COUNTRY,
-                "limit": ITUNES_SEARCH_LIMIT,
-            },
-            timeout=HTTP_LOOKUP_TIMEOUT,
-        )
-        response.raise_for_status()
-        results = response.json().get("results", [])
+        results = _search(artist, song)
     except requests.RequestException as exc:
         flog(f"[iTunes] Search failed for {artist} - {song}: {exc}")
         return None
@@ -115,3 +131,30 @@ def get_album_name(artist: str, song: str) -> DiscoveryResult | None:
 
     slog(f"Matched: {artist} - {match.matched_title} ({match.album})")
     return match
+
+
+def get_genre(artist: str, title: str, songs=None) -> GenreDiscoveryResult | None:
+    """The store genre of the track titled most like the song (its version
+    only for a song that is one), read through ITUNES_GENRE_NAMES. Raises
+    when iTunes can't be asked."""
+    best, best_score = None, SPELLING_CHECK_THRESHOLD
+    for result in _search(artist, title):
+        track_title = (result.get("trackName") or "").split("(")[0].strip()
+        if result.get("kind") != "song" or not (track_title and result.get("primaryGenreName")):
+            continue
+        if not _credits(result.get("artistName"), artist):
+            continue
+        if (reading := read_version(result["trackName"])) and sure_version(reading) and not read_version(title):
+            continue
+        score = similarity(title.lower(), track_title.lower())
+        if score > best_score:
+            best, best_score = result, score
+    if best is None:
+        flog(f"[iTunes] no track with a genre for '{artist} - {title}'")
+        return None
+    genre = best["primaryGenreName"]
+    names = ITUNES_GENRE_NAMES.get(genre, genre.replace("/", ","))
+    return GenreDiscoveryResult([name.strip() for name in names.split(",")],
+                                matched_title=best["trackName"].split("(")[0].strip(),
+                                matched_artist=best.get("artistName"), source_ref=best.get("trackViewUrl"),
+                                never_sure=True)

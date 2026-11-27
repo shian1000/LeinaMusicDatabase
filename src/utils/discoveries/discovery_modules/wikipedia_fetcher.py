@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup, GuessedAtParserWarning
 from utils.common.debug import flog, slog
 from utils.common.normalizer import normalize
 from utils.common.text_utils import is_blacklisted_album, title_resembles
-from utils.discoveries.discovery_result import DiscoveryResult
+from utils.discoveries.discovery_result import DiscoveryResult, GenreDiscoveryResult
 from config.constants import MUSICBRAINZ_API_USER_AGENT, SINGLES_ALBUM
 
 # The wikipedia package parses HTML internally without picking a parser,
@@ -51,6 +51,12 @@ NON_TRACK_HEADINGS = {
 # A page about one song: "Heart of Glass (song)", "Heroes (David Bowie song)"
 SONG_PAGE_TITLE = re.compile(r"\((?:[^()]*\s)?(?:song|single)\)\s*$", re.IGNORECASE)
 SONG_INFOBOX_HEADER = re.compile(r"^(?:promotional\s+)?(?:single|song)\s+by\b", re.IGNORECASE)
+# A song infobox's "Genre" row; its values are links, or text split at these
+GENRE_LABEL = re.compile(r"^genres?$", re.IGNORECASE)
+GENRE_SEPARATORS = re.compile(r"\s*[,;\n]\s*")
+# Genres a song's page names come from its editors, not always sourced: the
+# owner reviews them (discoveries_manager.discover_genre())
+GENRE_NEVER_SURE = True
 
 
 # ---------------------------------------------------------------------------
@@ -101,13 +107,33 @@ def get_album_name(artist: str, title: str) -> DiscoveryResult | None:
     return DiscoveryResult(album=album, matched_artist=matched_artist)
 
 
+def get_genre(artist: str, title: str, songs=None) -> GenreDiscoveryResult | None:
+    """The genres in the infobox of the song's own page - never an album's or
+    the artist's page. matched_artist as for get_album_name(); the title
+    check is the page's title resembling the queried one."""
+    page = _fetch_wikipedia_page(artist, title, strict=True)
+    if not page:
+        return None
+    soup = _fetch_soup(page.url, strict=True)
+    if not (title_resembles(title, SONG_PAGE_TITLE.sub("", page.title).strip()) and _is_song_page(soup, page.title)):
+        flog(f"[Wikipedia] '{page.title}' isn't the page of '{artist} - {title}'")
+        return None
+    genres = _infobox_genres(soup)
+    if not genres:
+        flog(f"[Wikipedia] no genre in the infobox of '{page.title}'")
+        return None
+    return GenreDiscoveryResult(genres, matched_artist=_infobox_artist(soup, artist), source_ref=page.url,
+                                never_sure=True)
+
+
 # ---------------------------------------------------------------------------
 # Helpers: fetching
 # ---------------------------------------------------------------------------
 
-def _fetch_wikipedia_page(artist: str, title: str):
-    """Search Wikipedia and return the first matching page, or None."""
-    results = _search_with_retry(f"{artist} {title}")
+def _fetch_wikipedia_page(artist: str, title: str, strict: bool = False):
+    """Search Wikipedia and return the first matching page, or None. strict:
+    a request that fails raises instead (get_genre(): not a miss)."""
+    results = _search_with_retry(f"{artist} {title}", strict)
     if not results:
         flog("[Wikipedia] No search results")
         return None
@@ -121,24 +147,29 @@ def _fetch_wikipedia_page(artist: str, title: str):
         return None
     except requests.exceptions.RequestException as exc:
         flog(f"[Wikipedia] Page request failed: {exc}")
+        if strict:
+            raise
         return None
 
     slog(f"Page title: {page.title}")
     return page
 
 
-def _search_with_retry(query: str, retries: int = 3, delay: int = 2) -> list:
-    """Run wikipedia.search with retries on transient request failures."""
+def _search_with_retry(query: str, strict: bool = False, retries: int = 3, delay: int = 2) -> list:
+    """Run wikipedia.search with retries on transient request failures; after
+    the last one [], or with strict the error raised."""
     for attempt in range(retries):
         try:
             return wikipedia.search(query)
         except requests.exceptions.RequestException:
             if attempt < retries - 1:
                 time.sleep(delay)
+            elif strict:
+                raise
     return []
 
 
-def _fetch_soup(url: str) -> BeautifulSoup | None:
+def _fetch_soup(url: str, strict: bool = False) -> BeautifulSoup | None:
     headers = {"User-Agent": USER_AGENT}
     try:
         response = requests.get(url, headers=headers, timeout=10)
@@ -147,6 +178,8 @@ def _fetch_soup(url: str) -> BeautifulSoup | None:
         return BeautifulSoup(response.text, "html.parser")
     except requests.exceptions.RequestException as exc:
         flog(f"[Wikipedia] Page fetch failed: {exc}")
+        if strict:
+            raise
         return None
 
 
@@ -218,6 +251,26 @@ def _infobox_artist(soup: BeautifulSoup, artist: str) -> str | None:
                 return name
         return credit or None
     return None
+
+
+def _infobox_genres(soup: BeautifulSoup) -> list[str]:
+    """The infobox's "Genre" row as written, in its order, without the
+    citation marks ("[1]")."""
+    infobox = soup.find("table", class_=re.compile(r"\binfobox\b"))
+    if not infobox:
+        return []
+    for th in infobox.find_all("th"):
+        if not GENRE_LABEL.match(th.get_text(" ", strip=True)):
+            continue
+        cell = th.find_next_sibling("td")
+        if cell is None:
+            return []
+        for mark in cell.find_all("sup"):
+            mark.decompose()
+        links = [a.get_text(" ", strip=True) for a in cell.find_all("a")]
+        names = links or GENRE_SEPARATORS.split(cell.get_text("\n", strip=True))
+        return [name for name in (n.strip(STRIP_CHARS) for n in names) if name]
+    return []
 
 
 def _is_song_page(soup: BeautifulSoup, page_title: str) -> bool:

@@ -9,7 +9,7 @@ from utils.common.debug import flog
 from upath import UPath
 from utils.ui.menu_utils import execute_menu_item, clear_screen, open_file_browser_terminal
 from utils.discoveries.discoveries_manager import load_all_discovery_modules_metadata
-from utils.discoveries.discovery_settings import (ALBUMS, LANGUAGES, LYRICS, YEARS, load_discovery_config,
+from utils.discoveries.discovery_settings import (ALBUMS, GENRES, LANGUAGES, LYRICS, YEARS, load_discovery_config,
                                                   save_discovery_config)
 from utils.common import startup_settings
 from utils.common.env_file import MACHINE_KEYS, read_env_value, save_env_value
@@ -369,7 +369,7 @@ def setup_database_sharing():
 
 
 # The kinds of lookup, as the menu names them (discovery_settings.KINDS)
-_KIND_LABELS = {ALBUMS: "Albums", YEARS: "Years", LYRICS: "Lyrics", LANGUAGES: "Languages"}
+_KIND_LABELS = {ALBUMS: "Albums", YEARS: "Years", LYRICS: "Lyrics", LANGUAGES: "Languages", GENRES: "Genres"}
 
 
 def discovery_modules_menu():
