@@ -33,6 +33,7 @@ DISCOVERY_MODULES_YEAR_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_ye
 # The same for "Fill missing data -> Lyrics" (modules with get_lyrics())
 DISCOVERY_MODULES_LYRICS_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_lyrics.json"
 DISCOVERY_MODULES_LANGUAGE_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_language.json"
+DISCOVERY_MODULES_GENRE_CONFIG_FILE = PROJECT_ROOT / "discovery_modules_config_genre.json"
 
 # Optional override for Settings.database_dir (the folder holding music.db /
 # tag.db), persisted as JSON. Read once at startup, so a change made through
@@ -50,6 +51,7 @@ DISCOVERY_STATS_FILE = PROJECT_ROOT / "discovery_fetcher_stats.json"
 DISCOVERY_STATS_YEAR_FILE = PROJECT_ROOT / "discovery_fetcher_stats_years.json"
 DISCOVERY_STATS_LYRICS_FILE = PROJECT_ROOT / "discovery_fetcher_stats_lyrics.json"
 DISCOVERY_STATS_LANGUAGE_FILE = PROJECT_ROOT / "discovery_fetcher_stats_language.json"
+DISCOVERY_STATS_GENRE_FILE = PROJECT_ROOT / "discovery_fetcher_stats_genre.json"
 
 # Cap on how many songs a single "Fetch database data" run (e.g. Fill missing
 # albums) processes at once, persisted as JSON. Keeps a single run from
@@ -206,6 +208,8 @@ AUTOMATION_RULE_LABELS = {
     "spell_check_title": "Spell check: retitle a song as MusicBrainz spells it",
     "years_unsure": "Fill missing years: save a year only an unsure source gave (a YouTube video's date, a "
                     "year in the title, a project's release)",
+    "genres_artist_songs": "Fill missing genres: give a song nothing else knew the genres of its artist's other "
+                           "songs in the database (only those nearly all of them share)",
     "genres_artist": "Fill missing genres: give a song its artist's genres when MusicBrainz has none for the "
                      "song or its album",
     "lyrics_same_title": "Fill missing lyrics: save lyrics found for a song of the same title whose length "
@@ -345,9 +349,18 @@ AUTOMATION_QUESTIONS = {
         "years_later": ("how many years later the stored one is", FACT_NUMBER),
         "songs": ("how many songs get it", FACT_NUMBER),
         "album": ("an album's songs (not a single)", FACT_YES_NO)}),
-    "genres_artist": ("Fill missing genres: only the artist's genres found", {
+    "genres_artist_songs": ("Fill missing genres: the genres of the artist's other songs in the database", {
         "genres": ("the genres", FACT_TEXT),
-        "genre_count": ("how many genres", FACT_NUMBER)}),
+        "artist_songs": ("how many of the artist's songs have a genre", FACT_NUMBER),
+        "share": ("the share of them with the main one (0-1)", FACT_NUMBER)}),
+    "genres_artist": ("Fill missing genres: genres no sure source gave (the artist's, or Wikipedia's, "
+                      "iTunes' or Google's)", {
+        "genres": ("the genres", FACT_TEXT),
+        "genre_count": ("how many genres", FACT_NUMBER),
+        "module": ("the module that found them (music_brainz_fetcher, wikipedia_fetcher, itunes_fetcher, "
+                   "google_search_fetcher)", FACT_TEXT),
+        "level": ("what they're the genres of (song / album / artist)", FACT_TEXT),
+        "artist_level": ("the artist's genres", FACT_YES_NO)}),
     "lyrics_same_title": ("Fill missing lyrics: lyrics found for a song only resembling ours", {
         "title_similarity": ("the titles alike" + _SIMILARITY, FACT_NUMBER),
         "artist_similarity": ("the artists alike" + _SIMILARITY, FACT_NUMBER),
@@ -466,7 +479,7 @@ DEFAULT_DISCOVERY_MODULE_ORDER = [
 
 # Modules that need a key from .env: off until the user switches them on,
 # both in a new config and when one is added to an existing config.
-DISCOVERY_MODULES_NEEDING_API_KEY = frozenset({"spotify_api_fetcher", "genius_api_fetcher"})
+DISCOVERY_MODULES_NEEDING_API_KEY = frozenset({"spotify_api_fetcher", "genius_api_fetcher", "lastfm_fetcher"})
 
 # Seed order for the subset of modules that implement get_release_year().
 # Like DEFAULT_DISCOVERY_MODULE_ORDER, only used the first time the config
@@ -502,6 +515,18 @@ DEFAULT_DISCOVERY_MODULE_LANGUAGE_ORDER = [
     "music_brainz_fetcher",
     # Last on purpose: YouTube's audio language is never sure (the owner reviews it)
     "youtube_language_fetcher",
+]
+
+# The same for the modules with get_genre(): MusicBrainz first (its song and
+# album genres are saved unasked), then the sources only reviewed (never_sure)
+DEFAULT_DISCOVERY_MODULE_GENRE_ORDER = [
+    "music_brainz_fetcher",
+    "wikipedia_fetcher",
+    "itunes_fetcher",
+    # Listeners' tags; needs LASTFM_API_KEY, so off by default
+    "lastfm_fetcher",
+    # Last on purpose: a browser, slow, and Google's CAPTCHA
+    "google_search_fetcher",
 ]
 
 # A fetched release year outside this range is treated as implausible (e.g. a
@@ -991,11 +1016,41 @@ GENRE_SYNONYMS = {
 # voted first, and only genres with at least this share of the top one's votes
 GENRE_MAX_PER_SONG = 3
 GENRE_MIN_VOTE_SHARE = 0.3
-# Songs MusicBrainz had no genre for, skipped by later runs. Relative to the
-# project root; delete it to look them all up again.
+# A get_genre() module failing (no network, Google's CAPTCHA) this many songs in
+# a row isn't asked again in that run of Fill missing data -> Genres
+GENRE_MODULE_MAX_FAILURES = 3
+# A song every genre module had nothing for is offered its artist's genres
+# from music.db: those at least GENRE_ARTIST_MIN_SHARE of the artist's songs
+# with a genre have, ticked when the artist has GENRE_ARTIST_MIN_SONGS such
+# songs and GENRE_ARTIST_TICK_SHARE of them have its main one
+GENRE_ARTIST_MIN_SHARE = 0.5
+GENRE_ARTIST_MIN_SONGS = 3
+GENRE_ARTIST_TICK_SHARE = 0.8
+# genre_lookup_misses.json's key for the songs whose artist's genres the owner
+# turned down (not offered again)
+GENRE_ARTIST_SONGS_MISSES = "artist_songs"
+# Each get_genre() module is asked up to this many of the song's (artist,
+# title) queries (discoveries_manager._lyrics_queries()) until it answers
+GENRE_MAX_QUERIES = 2
+# iTunes' genres ("primaryGenreName") that aren't a MusicBrainz genre as
+# written -> the genre(s) they mean; one missing here is split at "/" and
+# kept only where MusicBrainz knows the part ("Soundtrack", "Worldwide" say
+# nothing of the music and stay out)
+ITUNES_GENRE_NAMES = {
+    "Alternative": "alternative rock",
+    "Hip-Hop/Rap": "hip hop",
+    "R&B/Soul": "r&b, soul",
+    "Singer/Songwriter": "singer-songwriter",
+    "Rock & Roll": "rock and roll",
+    "Christian & Gospel": "gospel",
+}
+# Songs each get_genre() module had nothing for ({module id: [song ids]}),
+# not asked by that module again. Relative to the project root; delete it to
+# look them all up again.
 GENRE_LOOKUP_MISSES_FILE = PROJECT_ROOT / "data/genre_lookup_misses.json"
-# Where a looked-up genre came from (genres.GenreResult.level). Song and album
-# genres are saved at once; an artist's genre is listed for the owner first.
+# What a looked-up genre is the genre of (GenreDiscoveryResult.level). A sure
+# source's song and album genres are saved at once; an artist's genre, or any
+# never_sure source's, is listed for the owner first.
 GENRE_LEVEL_SONG = "song"
 GENRE_LEVEL_ALBUM = "album"
 GENRE_LEVEL_ARTIST = "artist"
@@ -1128,6 +1183,12 @@ SPOTIFY_API_TOKEN_MARGIN = 60
 GENIUS_API_SEARCH_URL = "https://api.genius.com/search"
 GENIUS_API_SONG_URL = "https://api.genius.com/songs/{song_id}"
 GENIUS_API_MIN_INTERVAL = 0.5
+# Last.fm API (lastfm_fetcher.py, genres only): its terms ask for at most a few calls a second
+LASTFM_API_URL = "https://ws.audioscrobbler.com/2.0/"
+LASTFM_API_MIN_INTERVAL = 0.25
+# A tag's weight (Last.fm's count, the song's most used tag = 100) a genre needs:
+# below it are a few listeners' odd tags ("seen live", another genre once)
+LASTFM_GENRE_MIN_COUNT = 20
 # Settings -> "Debug log": what each verbosity adds to debug.log
 # (utils.common.debug / utils.common.trace; the priorities passed to
 # slog() / mlog() are 3 - the verbosity they first show at)

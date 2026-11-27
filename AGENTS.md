@@ -399,8 +399,14 @@ non-trivial work in that area.
   written only by `set_song_kind()`; `songs_for_entry()` is the rule every song matcher applies so
   a track never matches the full album of its name. Details: `docs/data-model.md`,
   `docs/agent-notes/normalization-and-matching.md`. Filled by Fill missing data
-  → "Genres" (`utils/discoveries/genre_lookup.py`, MusicBrainz: song tags → album → artist, the
-  artist level ticked by the owner first; `utils/ui/genre_review.py`), the editor, Song actions →
+  → "Genres" (`utils/ui/genre_review.py`: the `get_genre()` discovery kind through
+  `discoveries_manager.discover_genre()` - MusicBrainz first, song tags → album → artist, its song
+  and album genres saved; the artist level, and Wikipedia's infobox / iTunes' store genre /
+  Last.fm's tags (`LASTFM_API_KEY`) / Google's panel - `GENRE_NEVER_SURE`, asked only while nothing has answered - in one list, only
+  the artist level ticked; only names on MusicBrainz's genre list kept; misses per module in
+  `data/genre_lookup_misses.json`, so a new module asks every song once, an unticked answer counts
+  as that module's miss; a song every module missed is then offered the genres half its artist's
+  other songs share, `genres.artist_genre_proposal()`, own rule `genres_artist_songs`, off), the editor, Song actions →
   "Set genre", or a reviewed correction. Details: `docs/data-model.md`.
   `song_duplicates.py` — duplicate songs of one artist (titles differing only in spelling, a
   "feat." credit or a junk bracket like "(Visualiser)"; remix / cover / live brackets are songs of
@@ -1062,8 +1068,8 @@ non-trivial work in that area.
   request URL with `key=`; `debug._log()` passes everything through `redact_secrets()`, so
   `flog(f"... {exc}")` and crashes are safe in `debug.log` - not a `print()` of the error. The OAuth token in `.secrets/token.json` (playlists) is a
   separate credential and expires; without the key and a valid token the API check is skipped.
-- `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN` (optional, `.env`) — the API
-  versions of those lookups, off by default (`DISCOVERY_MODULES_NEEDING_API_KEY`). Same rules.
+- `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN`, `LASTFM_API_KEY` (optional,
+  `.env`) — the API versions of those lookups and the Last.fm genre lookup, off by default (`DISCOVERY_MODULES_NEEDING_API_KEY`). Same rules.
 - `GITHUB_DB_TOKEN` (`.env`) — fine-grained GitHub token, Contents: read and write on
   `GITHUB_DB_REPO` only, for the public database release. Same rules; GitHub errors are
   reported without it.
@@ -1299,7 +1305,7 @@ non-trivial work in that area.
   strings, and why a typo inside an artist name defeats the local fuzzy lookup (substring-only
   candidates) and how `LocalSongMatcher.match_similar()` works around it, and why the duplicate-song
   key keeps non-junk brackets (remixes and covers are songs of their own).
-- [discovery-modules.md](docs/agent-notes/discovery-modules.md) — the language lookups (langdetect on the stored lyrics, measured accuracy, what it confuses), why `discoveries_manager.py`
+- [discovery-modules.md](docs/agent-notes/discovery-modules.md) — the genre lookups (MusicBrainz sure, Wikipedia / iTunes / Google only reviewed, misses per module), the language lookups (langdetect on the stored lyrics, measured accuracy, what it confuses), why `discoveries_manager.py`
   re-validates every fetcher's result instead of trusting each module, the `DiscoveryResult`
   contract (with the track position and the lazy tracklist behind Albums' per-run
   `AlbumTrackCache`, which writes `songs.track_number`, and the year / album type / ids the same

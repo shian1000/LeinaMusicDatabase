@@ -701,6 +701,57 @@ corrected by hand, and a random sample of 60 of the 1,495 nobody had a value to 
 all looked right on reading. The lyrics turned out to hold a few English translations (LRCLIB, Genius) -
 LyricsTranslate's pages, "-english" addresses too, are the originals.
 
+## Genre lookups ("Fill missing data -> Genres") and `get_genre()`
+
+Until 2026-11-26 Genres was one hard-wired MusicBrainz class (`genre_lookup.py`). It is now a
+discovery kind like the others (`discovery_settings.GENRES`, `DEFAULT_DISCOVERY_MODULE_GENRE_ORDER`,
+Settings and Statistics list it), `get_genre(artist, title, songs=None) -> GenreDiscoveryResult`:
+
+- **MusicBrainz** (`music_brainz_fetcher.GenreLookup`, one object per process, `_GENRES`): the
+  old logic unchanged - recordings' genre tags, else the album's release group, else the artist's
+  (`level`). It matches the song itself (titles, album, synonyms), so `checked=True` and
+  `GENRE_BY_SONG` (asked once, not per query). A request MusicBrainz doesn't answer now raises
+  (`_mb_json()`, shared with the language lookup); the old code counted it as "nothing on
+  MusicBrainz" and remembered the song for good.
+- **Wikipedia** - the "Genre" row of the song's own page's infobox (the page's title, without
+  "(... song)", resembling the query, and a song page); never an album or artist page.
+- **iTunes** - `primaryGenreName` of the artist's track titled most like the song (not a live /
+  remix version for a song that isn't one), through `ITUNES_GENRE_NAMES` ("Alternative" →
+  alternative rock), else split at "/".
+- **Google** - the knowledge panel's `skos_genre` (already parsed for albums). No browser or a
+  CAPTCHA sets the module's `blocked`, and `get_genre()` raises then, so it isn't a miss.
+- **Last.fm** (`lastfm_fetcher.py`, genres only, `LASTFM_API_KEY`, off by default as an API
+  module) - listeners' tags of the track (`track.getTopTags`, autocorrect on: the corrected names
+  are the matched ones), else of the artist (level artist), those weighing at least
+  `LASTFM_GENRE_MIN_COUNT` (the top tag = 100; below are "seen live" and one-off tags). Not
+  found (error 6) is a miss; any other error, no key or no network raises. `never_sure`. Added
+  for the ~1,100 songs the other modules had nothing for (2026-11-27, small Eastern European,
+  Japanese and YouTube-only artists); not yet run on the catalog - no key on this machine.
+
+`discover_genre()` keeps only names `genres.is_known_genre()` accepts (MusicBrainz's list +
+synonyms) in their stored spelling, at most `GENRE_MAX_PER_SONG`; a result naming none
+("Soundtrack", "Worldwide") is a miss. Sure = a song's or album's genres from a module that may
+be sure; the artist level and the other modules (`never_sure`, the owner's choice: only
+reviewed until the owner decides otherwise) are not. The first sure answer wins; an unsure one is kept,
+and after it only modules without `GENRE_NEVER_SURE` are asked - so Google's browser isn't
+started for a song MusicBrainz already gave its artist's genres. Queries are
+`_lyrics_queries()`' first `GENRE_MAX_QUERIES`, never the covered artist's.
+
+The UI (`utils/ui/genre_review.py`) saves sure answers at once and asks the rest in one list,
+rule `genres_artist`: only MusicBrainz's artist level ticked, so the automation (Genres is in
+`LOOKUP_STEPS`) never saves the new modules' genres unless the owner adds a rule of their own with
+the `module` / `level` facts. Misses are per module (`{module id: [song ids]}`; the old list was
+MusicBrainz's): a module isn't asked again about a song it had nothing for, a song is skipped
+only when every enabled module had nothing - so a module switched on later asks every song once.
+An answer the owner unticks counts as that module's miss too (else the next run asked the same
+songs - the first batches on the catalog went round in circles), a cancelled list as nothing. A
+module failing `GENRE_MODULE_MAX_FAILURES` songs in a row (Google's CAPTCHA: 437 failures in one
+evening) is dropped for the rest of the run; Wikipedia's search / page requests raise for
+`get_genre()` (`strict=True`) instead of counting as "no results". Last, a song every enabled module
+missed is offered its artist's genres from music.db (`genres.artist_genre_proposal()`: those half
+the artist's songs with a genre have; rule `genres_artist_songs`, off by default) - 323 songs got
+theirs that way on 2026-11-27, Fisz, Ørganek, Nosowska and Waglewski among them.
+
 ## Multi-artist songs (`additional_song_artists`)
 
 Fetchers still get one artist string; nothing in a module changed. `discover_album_name()` (and

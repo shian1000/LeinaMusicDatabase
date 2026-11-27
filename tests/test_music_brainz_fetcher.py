@@ -292,12 +292,11 @@ def test_quotes_and_backslashes_in_names_are_escaped_in_the_query(monkeypatch):
                            'release:"Live \\"Wire\\"" AND artist:"AC\\\\DC"']  # the various-artists fallback
 
 
-def test_lucene_quote_is_shared_with_the_genre_lookup():
+def test_lucene_quote_is_shared_with_the_language_and_genre_lookups():
     from utils.common.musicbrainz_client import lucene_quote
-    from utils.discoveries import genre_lookup
 
     assert lucene_quote('a "b" \\c') == '"a \\"b\\" \\\\c"'
-    assert genre_lookup.lucene_quote is lucene_quote
+    assert music_brainz_fetcher.lucene_quote is lucene_quote
 
 
 def _placed_release(title, primary_type, number, disc=1, medium_count=1, release_id="rel-1"):

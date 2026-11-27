@@ -6,18 +6,29 @@ from contextlib import contextmanager
 import musicbrainzngs
 from utils.common.debug import flog, slog
 from utils.common.text_utils import is_blacklisted_album, title_resembles, similarity
-from utils.common.normalizer import normalize
-from utils.discoveries.discovery_result import AlbumTrack, DiscoveryResult, LanguageDiscoveryResult, YearDiscoveryResult
+from utils.common.normalizer import name_key, normalize
+from utils.database.genres import canonical_genre, genre_key, is_known_genre
+from utils.database.latin_names import artist_synonyms, song_titles
+from utils.discoveries.discovery_result import (AlbumTrack, DiscoveryResult, GenreDiscoveryResult, LanguageDiscoveryResult,
+                                                YearDiscoveryResult)
 import re
 from utils.common.text_utils import check_spelling
+from collections import Counter
 from config.constants import (
     ALBUM_TYPE_ALBUM,
     ALBUM_TYPE_EP,
     ALBUM_TYPE_SOUNDTRACK,
+    GENRE_LEVEL_ALBUM,
+    GENRE_LEVEL_ARTIST,
+    GENRE_LEVEL_SONG,
+    GENRE_MAX_PER_SONG,
+    GENRE_MIN_VOTE_SHARE,
+    MUSICBRAINZ_API_LIMIT,
     MIN_PLAUSIBLE_RELEASE_YEAR,
     MUSICBRAINZ_REISSUE_AFTER_YEARS,
     MUSICBRAINZ_VARIOUS_ARTISTS_ID,
     MUSICBRAINZ_WS_ROOT,
+    SINGLES_ALBUM,
     VERSION_LIVE,
     VERSION_REMIX,
 )
@@ -641,3 +652,173 @@ def get_language(artist: str, title: str, songs=None) -> LanguageDiscoveryResult
                                            never_sure=True)
     flog(f"[{MODULE_NAME}] no work with a language for '{artist} - {title}'")
     return None
+
+
+# ==================== genres ====================
+# MusicBrainz has genres on recordings, release groups and artists. Most
+# recordings have none, so the most specific level that has any wins
+# (GenreDiscoveryResult.level):
+# 1. song - the genre tags of the recordings with the song's title by its
+#    artist, taken straight from the search results (a search result carries
+#    all its tags; only those MusicBrainz lists as genres count). Live
+#    recordings and videos only when there's nothing else.
+# 2. album - the release group of the song's album (else its single, else its
+#    first album), one lookup, cached.
+# 3. artist - the artist's genres, one lookup, cached (also found by an
+#    artist search when no recording matches).
+# Each level's votes are summed per genre; the most voted come first, at most
+# GENRE_MAX_PER_SONG, only those with GENRE_MIN_VOTE_SHARE of the top's votes.
+# The song's own titles, album and synonyms are what's matched, so it's asked
+# once a song (GENRE_BY_SONG), whatever query the manager has.
+GENRE_BY_SONG = True
+
+
+class GenreLookup:
+    """Caches release groups' and artists' genres, so the songs of one album
+    or artist cost one request between them (one for the process: _GENRES)."""
+
+    def __init__(self):
+        self._release_groups: dict = {}
+        self._artists: dict = {}
+        self._artist_searches: dict = {}
+
+    # ---------- the levels ----------
+
+    def lookup(self, song) -> GenreDiscoveryResult | None:
+        names = _genre_artist_names(song)
+        # A well-known song's results are mostly live recordings and
+        # compilations, so its album (when known) is searched for first
+        album = song.album if song.album and song.album != SINGLES_ALBUM else None
+        recordings = []
+        for title in song_titles(song):
+            for release in ([album, None] if album else [None]):
+                recordings = [r for r in self._search_recordings(title, song.artist.name, release)
+                              if _genre_title_matches(r, song) and _genre_credited_artist(r, names)]
+                if recordings:
+                    break
+            if recordings:
+                break
+        studio = [r for r in recordings if not _genre_is_live(r)] or recordings
+
+        votes = Counter()
+        for recording in studio:
+            for tag in recording.get("tags") or []:
+                if is_known_genre(tag.get("name") or ""):
+                    votes[tag["name"]] += max(int(tag.get("count") or 0), 1)
+        genres = self.pick(votes)
+        if genres:
+            return GenreDiscoveryResult(genres, GENRE_LEVEL_SONG, checked=True,
+                                        source_ref=f"https://musicbrainz.org/recording/{studio[0]['id']}")
+
+        release_group = _genre_release_group(studio, song)
+        if release_group:
+            genres = self.pick(self._entity_genres("release-group", release_group, self._release_groups))
+            if genres:
+                return GenreDiscoveryResult(genres, GENRE_LEVEL_ALBUM, checked=True,
+                                            source_ref=f"https://musicbrainz.org/release-group/{release_group}")
+
+        artist_id = next((a for a in (_genre_credited_artist(r, names) for r in studio) if a), None) \
+            or self._search_artist(song.artist.name, names)
+        if artist_id:
+            genres = self.pick(self._entity_genres("artist", artist_id, self._artists))
+            if genres:
+                return GenreDiscoveryResult(genres, GENRE_LEVEL_ARTIST, checked=True,
+                                            source_ref=f"https://musicbrainz.org/artist/{artist_id}")
+
+        flog(f"[{MODULE_NAME}] no genre for '{song.artist.name} - {song.title}' "
+             f"({len(recordings)} matching recording(s))")
+        return None
+
+    @staticmethod
+    def pick(votes: Counter) -> list[str]:
+        """The most voted genres (one spelling each), the most voted first."""
+        summed = Counter()
+        spelling = {}
+        for name, count in votes.items():
+            genre = canonical_genre(name)
+            summed[genre_key(genre)] += count
+            spelling.setdefault(genre_key(genre), genre)
+        if not summed:
+            return []
+        ranked = summed.most_common()
+        floor = ranked[0][1] * GENRE_MIN_VOTE_SHARE
+        return [spelling[key] for key, count in ranked if count >= floor][:GENRE_MAX_PER_SONG]
+
+    # ---------- requests ----------
+
+    def _search_recordings(self, title: str, artist: str, release: str | None = None) -> list:
+        query = f'recording:{lucene_quote(title)} AND artist:{lucene_quote(artist)} AND video:false'
+        if release:
+            query += f' AND release:{lucene_quote(release)}'
+        data = _mb_json(f"{MUSICBRAINZ_WS_ROOT}recording/", {"query": query, "limit": MUSICBRAINZ_API_LIMIT})
+        return data.get("recordings") or []
+
+    def _search_artist(self, name: str, names: set) -> str | None:
+        key = name_key(name)
+        if key not in self._artist_searches:
+            data = _mb_json(f"{MUSICBRAINZ_WS_ROOT}artist/", {"query": f'artist:{lucene_quote(name)}', "limit": 5})
+            found = [a for a in data.get("artists") or []
+                     if name_key(a.get("name")) in names
+                     or any(name_key(alias.get("name")) in names for alias in a.get("aliases") or [])]
+            # Two artists of that name: can't tell which one it is
+            self._artist_searches[key] = found[0]["id"] if len(found) == 1 else None
+        return self._artist_searches[key]
+
+    def _entity_genres(self, entity: str, mbid: str, cache: dict) -> Counter:
+        if mbid not in cache:
+            data = _mb_json(f"{MUSICBRAINZ_WS_ROOT}{entity}/{mbid}", {"inc": "genres"})
+            cache[mbid] = Counter({g["name"]: max(int(g.get("count") or 0), 1)
+                                   for g in data.get("genres") or [] if g.get("name")})
+        return cache[mbid]
+
+
+def _genre_artist_names(song) -> set:
+    names = {name_key(song.artist.name)}
+    names.update(name_key(s) for s in artist_synonyms(song.artist))
+    return names - {""}
+
+
+def _genre_title_matches(recording: dict, song) -> bool:
+    return normalize(recording.get("title")) in {normalize(t) for t in song_titles(song)}
+
+
+def _genre_credited_artist(recording: dict, names: set) -> str | None:
+    """The MusicBrainz id of the song's artist among the recording's credits."""
+    for credit in recording.get("artist-credit") or []:
+        artist = credit.get("artist") or {}
+        if name_key(artist.get("name")) in names or name_key(credit.get("name")) in names:
+            return artist.get("id")
+    return None
+
+
+def _genre_is_live(recording: dict) -> bool:
+    return bool(recording.get("video")) or "live" in (recording.get("disambiguation") or "").lower()
+
+
+def _genre_release_group(recordings: list, song) -> str | None:
+    """The song's album among the recordings' release groups, else its
+    single, else the first studio album."""
+    groups = []
+    for recording in recordings:
+        for release in recording.get("releases") or []:
+            group = release.get("release-group") or {}
+            if group.get("id") and not group.get("secondary-types"):
+                groups.append((group, release.get("title")))
+    album = normalize(song.album) if song.album and song.album != SINGLES_ALBUM else None
+    titles = {normalize(t) for t in song_titles(song)}
+    for wanted in (
+        lambda g, t: album is not None and album in (normalize(g.get("title")), normalize(t)),
+        lambda g, t: g.get("primary-type") == "Single" and normalize(g.get("title") or t) in titles,
+        lambda g, t: g.get("primary-type") == "Album",
+    ):
+        for group, release_title in groups:
+            if wanted(group, release_title):
+                return group["id"]
+    return None
+
+
+_GENRES = GenreLookup()
+
+
+def get_genre(artist: str, title: str, songs=None) -> GenreDiscoveryResult | None:
+    return _GENRES.lookup(songs[0]) if songs else None

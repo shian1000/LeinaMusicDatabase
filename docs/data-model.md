@@ -268,12 +268,18 @@ aliases       other spellings, comma-separated
   lowercase: "hip hop", "synth-pop", "r&b"), `GENRE_SYNONYMS`, and the spelling music.db already
   uses for that genre (`genre_key()`: no case, diacritics, punctuation or spaces, "&" = "and").
   Song-level on purpose (a band's songs differ), though an album's or artist's genre may fill it.
-  Filled by Fetch database data → Fill missing data → "Genres" (MusicBrainz: the recordings' genre
-  tags, else the album's release group, saved; else the artist's, ticked in one list first —
-  `utils/discoveries/genre_lookup.py`, `utils/ui/genre_review.py`), the song editor, Song actions
+  Filled by Fetch database data → Fill missing data → "Genres" (the `get_genre()` modules,
+  Settings → Discovery modules → Genres: MusicBrainz's recordings' genre tags, else the album's
+  release group, saved; else the artist's, ticked in one list first; Wikipedia's song infobox,
+  iTunes' store genre, Last.fm's tags and Google's panel only in that list, unticked —
+  `discoveries_manager.discover_genre()`, `utils/ui/genre_review.py`), the song editor, Song actions
   → "Set genre", or a reviewed Leina Radio correction. Only songs with no genre are looked up;
-  songs MusicBrainz had nothing for are listed in `data/genre_lookup_misses.json` and skipped
-  later. Duplicate-song merges keep the kept song's genre, else the other's. Migration `0013`
+  the songs each module had nothing for are listed in `data/genre_lookup_misses.json`
+  (`{module id: [song ids]}`) and not asked by that module later; an answer the owner unticks counts
+  as that module's miss. A song every enabled module had nothing for is then offered the genres at
+  least half its artist's other songs with a genre share (`genres.artist_genre_proposal()`, ticked
+  from 3 such songs and 80 % on the main one; an unticked one is kept under `artist_songs` in the
+  same file and not offered again). Duplicate-song merges keep the kept song's genre, else the other's. Migration `0013`
   (2026-10-16), app handoff `musicdatabase-genres.md`, answer
   [`handoffs/genres-for-musicdatabaseapp.md`](handoffs/genres-for-musicdatabaseapp.md).
 - `Song.kind` — what kind of recording the row is: NULL = a song, `'full_album'` = a whole album
