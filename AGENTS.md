@@ -245,6 +245,18 @@ non-trivial work in that area.
   matcher count them as titles (`latin_names.song_titles()`), merges keep both songs'
   (`keep_other_titles_on_merge()`). Write them through `set_other_titles()` / `add_other_titles()`.
   Leina Radio reads them ([handoff](docs/handoffs/other-titles-for-musicdatabaseapp.md)).
+  `transliterations.py` — `name_transliterations` (migration 0027): Latin forms of a name per
+  method (`constants.TRANSLITERATION_METHODS`, Ukrainian's `uk-national` / `uk-slavic` apart),
+  keyed by (table, row id, column), so songs' and albums' titles fit, only artists filled
+  (`refresh_artist_transliterations()`, source `romanize`, before every sharing copy and in
+  Resolve duplicates → "Resolve duplicated additional names of artists", which then removes
+  synonyms repeating a name - exact ones unasked, `normalize()`-equal ones ticked). The owner's
+  rows (source `owner`) are never refreshed; triggers drop a deleted row's forms and a renamed
+  one's automatic ones, merges carry the owner's (`keep_transliterations_on_merge()`).
+  `Artist.transliterations` (view-only, loaded with the artists) counts like synonyms: in
+  `artist_match_synonyms()`, `artist_own_names()`, SQL `transliterated_artist_ids()` - a new
+  artist-name lookup takes them through those. In the public copy, since every artist load reads
+  the table ([handoff](docs/handoffs/name-transliterations-for-musicdatabaseapp.md)).
   `latin_names.py` — Latin forms of names in other alphabets (`songs.title_latin`,
   `artists.name_latin`, `albums.title_latin`, migration 0011; "Кино" → "Kino"), which Leina Radio
   shows as "Кино (Kino)" and sends as field corrections. The owner writes them (song/artist

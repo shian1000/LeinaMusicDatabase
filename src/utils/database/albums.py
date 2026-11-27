@@ -48,7 +48,8 @@ from config.constants import (
 from settings import Settings
 from utils.common.debug import mlog
 from utils.common.normalizer import normalize
-from utils.database.datatables import Album, AlbumCover, Artist, Song
+from utils.database.datatables import Album, AlbumCover, Artist, NameTransliteration, Song
+from utils.database.transliterations import keep_transliterations_on_merge
 from utils.common.artist_credits import split_synonyms
 
 # Filename of the migration whose arrival triggers the one-off backfill of
@@ -564,6 +565,7 @@ def merge_albums(session, keep: Album, drop: Album) -> None:
     for attr in ("title_latin", "year", *ALBUM_EXTERNAL_ID_COLUMNS):
         if getattr(keep, attr) is None and getattr(drop, attr) is not None:
             setattr(keep, attr, getattr(drop, attr))
+    keep_transliterations_on_merge(session, keep, drop, "title")
 
     kept_sources = {c.source for c in keep.covers if c.status == ALBUM_COVER_STATUS_FOUND}
     session.flush()
@@ -623,7 +625,7 @@ def reassign_artist_albums(session, from_id: int, to_id: int) -> None:
 
 
 def artist_has_album(artist_name: str, title: str) -> bool:
-    """Does any song of the artist (by name or synonym) already have `title`
+    """Does any song of the artist (by name, synonym or transliteration) already have `title`
     as its album text? Lets a blacklisted-looking title through for that
     artist only (text_utils.is_blacklisted_album()). Reads songs.album, not
     the albums table: a title several artists share has no row yet."""
@@ -638,6 +640,11 @@ def artist_has_album(artist_name: str, title: str) -> bool:
             artist_id for artist_id, name, name_latin, synonyms
             in session.execute(select(Artist.id, Artist.name, Artist.name_latin, Artist.synonyms))
             if artist_norm in {normalize(n) for n in [name, name_latin, *split_synonyms(synonyms)] if n}
+        ] + [
+            artist_id for artist_id, value
+            in session.execute(select(NameTransliteration.row_id, NameTransliteration.value)
+                               .where(NameTransliteration.table_name == "artists"))
+            if normalize(value) == artist_norm
         ]
         if not artist_ids:
             return False

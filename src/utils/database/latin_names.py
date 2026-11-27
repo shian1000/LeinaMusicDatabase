@@ -8,7 +8,8 @@ without the owner accepting it. App handoff:
 docs/handoffs/latin-names-for-musicdatabaseapp.md.
 
 Search and matching count a Latin form as one more name: an artist's
-name_latin as a synonym (artist_match_synonyms() for code that takes the
+name_latin as a synonym, and so are the transliterations of its name
+(transliterations.py; artist_match_synonyms() for code that takes the
 synonyms text), a song's title_latin as another title. A one-song "Singles"
 album copies its song's form (albums._link_single()), so it's never asked
 for separately.
@@ -22,7 +23,9 @@ from utils.common.normalizer import normalize
 from utils.common.romanize import latin_basis, suggest_latin
 from utils.common.script_utils import has_non_latin
 from utils.common.version_names import title_with_version
-from utils.database.datatables import Album, Artist, Song
+from sqlalchemy import func, select
+
+from utils.database.datatables import Album, Artist, NameTransliteration, Song
 from utils.common.artist_credits import split_synonyms
 from utils.database.other_titles import other_titles
 
@@ -78,9 +81,32 @@ def with_latin_synonym(synonyms: str | None, name_latin: str | None) -> str | No
 
 
 def artist_match_synonyms(artist) -> str | None:
-    """The artist's synonyms plus its Latin form - what matching (YouTube,
-    fetchers, imports) should treat as its other names."""
-    return with_latin_synonym(getattr(artist, "synonyms", None), getattr(artist, "name_latin", None))
+    """The artist's synonyms plus its Latin form and the transliterations of
+    its name (transliterations.py) - what matching (YouTube, fetchers,
+    imports) should treat as its other names."""
+    synonyms = with_latin_synonym(getattr(artist, "synonyms", None), getattr(artist, "name_latin", None))
+    names, extra = split_synonyms(synonyms), []
+    seen = {normalize(name) for name in names}
+    for row in getattr(artist, "transliterations", None) or ():
+        if row.value and normalize(row.value) not in seen:
+            seen.add(normalize(row.value))
+            extra.append(row.value)
+    return ", ".join([*names, *extra]) if extra else synonyms
+
+
+def artist_own_names(artist) -> list[str]:
+    """The names `artist` is called by - its name, Latin form and the
+    transliterations of its name - not its synonyms."""
+    return [n for n in (artist.name, getattr(artist, "name_latin", None),
+                        *(t.value for t in getattr(artist, "transliterations", None) or ())) if n]
+
+
+def transliterated_artist_ids(value_filter):
+    """SQL: the ids of artists a transliteration of whose name passes
+    `value_filter(lowered value)` - `lambda v: v == "okean elzy"`."""
+    return (select(NameTransliteration.row_id)
+            .where(NameTransliteration.table_name == "artists", NameTransliteration.column_name == "name",
+                   value_filter(func.lower(NameTransliteration.value))))
 
 
 def artist_synonyms(artist) -> list[str]:

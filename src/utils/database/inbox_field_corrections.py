@@ -107,7 +107,7 @@ from utils.database.inbox_requests import (
     save_decision,
     unmark_bad_video,
 )
-from utils.database.latin_names import LATIN_COLUMNS, latin_of
+from utils.database.latin_names import LATIN_COLUMNS, artist_own_names, latin_of
 from utils.database.song_artists import count_artist_songs, song_all_artists
 from utils.database.song_kinds import set_song_kind
 from utils.database.song_references import load_changes
@@ -424,10 +424,9 @@ def collect_field_correction_cases(session, requests: list[RequestFile]) -> list
 
 
 def _called(artist: Artist | None, name) -> bool:
-    """`artist` is called `name`, normalized, Latin form too."""
+    """`artist` is called `name`, normalized, Latin form and transliterations too."""
     wanted = normalize(name or "")
-    return artist is not None and bool(wanted) and \
-        wanted in (normalize(artist.name or ""), normalize(artist.name_latin or ""))
+    return artist is not None and bool(wanted) and wanted in {normalize(n) for n in artist_own_names(artist)}
 
 
 def holds(case: FieldCorrectionCase, value) -> bool:

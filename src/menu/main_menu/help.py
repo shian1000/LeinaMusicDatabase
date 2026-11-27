@@ -273,7 +273,10 @@ All in Enter database -> Manage database:
   - Resolve duplicates -> "Resolve duplicated artists": merges artists (and their songs) whose names
     differ only in case, apostrophes or look-alike letters, without asking. "Resolve duplicated
     songs": near duplicates ('feat.', '(Visualiser)') in one list to tick, and - unticked - one
-    title credited to two different artists who share another artist or a link.
+    title credited to two different artists who share another artist or a link. "Resolve
+    duplicated additional names of artists": first works out the artists' names in Latin letters
+    (each transliteration system, Ukrainian's national and Slavic ones apart), then removes
+    synonyms that repeat a name exactly; ones differing only in case or accents are listed to tick.
   - Merge artists / Divide artists: by hand, when one artist row is really two, or two are one.
   - Manual management -> "Edit artist" -> synonyms: the other names an artist goes by (a channel
     name, another spelling), which search, matching and Leina Radio use. Untick the wrong ones,

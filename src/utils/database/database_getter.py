@@ -110,7 +110,8 @@ _EAGER_ADDITIONAL_ARTISTS = selectinload(Song.additional_artist_links).selectinl
 
 
 def _artist_name_and_synonyms(artist: Artist) -> str:
-    return normalize_text(f"{artist.name or ''} {artist.name_latin or ''} {artist.synonyms or ''}")
+    names = " ".join(t.value for t in artist.transliterations)
+    return normalize_text(f"{artist.name or ''} {artist.name_latin or ''} {artist.synonyms or ''} {names}")
 
 
 def _title_and_latin(song: Song) -> str:

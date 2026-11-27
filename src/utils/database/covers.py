@@ -22,9 +22,8 @@ from utils.common.cover_names import read_cover
 from utils.common.normalizer import normalize
 from utils.common.script_utils import matching_key
 from utils.database.datatables import Artist, Song
-from utils.database.latin_names import song_titles
+from utils.database.latin_names import artist_synonyms, song_titles
 from utils.database.song_artists import song_has_artist_id
-from utils.common.artist_credits import split_synonyms
 
 
 @dataclass
@@ -43,12 +42,12 @@ class CoverProposal:
 
 
 def _artists_by_key(session) -> dict:
-    """normalize()d name, Latin form and every synonym -> Artist; a name
-    comes before another artist's synonym."""
+    """normalize()d name, Latin form, transliteration and every synonym ->
+    Artist; a name comes before another artist's synonym."""
     artists = session.query(Artist).order_by(Artist.id).all()
     keys = {}
     for artist in artists:
-        for spelling in filter(None, [artist.name_latin, *split_synonyms(artist.synonyms)]):
+        for spelling in artist_synonyms(artist):
             keys.setdefault(normalize(spelling), artist)
     keys.update({normalize(artist.name): artist for artist in artists if artist.name})
     keys.pop("", None)

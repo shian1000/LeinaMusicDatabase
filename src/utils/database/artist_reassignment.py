@@ -16,7 +16,7 @@ from utils.common.normalizer import normalize
 from utils.database.albums import album_key, link_songs, reassign_artist_albums
 from utils.common.artist_credits import propose_artist_split
 from utils.database.datatables import Artist, Song
-from utils.database.latin_names import artist_synonyms
+from utils.database.latin_names import artist_own_names, artist_synonyms
 from utils.database.song_artists import (
     add_additional_artist,
     additional_artist_role,
@@ -39,7 +39,7 @@ def artists_named(session, name: str, exclude: Artist | None = None) -> list[Art
     if exclude is not None and exclude.id is not None:
         query = query.filter(Artist.id != exclude.id)
     return [a for a in query.all()
-            if wanted in (normalize(a.name or ""), normalize(a.name_latin or ""))]
+            if wanted in {normalize(n) for n in artist_own_names(a)}]
 
 
 # Artist names meaning "not known", matched whole after casefold(): "Unknown

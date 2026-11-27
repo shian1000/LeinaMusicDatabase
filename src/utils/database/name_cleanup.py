@@ -22,7 +22,7 @@ from utils.common.sanitize import FIELD_ORDER, MODE_AUTO, SOURCE_STORED, STAGE_F
 from utils.database.albums import rename_album
 from utils.database.artist_reassignment import artists_named
 from utils.database.database_management import decomposed_names
-from utils.database.datatables import Album, Artist, Song
+from utils.database.datatables import Album, Artist, NameTransliteration, Song
 
 # (field, read, write) of the three names a song carries
 CLEANUP_FIELDS = [
@@ -280,6 +280,8 @@ def feat_move_proposals(session, songs: list) -> list[FeatMove]:
             continue
         if known_keys is None:
             known_keys = {name_key(n) for row in session.query(Artist.name, Artist.name_latin).all() for n in row if n}
+            known_keys |= {name_key(value) for (value,) in session.query(NameTransliteration.value)
+                           .filter(NameTransliteration.table_name == "artists")}
         moves.append(FeatMove(
             song=song, title=title, names=names,
             known={n: name_key(n) in known_keys for n in names},

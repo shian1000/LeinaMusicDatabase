@@ -29,6 +29,7 @@ from utils.ui.genre_review import fill_missing_genres
 from utils.ui.lyrics_review import fill_missing_lyrics
 from utils.ui.project_review import review_project_proposals
 from utils.ui.latin_forms_review import fill_latin_forms
+from utils.ui.synonym_duplicate_review import review_duplicate_synonyms
 from utils.ui.file_fix_review import fix_file_names_and_tags
 from utils.ui.song_duplicate_review import resolve_duplicated_songs
 from utils.database.song_kinds import is_full_album
@@ -59,6 +60,7 @@ def resolve_duplicates():
     action_map = {
         "Resolve duplicated artists": resolve_duplicated_artists,
         "Resolve duplicated songs": resolve_duplicated_songs,
+        "Resolve duplicated additional names of artists": review_duplicate_synonyms,
     }
 
     execute_menu_item("Resolve duplicates", action_map)

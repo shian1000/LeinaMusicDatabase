@@ -207,11 +207,12 @@ def _read_tags(file: Path) -> tuple:
 
 def catalog_fingerprint(music_session) -> str:
     """Hash of everything LocalSongMatcher reads from music.db: artists'
-    names, Latin forms and synonyms, songs' titles (their Latin forms and other titles)
+    names, Latin forms, transliterations and synonyms, songs' titles (their Latin forms and other titles)
     and artists. Filling in albums or years doesn't change it."""
     digest = hashlib.sha256()
     for query in ("SELECT id, name, name_latin, synonyms FROM artists ORDER BY id",
-                  "SELECT id, artist_id, title, title_latin, other_titles FROM songs ORDER BY id"):
+                  "SELECT id, artist_id, title, title_latin, other_titles FROM songs ORDER BY id",
+                  "SELECT table_name, row_id, column_name, method, value FROM name_transliterations ORDER BY id"):
         for row in music_session.execute(text(query)):
             digest.update(repr(tuple(row)).encode())
     return digest.hexdigest()

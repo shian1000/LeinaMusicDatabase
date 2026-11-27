@@ -589,14 +589,18 @@ def suggest_latin(text: str | None, language: str | None = None, origin: str | N
     return text if text and _only_latin_letters(text) else None
 
 
-_CYRILLIC_SYSTEMS = {"be": "Belarusian Lacinka", "uk": "Ukrainian", "bg": "Bulgarian", "mn": "Mongolian/Tuvan",
-                     "sr": "Serbian/Macedonian Latin", "ru": "Russian"}
-_ONE_SYSTEM = (("GREEK", "Greek"), ("GEORGIAN", "Georgian"), ("HANGUL", "Korean"))
-_HAN_SYSTEMS = {"ja": "Japanese (Hepburn)", "zh": "Chinese (pinyin)", "yue": "Cantonese (Jyutping)"}
+# latin_system()'s codes, as latin_basis() names them
+_SYSTEM_NAMES = {"be": "Belarusian Lacinka", "uk": "Ukrainian", "bg": "Bulgarian", "mn": "Mongolian/Tuvan",
+                 "sr": "Serbian/Macedonian Latin", "ru": "Russian", "el": "Greek", "ka": "Georgian",
+                 "ko": "Korean", "ja": "Japanese (Hepburn)", "zh": "Chinese (pinyin)", "yue": "Cantonese (Jyutping)",
+                 "ar": "Arabic"}
+_ONE_SYSTEM = (("GREEK", "el"), ("GEORGIAN", "ka"), ("HANGUL", "ko"))
 
 
-def latin_basis(text: str | None, language: str | None = None, origin: str | None = None) -> tuple[str, str] | None:
-    """(system, what settled it) behind suggest_latin(text, ...): "language" /
+def latin_system(text: str | None, language: str | None = None, origin: str | None = None) -> tuple[str, str] | None:
+    """(system code, what settled it) behind suggest_latin(text, ...): the
+    code is cyrillic_language()'s ("uk", "ru", ...), _han_system()'s ("ja",
+    "zh", "yue"), "el" / "ka" / "ko" or "ar"; what settled it "language" /
     "letters" / "origin" / "guess" for Cyrillic (_cyrillic_system()) and
     kanji / hanzi (_han_system()), "vowels" for Arabic (they're guessed),
     "alphabet" for a script with one system here. None when it suggests
@@ -605,11 +609,15 @@ def latin_basis(text: str | None, language: str | None = None, origin: str | Non
         return None
     scripts = scripts_in(unicodedata.normalize("NFKC", text))
     if "CYRILLIC" in scripts:
-        code, basis = _cyrillic_system(text, language, origin)
-        return _CYRILLIC_SYSTEMS[code], basis
+        return _cyrillic_system(text, language, origin)
     if "KANA" in scripts or "CJK" in scripts:
-        code, basis = _han_system(text, language, origin)
-        return _HAN_SYSTEMS[code], basis
+        return _han_system(text, language, origin)
     if "ARABIC" in scripts:
-        return "Arabic", "vowels"  # mishkal's guess of the unwritten vowels
-    return next(name for script, name in _ONE_SYSTEM if script in scripts), "alphabet"
+        return "ar", "vowels"  # mishkal's guess of the unwritten vowels
+    return next(code for script, code in _ONE_SYSTEM if script in scripts), "alphabet"
+
+
+def latin_basis(text: str | None, language: str | None = None, origin: str | None = None) -> tuple[str, str] | None:
+    """latin_system() with the system's name ("Ukrainian", "Japanese (Hepburn)")."""
+    system = latin_system(text, language, origin)
+    return (_SYSTEM_NAMES[system[0]], system[1]) if system else None

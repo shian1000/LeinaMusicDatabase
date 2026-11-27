@@ -9,7 +9,7 @@ Song.additional_artist_links or the table directly.
 """
 
 from sqlalchemy import func, or_, select, text
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, object_session
 
 from config.constants import (
     ADDITIONAL_ARTIST_ROLE_FEAT,
@@ -19,7 +19,8 @@ from config.constants import (
     MULTI_ARTIST_MAIN_SEPARATOR,
 )
 from utils.database.datatables import AdditionalSongArtist, Artist, Song
-from utils.database.latin_names import artist_match_synonyms
+from utils.database.latin_names import artist_match_synonyms, transliterated_artist_ids
+from utils.database.transliterations import keep_transliterations_on_merge
 from utils.common.artist_credits import split_synonyms
 from utils.common.normalizer import normalize
 
@@ -75,14 +76,15 @@ def song_main_artist_label(song: Song) -> str:
 
 
 def artist_name_or_synonym_contains(artist, word: str):
-    """SQL filter: `artist`'s (an Artist or an aliased one) name, Latin form
-    or synonyms contain `word`. Searching "Okean Elzy" has to find "Океан
-    Ельзи", whose synonyms hold the Latin spelling, and "Kino" "Кино", whose
-    name_latin is "Kino"."""
+    """SQL filter: `artist`'s (an Artist or an aliased one) name, Latin form,
+    synonyms or a transliteration of its name contain `word`. Searching "Okean
+    Elzy" has to find "Океан Ельзи", whose transliterations (and synonyms)
+    hold the Latin spelling, and "Kino" "Кино", whose name_latin is "Kino"."""
     return or_(
         func.lower(artist.name).contains(word.lower()),
         func.lower(func.coalesce(artist.name_latin, "")).contains(word.lower()),
         func.lower(func.coalesce(artist.synonyms, "")).contains(word.lower()),
+        artist.id.in_(transliterated_artist_ids(lambda value: value.contains(word.lower()))),
     )
 
 
@@ -120,7 +122,9 @@ def merge_artist_synonyms(merge_to: Artist, merge_from: Artist) -> None:
     name isn't lost with the deleted row (Бумбокс lost "familyboombox,
     Bumboks" this way). Duplicates are dropped after normalize(). The Latin
     form (name_latin) is `merge_to`'s, else `merge_from`'s; a different one
-    of `merge_from`'s becomes a synonym. Caller commits."""
+    of `merge_from`'s becomes a synonym. So do the owner's transliterations
+    (transliterations.keep_transliterations_on_merge()). Caller commits."""
+    keep_transliterations_on_merge(object_session(merge_to), merge_to, merge_from)
     def split(value):
         return [s.strip() for s in (value or "").split(",") if s.strip()]
 

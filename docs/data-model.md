@@ -136,6 +136,23 @@ aliases       other spellings, comma-separated
   dropped, joined by ", ", none = NULL. Nothing caches them across a pass (`LocalSongMatcher` /
   `ArtistPool` are made per run; the library index rematches because `catalog_fingerprint`
   hashes them); the sharing copy carries the column as part of music.db.
+- Transliterations (migration 0027): `name_transliterations(table_name, row_id, column_name,
+  method, value, source)`, one Latin form of `artists.name` / `songs.title` / `albums.title` per
+  method (`constants.TRANSLITERATION_METHODS`: `uk-national` and `uk-slavic` told apart,
+  `ru-english`, `be-lacinka`, `ja-hepburn`, ...), unique per (table, row, column, method); no
+  ForeignKey (three tables), triggers drop a deleted row's forms and a renamed one's automatic
+  ones. Only artists filled so far: `transliterations.refresh_artist_transliterations()`
+  (source `romanize`, idempotent, refreshed before every sharing copy and by Manage database →
+  Resolve duplicates → "Resolve duplicated additional names of artists"; a Ukrainian name gets
+  both Ukrainian methods, Arabic and unreadable names none); the owner's rows (source `owner`)
+  are never touched, and merges carry them (`keep_transliterations_on_merge()`). `name_latin`
+  stays the display form; these count like synonyms in search and matching
+  (`artist_match_synonyms()`, `artist_own_names()`, `transliterated_artist_ids()` in SQL). In
+  the public copy too (the app loads `Artist.transliterations` with every artist). App handoff:
+  [`docs/handoffs/name-transliterations-for-musicdatabaseapp.md`](handoffs/name-transliterations-for-musicdatabaseapp.md).
+  Synonyms repeating one of these, the name, the Latin form or an earlier synonym are found by
+  `duplicate_synonyms()`: exact repeats removed unasked, ones equal only after `normalize()`
+  ticked by the owner ("ROSALÍA" may be the artist's own spelling).
 - Latin forms (migration 0011): `songs.title_latin`, `artists.name_latin`, `albums.title_latin` —
   the owner's Latin spelling of a name in another alphabet ("Кино" → "Kino"), free text, NULL =
   none. Leina Radio shows them as "Кино (Kino)" (album via `songs.album_id`; `songs.album` has no

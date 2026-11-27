@@ -105,6 +105,24 @@ def _refresh_lyrics_latin() -> None:
         flog(f"Lyrics in Latin letters not refreshed (non-fatal): {exc}")
 
 
+def _refresh_transliterations() -> None:
+    """The artists' automatic transliterations brought up to date before
+    music.db is copied (transliterations.py); a failure only leaves them as
+    they were (never blocks the copy)."""
+    from utils.database.transliterations import refresh_artist_transliterations
+    from utils.database.user_datatables import sqlite_session
+
+    music_db = DB_FILES.get("music")
+    if not (music_db and music_db.exists()):
+        return
+    try:
+        with sqlite_session(music_db) as session:
+            refresh_artist_transliterations(session)
+            session.commit()
+    except Exception as exc:
+        flog(f"Artists' transliterations not refreshed (non-fatal): {exc}")
+
+
 def share_databases() -> list[Path]:
     """
     Copy every existing DB file into SHARING_DIR and return the published
@@ -115,6 +133,7 @@ def share_databases() -> list[Path]:
     errors (disk full, ...) propagate too, after cleaning up temp files.
     """
     _ensure_sharing_dir()
+    _refresh_transliterations()
     _refresh_lyrics_latin()
     pending = []
     try:

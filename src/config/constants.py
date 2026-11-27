@@ -1090,6 +1090,32 @@ LYRICS_LATIN_UK_SLAVIC = "uk-slavic"
 # lyrics_latin.source: worked out by romanize (the only one so far; the phone
 # is told it as latin_source, so an owner-written form could come later)
 LYRICS_LATIN_ROMANIZE = "romanize"
+# name_transliterations.method (migration 0027, utils/database/transliterations.py):
+# the transliteration system of a name's Latin form, keyed by romanize.py's
+# system code. Ukrainian has two: the national system (2010, what name_latin
+# suggestions and the lyrics' default use) and the owner's Slavic alphabet,
+# the same id as the lyrics' alternative. Leina Radio reads the ids - don't
+# rename one.
+TRANSLITERATION_UK_NATIONAL = "uk-national"
+TRANSLITERATION_UK_SLAVIC = LYRICS_LATIN_UK_SLAVIC
+TRANSLITERATION_METHODS = {
+    "uk": TRANSLITERATION_UK_NATIONAL,
+    "ru": "ru-english",  # English-style: "Alyona", "Zhuki"
+    "be": "be-lacinka",
+    "bg": "bg-streamlined",
+    "mn": "mn-mns",  # also Tuvan
+    "sr": "sr-latin",  # also Macedonian, Bosnian, Montenegrin Cyrillic
+    "el": "el-latin",
+    "ka": "ka-national",
+    "ko": "ko-revised",
+    "ja": "ja-hepburn",
+    "zh": "zh-pinyin",
+    "yue": "yue-jyutping",
+}
+# name_transliterations.source: worked out (refreshed before every copy for
+# Leina Radio) or written by the owner (never overwritten nor dropped on a rename)
+TRANSLITERATION_SOURCE_ROMANIZE = LYRICS_LATIN_ROMANIZE
+TRANSLITERATION_SOURCE_OWNER = "owner"
 # Part of every lyrics_latin.made_from: raise it when romanize's rules change,
 # so the next refresh works every song's Latin text out again
 LYRICS_LATIN_RULES_VERSION = 2

@@ -45,6 +45,7 @@ from utils.database.additional_videos import add_additional_video
 from utils.database.datatables import Artist, Song
 from utils.database.genres import keep_genre_on_merge
 from utils.database.latin_names import keep_latin_on_merge
+from utils.database.transliterations import keep_transliterations_on_merge
 from utils.database.other_titles import keep_other_titles_on_merge
 from utils.common.artist_credits import propose_artist_split
 from utils.database.song_artists import add_additional_artist, additional_artist_role, additional_artists, song_all_artists
@@ -281,6 +282,7 @@ def merge_songs(session, kept: Song, dropped: Song) -> None:
     if kept.version_kind and (reading := read_version(kept.title)) and reading.kind == kept.version_kind:
         kept.title = reading.title
     keep_latin_on_merge(kept, dropped)
+    keep_transliterations_on_merge(session, kept, dropped, "title")
     keep_other_titles_on_merge(kept, dropped)
     keep_genre_on_merge(kept, dropped)
     # Its own link still names this recording: kept for recognising the video

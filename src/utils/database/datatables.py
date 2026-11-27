@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, CheckConstraint, Index, text, DDL, event, func
-from sqlalchemy.orm import declarative_base, relationship, validates
+from sqlalchemy import Column, Integer, String, ForeignKey, CheckConstraint, Index, UniqueConstraint, text, DDL, event, func, and_
+from sqlalchemy.orm import declarative_base, foreign, relationship, validates
 from utils.common.language_names import clean_language
 from utils.common.origin_names import clean_origin
 from utils.common.normalizer import composed
@@ -335,6 +335,56 @@ BEGIN
 	UPDATE settled_song_requests SET song_id = NEW.new_song_id
 		WHERE song_id = NEW.old_song_id AND NEW.new_song_id IS NOT NULL;
 	DELETE FROM settled_song_requests WHERE song_id = NEW.old_song_id;
+END
+"""))
+
+
+# --------------------
+# Latin forms of names per transliteration method (migration 0027) - see
+# utils/database/transliterations.py. row_id is the id of a row of table_name
+# (artists / songs / albums), no ForeignKey: it points at three tables.
+# --------------------
+class NameTransliteration(Base):
+    __tablename__ = "name_transliterations"
+    # AUTOINCREMENT: the triggers delete rows the ORM may still hold, so an id is never handed out again
+    __table_args__ = (UniqueConstraint("table_name", "row_id", "column_name", "method"), {"sqlite_autoincrement": True})
+
+    id = Column(Integer, primary_key=True)
+    table_name = Column(String, nullable=False)
+    row_id = Column(Integer, nullable=False)
+    column_name = Column(String, nullable=False)
+    method = Column(String, nullable=False)  # constants.TRANSLITERATION_METHODS
+    value = Column(String, nullable=False)
+    source = Column(String, nullable=False)  # constants.TRANSLITERATION_SOURCE_*
+
+    @validates("value")
+    def _compose(self, key, value):
+        return composed(value)
+
+
+# An artist's forms of its name, searched like its synonyms
+# (latin_names.artist_match_synonyms()); loaded with the artists, one query
+Artist.transliterations = relationship(
+    NameTransliteration, viewonly=True, lazy="selectin", order_by=NameTransliteration.method,
+    primaryjoin=lambda: and_(foreign(NameTransliteration.row_id) == Artist.id,
+                             NameTransliteration.table_name == "artists",
+                             NameTransliteration.column_name == "name"))
+
+# Same triggers as migration 0027, each on the table it watches
+for _table, _column in ((Artist.__table__, "name"), (Song.__table__, "title"), (Album.__table__, "title")):
+    event.listen(_table, "after_create", DDL(f"""
+CREATE TRIGGER IF NOT EXISTS name_transliterations_{_table.name[:-1]}_deleted
+AFTER DELETE ON {_table.name}
+BEGIN
+	DELETE FROM name_transliterations WHERE table_name = '{_table.name}' AND row_id = OLD.id;
+END
+"""))
+    event.listen(_table, "after_create", DDL(f"""
+CREATE TRIGGER IF NOT EXISTS name_transliterations_{_table.name[:-1]}_renamed
+AFTER UPDATE OF {_column} ON {_table.name} WHEN OLD.{_column} IS NOT NEW.{_column}
+BEGIN
+	DELETE FROM name_transliterations
+		WHERE table_name = '{_table.name}' AND row_id = OLD.id AND column_name = '{_column}' AND source = 'romanize';
 END
 """))
 

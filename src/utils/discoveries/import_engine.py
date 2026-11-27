@@ -15,7 +15,7 @@ from utils.common.text_utils import normalize, check_spelling, spelling_lookup_f
 from utils.common.sanitize.text import strip_trailing_junk_suffix
 from utils.common.version_names import title_with_version
 from utils.common.artist_credits import feat_credits, propose_artist_split, strip_feat_credits, with_credits
-from utils.database.latin_names import artist_synonyms, song_titles
+from utils.database.latin_names import artist_synonyms, song_titles, transliterated_artist_ids
 from utils.database.other_titles import other_titles
 from utils.database.song_artists import song_all_artists, song_main_artists
 from utils.database.song_kinds import (
@@ -35,7 +35,7 @@ from utils.ui.album_resolution_review import offer_album_resolution
 from utils.common.output import REVIEW_WIDTH, review_header, show, styled
 import questionary
 from utils.ui.prompts import ask_yes_no
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import object_session
 from utils.database.additional_videos import apply_video_links, plan_video_links
 from config.constants import ADDITIONAL_VIDEO_IMPORT
@@ -236,10 +236,12 @@ def _match_artist_locally(name: str, session=None, artist_pool=None) -> tuple:
     ).all()
     if candidates:
         return candidates[0], True
-    # The owner's Latin form of a name in another alphabet: "Kino" is "Кино"
-    candidates = music_session.query(Artist).filter(
-        func.lower(Artist.name_latin) == name.lower()
-    ).order_by(Artist.id).all()
+    # The owner's Latin form of a name in another alphabet, or a
+    # transliteration of it: "Kino" is "Кино"
+    candidates = music_session.query(Artist).filter(or_(
+        func.lower(Artist.name_latin) == name.lower(),
+        Artist.id.in_(transliterated_artist_ids(lambda value: value == name.lower())),
+    )).order_by(Artist.id).all()
     if candidates:
         return candidates[0], True
     # "The Ball And Chain" is "The Ball & Chain" (normalize() drops the "&")

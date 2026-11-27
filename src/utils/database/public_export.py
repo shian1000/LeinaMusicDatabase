@@ -64,6 +64,9 @@ MUSIC_SPEC = DatabaseSpec("music.db", {
                                         "song_id", "settled_at")),
     "youtube_video_durations": TableSpec(("video_id", "duration_s", "fetched_at")),
     "additional_youtube_videos": TableSpec(("video_id", "song_id", "source", "added_at")),
+    # The public names romanized (and the owner's forms of them); the app reads
+    # artists with it, so a fresh install from this copy needs the table
+    "name_transliterations": TableSpec(("id", "table_name", "row_id", "column_name", "method", "value", "source")),
     "schema_version": TableSpec(("id", "filename", "applied_at")),
     "sqlite_sequence": TableSpec(("name", "seq")),
 })
